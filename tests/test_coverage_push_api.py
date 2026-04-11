@@ -451,7 +451,8 @@ cases:
 
 class TestResumeAfterApproval:
     def test_resume_after_approval_run_not_found(self):
-        """_resume_after_approval with missing run should return silently."""
+        """_resume_after_approval with missing run should raise HTTPException 409."""
+        from fastapi import HTTPException
         from sandcastle.api.routes import _resume_after_approval
         from sandcastle.models.db import ApprovalRequest
 
@@ -467,11 +468,13 @@ class TestResumeAfterApproval:
             mock_sess.get = AsyncMock(return_value=None)  # run not found
             mock_sf.return_value = mock_sess
 
-            # Should not raise
-            run_async(_resume_after_approval(mock_approval, output_data={"approved": True}))
+            with pytest.raises(HTTPException) as exc_info:
+                run_async(_resume_after_approval(mock_approval, output_data={"approved": True}))
+            assert exc_info.value.status_code == 409
 
     def test_resume_after_approval_workflow_not_found(self):
-        """_resume_after_approval with missing workflow should return silently."""
+        """_resume_after_approval with missing workflow should raise HTTPException 409."""
+        from fastapi import HTTPException
         from sandcastle.api.routes import _resume_after_approval
         from sandcastle.models.db import ApprovalRequest
 
@@ -495,11 +498,13 @@ class TestResumeAfterApproval:
             mock_sess.get = AsyncMock(return_value=mock_run)
             mock_sf.return_value = mock_sess
 
-            # Should not raise
-            run_async(_resume_after_approval(mock_approval, output_data={"approved": True}))
+            with pytest.raises(HTTPException) as exc_info:
+                run_async(_resume_after_approval(mock_approval, output_data={"approved": True}))
+            assert exc_info.value.status_code == 409
 
     def test_resume_after_approval_enqueue_fails(self):
-        """Enqueue failure during resume should be handled gracefully."""
+        """Enqueue failure during resume should raise HTTPException 500."""
+        from fastapi import HTTPException
         from sandcastle.api.routes import _resume_after_approval
         from sandcastle.models.db import ApprovalRequest
 
@@ -529,8 +534,9 @@ class TestResumeAfterApproval:
             mock_sess.execute = AsyncMock(return_value=mock_result)
             mock_sf.return_value = mock_sess
 
-            # Should not raise even when enqueue fails
-            run_async(_resume_after_approval(mock_approval, output_data={"approved": True}))
+            with pytest.raises(HTTPException) as exc_info:
+                run_async(_resume_after_approval(mock_approval, output_data={"approved": True}))
+            assert exc_info.value.status_code == 500
 
 
 # ===========================================================================

@@ -347,6 +347,30 @@ def _load_workflow_yaml(workflow_name: str) -> str:
     raise FileNotFoundError(f"Workflow '{workflow_name}' not found in {workflows_dir}")
 
 
+async def _load_versioned_workflow_yaml(
+    workflow_name: str, workflow_version: int | None
+) -> str:
+    """Load workflow YAML from WorkflowVersion DB if version is set, else from disk.
+
+    Falls back to disk when version is None or the version row is missing.
+    """
+    if workflow_version is not None:
+        async with async_session() as session:
+            stmt = select(WorkflowVersion).where(
+                WorkflowVersion.workflow_name == workflow_name,
+                WorkflowVersion.version == workflow_version,
+            )
+            wv = (await session.execute(stmt)).scalar_one_or_none()
+            if wv:
+                return wv.yaml_content
+            logger.warning(
+                "WorkflowVersion %s v%d not found, falling back to disk",
+                workflow_name,
+                workflow_version,
+            )
+    return _load_workflow_yaml(workflow_name)
+
+
 async def _resolve_workflow_request(request: WorkflowRunRequest) -> tuple[str, int | None]:
     """Resolve a WorkflowRunRequest to (YAML content, version number).
 
@@ -4270,11 +4294,11 @@ async def delete_workflow(name: str, req: Request) -> ApiResponse:
             ).model_dump(),
         )
 
-    # Check for active runs
+    # Check for active runs (including those awaiting approval)
     async with async_session() as session:
         active_stmt = select(func.count(Run.id)).where(
             Run.workflow_name == safe_name,
-            Run.status.in_([RunStatus.QUEUED, RunStatus.RUNNING]),
+            Run.status.in_([RunStatus.QUEUED, RunStatus.RUNNING, RunStatus.AWAITING_APPROVAL]),
         )
         active_count = (await session.execute(active_stmt)).scalar() or 0
         if active_count > 0:
@@ -4737,16 +4761,21 @@ async def compare_runs(
 
     same_workflow = db_run_a.workflow_name == db_run_b.workflow_name
 
-    # Extract step configs from workflow YAML if available
+    # Extract step configs from the workflow version that actually ran,
+    # falling back to current disk file if no version is stored.
     configs_a: dict[str, dict] = {}
     configs_b: dict[str, dict] = {}
     try:
-        yaml_a = _load_workflow_yaml(db_run_a.workflow_name)
+        yaml_a = await _load_versioned_workflow_yaml(
+            db_run_a.workflow_name, db_run_a.workflow_version
+        )
         configs_a = _extract_step_configs(yaml_a)
     except Exception:
         pass
     try:
-        yaml_b = _load_workflow_yaml(db_run_b.workflow_name)
+        yaml_b = await _load_versioned_workflow_yaml(
+            db_run_b.workflow_name, db_run_b.workflow_version
+        )
         configs_b = _extract_step_configs(yaml_b)
     except Exception:
         pass
@@ -5707,9 +5736,12 @@ async def replay_run(run_id: str, request: ReplayRequest, req: Request) -> ApiRe
             ).model_dump(),
         )
 
-    # Load workflow YAML and validate from_step
+    # Load workflow YAML from versioned DB if the original run has a version,
+    # otherwise fall back to current disk file.
     try:
-        yaml_content = _load_workflow_yaml(original_run.workflow_name)
+        yaml_content = await _load_versioned_workflow_yaml(
+            original_run.workflow_name, original_run.workflow_version
+        )
     except FileNotFoundError:
         raise HTTPException(
             status_code=400,
@@ -5777,6 +5809,7 @@ async def replay_run(run_id: str, request: ReplayRequest, req: Request) -> ApiRe
             parent_run_id=run_uuid,
             replay_from_step=request.from_step,
             max_cost_usd=original_run.max_cost_usd,
+            workflow_version=original_run.workflow_version,
         )
         session.add(new_run)
         await session.commit()
@@ -5847,9 +5880,12 @@ async def fork_run(run_id: str, request: ForkRequest, req: Request) -> ApiRespon
             ).model_dump(),
         )
 
-    # Load workflow YAML and validate from_step
+    # Load workflow YAML from versioned DB if the original run has a version,
+    # otherwise fall back to current disk file.
     try:
-        yaml_content = _load_workflow_yaml(original_run.workflow_name)
+        yaml_content = await _load_versioned_workflow_yaml(
+            original_run.workflow_name, original_run.workflow_version
+        )
     except FileNotFoundError:
         raise HTTPException(
             status_code=400,
@@ -5916,6 +5952,7 @@ async def fork_run(run_id: str, request: ForkRequest, req: Request) -> ApiRespon
             replay_from_step=request.from_step,
             fork_changes=request.changes,
             max_cost_usd=original_run.max_cost_usd,
+            workflow_version=original_run.workflow_version,
         )
         session.add(new_run)
         await session.commit()
@@ -5969,7 +6006,7 @@ async def create_schedule(request: ScheduleCreateRequest, req: Request) -> ApiRe
 
     # Validate that the workflow exists
     try:
-        _load_workflow_yaml(request.workflow_name)
+        yaml_content = _load_workflow_yaml(request.workflow_name)
     except FileNotFoundError:
         raise HTTPException(
             status_code=400,
@@ -5980,6 +6017,23 @@ async def create_schedule(request: ScheduleCreateRequest, req: Request) -> ApiRe
                 )
             ).model_dump(),
         )
+
+    # Validate input_data against workflow input_schema if provided
+    if request.input_data:
+        workflow = parse_yaml_string(yaml_content)
+        validation_errors = _validate_workflow_input(
+            request.input_data, workflow.input_schema
+        )
+        if validation_errors:
+            raise HTTPException(
+                status_code=400,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="INVALID_INPUT",
+                        message="; ".join(validation_errors),
+                    )
+                ).model_dump(),
+            )
 
     # Validate cron expression before saving
     try:
@@ -6221,6 +6275,29 @@ async def update_schedule(
                     ).model_dump(),
                 ) from exc
 
+        # Validate input_data against workflow input_schema if provided
+        if request.input_data is not None:
+            try:
+                yaml_content = _load_workflow_yaml(schedule.workflow_name)
+                workflow = parse_yaml_string(yaml_content)
+                validation_errors = _validate_workflow_input(
+                    request.input_data, workflow.input_schema
+                )
+                if validation_errors:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=ApiResponse(
+                            error=ErrorResponse(
+                                code="INVALID_INPUT",
+                                message="; ".join(validation_errors),
+                            )
+                        ).model_dump(),
+                    )
+            except HTTPException:
+                raise
+            except Exception:
+                pass  # Workflow may not exist yet during migration
+
         # Snapshot old state for rollback compensation
         old_enabled = schedule.enabled
         old_cron = schedule.cron_expression
@@ -6400,14 +6477,34 @@ async def trigger_schedule(schedule_id: str, req: Request) -> ApiResponse:
         workflow = parse_yaml_string(yaml_content)
         run_id = str(uuid.uuid4())
 
+        # Use the schedule's original tenant_id for the run, not the caller's.
+        # If the schedule has no tenant (global), require admin auth.
+        run_tenant_id = schedule.tenant_id
+        if run_tenant_id is None and settings.auth_required:
+            _require_admin(req)
+
+        # Resolve budget from the schedule owner's API key
+        max_cost: float | None = None
+        if run_tenant_id and settings.auth_required:
+            budget_stmt = (
+                select(ApiKey.max_cost_per_run_usd)
+                .where(
+                    ApiKey.tenant_id == run_tenant_id,
+                    ApiKey.is_active.is_(True),
+                )
+                .limit(1)
+            )
+            max_cost = await session.scalar(budget_stmt)
+
         # Create a queued run
         db_run = Run(
             id=uuid.UUID(run_id),
             workflow_name=workflow.name,
             status=RunStatus.QUEUED,
             input_data=schedule.input_data or {},
-            tenant_id=tenant_id,
+            tenant_id=run_tenant_id,
             risk_level=getattr(workflow, "risk_level", "minimal"),
+            max_cost_usd=max_cost,
         )
         session.add(db_run)
 
@@ -6417,7 +6514,8 @@ async def trigger_schedule(schedule_id: str, req: Request) -> ApiResponse:
 
     # Enqueue the job outside the session
     try:
-        await enqueue_workflow(yaml_content, schedule.input_data or {}, run_id)
+        await enqueue_workflow(yaml_content, schedule.input_data or {}, run_id,
+                               max_cost_usd=max_cost)
     except Exception as e:
         logger.error("Failed to enqueue triggered schedule run: %s", e)
         # Mark run as failed so it does not stay stuck
@@ -7370,10 +7468,11 @@ async def regenerate_approval(
 async def _resume_after_approval(
     approval: ApprovalRequest,
     output_data: dict | None,
-) -> None:
+) -> bool:
     """Resume a workflow after an approval gate is resolved.
 
     Loads the checkpoint, sets the approval step output, and re-enqueues.
+    Returns True on success, False on failure.
     """
     run_id = str(approval.run_id)
     step_id = approval.step_id
@@ -7383,7 +7482,15 @@ async def _resume_after_approval(
         run = await session.get(Run, approval.run_id)
         if not run:
             logger.error(f"Cannot resume: run {run_id} not found")
-            return
+            raise HTTPException(
+                status_code=409,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="RESUME_FAILED",
+                        message=f"Run '{run_id}' not found, cannot resume after approval",
+                    )
+                ).model_dump(),
+            )
 
         workflow_name = run.workflow_name
         input_data = run.input_data or {}
@@ -7394,7 +7501,16 @@ async def _resume_after_approval(
         yaml_content = _load_workflow_yaml(workflow_name)
     except FileNotFoundError:
         logger.error(f"Cannot resume: workflow '{workflow_name}' not found")
-        return
+        raise HTTPException(
+            status_code=409,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="RESUME_FAILED",
+                    message=f"Workflow '{workflow_name}' not found on disk, "
+                    f"cannot resume run '{run_id}' after approval",
+                )
+            ).model_dump(),
+        )
 
     # Find the checkpoint (saved before the approval step)
     async with async_session() as session:
@@ -7451,6 +7567,7 @@ async def _resume_after_approval(
             skip_steps=skip_steps,
         )
         logger.info(f"Resumed workflow {run_id} after approval of step '{step_id}'")
+        return True
     except Exception as e:
         logger.error(f"Failed to resume workflow {run_id}: {e}")
         async with async_session() as session:
@@ -7460,6 +7577,15 @@ async def _resume_after_approval(
                 run.error = f"Failed to resume after approval: {e}"
                 run.completed_at = datetime.now(timezone.utc)
                 await session.commit()
+        raise HTTPException(
+            status_code=500,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="RESUME_FAILED",
+                    message=f"Failed to enqueue workflow resumption for run '{run_id}'",
+                )
+            ).model_dump(),
+        )
 
 
 # --- API Keys ---
@@ -8526,11 +8652,13 @@ async def list_workflow_versions(
 
 @router.get("/workflows/{name}/versions/diff")
 async def diff_workflow_versions(
+    req: Request,
     name: str,
     version_a: int = Query(..., description="First version to compare"),
     version_b: int = Query(..., description="Second version to compare"),
 ) -> ApiResponse:
     """Get a structured diff between two workflow versions."""
+    _require_admin(req)
     async with async_session() as session:
         stmt_a = select(WorkflowVersion).where(
             WorkflowVersion.workflow_name == name,
