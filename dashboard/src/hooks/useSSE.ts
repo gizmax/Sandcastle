@@ -46,6 +46,10 @@ export function useSSE(path: string | null) {
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
+        // Persist event/data state across chunk boundaries so an event:
+        // line in one chunk is not lost when data: arrives in the next.
+        let currentEvent = "message";
+        let currentData = "";
 
         while (true) {
           const { done, value } = await reader.read();
@@ -55,8 +59,6 @@ export function useSSE(path: string | null) {
           const lines = buffer.split("\n");
           buffer = lines.pop() || "";
 
-          let currentEvent = "message";
-          let currentData = "";
           for (const line of lines) {
             if (line.startsWith("event: ")) {
               currentEvent = line.slice(7).trim();
@@ -75,6 +77,7 @@ export function useSSE(path: string | null) {
               } catch {
                 // Ignore parse errors
               }
+              // Reset only after a complete event is dispatched
               currentEvent = "message";
               currentData = "";
             }

@@ -4049,8 +4049,9 @@ Processing is performed under legitimate interest (Art. 6(1)(f) GDPR) for workfl
 
 
 @router.get("/workflows")
-async def list_workflows() -> ApiResponse:
+async def list_workflows(req: Request) -> ApiResponse:
     """List available workflow YAML files from the workflows directory."""
+    caller_is_admin = is_admin(req)
     workflows_dir = Path(settings.workflows_dir)
     if not workflows_dir.exists():
         return ApiResponse(data=[])
@@ -4101,7 +4102,8 @@ async def list_workflows() -> ApiResponse:
                             id=s.id,
                             depends_on=s.depends_on,
                             model=s.model,
-                            prompt=s.prompt,
+                            # Strip prompt for non-admin callers to avoid leaking implementation
+                            prompt=s.prompt if caller_is_admin else None,
                         )
                         for s in workflow.steps
                     ],
@@ -4109,7 +4111,8 @@ async def list_workflows() -> ApiResponse:
                     version=vi.get("prod"),
                     version_status="production" if vi.get("prod") else None,
                     total_versions=vi.get("total") or None,
-                    yaml_content=content,
+                    # Strip raw YAML for non-admin callers
+                    yaml_content=content if caller_is_admin else None,
                 )
             )
         except Exception as e:
@@ -4119,8 +4122,9 @@ async def list_workflows() -> ApiResponse:
 
 
 @router.post("/workflows", status_code=201)
-async def save_workflow(request: WorkflowSaveRequest) -> ApiResponse:
+async def save_workflow(request: WorkflowSaveRequest, req: Request) -> ApiResponse:
     """Save a workflow YAML file to the workflows directory and create a draft version."""
+    _require_admin(req)
     try:
         workflow = parse_yaml_string(request.content)
     except Exception as e:
@@ -4214,8 +4218,9 @@ async def save_workflow(request: WorkflowSaveRequest) -> ApiResponse:
 
 
 @router.delete("/workflows/{name}")
-async def delete_workflow(name: str) -> ApiResponse:
+async def delete_workflow(name: str, req: Request) -> ApiResponse:
     """Delete a workflow YAML file and all its version records."""
+    _require_admin(req)
     from sqlalchemy import delete as sa_delete
 
     # Validate name
@@ -4264,10 +4269,13 @@ async def delete_workflow(name: str) -> ApiResponse:
         )
         await session.commit()
 
-    # Delete YAML file from disk
+    # Delete YAML file from disk (try both .yaml and .yml extensions)
+    yml_path = workflows_dir / f"{safe_name}.yml"
     if file_path.exists():
         file_path.unlink()
-    elif not resolved_path.exists():
+    elif yml_path.exists():
+        yml_path.unlink()
+    else:
         raise HTTPException(
             status_code=404,
             detail=ApiResponse(
@@ -8822,6 +8830,24 @@ async def batch_run_workflow(name: str, req: Request) -> ApiResponse:
             ).model_dump(),
         )
 
+    # Validate each batch item against the workflow's input_schema
+    if workflow.input_schema:
+        invalid_items: list[str] = []
+        for idx, item_input in enumerate(batch_req.items):
+            item_errors = _validate_workflow_input(dict(item_input), workflow.input_schema)
+            if item_errors:
+                invalid_items.append(f"item[{idx}]: {'; '.join(item_errors)}")
+        if invalid_items:
+            raise HTTPException(
+                status_code=400,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="INVALID_INPUT",
+                        message="Batch input validation failed: " + " | ".join(invalid_items),
+                    )
+                ).model_dump(),
+            )
+
     # Clamp max_parallel to the server's max_concurrent_sandboxes setting
     effective_parallel = min(batch_req.max_parallel, settings.max_concurrent_sandboxes)
 
@@ -8936,7 +8962,37 @@ async def batch_run_workflow(name: str, req: Request) -> ApiResponse:
                                     batch["total_cost_usd"] += item["cost_usd"]
                                 break
                     else:
-                        # Timed out waiting for completion
+                        # Timed out waiting for completion - cancel the actual run
+                        try:
+                            from sqlalchemy import update as sa_update
+                            async with async_session() as session:
+                                cancel_stmt = (
+                                    sa_update(Run)
+                                    .where(
+                                        Run.id == uuid.UUID(run_id),
+                                        Run.status.in_([RunStatus.QUEUED, RunStatus.RUNNING]),
+                                    )
+                                    .values(
+                                        status=RunStatus.CANCELLED,
+                                        completed_at=datetime.now(timezone.utc),
+                                        error="Cancelled: batch item timed out after 10 minutes",
+                                    )
+                                )
+                                await session.execute(cancel_stmt)
+                                await session.commit()
+                            # Set cancel flag so executor stops
+                            if settings.redis_url:
+                                try:
+                                    from sandcastle.engine.executor import _get_redis
+                                    r = await _get_redis()
+                                    await r.set(f"cancel:{run_id}", "1", ex=3600)
+                                except Exception:
+                                    pass
+                            else:
+                                from sandcastle.engine.executor import cancel_run_local
+                                await cancel_run_local(run_id)
+                        except Exception as cancel_exc:
+                            logger.warning("Failed to cancel timed-out batch run %s: %s", run_id, cancel_exc)
                         item["status"] = "failed"
                         item["error"] = "Timed out after 10 minutes"
                         async with counter_lock:
@@ -8951,6 +9007,27 @@ async def batch_run_workflow(name: str, req: Request) -> ApiResponse:
                     item["completed_at"] = datetime.now(timezone.utc).isoformat()
                     async with counter_lock:
                         batch["failed"] += 1
+                    # Update DB Run to failed so it doesn't stay QUEUED forever
+                    if item.get("run_id"):
+                        try:
+                            from sqlalchemy import update as sa_update
+                            async with async_session() as session:
+                                fail_stmt = (
+                                    sa_update(Run)
+                                    .where(
+                                        Run.id == uuid.UUID(item["run_id"]),
+                                        Run.status.in_([RunStatus.QUEUED, RunStatus.RUNNING]),
+                                    )
+                                    .values(
+                                        status=RunStatus.FAILED,
+                                        completed_at=datetime.now(timezone.utc),
+                                        error=f"Batch enqueue/processing failed: {exc}",
+                                    )
+                                )
+                                await session.execute(fail_stmt)
+                                await session.commit()
+                        except Exception as db_exc:
+                            logger.warning("Failed to mark batch run %s as failed in DB: %s", item["run_id"], db_exc)
                 finally:
                     async with counter_lock:
                         batch["running"] -= 1
