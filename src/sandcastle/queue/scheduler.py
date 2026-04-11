@@ -173,7 +173,11 @@ async def _run_scheduled_workflow(
             # Guard against concurrent execution of the same scheduled workflow
             if schedule.last_run_id:
                 last_run = await session.get(Run, schedule.last_run_id)
-                if last_run and last_run.status in (RunStatus.RUNNING, RunStatus.QUEUED):
+                if last_run and last_run.status in (
+                    RunStatus.RUNNING,
+                    RunStatus.QUEUED,
+                    RunStatus.AWAITING_APPROVAL,
+                ):
                     logger.warning(
                         "Skipping scheduled run for '%s' - previous run %s still active",
                         schedule.workflow_name,

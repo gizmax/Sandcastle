@@ -6018,22 +6018,23 @@ async def create_schedule(request: ScheduleCreateRequest, req: Request) -> ApiRe
             ).model_dump(),
         )
 
-    # Validate input_data against workflow input_schema if provided
-    if request.input_data:
-        workflow = parse_yaml_string(yaml_content)
-        validation_errors = _validate_workflow_input(
-            request.input_data, workflow.input_schema
+    # Validate input_data against workflow input_schema (always check,
+    # even for empty {} -- a schema with required fields must reject it)
+    workflow = parse_yaml_string(yaml_content)
+    input_to_validate = request.input_data if request.input_data else {}
+    validation_errors = _validate_workflow_input(
+        input_to_validate, workflow.input_schema
+    )
+    if validation_errors:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_INPUT",
+                    message="; ".join(validation_errors),
+                )
+            ).model_dump(),
         )
-        if validation_errors:
-            raise HTTPException(
-                status_code=400,
-                detail=ApiResponse(
-                    error=ErrorResponse(
-                        code="INVALID_INPUT",
-                        message="; ".join(validation_errors),
-                    )
-                ).model_dump(),
-            )
 
     # Validate cron expression before saving
     try:
@@ -7323,6 +7324,25 @@ async def _resolve_and_update_approval(
     return approval
 
 
+async def _rollback_approval_to_pending(approval: ApprovalRequest) -> None:
+    """Reset a committed approval back to PENDING so the user can retry.
+
+    Called when _resume_after_approval fails after the approval was already
+    committed -- prevents the approval from being stuck in a terminal state
+    with no running workflow.
+    """
+    async with async_session() as session:
+        ap = await session.get(ApprovalRequest, approval.id)
+        if ap:
+            ap.status = ApprovalStatus.PENDING
+            ap.resolved_at = None
+            await session.commit()
+            logger.info(
+                "Rolled back approval %s to PENDING after resume failure",
+                approval.id,
+            )
+
+
 @router.post("/approvals/{approval_id}/approve")
 async def approve_approval(
     approval_id: str,
@@ -7345,7 +7365,11 @@ async def approve_approval(
                 ap.response_data = response_data
                 await session.commit()
 
-    await _resume_after_approval(approval, output_data=response_data or {"approved": True})
+    try:
+        await _resume_after_approval(approval, output_data=response_data or {"approved": True})
+    except Exception:
+        await _rollback_approval_to_pending(approval)
+        raise
 
     return ApiResponse(
         data={"approved": True, "approval_id": approval_id, "run_id": str(approval.run_id)},
@@ -7383,7 +7407,11 @@ async def skip_approval(
         approval_id, tenant_id, ApprovalStatus.SKIPPED, request,
     )
 
-    await _resume_after_approval(approval, output_data=None)
+    try:
+        await _resume_after_approval(approval, output_data=None)
+    except Exception:
+        await _rollback_approval_to_pending(approval)
+        raise
 
     return ApiResponse(
         data={"skipped": True, "approval_id": approval_id, "run_id": str(approval.run_id)},
@@ -7453,7 +7481,11 @@ async def regenerate_approval(
             ap.response_data = output_data
             await session.commit()
 
-    await _resume_after_approval(approval, output_data=output_data)
+    try:
+        await _resume_after_approval(approval, output_data=output_data)
+    except Exception:
+        await _rollback_approval_to_pending(approval)
+        raise
 
     return ApiResponse(
         data={
@@ -7493,12 +7525,13 @@ async def _resume_after_approval(
             )
 
         workflow_name = run.workflow_name
+        workflow_version = run.workflow_version
         input_data = run.input_data or {}
         max_cost_usd = run.max_cost_usd
 
-    # Load workflow YAML
+    # Load workflow YAML (use versioned loader to match replay/fork behavior)
     try:
-        yaml_content = _load_workflow_yaml(workflow_name)
+        yaml_content = await _load_versioned_workflow_yaml(workflow_name, workflow_version)
     except FileNotFoundError:
         logger.error(f"Cannot resume: workflow '{workflow_name}' not found")
         raise HTTPException(

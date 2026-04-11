@@ -485,12 +485,13 @@ class TestResumeAfterApproval:
 
         mock_run = MagicMock()
         mock_run.workflow_name = "nonexistent-workflow"
+        mock_run.workflow_version = None
         mock_run.input_data = {}
         mock_run.max_cost_usd = None
 
         with (
             patch("sandcastle.api.routes.async_session") as mock_sf,
-            patch("sandcastle.api.routes._load_workflow_yaml", side_effect=FileNotFoundError("not found")),
+            patch("sandcastle.api.routes._load_versioned_workflow_yaml", new=AsyncMock(side_effect=FileNotFoundError("not found"))),
         ):
             mock_sess = AsyncMock()
             mock_sess.__aenter__ = AsyncMock(return_value=mock_sess)
@@ -515,12 +516,13 @@ class TestResumeAfterApproval:
 
         mock_run = MagicMock()
         mock_run.workflow_name = "simple-test"
+        mock_run.workflow_version = None
         mock_run.input_data = {}
         mock_run.max_cost_usd = None
 
         with (
             patch("sandcastle.api.routes.async_session") as mock_sf,
-            patch("sandcastle.api.routes._load_workflow_yaml", return_value=SIMPLE_WF),
+            patch("sandcastle.api.routes._load_versioned_workflow_yaml", new=AsyncMock(return_value=SIMPLE_WF)),
             patch("sandcastle.api.routes.enqueue_workflow", new=AsyncMock(side_effect=Exception("queue down"))),
         ):
             mock_sess = AsyncMock()
