@@ -7330,13 +7330,41 @@ async def _rollback_approval_to_pending(approval: ApprovalRequest) -> None:
     Called when _resume_after_approval fails after the approval was already
     committed -- prevents the approval from being stuck in a terminal state
     with no running workflow.
+
+    Also resets the run back to AWAITING_APPROVAL (if it was set to FAILED
+    by the resume failure) and writes a compensating audit event so the
+    audit trail reflects the real state.
     """
     async with async_session() as session:
         ap = await session.get(ApprovalRequest, approval.id)
         if ap:
             ap.status = ApprovalStatus.PENDING
             ap.resolved_at = None
+
+            # Also reset the run if it was marked FAILED by the failed resume
+            if ap.run_id:
+                run = await session.get(Run, ap.run_id)
+                if run and run.status == RunStatus.FAILED:
+                    run.status = RunStatus.AWAITING_APPROVAL
+                    run.error = ""
+                    run.completed_at = None
+
             await session.commit()
+
+            # Compensating audit event so trail matches reality
+            try:
+                from sandcastle.engine.audit import append_audit_event
+                await append_audit_event(
+                    session=session,
+                    event_type="approval.rollback_to_pending",
+                    run_id=str(ap.run_id) if ap.run_id else None,
+                    actor_id="system",
+                    payload={"approval_id": str(approval.id), "reason": "resume_failed"},
+                )
+                await session.commit()
+            except Exception as _ae:
+                logger.warning("Audit approval.rollback_to_pending failed: %s", _ae)
+
             logger.info(
                 "Rolled back approval %s to PENDING after resume failure",
                 approval.id,
