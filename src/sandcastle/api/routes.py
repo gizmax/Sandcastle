@@ -5131,10 +5131,11 @@ async def stream_run(run_id: str, request: Request) -> StreamingResponse:
         when no status change occurs to prevent proxy timeout.
         """
         last_status = None
-        seen_step_ids: set[tuple[str, int | None]] = set()
+        # Dedup key includes status so state transitions (running -> completed) are sent
+        seen_step_keys: set[tuple[str, int | None, str]] = set()
         last_event_time = time.monotonic()
 
-        for _ in range(600):  # Max 10 minutes of polling (1s intervals)
+        while True:  # Run until terminal state or client disconnect
             if await request.is_disconnected():
                 break
             async with async_session() as session:
@@ -5162,14 +5163,14 @@ async def stream_run(run_id: str, request: Request) -> StreamingResponse:
                 last_status = current_status
                 emitted = True
 
-            # Emit step update events (keyed by step_id + parallel_index to avoid duplicates)
+            # Emit step update events (keyed by step_id + parallel_index + status)
             for step in run.steps:
-                key = (step.step_id, step.parallel_index)
-                if key not in seen_step_ids:
-                    seen_step_ids.add(key)
-                    step_status = (
-                        step.status.value if hasattr(step.status, "value") else step.status
-                    )
+                step_status = (
+                    step.status.value if hasattr(step.status, "value") else step.status
+                )
+                key = (step.step_id, step.parallel_index, step_status)
+                if key not in seen_step_keys:
+                    seen_step_keys.add(key)
                     yield _sse_event(
                         "step",
                         {
@@ -5212,8 +5213,6 @@ async def stream_run(run_id: str, request: Request) -> StreamingResponse:
                 last_event_time = time.monotonic()
 
             await asyncio.sleep(1.0)
-
-        yield _sse_event("error", {"message": "Stream timed out"})
 
     return StreamingResponse(
         event_generator(),
@@ -8091,6 +8090,7 @@ async def rotate_api_key(
             name=old_key.name,
             max_cost_per_run_usd=old_key.max_cost_per_run_usd,
             allowed_cidrs=old_key.allowed_cidrs,
+            allowed_workflows=old_key.allowed_workflows,
             rotated_from_id=old_key.id,
         )
         session.add(new_db_key)
@@ -8844,10 +8844,11 @@ async def batch_run_workflow(name: str, req: Request) -> ApiResponse:
             "completed_at": None,
         })
 
-    # Store batch metadata
+    # Store batch metadata (tenant_id for isolation)
     _batch_store[batch_id] = {
         "batch_id": batch_id,
         "workflow": name,
+        "tenant_id": tenant_id,
         "status": "running",
         "total": len(batch_req.items),
         "completed": 0,
@@ -8983,10 +8984,16 @@ async def batch_run_workflow(name: str, req: Request) -> ApiResponse:
 
 
 @router.get("/batch/{batch_id}/status")
-async def get_batch_status(batch_id: str) -> ApiResponse:
+async def get_batch_status(batch_id: str, req: Request) -> ApiResponse:
     """Get the status of a batch run."""
     batch = _batch_store.get(batch_id)
-    if not batch:
+    # Return 404 for missing batch or tenant mismatch (don't reveal existence)
+    tenant_id = get_tenant_id(req)
+    if not batch or (
+        settings.auth_required
+        and tenant_id is not None
+        and batch.get("tenant_id") != tenant_id
+    ):
         raise HTTPException(
             status_code=404,
             detail=ApiResponse(
@@ -9001,14 +9008,20 @@ async def get_batch_status(batch_id: str) -> ApiResponse:
 
 
 @router.post("/batch/{batch_id}/cancel")
-async def cancel_batch(batch_id: str) -> ApiResponse:
+async def cancel_batch(batch_id: str, req: Request) -> ApiResponse:
     """Cancel a running batch.
 
     Sets the batch status to "cancelled". Pending items are skipped immediately.
     Currently running items are allowed to finish, but no new items will start.
     """
     batch = _batch_store.get(batch_id)
-    if not batch:
+    # Return 404 for missing batch or tenant mismatch (don't reveal existence)
+    tenant_id = get_tenant_id(req)
+    if not batch or (
+        settings.auth_required
+        and tenant_id is not None
+        and batch.get("tenant_id") != tenant_id
+    ):
         raise HTTPException(
             status_code=404,
             detail=ApiResponse(
@@ -9203,10 +9216,26 @@ async def run_workflow_api(workflow_name: str, req: Request) -> ApiResponse:
 
     try:
         body = await req.json()
-        if not isinstance(body, dict):
-            raise ValueError("Request body must be a JSON object")
     except Exception:
-        body = {}
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_REQUEST",
+                    message="Request body must be valid JSON",
+                )
+            ).model_dump(),
+        )
+    if not isinstance(body, dict):
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_REQUEST",
+                    message="Request body must be a JSON object",
+                )
+            ).model_dump(),
+        )
 
     callback_url = req.headers.get("X-Callback-URL")
     if callback_url:
