@@ -660,7 +660,8 @@ class TestWorkflowCreate:
             })
         assert resp.status_code == 201
         data = resp.json()["data"]
-        assert data["name"] == "integration-test"
+        # YAML name is overridden to match request name for consistency
+        assert data["name"] == "test-create"
         assert data["steps_count"] == 1
 
     def test_create_invalid_yaml_returns_400(self, tmp_path):

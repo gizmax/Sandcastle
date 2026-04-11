@@ -83,6 +83,8 @@ export function useSSE(path: string | null) {
             }
           }
         }
+        // Stream ended normally (done=true) - mark as disconnected
+        setConnected(false);
       } catch (e: unknown) {
         if (e instanceof DOMException && e.name === "AbortError") return;
         setConnected(false);

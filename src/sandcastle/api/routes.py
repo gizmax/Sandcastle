@@ -4144,6 +4144,13 @@ async def save_workflow(request: WorkflowSaveRequest, req: Request) -> ApiRespon
             ).model_dump(),
         )
 
+    # Enforce YAML name consistency with request name to prevent
+    # registry key / run name divergence (runs use YAML name, delete
+    # guards use registry key - mismatch lets active runs escape protection).
+    req_safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in request.name)
+    if workflow.name != req_safe:
+        workflow.name = req_safe
+
     # Write to disk (backward compat)
     workflows_dir = Path(settings.workflows_dir)
     workflows_dir.mkdir(parents=True, exist_ok=True)
@@ -4245,6 +4252,23 @@ async def delete_workflow(name: str, req: Request) -> ApiResponse:
             ).model_dump(),
         )
 
+    # Check file exists on disk FIRST (try both .yaml and .yml extensions)
+    yml_path = workflows_dir / f"{safe_name}.yml"
+    if file_path.exists():
+        target_path = file_path
+    elif yml_path.exists():
+        target_path = yml_path
+    else:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="NOT_FOUND",
+                    message=f"Workflow '{name}' not found",
+                )
+            ).model_dump(),
+        )
+
     # Check for active runs
     async with async_session() as session:
         active_stmt = select(func.count(Run.id)).where(
@@ -4263,28 +4287,14 @@ async def delete_workflow(name: str, req: Request) -> ApiResponse:
                 ).model_dump(),
             )
 
+        # Delete file from disk first, then DB versions
+        target_path.unlink()
+
         # Delete all WorkflowVersion records
         await session.execute(
             sa_delete(WorkflowVersion).where(WorkflowVersion.workflow_name == safe_name)
         )
         await session.commit()
-
-    # Delete YAML file from disk (try both .yaml and .yml extensions)
-    yml_path = workflows_dir / f"{safe_name}.yml"
-    if file_path.exists():
-        file_path.unlink()
-    elif yml_path.exists():
-        yml_path.unlink()
-    else:
-        raise HTTPException(
-            status_code=404,
-            detail=ApiResponse(
-                error=ErrorResponse(
-                    code="NOT_FOUND",
-                    message=f"Workflow '{name}' not found",
-                )
-            ).model_dump(),
-        )
 
     return ApiResponse(data={"deleted": True, "workflow_name": name})
 
@@ -8411,11 +8421,13 @@ async def update_settings(
 
 @router.get("/workflows/{name}/versions")
 async def list_workflow_versions(
+    req: Request,
     name: str,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ) -> ApiResponse:
     """List all versions of a workflow."""
+    _require_admin(req)
     async with async_session() as session:
         count_stmt = select(func.count(WorkflowVersion.id)).where(
             WorkflowVersion.workflow_name == name
@@ -8503,9 +8515,62 @@ async def list_workflow_versions(
     )
 
 
+@router.get("/workflows/{name}/versions/diff")
+async def diff_workflow_versions(
+    name: str,
+    version_a: int = Query(..., description="First version to compare"),
+    version_b: int = Query(..., description="Second version to compare"),
+) -> ApiResponse:
+    """Get a structured diff between two workflow versions."""
+    async with async_session() as session:
+        stmt_a = select(WorkflowVersion).where(
+            WorkflowVersion.workflow_name == name,
+            WorkflowVersion.version == version_a,
+        )
+        stmt_b = select(WorkflowVersion).where(
+            WorkflowVersion.workflow_name == name,
+            WorkflowVersion.version == version_b,
+        )
+        wv_a = (await session.execute(stmt_a)).scalar_one_or_none()
+        wv_b = (await session.execute(stmt_b)).scalar_one_or_none()
+
+    if not wv_a or not wv_b:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message="One or both versions not found")
+            ).model_dump(),
+        )
+
+    # Extract step IDs from each version
+    steps_a = set(_extract_step_configs(wv_a.yaml_content).keys())
+    steps_b = set(_extract_step_configs(wv_b.yaml_content).keys())
+
+    configs_a = _extract_step_configs(wv_a.yaml_content)
+    configs_b = _extract_step_configs(wv_b.yaml_content)
+
+    changed = []
+    for sid in steps_a & steps_b:
+        if configs_a.get(sid) != configs_b.get(sid):
+            changed.append(sid)
+
+    return ApiResponse(
+        data=WorkflowVersionDiffResponse(
+            version_a=version_a,
+            version_b=version_b,
+            yaml_a=wv_a.yaml_content,
+            yaml_b=wv_b.yaml_content,
+            steps_added=sorted(steps_b - steps_a),
+            steps_removed=sorted(steps_a - steps_b),
+            steps_changed=sorted(changed),
+        )
+    )
+
+
 @router.get("/workflows/{name}/versions/{version}")
-async def get_workflow_version(name: str, version: int) -> ApiResponse:
+async def get_workflow_version(req: Request, name: str, version: int) -> ApiResponse:
     """Get a specific workflow version with full YAML content."""
+    _require_admin(req)
     async with async_session() as session:
         stmt = select(WorkflowVersion).where(
             WorkflowVersion.workflow_name == name,
@@ -9192,11 +9257,12 @@ async def publish_workflow_api(name: str, req: Request) -> ApiResponse:
                 audit_session,
                 event_type="workflow.published",
                 run_id=None,
-                actor_id=get_tenant_id(req),
+                actor_id=get_tenant_id(req) or "admin",
                 payload={"workflow_name": name, "version": wv.version},
                 actor_key_prefix=req.headers.get("X-API-Key", "")[:8],
                 source_ip=req.client.host if req.client else None,
             )
+            await audit_session.commit()
     except Exception:
         logger.warning("Failed to emit audit event for workflow.published", exc_info=True)
 
@@ -9439,6 +9505,17 @@ async def run_workflow_api(workflow_name: str, req: Request) -> ApiResponse:
     try:
         plan = build_plan(workflow)
     except ValueError as e:
+        # Mark run as FAILED before returning error
+        try:
+            async with async_session() as session:
+                db_run = await session.get(Run, uuid.UUID(run_id))
+                if db_run:
+                    db_run.status = RunStatus.FAILED
+                    db_run.error = f"Plan error: {e}"
+                    db_run.completed_at = datetime.now(timezone.utc)
+                    await session.commit()
+        except Exception:
+            logger.error("Failed to mark run %s as FAILED after plan error", run_id, exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=ApiResponse(
@@ -9446,15 +9523,34 @@ async def run_workflow_api(workflow_name: str, req: Request) -> ApiResponse:
             ).model_dump(),
         )
 
-    storage = create_storage()
-    result = await execute_workflow(
-        workflow=workflow,
-        plan=plan,
-        input_data=input_data,
-        run_id=run_id,
-        storage=storage,
-        max_cost_usd=budget,
-    )
+    try:
+        storage = create_storage()
+        result = await execute_workflow(
+            workflow=workflow,
+            plan=plan,
+            input_data=input_data,
+            run_id=run_id,
+            storage=storage,
+            max_cost_usd=budget,
+        )
+    except Exception as e:
+        # Mark run as FAILED if execution raises
+        try:
+            async with async_session() as session:
+                db_run = await session.get(Run, uuid.UUID(run_id))
+                if db_run:
+                    db_run.status = RunStatus.FAILED
+                    db_run.error = f"Execution error: {e}"
+                    db_run.completed_at = datetime.now(timezone.utc)
+                    await session.commit()
+        except Exception:
+            logger.error("Failed to mark run %s as FAILED after exec error", run_id, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=ApiResponse(
+                error=ErrorResponse(code="EXECUTION_ERROR", message=str(e))
+            ).model_dump(),
+        )
 
     status_map = {
         "completed": RunStatus.COMPLETED,
@@ -9656,57 +9752,6 @@ async def get_workflow_api_usage(
         )
     )
 
-
-@router.get("/workflows/{name}/versions/diff")
-async def diff_workflow_versions(
-    name: str,
-    version_a: int = Query(..., description="First version to compare"),
-    version_b: int = Query(..., description="Second version to compare"),
-) -> ApiResponse:
-    """Get a structured diff between two workflow versions."""
-    async with async_session() as session:
-        stmt_a = select(WorkflowVersion).where(
-            WorkflowVersion.workflow_name == name,
-            WorkflowVersion.version == version_a,
-        )
-        stmt_b = select(WorkflowVersion).where(
-            WorkflowVersion.workflow_name == name,
-            WorkflowVersion.version == version_b,
-        )
-        wv_a = (await session.execute(stmt_a)).scalar_one_or_none()
-        wv_b = (await session.execute(stmt_b)).scalar_one_or_none()
-
-    if not wv_a or not wv_b:
-        raise HTTPException(
-            status_code=404,
-            detail=ApiResponse(
-                error=ErrorResponse(code="NOT_FOUND", message="One or both versions not found")
-            ).model_dump(),
-        )
-
-    # Extract step IDs from each version
-    steps_a = set(_extract_step_configs(wv_a.yaml_content).keys())
-    steps_b = set(_extract_step_configs(wv_b.yaml_content).keys())
-
-    configs_a = _extract_step_configs(wv_a.yaml_content)
-    configs_b = _extract_step_configs(wv_b.yaml_content)
-
-    changed = []
-    for sid in steps_a & steps_b:
-        if configs_a.get(sid) != configs_b.get(sid):
-            changed.append(sid)
-
-    return ApiResponse(
-        data=WorkflowVersionDiffResponse(
-            version_a=version_a,
-            version_b=version_b,
-            yaml_a=wv_a.yaml_content,
-            yaml_b=wv_b.yaml_content,
-            steps_added=sorted(steps_b - steps_a),
-            steps_removed=sorted(steps_a - steps_b),
-            steps_changed=sorted(changed),
-        )
-    )
 
 
 # ---------------------------------------------------------------------------
