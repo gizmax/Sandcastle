@@ -80,6 +80,7 @@ class Run(Base):
         Index("ix_runs_api_key_id", "api_key_id"),
         CheckConstraint("total_cost_usd >= 0", name="ck_runs_total_cost_non_negative"),
         CheckConstraint("depth >= 0", name="ck_runs_depth_non_negative"),
+        UniqueConstraint("tenant_id", "idempotency_key", name="uq_tenant_idempotency_key"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -97,7 +98,7 @@ class Run(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     callback_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     tenant_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    idempotency_key: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     max_cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
     parent_run_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("runs.id", ondelete="SET NULL"), nullable=True

@@ -1377,7 +1377,11 @@ class TestWorkflowVersions:
 
     def test_list_versions_nonexistent_workflow(self):
         response = client.get("/api/workflows/nonexistent-wf/versions")
-        assert response.status_code == 404
+        # Returns 200 with empty list (read-only endpoint, no auto-import)
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["versions"] == []
+        assert data["total"] == 0
 
     def test_get_version_nonexistent(self):
         response = client.get("/api/workflows/nonexistent-wf/versions/1")

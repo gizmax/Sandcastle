@@ -24,6 +24,10 @@ export function useSSE(path: string | null) {
   useEffect(() => {
     if (!path) return;
 
+    // Reset events when path changes so old events from a previous
+    // run/stream don't mix with new ones.
+    setEvents([]);
+
     const controller = new AbortController();
     abortRef.current = controller;
 

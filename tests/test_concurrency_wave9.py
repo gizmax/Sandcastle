@@ -234,7 +234,11 @@ class TestDatabaseConcurrentAccess:
 
     @pytest.mark.asyncio
     async def test_idempotency_key_concurrent_inserts(self):
-        """Two concurrent inserts with same idempotency_key - one must fail."""
+        """Two concurrent inserts with same tenant + idempotency_key - one must fail.
+
+        The unique constraint is composite (tenant_id, idempotency_key) so the
+        same key can coexist across different tenants but not within one.
+        """
         from sqlalchemy.exc import IntegrityError
 
         from sandcastle.models.db import Run, RunStatus
@@ -242,6 +246,7 @@ class TestDatabaseConcurrentAccess:
         eng, sf = await _setup_test_db()
         try:
             idem_key = "unique-request-123"
+            tenant = "tenant-idem-test"
             results = []
 
             async def insert_with_idem(idx: int):
@@ -253,6 +258,7 @@ class TestDatabaseConcurrentAccess:
                             status=RunStatus.QUEUED,
                             input_data={},
                             idempotency_key=idem_key,
+                            tenant_id=tenant,
                         )
                         session.add(run)
                         await session.commit()

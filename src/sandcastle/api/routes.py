@@ -2295,6 +2295,7 @@ async def export_workflow(name: str, request: Request) -> ApiResponse:
 
     Removes environment variable references and sensitive data.
     """
+    _require_admin(request)
     async with async_session() as session:
         result = await session.execute(
             select(WorkflowVersion)
@@ -4420,14 +4421,28 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
             ).model_dump(),
         )
 
-    result = await execute_workflow(
-        workflow=workflow,
-        plan=plan,
-        input_data=request.input,
-        run_id=run_id,
-        storage=storage,
-        max_cost_usd=budget,
-    )
+    try:
+        result = await execute_workflow(
+            workflow=workflow,
+            plan=plan,
+            input_data=request.input,
+            run_id=run_id,
+            storage=storage,
+            max_cost_usd=budget,
+        )
+    except Exception as exc:
+        # Mark the run as FAILED so it doesn't stay stuck in RUNNING.
+        try:
+            async with async_session() as session:
+                db_run = await session.get(Run, uuid.UUID(run_id))
+                if db_run:
+                    db_run.status = RunStatus.FAILED
+                    db_run.error = f"Engine error: {exc}"
+                    db_run.completed_at = datetime.now(timezone.utc)
+                    await session.commit()
+        except Exception:
+            logger.error("Failed to mark run %s as FAILED after engine error", run_id, exc_info=True)
+        raise
 
     # Map result status to RunStatus
     status_map = {
@@ -8445,23 +8460,17 @@ async def list_workflow_versions(
         versions = result.scalars().all()
 
     if not versions and total == 0:
-        # Try auto-import from disk
-        try:
-            yaml_content = _load_workflow_yaml(name)
-            await _auto_import_workflow(name, yaml_content)
-            # Re-query
-            async with async_session() as session:
-                total = 1
-                stmt = select(WorkflowVersion).where(WorkflowVersion.workflow_name == name)
-                result = await session.execute(stmt)
-                versions = result.scalars().all()
-        except FileNotFoundError:
-            raise HTTPException(
-                status_code=404,
-                detail=ApiResponse(
-                    error=ErrorResponse(code="NOT_FOUND", message=f"Workflow '{name}' not found")
-                ).model_dump(),
-            )
+        # Return empty list instead of auto-importing (read-only endpoint
+        # should not create production versions as a side effect).
+        return ApiResponse(
+            data={
+                "versions": [],
+                "total": 0,
+                "production_version": None,
+                "staging_version": None,
+                "draft_version": None,
+            }
+        )
 
     prod_ver = None
     staging_ver = None
