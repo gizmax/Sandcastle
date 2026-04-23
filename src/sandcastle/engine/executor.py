@@ -95,6 +95,7 @@ class RunContext:
     _file_read_counts: dict[str, int] = field(default_factory=dict, repr=False)
     _seen_prompt_hashes: set[str] = field(default_factory=set, repr=False)
     _step_output_max_tokens: dict[str, int] = field(default_factory=dict, repr=False)
+    admin_trusted: bool = field(default=False)
 
     def with_item(self, item: Any, index: int) -> RunContext:
         """Create a child context for a parallel_over item.
@@ -517,7 +518,14 @@ async def _resolve_context_query(
         result = _context_search_files(query, limit=5)
 
     elif step.context_source == "custom":
-        result = await _context_run_command(query)
+        if not context.admin_trusted:
+            logger.warning(
+                "Step '%s' uses context_source=custom but workflow is not admin-trusted - skipping",
+                step.id,
+            )
+            result = ""
+        else:
+            result = await _context_run_command(query)
 
     else:
         result = ""
@@ -4085,6 +4093,15 @@ async def _execute_code_step(
     try:
         code = cfg.code
 
+        # Guard: code steps execute in-process - require admin_trusted workflow
+        if not context.admin_trusted:
+            return StepResult(
+                step_id=step.id,
+                status="failed",
+                error="Code steps require admin-trusted workflow (set admin_trusted: true in workflow YAML or run from internal endpoint)",
+                duration_seconds=time.monotonic() - started_at,
+            )
+
         # Guard: reject oversized code
         if len(code) > _CODE_STEP_MAX_SIZE:
             return StepResult(
@@ -7209,6 +7226,7 @@ async def execute_workflow(
     skip_steps: set[str] | None = None,
     step_overrides: dict[str, dict] | None = None,
     depth: int = 0,
+    admin_trusted: bool = False,
 ) -> WorkflowResult:
     """Execute a full workflow with parallel stages and retry logic.
 
@@ -7318,6 +7336,7 @@ async def execute_workflow(
         workflow_name=workflow.name,
         default_tools=getattr(workflow, "default_tools", []),
         _step_output_max_tokens=step_output_max_tokens,
+        admin_trusted=admin_trusted,
     )
 
     # Set telemetry context for this workflow run

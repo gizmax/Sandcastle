@@ -92,6 +92,7 @@ async def run_workflow_job(
     initial_context: dict | None = None,
     skip_steps: list[str] | None = None,
     step_overrides: dict | None = None,
+    admin_trusted: bool = False,
 ) -> dict:
     """Arq job: execute a workflow asynchronously.
 
@@ -150,6 +151,7 @@ async def run_workflow_job(
             initial_context=initial_context,
             skip_steps=set(skip_steps) if skip_steps else None,
             step_overrides=step_overrides,
+            admin_trusted=admin_trusted,
         )
 
         # Map result status to RunStatus
@@ -372,6 +374,7 @@ async def enqueue_workflow(
     initial_context: dict | None = None,
     skip_steps: list[str] | None = None,
     step_overrides: dict | None = None,
+    admin_trusted: bool = False,
 ) -> None:
     """Enqueue a workflow job - via Redis (arq) or in-process (asyncio.create_task).
 
@@ -408,6 +411,7 @@ async def enqueue_workflow(
                 initial_context=initial_context,
                 skip_steps=skip_steps,
                 step_overrides=step_overrides,
+                admin_trusted=admin_trusted,
                 _job_id=run_id,
             )
         except Exception as enqueue_err:
@@ -433,6 +437,7 @@ async def enqueue_workflow(
                 initial_context=initial_context,
                 skip_steps=skip_steps,
                 step_overrides=step_overrides,
+                admin_trusted=admin_trusted,
             ),
             name=f"workflow-{run_id}",
         )

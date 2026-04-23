@@ -132,6 +132,7 @@ def ctx(**kw) -> RunContext:
         costs=kw.get("costs", []),
         max_cost_usd=kw.get("max_cost_usd", None),
         workflow_name=kw.get("workflow_name", "test_wf"),
+        admin_trusted=True,
     )
 
 

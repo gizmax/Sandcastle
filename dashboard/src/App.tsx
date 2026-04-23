@@ -79,6 +79,11 @@ export default function App() {
   return (
     <BrowserRouter basename={import.meta.env.BASE_URL}>
       <PageTracker />
+      {state === "offline" && (
+        <div className="bg-yellow-500/90 text-yellow-950 text-center text-sm py-1.5 px-4 font-medium">
+          Backend unreachable - running in offline/demo mode. Data shown may be stale.
+        </div>
+      )}
       <ErrorBoundary name="root">
       <EventStreamProvider>
         <Suspense

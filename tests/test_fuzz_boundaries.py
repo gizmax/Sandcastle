@@ -412,6 +412,7 @@ def _ctx(**kwargs) -> RunContext:
         run_id="00000000-0000-0000-0000-000000000000",
         input={"foo": "bar"},
         step_outputs={},
+        admin_trusted=True,
     )
     defaults.update(kwargs)
     return RunContext(**defaults)

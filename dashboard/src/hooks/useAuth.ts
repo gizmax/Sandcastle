@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "@/api/client";
 import { API_BASE_URL } from "@/lib/constants";
 
-type AuthState = "loading" | "authenticated" | "unauthenticated";
+type AuthState = "loading" | "authenticated" | "unauthenticated" | "offline";
 
 export function useAuth() {
   const [state, setState] = useState<AuthState>("loading");
@@ -39,9 +39,10 @@ export function useAuth() {
         // First try without any key (auth might be disabled)
         const noAuthResult = await tryConnect(null, controller.signal);
 
-        // Backend unreachable - allow access in demo/mock mode
+        // Backend unreachable - show offline/demo state instead of
+        // silently granting full access (which is confusing in production)
         if (noAuthResult === "unreachable") {
-          setState("authenticated");
+          setState("offline");
           return;
         }
 
@@ -58,7 +59,7 @@ export function useAuth() {
             return;
           }
           if (ok === "unreachable") {
-            setState("authenticated");
+            setState("offline");
             return;
           }
           // Key is invalid, remove it

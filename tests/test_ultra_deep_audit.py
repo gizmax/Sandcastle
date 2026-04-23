@@ -127,6 +127,7 @@ def _ctx(**kwargs) -> RunContext:
         max_cost_usd=kwargs.get("max_cost_usd", None),
         workflow_name=kwargs.get("workflow_name", "test-workflow"),
         default_tools=kwargs.get("default_tools", []),
+        admin_trusted=True,
     )
 
 

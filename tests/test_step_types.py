@@ -393,6 +393,7 @@ class TestCodeStepExecutor:
             run_id="test-run",
             input={"text": "hello", "number": 42},
             step_outputs={"prev": {"items": [1, 2, 3]}},
+            admin_trusted=True,
         )
 
     @pytest.mark.asyncio

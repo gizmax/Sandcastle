@@ -234,13 +234,13 @@ async def lifespan(app: FastAPI):
         # from environment variables and cannot be overridden from the DB.
         _RESTORABLE_SETTINGS = {
             "anthropic_api_key", "e2b_api_key", "openai_api_key",
-            "minimax_api_key", "openrouter_api_key",
+            "mistral_api_key", "minimax_api_key", "openrouter_api_key",
             "default_max_cost_usd", "log_level", "max_workflow_depth",
         }
         # Keys in restorable settings that may be stored encrypted
         _ENCRYPTED_RESTORABLE = {
             "anthropic_api_key", "e2b_api_key", "openai_api_key",
-            "minimax_api_key", "openrouter_api_key",
+            "mistral_api_key", "minimax_api_key", "openrouter_api_key",
         }
         for key, value in saved.items():
             if key not in _RESTORABLE_SETTINGS:

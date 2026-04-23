@@ -91,6 +91,7 @@ def _make_context(
         input=inputs or {},
         step_outputs=step_outputs or {},
         max_cost_usd=max_cost_usd,
+        admin_trusted=True,
     )
     if step_results:
         ctx.step_results = step_results

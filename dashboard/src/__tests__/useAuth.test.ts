@@ -170,13 +170,13 @@ describe("useAuth", () => {
     expect(mockSetApiKey).toHaveBeenCalledWith(null);
   });
 
-  it("treats network error as authenticated (mock mode fallback)", async () => {
+  it("treats network error as offline (not silently authenticated)", async () => {
     globalThis.fetch = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
 
     const { result } = renderHook(() => useAuth());
 
     await waitFor(() => {
-      expect(result.current.state).toBe("authenticated");
+      expect(result.current.state).toBe("offline");
     });
   });
 });

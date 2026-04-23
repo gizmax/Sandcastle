@@ -706,6 +706,7 @@ class CloudflareBackend:
         self,
         worker_url: str,
         timeout: float = 300.0,
+        shared_secret: str = "",
     ) -> None:
         url = worker_url.rstrip("/") if worker_url else ""
         # Enforce HTTPS for Cloudflare worker URLs since API keys
@@ -718,6 +719,7 @@ class CloudflareBackend:
             url = "https://" + url[7:]
         self._worker_url = url
         self._timeout = timeout
+        self._shared_secret = shared_secret
         self._client: Any = None  # httpx.AsyncClient | None
         # Health cache: (result, timestamp)
         self._health_cache: tuple[bool, float] = (False, 0.0)
@@ -811,12 +813,17 @@ class CloudflareBackend:
         # Use a dedicated client with the per-request timeout for the /run
         # call, since the pooled client uses the default backend timeout
         # which may differ from the step-level timeout.
+        headers: dict[str, str] = {}
+        if self._shared_secret:
+            headers["Authorization"] = f"Bearer {self._shared_secret}"
+
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(timeout)
         ) as run_client:
             resp = await run_client.post(
                 f"{self._worker_url}/run",
                 json=payload,
+                headers=headers,
             )
             resp.raise_for_status()
             data = resp.json()
@@ -865,6 +872,7 @@ def create_backend(
     docker_cpu_period: int = 100_000,
     docker_cpu_quota: int = 50_000,
     cloudflare_worker_url: str = "",
+    cloudflare_shared_secret: str = "",
     timeout: float = 300.0,
     e2b_event_queue_size: int = 1000,
     e2b_npm_install_timeout: int = 60,
@@ -908,4 +916,5 @@ def create_backend(
     return CloudflareBackend(
         worker_url=cloudflare_worker_url,
         timeout=timeout,
+        shared_secret=cloudflare_shared_secret,
     )

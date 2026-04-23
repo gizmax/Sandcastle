@@ -4173,8 +4173,19 @@ async def save_workflow(request: WorkflowSaveRequest, req: Request) -> ApiRespon
     # registry key / run name divergence (runs use YAML name, delete
     # guards use registry key - mismatch lets active runs escape protection).
     req_safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in request.name)
+    yaml_content = request.content
     if workflow.name != req_safe:
         workflow.name = req_safe
+        # Rewrite the name in the stored YAML to prevent name mismatch
+        # between in-memory workflow and persisted content
+        import re as _re
+        yaml_content = _re.sub(
+            r"^(name:\s*).*$",
+            rf"\g<1>{req_safe}",
+            yaml_content,
+            count=1,
+            flags=_re.MULTILINE,
+        )
 
     # Write to disk (backward compat)
     workflows_dir = Path(settings.workflows_dir)
@@ -4204,12 +4215,12 @@ async def save_workflow(request: WorkflowSaveRequest, req: Request) -> ApiRespon
     try:
         async with async_session() as session:
             next_ver = await _get_next_version(session, safe_name)
-            checksum = _compute_checksum(request.content)
+            checksum = _compute_checksum(yaml_content)
             wv = WorkflowVersion(
                 workflow_name=safe_name,
                 version=next_ver,
                 status=WorkflowVersionStatus.DRAFT,
-                yaml_content=request.content,
+                yaml_content=yaml_content,
                 description=request.description,
                 steps_count=len(workflow.steps),
                 checksum=checksum,
@@ -4225,7 +4236,7 @@ async def save_workflow(request: WorkflowSaveRequest, req: Request) -> ApiRespon
         )
 
     # Write YAML to disk (after DB so both stay consistent)
-    file_path.write_text(request.content)
+    file_path.write_text(yaml_content)
 
     return ApiResponse(
         data=WorkflowInfoResponse(
@@ -4343,6 +4354,19 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
             ).model_dump(),
         )
 
+    # Enforce allowed_workflows restriction (same as /v1/ endpoint)
+    allowed_workflows = getattr(req.state, "allowed_workflows", None)
+    if allowed_workflows is not None and request.workflow not in allowed_workflows:
+        raise HTTPException(
+            status_code=403,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="FORBIDDEN",
+                    message=f"API key is not authorized to call workflow '{request.workflow}'",
+                )
+            ).model_dump(),
+        )
+
     try:
         workflow = parse_yaml_string(yaml_content)
     except Exception as e:
@@ -4453,6 +4477,7 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
             run_id=run_id,
             storage=storage,
             max_cost_usd=budget,
+            admin_trusted=True,
         )
     except Exception as exc:
         # Mark the run as FAILED so it doesn't stay stuck in RUNNING.
@@ -4596,6 +4621,19 @@ async def run_workflow_async(request: WorkflowRunRequest, req: Request) -> ApiRe
             ).model_dump(),
         )
 
+    # Enforce allowed_workflows restriction (same as /v1/ endpoint)
+    allowed_workflows = getattr(req.state, "allowed_workflows", None)
+    if allowed_workflows is not None and request.workflow not in allowed_workflows:
+        raise HTTPException(
+            status_code=403,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="FORBIDDEN",
+                    message=f"API key is not authorized to call workflow '{request.workflow}'",
+                )
+            ).model_dump(),
+        )
+
     try:
         workflow = parse_yaml_string(yaml_content)
     except Exception as e:
@@ -4683,7 +4721,7 @@ async def run_workflow_async(request: WorkflowRunRequest, req: Request) -> ApiRe
 
     # Enqueue the job - clean up orphan run on failure
     try:
-        await enqueue_workflow(yaml_content, request.input, run_id)
+        await enqueue_workflow(yaml_content, request.input, run_id, admin_trusted=True)
     except Exception as e:
         # Mark the run as failed so it doesn't stay stuck as "queued"
         try:
@@ -5134,8 +5172,9 @@ async def download_run_artifact(run_id: str, filename: str, req: Request):
             ).model_dump(),
         )
 
-    artifact_path = Path(f"data/artifacts/{run_id}/{filename}").resolve()
-    data_dir = Path("data").resolve()
+    artifact_path = Path(settings.data_dir) / "artifacts" / run_id / filename
+    artifact_path = artifact_path.resolve()
+    data_dir = Path(settings.data_dir).resolve()
     if not artifact_path.is_relative_to(data_dir):
         raise HTTPException(
             status_code=403,
@@ -8587,10 +8626,26 @@ async def update_settings(
     # Validate all updates through Pydantic before applying
     validated = Settings.model_validate({**settings.model_dump(), **updates})
 
+    # Keys that should be encrypted before persisting to DB
+    _ENCRYPTABLE_KEYS = frozenset({
+        "anthropic_api_key", "e2b_api_key", "openai_api_key",
+        "mistral_api_key", "minimax_api_key", "openrouter_api_key",
+    })
+
     # Persist each setting to DB and apply to runtime config
     async with async_session() as session:
         for key, value in updates.items():
             str_value = str(value).lower() if isinstance(value, bool) else str(value)
+            # Encrypt API keys before storing in DB (uses same Fernet
+            # layer as tool credentials if CREDENTIAL_ENCRYPTION_KEY is set)
+            if key in _ENCRYPTABLE_KEYS and str_value:
+                try:
+                    from sandcastle.engine.crypto import encrypt_credentials
+                    encrypted = encrypt_credentials({"v": str_value})
+                    if isinstance(encrypted, str):
+                        str_value = encrypted
+                except Exception as _enc_err:
+                    logger.warning("Could not encrypt %s: %s", key, _enc_err)
             # Upsert: try to load existing, otherwise create
             existing = await session.get(Setting, key)
             if existing:

@@ -2,7 +2,7 @@
 name = "sandcastle-ai"
 dynamic = ["version"]
 description = "You write YAML. Sandcastle ships AI to production. Any model, any provider, zero lock-in."
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = {text = "BSL-1.1"}
 readme = "README.md"
 authors = [

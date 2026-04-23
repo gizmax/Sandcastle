@@ -18,7 +18,7 @@ _CSP_POLICY = (
     "style-src 'self' 'unsafe-inline'; "
     "img-src 'self' data: blob:; "
     "font-src 'self' data:; "
-    "connect-src 'self' https://www.google-analytics.com https://pypi.org; "
+    "connect-src 'self' https://www.google-analytics.com https://pypi.org https://raw.githubusercontent.com; "
     "object-src 'none'; "
     "base-uri 'self'; "
     "form-action 'self'; "

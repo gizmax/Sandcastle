@@ -275,6 +275,7 @@ class TestResolveContextQuery:
             "input": {"topic": "AI quantization"},
             "step_outputs": {},
             "workflow_name": "test-wf",
+            "admin_trusted": True,
         }
         defaults.update(kwargs)
         return RunContext(**defaults)
