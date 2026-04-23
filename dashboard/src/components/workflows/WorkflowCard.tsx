@@ -1,6 +1,7 @@
 import { memo, useState } from "react";
 import { GitBranch, Play, Pencil, Eye, History, Check, Clock, CheckCircle, XCircle, Star, Layers } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { DoctorBadge } from "./DoctorBadge";
 
 // --- Mock workflow stats (deterministic, based on workflow name hash) ---
 // TODO: Replace with real API data when per-workflow stats endpoint is available
@@ -68,6 +69,8 @@ interface WorkflowCardProps {
   pinned?: boolean;
   stats?: WorkflowStats;
   owners?: string[];
+  doctorStatus?: "ok" | "warning" | "blocked" | null;
+  doctorRisk?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL" | null;
   onSelect?: () => void;
   onTogglePin?: () => void;
   onRun: () => void;
@@ -88,6 +91,8 @@ export const WorkflowCard = memo(function WorkflowCard({
   pinned,
   stats,
   owners,
+  doctorStatus,
+  doctorRisk,
   onSelect,
   onTogglePin,
   onRun,
@@ -168,7 +173,10 @@ export const WorkflowCard = memo(function WorkflowCard({
           <GitBranch className="h-5 w-5 text-accent" />
         </div>
         <div className="min-w-0 flex-1">
-          <h3 className="truncate text-sm font-semibold text-foreground" title={name}>{name}</h3>
+          <div className="flex items-center gap-1.5">
+            <h3 className="truncate text-sm font-semibold text-foreground" title={name}>{name}</h3>
+            <DoctorBadge status={doctorStatus} risk={doctorRisk} />
+          </div>
           <p className="mt-0.5 line-clamp-2 text-xs text-muted" title={description}>{description}</p>
         </div>
       </div>

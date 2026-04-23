@@ -1502,6 +1502,63 @@ def _cmd_doctor(args: argparse.Namespace) -> None:
                 "           Run 'sandcastle init' to create it"
             )
 
+    # --- Section 9: Workflow Doctor (if workflow file specified) ---
+    workflow_file = getattr(args, "workflow", None)
+    if workflow_file:
+        print()
+        print(_color("  Workflow Doctor", _C.BOLD))
+        print(_color("  ---------------", _C.BOLD))
+
+        wf_path = Path(workflow_file)
+        if not wf_path.exists():
+            _fail(f"Workflow file not found: {workflow_file}")
+        else:
+            try:
+                from sandcastle.engine.doctor import diagnose_yaml
+
+                yaml_content = wf_path.read_text()
+                report = diagnose_yaml(yaml_content)
+
+                risk_colors = {
+                    "LOW": _C.GREEN, "MEDIUM": _C.YELLOW,
+                    "HIGH": _C.RED, "CRITICAL": _C.RED,
+                }
+                risk_color = risk_colors.get(report.risk, _C.RESET)
+                print(f"  Workflow: {report.workflow_name}")
+                print(f"  Risk: {_color(report.risk, risk_color)}")
+                print()
+
+                if report.blocking:
+                    print(_color("  Blocking:", _C.RED))
+                    for f in report.blocking:
+                        step_label = f" [{f.step_id}]" if f.step_id else ""
+                        print(f"    - {f.message}{step_label}")
+                        if f.suggested_fix:
+                            print(f"      Fix: {f.suggested_fix}")
+
+                if report.warnings:
+                    print(_color("  Warnings:", _C.YELLOW))
+                    for f in report.warnings:
+                        step_label = f" [{f.step_id}]" if f.step_id else ""
+                        print(f"    - {f.message}{step_label}")
+                        if f.suggested_fix:
+                            print(f"      Fix: {f.suggested_fix}")
+
+                if report.info:
+                    print(_color("  Info:", _C.BLUE if hasattr(_C, "BLUE") else _C.RESET))
+                    for f in report.info:
+                        step_label = f" [{f.step_id}]" if f.step_id else ""
+                        print(f"    - {f.message}{step_label}")
+
+                if not report.findings:
+                    _pass("No issues found")
+                elif report.ok:
+                    _pass(f"Ready ({len(report.warnings)} warning(s))")
+                else:
+                    _fail(f"Blocked ({len(report.blocking)} blocking issue(s))")
+            except Exception as e:
+                _fail(f"Could not diagnose workflow: {e}")
+
     # --- Summary ---
     print()
     if failures == 0:
@@ -4285,7 +4342,8 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_connection_args(p_mcp)
 
     # --- doctor ---
-    subparsers.add_parser("doctor", help="Run local diagnostics")
+    p_doctor = subparsers.add_parser("doctor", help="Run local diagnostics")
+    p_doctor.add_argument("workflow", nargs="?", default=None, help="Workflow YAML file to diagnose (optional)")
 
     # --- eval ---
     p_eval = subparsers.add_parser("eval", help="Run an eval suite against a workflow")

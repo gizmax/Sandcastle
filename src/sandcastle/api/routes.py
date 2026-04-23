@@ -4116,6 +4116,16 @@ async def list_workflows(req: Request) -> ApiResponse:
             workflow = parse_yaml_string(content)
             wf_key = yaml_file.stem
             vi = version_info.get(wf_key, {})
+            # Run lightweight doctor check
+            d_status = None
+            d_risk = None
+            try:
+                from sandcastle.engine.doctor import diagnose
+                dr = diagnose(workflow)
+                d_status = "ok" if dr.ok else ("blocked" if dr.blocking else "warning")
+                d_risk = dr.risk
+            except Exception:
+                pass
             items.append(
                 WorkflowInfoResponse(
                     name=workflow.name,
@@ -4138,6 +4148,8 @@ async def list_workflows(req: Request) -> ApiResponse:
                     total_versions=vi.get("total") or None,
                     # Strip raw YAML for non-admin callers
                     yaml_content=content if caller_is_admin else None,
+                    doctor_status=d_status,
+                    doctor_risk=d_risk,
                 )
             )
         except Exception as e:
@@ -4238,6 +4250,17 @@ async def save_workflow(request: WorkflowSaveRequest, req: Request) -> ApiRespon
     # Write YAML to disk (after DB so both stay consistent)
     file_path.write_text(yaml_content)
 
+    # Run doctor check on save (non-blocking - just adds status to response)
+    doctor_status = None
+    doctor_risk = None
+    try:
+        from sandcastle.engine.doctor import diagnose
+        doctor_report = diagnose(workflow)
+        doctor_status = "ok" if doctor_report.ok else ("blocked" if doctor_report.blocking else "warning")
+        doctor_risk = doctor_report.risk
+    except Exception:
+        logger.debug("Doctor check failed on save", exc_info=True)
+
     return ApiResponse(
         data=WorkflowInfoResponse(
             name=workflow.name,
@@ -4256,8 +4279,56 @@ async def save_workflow(request: WorkflowSaveRequest, req: Request) -> ApiRespon
             input_schema=workflow.input_schema,
             version=new_version,
             version_status="draft" if new_version else None,
+            doctor_status=doctor_status,
+            doctor_risk=doctor_risk,
         )
     )
+
+
+@router.get("/workflows/{name}/doctor")
+async def doctor_workflow(name: str, req: Request) -> ApiResponse:
+    """Run preflight diagnostics on a workflow.
+
+    Returns a structured report with blocking issues, warnings, and
+    suggested fixes. Use this before executing, promoting, or publishing.
+    """
+    from sandcastle.engine.doctor import diagnose
+
+    safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
+    workflows_dir = Path(settings.workflows_dir)
+    file_path = workflows_dir / f"{safe_name}.yaml"
+    if not file_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message=f"Workflow '{name}' not found")
+            ).model_dump(),
+        )
+    try:
+        yaml_content = file_path.read_text()
+        workflow = parse_yaml_string(yaml_content)
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_WORKFLOW", message=str(e))
+            ).model_dump(),
+        )
+
+    report = diagnose(workflow)
+    return ApiResponse(data=report.to_dict())
+
+
+@router.post("/workflows/doctor")
+async def doctor_workflow_yaml(request: WorkflowSaveRequest, req: Request) -> ApiResponse:
+    """Run preflight diagnostics on raw YAML (without saving).
+
+    Accepts the same payload as POST /workflows but only runs diagnostics.
+    """
+    from sandcastle.engine.doctor import diagnose_yaml
+
+    report = diagnose_yaml(request.content)
+    return ApiResponse(data=report.to_dict())
 
 
 @router.delete("/workflows/{name}")

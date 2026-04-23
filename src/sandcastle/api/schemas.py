@@ -631,6 +631,8 @@ class WorkflowInfoResponse(BaseModel):
     version_status: str | None = None
     total_versions: int | None = None
     yaml_content: str | None = None
+    doctor_status: str | None = None  # "ok" | "warning" | "blocked"
+    doctor_risk: str | None = None  # "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"
 
 
 class WorkflowVersionResponse(BaseModel):

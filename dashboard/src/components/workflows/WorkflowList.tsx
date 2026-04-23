@@ -14,6 +14,8 @@ interface WorkflowInfo {
   version_status?: string | null;
   total_versions?: number | null;
   steps?: Array<{ id: string; owner?: string; [key: string]: unknown }>;
+  doctor_status?: "ok" | "warning" | "blocked" | null;
+  doctor_risk?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL" | null;
 }
 
 interface WorkflowListProps {
@@ -100,6 +102,8 @@ export function WorkflowList({ workflows, selectedNames, onSelectionChange, onRu
               pinned={isPinned(wf.name)}
               stats={statsMap.get(wf.file_name)}
               owners={owners}
+              doctorStatus={wf.doctor_status}
+              doctorRisk={wf.doctor_risk}
               onSelect={onSelectionChange ? () => handleToggle(wfKey) : undefined}
               onTogglePin={() => togglePin(wf.name)}
               onRun={() => onRun(wf)}

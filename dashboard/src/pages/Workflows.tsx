@@ -29,6 +29,8 @@ interface WorkflowInfo {
   version_status?: string | null;
   total_versions?: number | null;
   yaml_content?: string;
+  doctor_status?: "ok" | "warning" | "blocked" | null;
+  doctor_risk?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL" | null;
 }
 
 export default function Workflows() {
@@ -311,6 +313,8 @@ export default function Workflows() {
                     totalVersions={wf.total_versions}
                     pinned={true}
                     stats={undefined}
+                    doctorStatus={wf.doctor_status}
+                    doctorRisk={wf.doctor_risk}
                     onTogglePin={() => togglePin(wf.name)}
                     onRun={() => setRunModal(wf)}
                     onBatch={() => setBatchModal(wf)}
