@@ -2,7 +2,7 @@
 
 **Describe what you want. Go home. Sandcastle ships it.** Production-ready workflow orchestrator for AI agents. 7 AI providers with auto-failover, 22 step types including Claude Managed Agents, 15 agent templates, 4 OCR engines, EU AI Act compliance, and a full-featured dashboard. Define workflows in YAML or let AI design them for you.
 
-[![PyPI](https://img.shields.io/badge/PyPI-v0.30.1-blue?style=flat-square)](https://pypi.org/project/sandcastle-ai/0.30.1/)
+[![PyPI](https://img.shields.io/badge/PyPI-v0.30.2-blue?style=flat-square)](https://pypi.org/project/sandcastle-ai/0.30.2/)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-14600%2B%20passing-brightgreen?style=flat-square)](https://github.com/gizmax/Sandcastle/actions)
@@ -32,9 +32,9 @@
 - [Pluggable Sandbox Backends](#pluggable-sandbox-backends)
 - [Browser Step - LightPanda & Browserbase](#browser-step---lightpanda--browserbase)
 - [Multi-Provider Model Routing](#multi-provider-model-routing)
-- [63 Built-in Integrations](#63-built-in-integrations)
+- [62 Built-in Integrations](#62-built-in-integrations)
 - [Workflow Engine](#workflow-engine)
-- [21 Step Types](#21-step-types)
+- [22 Step Types](#22-step-types)
 - [Managed Agents](#managed-agents)
 - [Human Approval Gates](#human-approval-gates)
 - [Self-Optimizing Workflows (AutoPilot)](#self-optimizing-workflows-autopilot)
@@ -104,7 +104,7 @@ You'll need API keys for your chosen setup:
 
 Or use the `docker` backend (needs Docker installed) or `local` backend (dev only, no sandbox isolation) and skip the E2B key.
 
-Dashboard at `http://localhost:8080`, API at `http://localhost:8080/api`, 23 workflow templates included, 63 integrations ready to connect.
+Dashboard at `http://localhost:8080`, API at `http://localhost:8080/api`, 127 workflow templates included, 62 integrations ready to connect.
 
 Sandcastle auto-detects your environment. No `DATABASE_URL`? It uses SQLite. No `REDIS_URL`? Jobs run in-process. No S3 credentials? Files go to disk. **Same code, same API, same dashboard** - you just add connection strings when you're ready to scale.
 
@@ -474,8 +474,8 @@ Once connected, ask your AI assistant to:
 |---|---|
 | **Pluggable sandbox backends** (E2B, Docker, Local, Cloudflare) | Yes |
 | **Multi-provider model routing** (Claude, OpenAI, MiniMax, Google/Gemini, Mistral, Ollama, oMLX) | Yes |
-| **63 built-in integrations** across 9 categories | Yes |
-| **21 step types** (standard, llm, http, code, race, sensor, gate, parse, managed-agent...) | Yes |
+| **62 built-in integrations** across 9 categories | Yes |
+| **22 step types** (standard, llm, http, code, race, sensor, gate, parse, managed-agent...) | Yes |
 | **Zero-config local mode** | Yes |
 | **DAG workflow orchestration** | Yes |
 | **Parallel step execution** | Yes |
@@ -496,7 +496,7 @@ Once connected, ask your AI assistant to:
 | **MCP server** (Claude Desktop, Cursor, Windsurf) | Yes |
 | **Docker one-command deploy** | Yes |
 | **Dashboard with real-time monitoring** | Yes |
-| **23 built-in workflow templates** | Yes |
+| **127 built-in workflow templates** | Yes |
 | **118 community templates** (Community Hub) | Yes |
 | **Visual workflow builder** | Yes |
 | **Directory input (file processing)** | Yes |
@@ -670,13 +670,13 @@ for the full list.
 
 ---
 
-## 63 Built-in Integrations
+## 62 Built-in Integrations
 
 <p align="center">
   <img src="docs/screenshots/integrations.png" alt="Integrations" width="720" />
 </p>
 
-Sandcastle ships with 63 zero-config tool connectors across 9 categories. Each integration is a lightweight JavaScript module that agents can call during workflow execution. Named connections let you wire multiple accounts (e.g. "production-slack" vs "staging-slack"), and all credentials are encrypted at rest with Fernet (AES-128-CBC + HMAC-SHA256).
+Sandcastle ships with 62 zero-config tool connectors across 9 categories. Each integration is a lightweight JavaScript module that agents can call during workflow execution. Named connections let you wire multiple accounts (e.g. "production-slack" vs "staging-slack"), and all credentials are encrypted at rest with Fernet (AES-128-CBC + HMAC-SHA256).
 
 | Category | Tools |
 |----------|-------|
@@ -805,9 +805,9 @@ For fine-grained control, you can still reference specific outputs explicitly us
 
 ---
 
-## 21 Step Types
+## 22 Step Types
 
-Sandcastle supports 21 step types for building complex workflows beyond simple LLM prompts:
+Sandcastle supports 22 step types for building complex workflows beyond simple LLM prompts:
 
 | Phase | Type | Description |
 |-------|------|-------------|
@@ -1425,7 +1425,7 @@ Real-time activity stream on the dashboard: workflow runs, failures, edits, API 
   <img src="docs/screenshots/template-browser.png" alt="Template Browser" width="720" />
 </p>
 
-Sandcastle ships with 23 built-in workflow templates. The [Community Hub](https://sandcastle-ai.eu/hub) adds 118 more from the community - curated collections for marketing, sales, DevOps, and more.
+Sandcastle ships with 127 built-in workflow templates. The [Community Hub](https://sandcastle-ai.eu/hub) adds 118 more from the community - curated collections for marketing, sales, DevOps, and more.
 
 | Category | Built-in Templates |
 |----------|-----------|
@@ -1688,7 +1688,7 @@ Visual drag-and-drop editor for building workflows. Add steps, connect dependenc
 
 ### Integrations
 
-63 tool connectors across 9 categories. Each tool shows connection status, named connections, and a configuration panel. Contextual banner highlights tools that are available but not yet configured.
+62 tool connectors across 9 categories. Each tool shows connection status, named connections, and a configuration panel. Contextual banner highlights tools that are available but not yet configured.
 
 <p align="center">
   <img src="docs/screenshots/integrations.png" alt="Integrations" width="720" />
@@ -2040,7 +2040,7 @@ flowchart TD
     A2A["A2A Agents"] -->|"POST /a2a"| API
     AGUI["AG-UI Clients"] -->|"GET /api/agui/stream"| API
 
-    API --> Engine["Workflow Engine\n(DAG executor, 21 step types)"]
+    API --> Engine["Workflow Engine\n(DAG executor, 22 step types)"]
 
     Engine --> Standard["Standard Steps"]
     Engine --> Sub["Sub-Workflow Steps\n(recursive execution)"]
@@ -2063,7 +2063,7 @@ flowchart TD
     CF --> Execution
     E2B2 --> Merge
 
-    Execution["Parallel Execution\n63 integrations"] --> Provider["Multi-Provider Router\nClaude / OpenAI / MiniMax / Gemini"]
+    Execution["Parallel Execution\n62 integrations"] --> Provider["Multi-Provider Router\nClaude / OpenAI / MiniMax / Gemini"]
 
     Provider --> Gate{"Approval\nGate?"}
 
@@ -2097,7 +2097,7 @@ flowchart TD
 | Storage | Local filesystem | S3 / MinIO |
 | Agent Runtime | Sandshore (E2B / Docker / Local / Cloudflare) | Sandshore (E2B / Docker / Local / Cloudflare) |
 | Model Providers | Claude, OpenAI, MiniMax, Google/Gemini | Claude, OpenAI, MiniMax, Google/Gemini |
-| Integrations | 63 tools, 9 categories | 63 tools, 9 categories |
+| Integrations | 62 tools, 9 categories | 62 tools, 9 categories |
 | Security | Fernet encryption, HMAC auth, rate limiting | + Redis rate limiting, seccomp, IP allowlists |
 | Dashboard | React 18, TypeScript, Vite, Tailwind CSS v4 | React 18, TypeScript, Vite, Tailwind CSS v4 |
 | DAG Visualization | @xyflow/react | @xyflow/react |

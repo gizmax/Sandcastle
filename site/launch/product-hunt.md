@@ -9,7 +9,7 @@
 
 ## Description (short - 260 chars)
 
-Production-ready AI agent workflow orchestrator. Define pipelines in YAML, run with pluggable sandboxes, monitor via real-time dashboard. EU AI Act compliant with audit trail, PII redaction. 63 integrations. Free and open-source.
+Production-ready AI agent workflow orchestrator. Define pipelines in YAML, run with pluggable sandboxes, monitor via real-time dashboard. EU AI Act compliant with audit trail, PII redaction. 62 integrations. Free and open-source.
 
 ## Description (full)
 
@@ -26,7 +26,7 @@ Sandcastle runs your agent workflows so you don't have to.
 ### What makes it different
 
 - **EU AI Act Ready** - First orchestrator with built-in compliance: risk classification, tamper-evident audit trail (SHA-256 hash chain), transparency reports, PII redaction
-- **63 Integrations** - Slack, GitHub, Jira, Salesforce, HubSpot, Stripe, plus Langfuse, Qdrant, GCS, Azure Blob, Exa, and 50+ more
+- **62 Integrations** - Slack, GitHub, Jira, Salesforce, HubSpot, Stripe, plus Langfuse, Qdrant, GCS, Azure Blob, Exa, and 50+ more
 - **5 Sandbox Backends** - E2B, Docker, local process, LightPanda (10x faster browser), Browserbase (cloud)
 - **Multi-Provider Routing** - Claude, GPT, Gemini, MiniMax, Ollama in the same workflow
 - **Real-time Dashboard** - Runs, costs, approvals, violations, evaluations - all in one place
@@ -95,7 +95,7 @@ What's new in v0.23:
 - EU AI Act compliance (first in category)
 - Tamper-evident audit trail
 - PII redaction
-- 63 integrations
+- 62 integrations
 - 8,700+ tests
 
 Free & open-source: https://sandcastle-ai.eu
@@ -110,7 +110,7 @@ Why it matters: The EU AI Act deadline is August 2, 2026. Most AI tools have zer
 - Tamper-evident audit trail (SHA-256 hash chain)
 - Transparency reports (Article 13)
 - PII redaction with 7 pattern types
-- 63 integrations, multi-provider model routing
+- 62 integrations, multi-provider model routing
 - Real-time dashboard
 
 Get started in 30 seconds: pip install sandcastle-ai
@@ -125,7 +125,7 @@ Website: https://sandcastle-ai.eu
 **Body:**
 After months of building AI agent pipelines, I got tired of writing the same orchestration code. So I built Sandcastle.
 
-Define workflows in YAML. Pick your models (Claude, GPT, Gemini, Ollama). Connect 63 integrations. Run locally with zero infrastructure, or scale to production.
+Define workflows in YAML. Pick your models (Claude, GPT, Gemini, Ollama). Connect 62 integrations. Run locally with zero infrastructure, or scale to production.
 
 v0.23 adds "Enterprise Trust" features:
 - EU AI Act compliance (risk classification, audit trail, transparency reports)
