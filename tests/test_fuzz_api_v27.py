@@ -260,9 +260,10 @@ class TestPathParameterFuzzing:
         """DELETE /runs/<script>alert(1)</script> should return 4xx."""
         resp = client.delete("/api/runs/%3Cscript%3Ealert(1)%3C%2Fscript%3E")
         _assert_no_server_error(resp)
-        # URL-decoded angle brackets may cause route mismatch (405) or
-        # reach the handler which rejects invalid UUID (400)
-        assert resp.status_code in (400, 405)
+        # URL-decoded angle brackets may cause route mismatch (405), reach the
+        # handler which rejects invalid UUID (400), or be routed to a /runs/{id}
+        # GET handler returning 404 — all are acceptable 4xx outcomes.
+        assert resp.status_code in (400, 404, 405)
         # Verify XSS payload is not reflected unescaped
         assert "<script>" not in resp.text
 

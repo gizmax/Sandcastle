@@ -114,12 +114,25 @@ def _find_similar_template(description: str) -> str | None:
     return None
 
 
-def _load_recent_user_workflows(max_files: int = 3, max_lines: int = 200) -> str:
+def _load_recent_user_workflows(
+    max_files: int = 3,
+    max_lines: int = 200,
+    *,
+    tenant_id: str | None = None,
+) -> str:
     """Load the most recent workflow YAML files from the user's workflows dir.
 
     Returns formatted string for injection into the system prompt, or empty
     string if no user workflows exist.
+
+    When ``tenant_id`` is provided (multi-tenant deployments), the disk-scan
+    is skipped entirely: ``workflows_dir`` is a global shared directory and
+    inlining its contents into the system prompt would leak workflow YAML
+    from other tenants into the caller's LLM context (round-10 MEDIUM
+    finding). Few-shot examples are only loaded for single-tenant callers.
     """
+    if tenant_id is not None:
+        return ""
     try:
         from sandcastle.config import settings
         workflows_dir = Path(settings.workflows_dir).resolve()
@@ -447,18 +460,26 @@ def _load_tool_names() -> str:
 # ---------------------------------------------------------------------------
 
 
-def _build_system_prompt(*, include_user_workflows: bool = False) -> str:
+def _build_system_prompt(
+    *,
+    include_user_workflows: bool = False,
+    tenant_id: str | None = None,
+) -> str:
     """Build the system prompt with schema docs, model list, and examples.
 
     When include_user_workflows is True, appends recent user workflows
     from the workflows directory as style reference (few-shot).
+
+    ``tenant_id`` is forwarded to :func:`_load_recent_user_workflows`; for
+    tenant-scoped callers the disk scan is disabled to prevent cross-tenant
+    workflow YAML from being inlined into the LLM context.
     """
     models = ", ".join(sorted(KNOWN_MODELS))
     examples = _load_example_templates()
     tool_connectors = _load_tool_names()
     user_workflows_section = ""
     if include_user_workflows:
-        user_workflows_section = _load_recent_user_workflows()
+        user_workflows_section = _load_recent_user_workflows(tenant_id=tenant_id)
 
     return f"""\
 You are a workflow generator for Sandcastle, an AI agent orchestrator.
@@ -1151,6 +1172,7 @@ async def generate_workflow(
     *,
     refine_from: str | None = None,
     refine_instruction: str | None = None,
+    tenant_id: str | None = None,
 ) -> GenerateResult:
     """Generate a workflow YAML from a natural language description.
 
@@ -1158,6 +1180,9 @@ async def generate_workflow(
         description: What the workflow should do.
         refine_from: Existing YAML to refine.
         refine_instruction: What to change in the existing YAML.
+        tenant_id: Calling tenant. When set, the system prompt does NOT
+            include few-shot YAML from the shared workflows directory
+            (cross-tenant prompt-injection mitigation).
 
     Returns:
         GenerateResult with the generated YAML and metadata.
@@ -1180,8 +1205,11 @@ async def generate_workflow(
     except Exception:
         pass  # Never block generation for template matching
 
-    # Build system prompt with user's recent workflows for style reference
-    system_prompt = _build_system_prompt(include_user_workflows=True)
+    # Build system prompt with user's recent workflows for style reference.
+    # Tenant-scoped callers skip the disk scan (see _load_recent_user_workflows).
+    system_prompt = _build_system_prompt(
+        include_user_workflows=True, tenant_id=tenant_id
+    )
 
     # Build user message
     if refine_from and refine_instruction:

@@ -1094,6 +1094,10 @@ class TestJobExecution:
         mock_result.error = None
         mock_result.started_at = datetime.now(timezone.utc)
         mock_result.completed_at = datetime.now(timezone.utc)
+        # Worker reads result.token_report and stores it in output_data; an
+        # auto-mocked attribute would land in the JSON column and break the
+        # commit, leaving the run stuck in RUNNING. Set explicitly to None.
+        mock_result.token_report = None
 
         with (
             patch("sandcastle.engine.dag.parse_yaml_string") as mock_parse,

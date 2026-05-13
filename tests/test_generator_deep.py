@@ -119,7 +119,13 @@ class TestProviderConfigs:
     def test_all_providers_have_api_url(self):
         for name, cfg in _PROVIDER_CONFIGS.items():
             assert "api_url" in cfg, f"{name} missing api_url"
-            assert cfg["api_url"].startswith("http"), f"{name} api_url invalid"
+            url = cfg["api_url"]
+            # oMLX uses a runtime-resolved placeholder ({omlx_base_url}/...)
+            # so it doesn't start with http. Strip the placeholder before
+            # validating the rest of the URL shape.
+            if "{omlx_base_url}" in url:
+                url = url.replace("{omlx_base_url}", "http://localhost:8000")
+            assert url.startswith("http"), f"{name} api_url invalid"
 
     def test_all_providers_have_model(self):
         for name, cfg in _PROVIDER_CONFIGS.items():

@@ -3630,6 +3630,7 @@ async def generate_workflow(req: Request, request: WorkflowGenerateRequest) -> A
             request.description,
             refine_from=request.refine_from,
             refine_instruction=request.refine_instruction,
+            tenant_id=get_tenant_id(req),
         )
     except httpx.HTTPStatusError as exc:
         logger.error(f"Anthropic API error: {exc}")
@@ -4158,6 +4159,327 @@ async def list_workflows(req: Request) -> ApiResponse:
     return ApiResponse(data=items)
 
 
+# ---------------------------------------------------------------------------
+# Per-workflow run statistics
+# ---------------------------------------------------------------------------
+
+_stats_cache: dict[str, tuple[float, Any]] = {}
+_STATS_CACHE_TTL = 30  # seconds — stats are not real-time critical
+_STATS_CACHE_MAXSIZE = 200
+
+
+def _stats_cache_get(key: str) -> Any | None:
+    if key in _stats_cache:
+        ts, data = _stats_cache[key]
+        if time.time() - ts < _STATS_CACHE_TTL:
+            return data
+        del _stats_cache[key]
+    return None
+
+
+def _stats_cache_set(key: str, data: Any) -> None:
+    if len(_stats_cache) >= _STATS_CACHE_MAXSIZE and key not in _stats_cache:
+        oldest = min(_stats_cache, key=lambda k: _stats_cache[k][0])
+        del _stats_cache[oldest]
+    _stats_cache[key] = (time.time(), data)
+
+
+def _format_relative_time(when: datetime | None) -> str | None:
+    """Return e.g. '12m ago', '3h ago', '2d ago' or None."""
+    if when is None:
+        return None
+    now = datetime.now(timezone.utc)
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    delta = now - when
+    seconds = int(delta.total_seconds())
+    if seconds < 60:
+        return f"{seconds}s ago"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes}m ago"
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours}h ago"
+    days = hours // 24
+    if days < 7:
+        return f"{days}d ago"
+    weeks = days // 7
+    return f"{weeks}w ago"
+
+
+async def _compute_workflow_stats(
+    tenant_id: str | None,
+    name_filter: str | None = None,
+) -> list[dict[str, Any]]:
+    """Aggregate Run rows into per-workflow stats.
+
+    Single GROUP BY query so the dashboard grid view stays O(1) DB calls.
+    """
+    completed_status = RunStatus.COMPLETED
+    success_count = func.count(
+        case((Run.status == completed_status, Run.id), else_=None)
+    )
+    total_count = func.count(Run.id)
+
+    stmt = (
+        select(
+            Run.workflow_name.label("name"),
+            total_count.label("total_runs"),
+            success_count.label("success_count"),
+            func.coalesce(func.avg(Run.total_cost_usd), 0.0).label("avg_cost"),
+            func.max(Run.completed_at).label("last_completed_at"),
+            func.max(Run.started_at).label("last_started_at"),
+            func.max(Run.created_at).label("last_created_at"),
+        )
+        .group_by(Run.workflow_name)
+    )
+    stmt = _apply_tenant_filter(stmt, tenant_id, Run.tenant_id)
+    if name_filter is not None:
+        stmt = stmt.where(Run.workflow_name == name_filter)
+
+    async with async_session() as session:
+        rows = (await session.execute(stmt)).all()
+
+    results: list[dict[str, Any]] = []
+    for row in rows:
+        # Fetch the most recent run's status separately (cheap second pass)
+        last_status_stmt = (
+            select(Run.status, Run.completed_at, Run.started_at, Run.created_at)
+            .where(Run.workflow_name == row.name)
+            .order_by(Run.created_at.desc())
+            .limit(1)
+        )
+        last_status_stmt = _apply_tenant_filter(
+            last_status_stmt, tenant_id, Run.tenant_id
+        )
+        async with async_session() as session:
+            last_row = (await session.execute(last_status_stmt)).one_or_none()
+        last_status_val: str | None = None
+        last_when: datetime | None = None
+        if last_row is not None:
+            status_obj = last_row[0]
+            last_status_val = (
+                status_obj.value if hasattr(status_obj, "value") else str(status_obj)
+            )
+            last_when = last_row[1] or last_row[2] or last_row[3]
+
+        total = int(row.total_runs or 0)
+        succ = int(row.success_count or 0)
+        success_rate = round((succ / total) * 100.0, 1) if total > 0 else 0.0
+        results.append(
+            {
+                "name": row.name,
+                "total_runs": total,
+                "success_rate": success_rate,
+                "avg_cost_usd": round(float(row.avg_cost or 0.0), 4),
+                "last_run_status": last_status_val,
+                "last_run_at": last_when.isoformat() if last_when else None,
+                "last_run_ago": _format_relative_time(last_when),
+            }
+        )
+    return results
+
+
+@router.get("/workflows/stats")
+async def list_workflow_stats(req: Request) -> ApiResponse:
+    """Return per-workflow run statistics for the caller's tenant.
+
+    Cached in-process for 30s per tenant to keep grid view rendering cheap.
+    """
+    tenant_id = get_tenant_id(req)
+    cache_key = f"all:{tenant_id or '_'}"
+    cached = _stats_cache_get(cache_key)
+    if cached is not None:
+        return ApiResponse(data=cached)
+
+    try:
+        data = await _compute_workflow_stats(tenant_id)
+    except Exception as exc:
+        logger.warning("workflow stats query failed: %s", exc)
+        return ApiResponse(data=[])
+
+    _stats_cache_set(cache_key, data)
+    return ApiResponse(data=data)
+
+
+@router.get("/workflows/{name}/stats")
+async def get_workflow_stats(name: str, req: Request) -> ApiResponse:
+    """Return run statistics for a single workflow (tenant-scoped)."""
+    if not name or not name.strip():
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_WORKFLOW_NAME",
+                    message="Workflow name must not be empty",
+                )
+            ).model_dump(),
+        )
+    tenant_id = get_tenant_id(req)
+    cache_key = f"one:{tenant_id or '_'}:{name}"
+    cached = _stats_cache_get(cache_key)
+    if cached is not None:
+        return ApiResponse(data=cached)
+
+    try:
+        rows = await _compute_workflow_stats(tenant_id, name_filter=name)
+    except Exception as exc:
+        logger.warning("workflow stats query failed for %s: %s", name, exc)
+        rows = []
+
+    if not rows:
+        data = {
+            "name": name,
+            "total_runs": 0,
+            "success_rate": 0.0,
+            "avg_cost_usd": 0.0,
+            "last_run_status": None,
+            "last_run_at": None,
+            "last_run_ago": None,
+        }
+    else:
+        data = rows[0]
+
+    _stats_cache_set(cache_key, data)
+    return ApiResponse(data=data)
+
+
+@router.get("/workflows/{name}")
+async def get_workflow_by_name(name: str, req: Request) -> ApiResponse:
+    """Return detail for a single workflow.
+
+    Looks up the latest production version in the registry first; falls back
+    to the YAML file in ``workflows_dir``. Returns 404 when neither exists.
+    Strips ``yaml_content`` and per-step ``prompt`` for non-admin callers
+    so internal prompt engineering doesn't leak to scoped API keys.
+    """
+    if not name or not name.strip():
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_WORKFLOW_NAME",
+                    message="Workflow name must not be empty",
+                )
+            ).model_dump(),
+        )
+
+    caller_is_admin = is_admin(req)
+
+    # Try DB production version first
+    yaml_content: str | None = None
+    workflow_version: int | None = None
+    version_status: str | None = None
+    total_versions: int | None = None
+    try:
+        async with async_session() as session:
+            count_stmt = select(func.count(WorkflowVersion.id)).where(
+                WorkflowVersion.workflow_name == name
+            )
+            total_versions = await session.scalar(count_stmt) or None
+
+            prod_stmt = (
+                select(WorkflowVersion)
+                .where(
+                    WorkflowVersion.workflow_name == name,
+                    WorkflowVersion.status == WorkflowVersionStatus.PRODUCTION,
+                )
+                .order_by(WorkflowVersion.version.desc())
+                .limit(1)
+            )
+            prod = (await session.execute(prod_stmt)).scalar_one_or_none()
+            if prod:
+                yaml_content = prod.yaml_content
+                workflow_version = prod.version
+                version_status = "production"
+            elif total_versions:
+                # No production version yet — fall back to the newest version.
+                latest_stmt = (
+                    select(WorkflowVersion)
+                    .where(WorkflowVersion.workflow_name == name)
+                    .order_by(WorkflowVersion.version.desc())
+                    .limit(1)
+                )
+                latest = (await session.execute(latest_stmt)).scalar_one_or_none()
+                if latest:
+                    yaml_content = latest.yaml_content
+                    workflow_version = latest.version
+                    version_status = (
+                        latest.status.value
+                        if hasattr(latest.status, "value")
+                        else str(latest.status)
+                    )
+    except Exception:
+        # DB unavailable — fall through to disk fallback
+        pass
+
+    file_name: str | None = None
+    if yaml_content is None:
+        try:
+            yaml_content = _load_workflow_yaml(name)
+            file_name = f"{name}.yaml"
+        except (FileNotFoundError, ValueError):
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="NOT_FOUND",
+                        message=f"Workflow '{name}' not found",
+                    )
+                ).model_dump(),
+            )
+
+    try:
+        workflow = parse_yaml_string(yaml_content)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_WORKFLOW",
+                    message=f"Stored workflow could not be parsed: {e}",
+                )
+            ).model_dump(),
+        )
+
+    doctor_status: str | None = None
+    doctor_risk: str | None = None
+    try:
+        from sandcastle.engine.doctor import diagnose
+
+        dr = diagnose(workflow)
+        doctor_status = "ok" if dr.ok else ("blocked" if dr.blocking else "warning")
+        doctor_risk = dr.risk
+    except Exception:
+        pass
+
+    return ApiResponse(
+        data=WorkflowInfoResponse(
+            name=workflow.name,
+            description=workflow.description,
+            steps_count=len(workflow.steps),
+            file_name=file_name,
+            steps=[
+                WorkflowStepInfo(
+                    id=s.id,
+                    depends_on=s.depends_on,
+                    model=s.model,
+                    prompt=s.prompt if caller_is_admin else None,
+                )
+                for s in workflow.steps
+            ],
+            input_schema=workflow.input_schema,
+            version=workflow_version,
+            version_status=version_status,
+            total_versions=total_versions,
+            yaml_content=yaml_content if caller_is_admin else None,
+            doctor_status=doctor_status,
+            doctor_risk=doctor_risk,
+        )
+    )
+
+
 @router.post("/workflows", status_code=201)
 async def save_workflow(request: WorkflowSaveRequest, req: Request) -> ApiResponse:
     """Save a workflow YAML file to the workflows directory and create a draft version."""
@@ -4549,6 +4871,7 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
             storage=storage,
             max_cost_usd=budget,
             admin_trusted=True,
+            tenant_id=tenant_id,
         )
     except Exception as exc:
         # Mark the run as FAILED so it doesn't stay stuck in RUNNING.
@@ -6332,6 +6655,86 @@ async def list_schedules(
     return ApiResponse(
         data=items,
         meta=PaginationMeta(total=total or 0, limit=limit, offset=offset),
+    )
+
+
+@router.get("/schedules/{schedule_id}")
+async def get_schedule(
+    schedule_id: str,
+    req: Request,
+) -> ApiResponse:
+    """Get a single schedule by ID."""
+    tenant_id = get_tenant_id(req)
+
+    try:
+        schedule_uuid = uuid.UUID(schedule_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_ID", message="Invalid schedule ID format")
+            ).model_dump(),
+        )
+
+    async with async_session() as session:
+        stmt = select(Schedule).where(Schedule.id == schedule_uuid)
+        stmt = _apply_tenant_filter(stmt, tenant_id, Schedule.tenant_id)
+        result = await session.execute(stmt)
+        schedule = result.scalar_one_or_none()
+        if not schedule:
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="NOT_FOUND",
+                        message=f"Schedule '{schedule_id}' not found",
+                    )
+                ).model_dump(),
+            )
+
+        last_run_at = None
+        last_run_status = None
+        if schedule.last_run_id:
+            last_run = await session.get(Run, schedule.last_run_id)
+            if last_run:
+                last_run_at = last_run.started_at or last_run.created_at
+                last_run_status = (
+                    last_run.status.value
+                    if hasattr(last_run.status, "value")
+                    else str(last_run.status)
+                )
+
+        next_run_at = None
+        if schedule.enabled:
+            try:
+                from apscheduler.triggers.cron import CronTrigger
+
+                trigger = CronTrigger.from_crontab(schedule.cron_expression)
+                next_fire = trigger.get_next_fire_time(None, datetime.now(timezone.utc))
+                if next_fire:
+                    next_run_at = next_fire
+            except Exception:
+                pass
+
+        sched_status = "paused" if not schedule.enabled else "active"
+        if schedule.enabled and last_run_status == "failed":
+            sched_status = "failing"
+
+    return ApiResponse(
+        data=ScheduleResponse(
+            id=str(schedule.id),
+            workflow_name=schedule.workflow_name,
+            cron_expression=schedule.cron_expression,
+            input_data=schedule.input_data or {},
+            enabled=schedule.enabled,
+            last_run_id=str(schedule.last_run_id) if schedule.last_run_id else None,
+            last_run_at=last_run_at,
+            last_run_status=last_run_status,
+            next_run_at=next_run_at,
+            success_rate=0.0,
+            status=sched_status,
+            created_at=schedule.created_at,
+        )
     )
 
 
@@ -8773,16 +9176,66 @@ async def list_workflow_versions(
         versions = result.scalars().all()
 
     if not versions and total == 0:
-        # Return empty list instead of auto-importing (read-only endpoint
-        # should not create production versions as a side effect).
+        # No DB versions. Fall back to disk: if a YAML exists for this name
+        # in workflows_dir we return a synthetic "disk" version entry so the
+        # caller can still inspect / run the workflow. We deliberately do
+        # NOT write anything to the DB here — that's the round 4 invariant
+        # (a read-only endpoint must not create production versions as a
+        # side effect). If neither the DB nor disk knows this workflow,
+        # return 404 instead of an empty list.
+        try:
+            disk_yaml = _load_workflow_yaml(name)
+        except (FileNotFoundError, ValueError):
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="NOT_FOUND",
+                        message=f"Workflow '{name}' not found",
+                    )
+                ).model_dump(),
+            )
+
+        try:
+            disk_wf = parse_yaml_string(disk_yaml)
+            disk_steps = [
+                WorkflowStepInfo(
+                    id=s.id, depends_on=s.depends_on,
+                    model=s.model, prompt=s.prompt,
+                )
+                for s in disk_wf.steps
+            ]
+            disk_steps_count = len(disk_wf.steps)
+            disk_description = disk_wf.description or ""
+        except Exception:
+            disk_steps = []
+            disk_steps_count = 0
+            disk_description = ""
+
+        disk_version = WorkflowVersionResponse(
+            id="disk",
+            workflow_name=name,
+            version=1,
+            status="disk",
+            description=disk_description,
+            steps_count=disk_steps_count,
+            steps=disk_steps,
+            checksum=hashlib.sha256(disk_yaml.encode("utf-8")).hexdigest(),
+            created_by="filesystem",
+            promoted_by=None,
+            promoted_at=None,
+            created_at=datetime.now(timezone.utc),
+        )
+
         return ApiResponse(
-            data={
-                "versions": [],
-                "total": 0,
-                "production_version": None,
-                "staging_version": None,
-                "draft_version": None,
-            }
+            data=WorkflowVersionListResponse(
+                workflow_name=name,
+                production_version=None,
+                staging_version=None,
+                latest_draft_version=None,
+                versions=[disk_version],
+            ),
+            meta=PaginationMeta(total=1, limit=limit, offset=offset),
         )
 
     prod_ver = None
@@ -9856,6 +10309,7 @@ async def run_workflow_api(workflow_name: str, req: Request) -> ApiResponse:
             run_id=run_id,
             storage=storage,
             max_cost_usd=budget,
+            tenant_id=tenant_id,
         )
     except Exception as e:
         # Mark run as FAILED if execution raises

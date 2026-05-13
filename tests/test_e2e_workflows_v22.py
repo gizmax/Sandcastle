@@ -229,6 +229,20 @@ steps:
       theme: professional
       title: "Analysis Report"
       format: pdf
+
+  - id: managed-agent-step
+    type: managed-agent
+    depends_on: [std-step]
+    managed_agent_config:
+      agent_template: researcher
+      message: "Research {steps.std-step.output}"
+
+  - id: agent-step
+    type: agent
+    depends_on: [std-step]
+    agent_config:
+      template: researcher
+      task: "Investigate {steps.std-step.output}"
 """
 
 COMPOSIO_TEMPLATE_ACTION = """\

@@ -159,7 +159,7 @@ class TestBatchRunPost:
     def test_valid_batch_returns_202(self, mock_enqueue, mock_validate, mock_parse, mock_resolve):
         """POST with valid items returns 202 and batch_id."""
         mock_resolve.return_value = (VALID_WORKFLOW_YAML, 1)
-        mock_parse.return_value = MagicMock(name="batch-test", risk_level="minimal")
+        mock_parse.return_value = MagicMock(name="batch-test", risk_level="minimal", input_schema=None)
 
         resp = client.post(
             "/api/workflows/batch-test/batch",
@@ -214,7 +214,7 @@ class TestBatchRunPost:
     def test_batch_returns_unique_batch_id(self, mock_enqueue, mock_validate, mock_parse, mock_resolve):
         """Each batch request gets a unique batch_id."""
         mock_resolve.return_value = (VALID_WORKFLOW_YAML, 1)
-        mock_parse.return_value = MagicMock(name="batch-test", risk_level="minimal")
+        mock_parse.return_value = MagicMock(name="batch-test", risk_level="minimal", input_schema=None)
 
         ids = set()
         for _ in range(3):
@@ -233,7 +233,7 @@ class TestBatchRunPost:
     def test_batch_with_max_cost_per_item(self, mock_enqueue, mock_validate, mock_parse, mock_resolve):
         """POST with max_cost_per_item_usd is accepted."""
         mock_resolve.return_value = (VALID_WORKFLOW_YAML, 1)
-        mock_parse.return_value = MagicMock(name="batch-test", risk_level="minimal")
+        mock_parse.return_value = MagicMock(name="batch-test", risk_level="minimal", input_schema=None)
 
         resp = client.post(
             "/api/workflows/batch-test/batch",
@@ -252,7 +252,7 @@ class TestBatchRunPost:
     def test_batch_creates_store_entry(self, mock_enqueue, mock_validate, mock_parse, mock_resolve):
         """POST creates an entry in _batch_store with correct initial state."""
         mock_resolve.return_value = (VALID_WORKFLOW_YAML, 1)
-        mock_parse.return_value = MagicMock(name="batch-test", risk_level="minimal")
+        mock_parse.return_value = MagicMock(name="batch-test", risk_level="minimal", input_schema=None)
 
         resp = client.post(
             "/api/workflows/batch-test/batch",
@@ -273,7 +273,7 @@ class TestBatchRunPost:
     def test_batch_items_have_correct_indices(self, mock_enqueue, mock_validate, mock_parse, mock_resolve):
         """Each batch item in the store has a sequential index."""
         mock_resolve.return_value = (VALID_WORKFLOW_YAML, 1)
-        mock_parse.return_value = MagicMock(name="batch-test", risk_level="minimal")
+        mock_parse.return_value = MagicMock(name="batch-test", risk_level="minimal", input_schema=None)
 
         resp = client.post(
             "/api/workflows/batch-test/batch",

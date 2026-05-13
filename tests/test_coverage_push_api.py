@@ -965,8 +965,9 @@ class TestClassifyStepNonAnthropic:
         mock_resp.raise_for_status = MagicMock()
 
         with (
-            patch("sandcastle.engine.executor.resolve_templates", side_effect=lambda s, ctx: s),
-            patch("sandcastle.engine.executor.resolve_storage_refs", new=AsyncMock(side_effect=lambda s, st: s)),
+            # resolve_templates now takes (template, context, depends_on)
+            patch("sandcastle.engine.executor.resolve_templates", side_effect=lambda s, *_a, **_k: s),
+            patch("sandcastle.engine.executor.resolve_storage_refs", new=AsyncMock(side_effect=lambda s, *_a, **_k: s)),
             patch("sandcastle.engine.providers.resolve_model") as mock_resolve_model,
             patch("sandcastle.engine.providers.get_api_key", return_value="fake-key"),
             patch("httpx.AsyncClient") as mock_http_cls,
@@ -1021,8 +1022,9 @@ class TestClassifyStepNonAnthropic:
         mock_resp.raise_for_status = MagicMock()
 
         with (
-            patch("sandcastle.engine.executor.resolve_templates", side_effect=lambda s, ctx: s),
-            patch("sandcastle.engine.executor.resolve_storage_refs", new=AsyncMock(side_effect=lambda s, st: s)),
+            # resolve_templates now takes (template, context, depends_on)
+            patch("sandcastle.engine.executor.resolve_templates", side_effect=lambda s, *_a, **_k: s),
+            patch("sandcastle.engine.executor.resolve_storage_refs", new=AsyncMock(side_effect=lambda s, *_a, **_k: s)),
             patch("sandcastle.engine.providers.resolve_model") as mock_resolve_model,
             patch("sandcastle.engine.providers.get_api_key", return_value="fake-key"),
             patch("httpx.AsyncClient") as mock_http_cls,
@@ -1253,8 +1255,9 @@ class TestLLMStepNonAnthropic:
         mock_resp.raise_for_status = MagicMock()
 
         with (
-            patch("sandcastle.engine.executor.resolve_templates", side_effect=lambda s, ctx: s),
-            patch("sandcastle.engine.executor.resolve_storage_refs", new=AsyncMock(side_effect=lambda s, st: s)),
+            # resolve_templates now takes (template, context, depends_on)
+            patch("sandcastle.engine.executor.resolve_templates", side_effect=lambda s, *_a, **_k: s),
+            patch("sandcastle.engine.executor.resolve_storage_refs", new=AsyncMock(side_effect=lambda s, *_a, **_k: s)),
             patch("sandcastle.engine.providers.resolve_model") as mock_model_info,
             patch("sandcastle.engine.providers.get_api_key", return_value="fake-key"),
             patch("httpx.AsyncClient") as mock_http_cls,

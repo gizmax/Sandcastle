@@ -96,6 +96,9 @@ class RunContext:
     _seen_prompt_hashes: set[str] = field(default_factory=set, repr=False)
     _step_output_max_tokens: dict[str, int] = field(default_factory=dict, repr=False)
     admin_trusted: bool = field(default=False)
+    # Tenant ID is propagated into the run so sub-workflow + delegate steps
+    # can inherit it (round 9 multi-tenant memory isolation).
+    tenant_id: str | None = field(default=None, repr=False)
 
     def with_item(self, item: Any, index: int) -> RunContext:
         """Create a child context for a parallel_over item.
@@ -508,8 +511,18 @@ async def _resolve_context_query(
     query = resolve_templates(step.context_query, context, step.depends_on)
 
     if step.context_source == "memory":
-        scope_id = context._memory_scope_id or context.workflow_name or "default"
-        result = await _context_search_memory(query, scope_id, limit=5)
+        # When the workflow has no top-level `memory:` block, _memory_scope_id
+        # is None. Synthesize a workflow-scoped id from the workflow name so
+        # the search still hits a valid scope and the user sees results
+        # instead of a silent no-op (the raw workflow name fails
+        # _VALID_SCOPE_RE).
+        scope_id = context._memory_scope_id or (
+            f"workflow:{context.workflow_name}" if context.workflow_name else None
+        )
+        if not scope_id:
+            result = ""
+        else:
+            result = await _context_search_memory(query, scope_id, limit=5)
 
     elif step.context_source == "web":
         result = await _context_search_web(query, limit=3)
@@ -1665,9 +1678,19 @@ def _compute_cache_key(
     step_id: str,
     prompt: str,
     model: str,
+    tenant_id: str | None = None,
 ) -> str:
-    """Compute a deterministic cache key for a step execution."""
-    raw = f"{workflow_name}:{step_id}:{model}:{prompt}"
+    """Compute a deterministic cache key for a step execution.
+
+    The key includes *tenant_id* so that two tenants running the same
+    workflow with identical prompts never share cached outputs — without
+    this, tenant B would read tenant A's cached agent response (a real
+    cross-tenant data leak, parallel to the round 9 memory isolation fix).
+    None tenant_id (single-tenant / local mode) is encoded explicitly as
+    the literal string so its key shape is stable across runs.
+    """
+    tenant_part = tenant_id if tenant_id else "_none_"
+    raw = f"{tenant_part}:{workflow_name}:{step_id}:{model}:{prompt}"
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
@@ -1836,7 +1859,8 @@ async def _execute_step_once(
         cache_key = ""
         if not _step_reads_memory:
             cache_key = _compute_cache_key(
-                context.workflow_name, step.id, prompt, effective_model or step.model
+                context.workflow_name, step.id, prompt, effective_model or step.model,
+                tenant_id=context.tenant_id,
             )
             cached = await _get_cached_result(cache_key)
             if cached:
@@ -2502,6 +2526,9 @@ async def _execute_sub_workflow_step(
                     run_id=sub_run_id,
                     storage=storage,
                     depth=depth + 1,
+                    max_cost_usd=context.max_cost_usd,
+                    admin_trusted=context.admin_trusted,
+                    tenant_id=context.tenant_id,
                 )
 
         tasks = [asyncio.create_task(run_sub(item, i)) for i, item in enumerate(items)]
@@ -2555,6 +2582,9 @@ async def _execute_sub_workflow_step(
             run_id=sub_run_id,
             storage=storage,
             depth=depth + 1,
+            max_cost_usd=context.max_cost_usd,
+            admin_trusted=context.admin_trusted,
+            tenant_id=context.tenant_id,
         )
 
         duration = (datetime.now(timezone.utc) - started_at).total_seconds()
@@ -5366,6 +5396,8 @@ async def _execute_delegate_step(
                     storage=storage,
                     max_cost_usd=context.max_cost_usd,
                     depth=depth + 1,
+                    admin_trusted=context.admin_trusted,
+                    tenant_id=context.tenant_id,
                 )
 
                 # Emit progress: sub-run finished
@@ -7227,6 +7259,7 @@ async def execute_workflow(
     step_overrides: dict[str, dict] | None = None,
     depth: int = 0,
     admin_trusted: bool = False,
+    tenant_id: str | None = None,
 ) -> WorkflowResult:
     """Execute a full workflow with parallel stages and retry logic.
 
@@ -7337,6 +7370,7 @@ async def execute_workflow(
         default_tools=getattr(workflow, "default_tools", []),
         _step_output_max_tokens=step_output_max_tokens,
         admin_trusted=admin_trusted,
+        tenant_id=tenant_id,
     )
 
     # Set telemetry context for this workflow run
@@ -7370,6 +7404,7 @@ async def execute_workflow(
                 context._memory_scope_id = resolve_scope_id(
                     workflow.memory,
                     workflow.name,
+                    tenant_id=tenant_id,
                 )
                 context.memories = await load_memories(
                     context._memory_scope_id,

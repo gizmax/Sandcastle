@@ -152,6 +152,7 @@ async def run_workflow_job(
             skip_steps=set(skip_steps) if skip_steps else None,
             step_overrides=step_overrides,
             admin_trusted=admin_trusted,
+            tenant_id=run.tenant_id,
         )
 
         # Map result status to RunStatus

@@ -1377,11 +1377,10 @@ class TestWorkflowVersions:
 
     def test_list_versions_nonexistent_workflow(self):
         response = client.get("/api/workflows/nonexistent-wf/versions")
-        # Returns 200 with empty list (read-only endpoint, no auto-import)
-        assert response.status_code == 200
-        data = response.json()["data"]
-        assert data["versions"] == []
-        assert data["total"] == 0
+        # 404 when workflow has no DB versions AND no disk YAML (round 9).
+        # This replaces the previous "200 + empty list" behaviour which leaked
+        # the existence (or non-existence) of arbitrary workflow names.
+        assert response.status_code == 404
 
     def test_get_version_nonexistent(self):
         response = client.get("/api/workflows/nonexistent-wf/versions/1")

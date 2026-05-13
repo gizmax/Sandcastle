@@ -1370,14 +1370,21 @@ class TestStringAndUniqueConstraints:
 
     @pytest.mark.asyncio
     async def test_run_idempotency_key_unique(self):
-        """Two runs with the same idempotency_key should conflict."""
+        """Two runs with the same (tenant_id, idempotency_key) should conflict.
+
+        Round 4 made the unique constraint composite to allow different tenants
+        to reuse the same key. Both rows must share a non-null tenant_id for
+        the constraint to fire (NULL != NULL under SQL semantics).
+        """
         idem_key = f"idem-{uuid.uuid4().hex[:8]}"
-        await _create_run(idempotency_key=idem_key)
+        tenant = f"t-{uuid.uuid4().hex[:8]}"
+        await _create_run(idempotency_key=idem_key, tenant_id=tenant)
         async with async_session() as session:
             run2 = Run(
                 workflow_name="dup-idem",
                 status=RunStatus.QUEUED,
                 idempotency_key=idem_key,
+                tenant_id=tenant,
             )
             session.add(run2)
             with pytest.raises(IntegrityError):

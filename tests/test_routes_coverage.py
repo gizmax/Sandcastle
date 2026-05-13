@@ -75,6 +75,20 @@ def _uid() -> str:
     return str(uuid.uuid4())
 
 
+def _make_admin_request() -> MagicMock:
+    """Build a minimal Request stub that passes _require_admin().
+
+    The admin-only routes inspect ``req.state.is_admin`` (and indirectly
+    ``req.state.tenant_id`` / ``req.state.allowed_workflows``). A MagicMock
+    with those attributes set is sufficient for direct-call tests.
+    """
+    req = MagicMock()
+    req.state.is_admin = True
+    req.state.tenant_id = None
+    req.state.allowed_workflows = None
+    return req
+
+
 async def _create_run(
     run_id: str | None = None,
     status: RunStatus = RunStatus.COMPLETED,
@@ -900,8 +914,10 @@ class TestWorkflowVersionDiff:
         from fastapi import HTTPException
         from sandcastle.api.routes import diff_workflow_versions
 
+        admin_req = _make_admin_request()
         try:
             await diff_workflow_versions(
+                req=admin_req,
                 name="nonexistent-xyz-wf",
                 version_a=1,
                 version_b=2,
@@ -920,7 +936,10 @@ class TestWorkflowVersionDiff:
         await _create_workflow_version(wf, 1, WorkflowVersionStatus.PRODUCTION, VALID_WORKFLOW)
         await _create_workflow_version(wf, 2, WorkflowVersionStatus.STAGING, yaml_v2)
 
-        result = await diff_workflow_versions(name=wf, version_a=1, version_b=2)
+        admin_req = _make_admin_request()
+        result = await diff_workflow_versions(
+            req=admin_req, name=wf, version_a=1, version_b=2,
+        )
         data = result.data
         # data is a WorkflowVersionDiffResponse
         assert data.version_a == 1

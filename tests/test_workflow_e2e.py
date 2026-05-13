@@ -135,8 +135,15 @@ async def _run_workflow(
     sandbox_responses: list | None = None,
     sandbox_cost: float = 0.01,
     max_cost_usd: float | None = None,
+    admin_trusted: bool = True,
 ):
-    """Parse YAML, create mock sandbox, execute workflow and return result."""
+    """Parse YAML, create mock sandbox, execute workflow and return result.
+
+    Tests in this module exercise internal workflow execution end-to-end and
+    are treated as trusted callers — code/transform steps and custom
+    context_source require ``admin_trusted=True`` (introduced in round 8).
+    Override per-test when verifying the untrusted code path.
+    """
     wf, plan = _parse_and_plan(yaml_str)
     sandbox = _make_sandbox(sandbox_responses or ["mock output"], sandbox_cost)
     storage = _make_storage()
@@ -151,6 +158,7 @@ async def _run_workflow(
             input_data=input_data or {},
             storage=storage,
             max_cost_usd=max_cost_usd,
+            admin_trusted=admin_trusted,
         )
     return result, sandbox
 

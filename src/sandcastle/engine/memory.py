@@ -141,10 +141,12 @@ _STOPWORDS: set[str] = {
     "who", "whom", "there", "here", "after", "before", "between",
 }
 
-# Scope ID format: must be "workflow:<name>", "agent:<name>", or "global".
+# Scope ID format: must be "workflow:<name>", "agent:<name>", or "global",
+# optionally prefixed with "tenant:<id>/" for multi-tenant isolation.
 # Also accept the internal "__health_check__" scope for health probes.
 _VALID_SCOPE_RE = re.compile(
-    r"^(workflow:[a-zA-Z0-9_. -]{1,200}"
+    r"^(tenant:[a-zA-Z0-9_.-]{1,64}/)?"
+    r"(workflow:[a-zA-Z0-9_. -]{1,200}"
     r"|agent:[a-zA-Z0-9_. -]{1,200}"
     r"|global"
     r"|__health_check__)$"
@@ -312,15 +314,27 @@ def _get_graph_client() -> Any | None:
 def resolve_scope_id(
     memory_config: Any,
     workflow_name: str,
+    tenant_id: str | None = None,
 ) -> str:
-    """Map scope config to a Mem0 user_id."""
+    """Map scope config to a Mem0 user_id.
+
+    When *tenant_id* is provided, memory scopes are prefixed with
+    ``tenant:<id>/`` so different tenants never share workflow/agent
+    memories. The "global" scope is left unprefixed only when no tenant
+    is supplied; otherwise it becomes ``tenant:<id>/global``.
+    """
     scope = memory_config.scope if memory_config else "workflow"
     if scope == "agent" and memory_config and memory_config.agent:
-        return f"agent:{memory_config.agent}"
+        base = f"agent:{memory_config.agent}"
     elif scope == "global":
-        return "global"
+        base = "global"
     else:
-        return f"workflow:{workflow_name}"
+        base = f"workflow:{workflow_name}"
+    if tenant_id:
+        # Sanitize tenant id to allowed characters - same rules as scope ids.
+        safe = re.sub(r"[^a-zA-Z0-9_.-]", "_", tenant_id)[:64]
+        return f"tenant:{safe}/{base}"
+    return base
 
 
 # ---------------------------------------------------------------------------

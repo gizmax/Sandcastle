@@ -84,6 +84,46 @@ def _get_tenant_id_safe(request: Request) -> str | None:
     return getattr(request.state, "tenant_id", None)
 
 
+def _get_allowed_workflows_safe(request: Request) -> list[str] | None:
+    """Extract API-key-scoped allowed_workflows list from request state."""
+    return getattr(request.state, "allowed_workflows", None)
+
+
+async def _resolve_tenant_budget(tenant_id: str | None) -> float | None:
+    """Resolve max_cost_usd budget for the caller's API key.
+
+    Mirrors the behaviour of api.routes._resolve_budget but only handles the
+    A2A path where the request body has no explicit budget field.
+    """
+    if not tenant_id or not settings.auth_required:
+        return None
+    try:
+        from sandcastle.models.db import ApiKey, async_session as _async_session
+
+        async with _async_session() as session:
+            # Note: the ApiKey model uses ``is_active`` and the per-run
+            # budget lives on ``max_cost_per_run_usd``. The earlier
+            # ``ApiKey.active == True`` / ``key.max_cost_usd`` form raised
+            # AttributeError at runtime and silently swallowed the budget
+            # via the ``except Exception`` below. This mirrors
+            # ``queue/scheduler.py::_run_scheduled_workflow``.
+            stmt = (
+                select(ApiKey.max_cost_per_run_usd)
+                .where(
+                    ApiKey.tenant_id == tenant_id,
+                    ApiKey.is_active.is_(True),
+                )
+                .limit(1)
+            )
+            budget = await session.scalar(stmt)
+            if budget is not None:
+                return float(budget)
+    except Exception:
+        # Never block execution on budget resolution errors
+        return None
+    return None
+
+
 # -- Agent Card --
 
 
@@ -263,12 +303,18 @@ def _build_task_response(
 async def _handle_tasks_send(
     params: dict[str, Any],
     tenant_id: str | None = None,
+    allowed_workflows: list[str] | None = None,
+    max_cost_usd: float | None = None,
 ) -> dict[str, Any]:
     """Handle tasks/send - create and execute a workflow.
 
     Args:
         params: JSON-RPC params dict.
         tenant_id: Tenant ID from auth middleware (None if auth disabled).
+        allowed_workflows: Whitelist of workflow names the caller's API key
+            is permitted to invoke. None means no restriction.
+        max_cost_usd: Maximum cost budget for the run; enforced by the
+            executor when set.
     """
     task_id = params.get("id", str(uuid.uuid4()))
 
@@ -318,6 +364,15 @@ async def _handle_tasks_send(
     if any(ord(c) < 32 for c in workflow_name):
         return _build_task_response(
             task_id, "failed", error="Invalid characters in workflow name"
+        )
+
+    # Enforce per-API-key allowed_workflows restriction (parity with REST
+    # endpoints in api/routes.py). Without this gate, a tenant-scoped key
+    # with a workflow allowlist could invoke any workflow via /a2a.
+    if allowed_workflows is not None and workflow_name not in allowed_workflows:
+        return _build_task_response(
+            task_id, "failed",
+            error=f"API key is not authorized to call workflow '{workflow_name}'",
         )
 
     # Load workflow YAML
@@ -371,6 +426,7 @@ async def _handle_tasks_send(
                 input_data=workflow_input,
                 started_at=datetime.now(timezone.utc),
                 tenant_id=tenant_id,
+                max_cost_usd=max_cost_usd,
             )
             run_id = str(db_run.id)
             session.add(db_run)
@@ -390,6 +446,8 @@ async def _handle_tasks_send(
             input_data=workflow_input,
             run_id=run_id,
             storage=storage,
+            max_cost_usd=max_cost_usd,
+            tenant_id=tenant_id,
         )
     except Exception as e:
         # Update run as failed
@@ -635,9 +693,19 @@ async def a2a_endpoint(request: Request) -> JSONResponse:
 
     # Extract tenant_id for tenant isolation
     tenant_id = _get_tenant_id_safe(request)
+    allowed_workflows = _get_allowed_workflows_safe(request)
 
     try:
-        result = await handler(params, tenant_id=tenant_id)
+        if method == "tasks/send":
+            budget = await _resolve_tenant_budget(tenant_id)
+            result = await handler(
+                params,
+                tenant_id=tenant_id,
+                allowed_workflows=allowed_workflows,
+                max_cost_usd=budget,
+            )
+        else:
+            result = await handler(params, tenant_id=tenant_id)
         return _jsonrpc_result(req_id, result)
     except Exception:
         logger.exception("A2A handler error for method=%s", method)

@@ -8,11 +8,15 @@ page numbers, cover pages, and data-driven chart injection.
 from __future__ import annotations
 
 import base64
+import html as _html
 import io
+import ipaddress
 import logging
 import re
+import socket
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -1684,6 +1688,86 @@ def _preprocess_markdown(text: str) -> str:
 # CSS formatting helpers
 # ---------------------------------------------------------------------------
 
+# Networks blocked when WeasyPrint fetches resources (logo, images, etc.).
+# Same list as webhooks/dispatcher.py to keep the SSRF posture consistent.
+_BLOCKED_NETWORKS = [
+    ipaddress.ip_network("0.0.0.0/8"),
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("100.64.0.0/10"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+    ipaddress.ip_network("fe80::/10"),
+    ipaddress.ip_network("::ffff:0:0/96"),
+]
+
+
+def _is_safe_remote_url(url: str) -> bool:
+    """Return True when *url* is an http(s) URL that does not target a
+    private/internal address. Used to gate WeasyPrint URL fetches and
+    reject logo URLs that point at cloud metadata or LAN services.
+    """
+    if not url:
+        return False
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False
+    if parsed.scheme not in ("http", "https"):
+        return False
+    if not parsed.hostname:
+        return False
+    default_port = 443 if parsed.scheme == "https" else 80
+    try:
+        resolved = socket.getaddrinfo(parsed.hostname, parsed.port or default_port)
+    except socket.gaierror:
+        return False
+    for _, _, _, _, sockaddr in resolved:
+        try:
+            ip = ipaddress.ip_address(sockaddr[0])
+        except ValueError:
+            return False
+        for network in _BLOCKED_NETWORKS:
+            if ip in network:
+                return False
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            return False
+    return True
+
+
+def _safe_url_fetcher(url: str, timeout: int = 10):
+    """WeasyPrint url_fetcher that blocks SSRF-prone targets.
+
+    Falls back to weasyprint.default_url_fetcher for allowed http(s) URLs and
+    refuses anything that resolves to a private/internal IP, plus file://,
+    data: URIs are still allowed (in-document base64 charts use them).
+    """
+    if url.startswith("data:"):
+        from weasyprint.urls import default_url_fetcher as _default
+        return _default(url, timeout=timeout)
+    if not _is_safe_remote_url(url):
+        raise ValueError(
+            f"Refusing to fetch resource at unsafe or private URL: {url[:120]}"
+        )
+    from weasyprint.urls import default_url_fetcher as _default
+    return _default(url, timeout=timeout)
+
+
+def _safe_accent(accent: str) -> str:
+    """Return *accent* if it matches a strict hex/rgb color form, else default.
+
+    Prevents CSS injection through user-controlled accent_color values that
+    could break out of the CSS template (e.g. ``red; } body { background:
+    url(http://evil)``).
+    """
+    if isinstance(accent, str) and re.fullmatch(r"#[0-9A-Fa-f]{3,8}", accent):
+        return accent
+    return "#f59e0b"
+
+
 def _format_css(theme: str, accent: str, paper_size: str, include_page_numbers: bool) -> str:
     """Format theme CSS with configuration values."""
     css_template = _THEME_CSS.get(theme, _THEME_CSS["professional"])
@@ -1724,7 +1808,7 @@ def render_report(
 
     metadata = metadata or {}
     now = datetime.now(timezone.utc)
-    accent = config.accent_color
+    accent = _safe_accent(config.accent_color)
 
     # 1. Preprocess raw markdown
     content = _preprocess_markdown(content)
@@ -1759,14 +1843,32 @@ def render_report(
     css = _format_css(config.theme, accent, config.paper_size,
                       config.include_page_numbers)
 
-    # Cover page elements
-    title = config.title or metadata.get("title", "Report")
-    subtitle_html = f'<div class="subtitle">{config.subtitle}</div>' if config.subtitle else ""
-    author_html = f"<div><strong>Author:</strong> {config.author}</div>" if config.author else ""
-    logo_html = (
-        f'<img class="logo" src="{config.logo_url}" alt="Logo">'
-        if config.logo_url else ""
+    # Cover page elements - HTML-escape all user/config supplied strings to
+    # prevent stored XSS / HTML injection through ReportConfig fields.
+    raw_title = config.title or metadata.get("title", "Report")
+    title = _html.escape(str(raw_title))
+    subtitle_html = (
+        f'<div class="subtitle">{_html.escape(str(config.subtitle))}</div>'
+        if config.subtitle else ""
     )
+    author_html = (
+        f"<div><strong>Author:</strong> {_html.escape(str(config.author))}</div>"
+        if config.author else ""
+    )
+    # Only embed the logo when it points at a safe http(s) host or is a
+    # data: URI; otherwise drop it to avoid SSRF/file:// access via WeasyPrint.
+    logo_html = ""
+    if config.logo_url:
+        logo_src = str(config.logo_url)
+        if logo_src.startswith("data:") or _is_safe_remote_url(logo_src):
+            logo_html = (
+                f'<img class="logo" src="{_html.escape(logo_src, quote=True)}" '
+                f'alt="Logo">'
+            )
+        else:
+            logger.warning(
+                "Refusing to embed logo from unsafe URL: %s", logo_src[:120],
+            )
     date_str = now.strftime("%B %d, %Y")
 
     # Apply Jinja2 template if available, otherwise simple string formatting
@@ -1785,7 +1887,10 @@ def render_report(
     if config.format == "html":
         return full_html.encode("utf-8")
 
-    pdf_bytes = WeasyprintHTML(string=full_html).write_pdf()
+    # Restrict resource fetching to safe http(s) URLs / data: URIs.
+    pdf_bytes = WeasyprintHTML(
+        string=full_html, url_fetcher=_safe_url_fetcher,
+    ).write_pdf()
     return pdf_bytes
 
 
@@ -1800,7 +1905,7 @@ def render_report_html(
     """
     metadata = metadata or {}
     now = datetime.now(timezone.utc)
-    accent = config.accent_color
+    accent = _safe_accent(config.accent_color)
 
     # Full transformation pipeline (same as render_report)
     content = _preprocess_markdown(content)
@@ -1819,13 +1924,28 @@ def render_report_html(
     css = _format_css(config.theme, accent, config.paper_size,
                       config.include_page_numbers)
 
-    title = config.title or metadata.get("title", "Report")
-    subtitle_html = f'<div class="subtitle">{config.subtitle}</div>' if config.subtitle else ""
-    author_html = f"<div><strong>Author:</strong> {config.author}</div>" if config.author else ""
-    logo_html = (
-        f'<img class="logo" src="{config.logo_url}" alt="Logo">'
-        if config.logo_url else ""
+    raw_title = config.title or metadata.get("title", "Report")
+    title = _html.escape(str(raw_title))
+    subtitle_html = (
+        f'<div class="subtitle">{_html.escape(str(config.subtitle))}</div>'
+        if config.subtitle else ""
     )
+    author_html = (
+        f"<div><strong>Author:</strong> {_html.escape(str(config.author))}</div>"
+        if config.author else ""
+    )
+    logo_html = ""
+    if config.logo_url:
+        logo_src = str(config.logo_url)
+        if logo_src.startswith("data:") or _is_safe_remote_url(logo_src):
+            logo_html = (
+                f'<img class="logo" src="{_html.escape(logo_src, quote=True)}" '
+                f'alt="Logo">'
+            )
+        else:
+            logger.warning(
+                "Refusing to embed logo from unsafe URL: %s", logo_src[:120],
+            )
     date_str = now.strftime("%B %d, %Y")
 
     return _REPORT_HTML_TEMPLATE.format(

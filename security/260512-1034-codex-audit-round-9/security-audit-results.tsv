@@ -1,0 +1,8 @@
+iteration	vector	severity	owasp	stride	confidence	location	description
+0	-	-	-	-	-	-	baseline — round 9 starting from clean state on fix/codex-audit-round-8
+1	HTML-injection	High	A03	Tampering	Confirmed	src/sandcastle/engine/report.py:1773-1840	render_report interpolates config.title/subtitle/author/logo_url directly into HTML template without escaping — stored XSS in PDF/HTML output
+2	SSRF	High	A10	InfoDisclosure	Confirmed	src/sandcastle/engine/report.py:1767-1788	WeasyprintHTML(string=full_html).write_pdf() — no url_fetcher restriction; config.logo_url + remote @import font URLs cause server-side fetch (cloud metadata, internal services)
+3	prompt-injection	Medium	A04	Tampering	Likely	src/sandcastle/engine/generator.py:117-159	_load_recent_user_workflows reads YAML from global workflows_dir, injects content into LLM system prompt — malicious tenant can plant adversarial YAML that steers another tenant's workflow generation (cross-tenant prompt injection)
+4	tenant-isolation	High	A01	InfoDisclosure	Confirmed	src/sandcastle/engine/memory.py:312-323	resolve_scope_id uses workflow_name only (no tenant_id); load/save_memory share scope across tenants — tenant A's PII saved to memory leaks to tenant B's run of the same workflow
+5	authz-bypass	High	A01	ElevationOfPrivilege	Confirmed	src/sandcastle/api/a2a.py:263-417	_handle_tasks_send does NOT check allowed_workflows from request.state — API keys with restricted scopes can run ANY workflow via /a2a endpoint
+6	budget-bypass	Medium	A04	DoS	Confirmed	src/sandcastle/api/a2a.py:384-407	A2A tasks/send invokes execute_workflow without resolving tenant budget — bypasses spend limits configured on API keys
