@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.3] - 2026-05-14 - "Polish & Close"
+
+Closeout release for the v0.30 line: finishes the multi-tenant security work started in Codex audit round 9, addresses the lone MEDIUM finding deferred to round 10, adds a per-workflow stats API the dashboard was already wired to consume, and rolls up accessibility + UX polish across the dashboard.
+
+### Added
+- **Per-workflow stats API** - `GET /api/workflows/stats` (bulk) and `GET /api/workflows/{name}/stats` aggregate run counts, success rate, average cost, and last-run status. Tenant-scoped, 30s in-process cache. The dashboard workflow grid wires up to the bulk endpoint and renders real metrics in each card (previous mock generator removed).
+- **Schedule detail endpoint** - `GET /api/schedules/{schedule_id}` returns a single schedule (was missing; previously surfaced as 405).
+
+### Security
+- **Round 9 fixes (5 HIGH)** - A2A endpoint now honours `allowed_workflows` and per-key `max_cost_usd` budgets; Mem0 scope IDs are tenant-prefixed so memory and cache reads cannot cross tenant boundaries; ReportConfig fields HTML-escaped and `accent_color` validated against a strict hex regex (stored XSS in PDF/HTML reports); WeasyPrint URL fetching now blocks private IPs and non-http(s) schemes (SSRF).
+- **Round 10 MEDIUM** - the workflow generator no longer inlines content from the shared `workflows_dir` into the LLM system prompt when a `tenant_id` is provided. This prevents cross-tenant prompt injection through neighbour YAML files.
+- Tenant-scoped executor cache keys (`tenant_id` now part of step cache hash) and tenant-prefixed Mem0 scopes also rolled forward into all `execute_workflow` callers.
+
+### Changed
+- Dashboard a11y pass: `aria-expanded`, `aria-controls`, `aria-hidden`, `type="button"` consistently applied across Sidebar, ConfirmDialog, RunWorkflowModal, BatchRunModal, TemplatesPage, and OnboardingWizard; focus-visible rings on dialog action buttons.
+- Visible (sr-only) labels added to search and filter inputs on the Runs page.
+- All `localStorage` reads/writes in `useTheme`, `useDashboardLayout`, `usePinnedWorkflows`, `useEventStream`, and `lib/insights.ts` wrapped in try/catch with in-memory fallback so private browsing and quota-exceeded conditions degrade gracefully.
+- `useEventStream` resets the reconnect attempt counter and reconnects when the API client transitions back from mock mode (previously gave up silently after MOCK_MAX_ATTEMPTS).
+- Modal widths scale up on tablet (`md:max-w-2xl` / `md:max-w-xl`) so form inputs are no longer cramped.
+- Disabled button opacity bumped from `40%` to `60%` across Runs, Evaluations, Onboarding, and AI chat to satisfy WCAG contrast.
+- Runs table has a subtle horizontal scroll affordance on narrow viewports.
+- Skeleton row count on Runs page adapts to the previously observed total to avoid layout jumps when results come in smaller than expected.
+- BatchRun poll interval extracted to a named constant.
+
+### Fixed
+- `list_workflow_versions` returns 404 for unknown workflows instead of an empty list, and synthesises a "disk" version for YAML-only workflows.
+
+### Tests
+- 9 new tests for the stats endpoint and tenant-scoped generator prompt.
+- Test fixture signal updates for round 9 changes (composite idempotency key, admin-trusted e2e flag, oMLX placeholder URLs, `input_schema=None` defaults, widened fuzz status codes).
+
 ## [0.25.1] - 2026-03-21 — "UI Finetuning"
 
 ### Changed
