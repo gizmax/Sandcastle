@@ -40,8 +40,15 @@ function getSnapshot(): string[] {
 }
 
 function persist(names: string[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(names.slice(0, MAX_PINNED)));
-  cachedSnapshot = readStorage();
+  const next = names.slice(0, MAX_PINNED);
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    // Storage unavailable (private browsing, quota exceeded, disabled
+    // cookies). Keep the change in-memory so the UI still reflects it
+    // for the current session.
+  }
+  cachedSnapshot = next;
   emitChange();
 }
 

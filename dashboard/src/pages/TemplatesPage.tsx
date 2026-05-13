@@ -1009,15 +1009,24 @@ export default function TemplatesPage() {
       {/* Community install modal */}
       {communityInstallTarget && (
         <>
-          <div className="fixed inset-0 z-[60] bg-black/40" onClick={closeCommunityModals} />
+          <div
+            className="fixed inset-0 z-[60] bg-black/40"
+            onClick={closeCommunityModals}
+            aria-hidden="true"
+          />
           <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-            <div className="w-full max-w-md rounded-xl border border-border bg-surface p-6 shadow-xl">
+            <div role="dialog" aria-modal="true" aria-label={`Install ${communityInstallTarget.name}`} className="w-full max-w-md rounded-xl border border-border bg-surface p-6 shadow-xl">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-semibold text-foreground">
                   Install {communityInstallTarget.name}
                 </h2>
-                <button onClick={closeCommunityModals} className="rounded-lg p-1 text-muted hover:text-foreground">
-                  <X className="h-5 w-5" />
+                <button
+                  type="button"
+                  onClick={closeCommunityModals}
+                  aria-label="Close install dialog"
+                  className="rounded-lg p-1 text-muted hover:text-foreground"
+                >
+                  <X aria-hidden="true" className="h-5 w-5" />
                 </button>
               </div>
 
@@ -1110,12 +1119,21 @@ export default function TemplatesPage() {
       {/* Community preview modal */}
       {communityPreviewTarget && !communityInstallTarget && (
         <>
-          <div className="fixed inset-0 z-[60] bg-black/40" onClick={closeCommunityModals} />
+          <div
+            className="fixed inset-0 z-[60] bg-black/40"
+            onClick={closeCommunityModals}
+            aria-hidden="true"
+          />
           <div className="fixed inset-y-0 right-0 z-[60] flex w-full max-w-lg flex-col border-l border-border bg-surface shadow-xl">
             <div className="flex items-center justify-between border-b border-border px-5 py-4">
               <h2 className="text-lg font-semibold text-foreground">{communityPreviewTarget.name}</h2>
-              <button onClick={closeCommunityModals} className="rounded-lg p-1 text-muted hover:text-foreground">
-                <X className="h-5 w-5" />
+              <button
+                type="button"
+                onClick={closeCommunityModals}
+                aria-label="Close preview"
+                className="rounded-lg p-1 text-muted hover:text-foreground"
+              >
+                <X aria-hidden="true" className="h-5 w-5" />
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-5 space-y-4">
@@ -1224,9 +1242,10 @@ export default function TemplatesPage() {
           <div
             className="fixed inset-0 z-[60] bg-black/40"
             onClick={() => !publishLoading && setPublishModalOpen(false)}
+            aria-hidden="true"
           />
           <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-            <div className="w-full max-w-lg rounded-xl border border-border bg-surface p-6 shadow-xl">
+            <div role="dialog" aria-modal="true" aria-label="Publish workflow to Hub" className="w-full max-w-lg rounded-xl border border-border bg-surface p-6 shadow-xl">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
                   <Globe className="h-4 w-4 text-accent" />

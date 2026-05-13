@@ -221,7 +221,7 @@ export function StepChooseTemplate({
           className={cn(
             "inline-flex items-center gap-2 rounded-lg bg-accent px-5 py-2 text-sm font-medium text-accent-foreground",
             "hover:bg-accent-hover transition-all duration-200 shadow-sm",
-            "disabled:opacity-40 disabled:cursor-not-allowed"
+            "disabled:opacity-60 disabled:cursor-not-allowed"
           )}
         >
           Continue

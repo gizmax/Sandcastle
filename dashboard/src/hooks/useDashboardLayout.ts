@@ -74,8 +74,14 @@ function readStorage(): WidgetConfig[] {
 let cachedSnapshot: WidgetConfig[] = readStorage();
 
 function persist(widgets: WidgetConfig[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(widgets));
-  cachedSnapshot = readStorage();
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(widgets));
+    cachedSnapshot = readStorage();
+  } catch {
+    // Storage unavailable - keep the change in-memory so the UI still
+    // reflects the new layout for the current session.
+    cachedSnapshot = widgets;
+  }
   emitChange();
 }
 

@@ -241,8 +241,9 @@ export default function Runs() {
           ))}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
+          <label className="relative">
+            <span className="sr-only">Search runs by ID or name</span>
+            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" aria-hidden="true" />
             <input
               type="text"
               value={searchInput}
@@ -254,27 +255,30 @@ export default function Runs() {
                 "focus-visible:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
               )}
             />
-          </div>
-          <select
-            value={workflowFilter}
-            onChange={(e) => {
-              setWorkflowFilter(e.target.value);
-              setOffset(0);
-              setSelectedIds(new Set());
-            }}
-            aria-label="Filter by workflow"
-            className={cn(
-              "h-8 rounded-lg border border-border bg-background px-2.5 text-xs text-foreground",
-              "focus-visible:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-            )}
-          >
-            <option value="">All workflows</option>
-            {workflows.map((w) => (
-              <option key={w.name} value={w.name}>
-                {w.name}
-              </option>
-            ))}
-          </select>
+          </label>
+          <label>
+            <span className="sr-only">Filter by workflow</span>
+            <select
+              value={workflowFilter}
+              onChange={(e) => {
+                setWorkflowFilter(e.target.value);
+                setOffset(0);
+                setSelectedIds(new Set());
+              }}
+              aria-label="Filter by workflow"
+              className={cn(
+                "h-8 rounded-lg border border-border bg-background px-2.5 text-xs text-foreground",
+                "focus-visible:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+              )}
+            >
+              <option value="">All workflows</option>
+              {workflows.map((w) => (
+                <option key={w.name} value={w.name}>
+                  {w.name}
+                </option>
+              ))}
+            </select>
+          </label>
 
           <button
             onClick={handleExportCsv}
@@ -283,7 +287,7 @@ export default function Runs() {
             className={cn(
               "flex h-8 items-center gap-1.5 rounded-lg border border-border px-3 text-xs font-medium",
               "text-muted hover:text-foreground hover:border-accent/40 transition-colors",
-              "disabled:opacity-40 disabled:cursor-not-allowed"
+              "disabled:opacity-60 disabled:cursor-not-allowed"
             )}
           >
             <Download className="h-3.5 w-3.5" />
@@ -332,7 +336,7 @@ export default function Runs() {
                       className={cn(
                         "flex-1 rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground",
                         "hover:bg-accent/90 transition-colors",
-                        "disabled:opacity-40 disabled:cursor-not-allowed"
+                        "disabled:opacity-60 disabled:cursor-not-allowed"
                       )}
                     >
                       Save
@@ -493,7 +497,9 @@ export default function Runs() {
             <Skeleton className="h-4 w-24" />
             <Skeleton className="ml-auto h-4 w-20" />
           </div>
-          {Array.from({ length: 7 }).map((_, i) => (
+          {/* Adaptive skeleton count: avoid layout jumps when actual data
+              is smaller than the default 7-row placeholder. */}
+          {Array.from({ length: total > 0 ? Math.min(limit, total) : 5 }).map((_, i) => (
             <div key={i} className="flex items-center gap-4 rounded-lg border border-border bg-surface px-4 py-3">
               <Skeleton className="h-4 w-4 rounded" />
               <Skeleton className="h-4 w-48" />

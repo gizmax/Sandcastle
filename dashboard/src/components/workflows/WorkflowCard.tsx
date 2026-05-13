@@ -3,43 +3,15 @@ import { GitBranch, Play, Pencil, Eye, History, Check, Clock, CheckCircle, XCirc
 import { cn } from "@/lib/utils";
 import { DoctorBadge } from "./DoctorBadge";
 
-// --- Mock workflow stats (deterministic, based on workflow name hash) ---
-// TODO: Replace with real API data when per-workflow stats endpoint is available
-
-/** Simple deterministic hash from a string, returns 0..1 float. */
-function nameHash(name: string): number {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) {
-    h = ((h << 5) - h + name.charCodeAt(i)) | 0;
-  }
-  return Math.abs(h % 10000) / 10000;
-}
-
+/** Per-workflow runtime stats — populated by WorkflowList once the
+ *  backend exposes a per-workflow stats endpoint. Cards render without
+ *  the metrics row when ``stats`` is undefined. */
 export interface WorkflowStats {
   totalRuns: number;
   successRate: number; // 0-100
   avgCost: number;
   lastRunStatus: "completed" | "failed" | "running" | null;
   lastRunAgo: string | null; // e.g. "2h ago", "3d ago"
-}
-
-/** Generate deterministic mock stats from a workflow name. */
-export function mockWorkflowStats(name: string): WorkflowStats {
-  const h = nameHash(name);
-  const h2 = nameHash(name + "_salt");
-  const h3 = nameHash(name + "_cost");
-
-  const totalRuns = Math.floor(h * 180) + 1; // 1-180
-  const successRate = Math.floor(60 + h2 * 40); // 60-100
-  const avgCost = Math.round((0.01 + h3 * 0.45) * 100) / 100; // $0.01-$0.46
-
-  const statuses: Array<"completed" | "failed" | "running"> = ["completed", "completed", "completed", "failed", "running"];
-  const lastRunStatus = totalRuns > 0 ? statuses[Math.floor(h * statuses.length)] : null;
-
-  const timeUnits = ["1m ago", "12m ago", "1h ago", "2h ago", "5h ago", "1d ago", "3d ago", "1w ago"];
-  const lastRunAgo = totalRuns > 0 ? timeUnits[Math.floor(h2 * timeUnits.length)] : null;
-
-  return { totalRuns, successRate, avgCost, lastRunStatus, lastRunAgo };
 }
 
 type HealthLevel = "healthy" | "degraded" | "failing";

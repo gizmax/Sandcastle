@@ -175,9 +175,10 @@ export function useEventStream() {
   // Track mock mode changes from the API client
   useEffect(() => {
     const unsub = api.onMockChange((mock) => {
+      const wasMock = mockModeRef.current;
       mockModeRef.current = mock;
       if (mock) {
-        // If switching to mock mode, close any active connection
+        // Switching to mock mode - close any active connection
         if (abortRef.current) {
           abortRef.current.abort();
           abortRef.current = null;
@@ -187,10 +188,15 @@ export function useEventStream() {
           reconnectTimerRef.current = null;
         }
         setStatus("disconnected");
+      } else if (wasMock) {
+        // Backend came back online. Reset the attempt counter (the previous
+        // session may have given up after MOCK_MAX_ATTEMPTS) and reconnect.
+        attemptRef.current = 0;
+        if (!unmountedRef.current) connect();
       }
     });
     return unsub;
-  }, []);
+  }, [connect]);
 
   useEffect(() => {
     unmountedRef.current = false;

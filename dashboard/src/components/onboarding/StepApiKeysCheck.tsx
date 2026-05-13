@@ -200,7 +200,7 @@ export function StepApiKeysCheck({ onNext, onBack }: StepApiKeysCheckProps) {
           className={cn(
             "inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground",
             "hover:bg-accent/5 transition-all duration-200",
-            "disabled:opacity-40 disabled:cursor-not-allowed"
+            "disabled:opacity-60 disabled:cursor-not-allowed"
           )}
         >
           <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />

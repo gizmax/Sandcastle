@@ -10,7 +10,14 @@ export default function Onboarding() {
   const navigate = useNavigate();
 
   const handleFinish = useCallback(() => {
-    localStorage.setItem("sandcastle-onboarding-done", "true");
+    // Best-effort persistence: private browsing / disabled storage / quota
+    // exceeded must not block the user from leaving the onboarding screen.
+    try {
+      localStorage.setItem("sandcastle-onboarding-done", "true");
+    } catch {
+      // Storage unavailable - the user will see onboarding again next time
+      // but at least they can proceed now.
+    }
     navigate("/");
   }, [navigate]);
 

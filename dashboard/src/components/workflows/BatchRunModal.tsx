@@ -4,6 +4,10 @@ import { toast } from "sonner";
 import { api } from "@/api/client";
 import { cn } from "@/lib/utils";
 
+/** Poll interval for batch run status (ms). Kept here so it's easy to tune
+ *  without scattering magic numbers through the component. */
+const BATCH_POLL_INTERVAL_MS = 2000;
+
 interface BatchRunModalProps {
   open: boolean;
   workflowName: string;
@@ -99,8 +103,7 @@ export function BatchRunModal({ open, workflowName, fileName, onClose }: BatchRu
     if (!batchId) return;
     // Initial fetch
     void pollStatus();
-    // Poll every 2 seconds
-    pollRef.current = setInterval(() => void pollStatus(), 2000);
+    pollRef.current = setInterval(() => void pollStatus(), BATCH_POLL_INTERVAL_MS);
     return () => {
       if (pollRef.current) {
         clearInterval(pollRef.current);
@@ -197,13 +200,17 @@ export function BatchRunModal({ open, workflowName, fileName, onClose }: BatchRu
 
   return (
     <>
-      <div className="fixed inset-0 z-50 bg-black/40" onClick={onClose} />
+      <div
+        className="fixed inset-0 z-50 bg-black/40"
+        onClick={onClose}
+        aria-hidden="true"
+      />
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
         <div
           role="dialog"
           aria-modal="true"
           aria-label={`Batch run ${workflowName}`}
-          className="w-full max-w-lg max-h-[85vh] flex flex-col rounded-xl border border-border bg-surface shadow-xl"
+          className="w-full max-w-lg md:max-w-2xl max-h-[85vh] flex flex-col rounded-xl border border-border bg-surface shadow-xl"
         >
           {/* Header */}
           <div className="shrink-0 px-6 pt-6 pb-4 border-b border-border">
@@ -214,8 +221,13 @@ export function BatchRunModal({ open, workflowName, fileName, onClose }: BatchRu
                   Batch Run - {workflowName}
                 </h2>
               </div>
-              <button onClick={onClose} className="rounded-lg p-1 text-muted hover:text-foreground">
-                <X className="h-5 w-5" />
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Close"
+                className="rounded-lg p-1 text-muted hover:text-foreground"
+              >
+                <X aria-hidden="true" className="h-5 w-5" />
               </button>
             </div>
           </div>

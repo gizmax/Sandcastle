@@ -176,7 +176,7 @@ export default function EvaluationsPage() {
           className={cn(
             "flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm",
             "text-muted hover:text-foreground hover:border-accent/40 transition-colors",
-            "disabled:opacity-40 disabled:cursor-not-allowed"
+            "disabled:opacity-60 disabled:cursor-not-allowed"
           )}
         >
           <Download className="h-3.5 w-3.5" />

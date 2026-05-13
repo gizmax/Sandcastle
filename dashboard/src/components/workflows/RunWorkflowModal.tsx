@@ -126,14 +126,23 @@ export function RunWorkflowModal({ open, workflowName, inputSchema, onClose, onR
 
   return (
     <>
-      <div className="fixed inset-0 z-50 bg-black/40" onClick={onClose} />
+      <div
+        className="fixed inset-0 z-50 bg-black/40"
+        onClick={onClose}
+        aria-hidden="true"
+      />
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div role="dialog" aria-modal="true" aria-label={`Run ${workflowName}`} className="w-full max-w-md max-h-[85vh] flex flex-col rounded-xl border border-border bg-surface shadow-xl">
+        <div role="dialog" aria-modal="true" aria-label={`Run ${workflowName}`} className="w-full max-w-md md:max-w-xl max-h-[85vh] flex flex-col rounded-xl border border-border bg-surface shadow-xl">
           <div className="shrink-0 px-6 pt-6 pb-4">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-lg font-semibold text-foreground">Run {workflowName}</h2>
-              <button onClick={onClose} className="rounded-lg p-1 text-muted hover:text-foreground">
-                <X className="h-5 w-5" />
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Close"
+                className="rounded-lg p-1 text-muted hover:text-foreground"
+              >
+                <X aria-hidden="true" className="h-5 w-5" />
               </button>
             </div>
 

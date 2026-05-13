@@ -52,7 +52,17 @@ export function RunsTable({ runs, allRuns, total, limit, offset, onPageChange, s
 
   return (
     <div className="rounded-xl border border-border bg-surface shadow-sm overflow-hidden">
-      <div className="overflow-x-auto">
+      <div
+        className="overflow-x-auto"
+        style={{
+          backgroundImage:
+            "linear-gradient(to right, var(--surface), var(--surface)), linear-gradient(to right, var(--surface), var(--surface)), linear-gradient(to right, rgba(0,0,0,0.08), transparent), linear-gradient(to left, rgba(0,0,0,0.08), transparent)",
+          backgroundPosition: "left center, right center, left center, right center",
+          backgroundRepeat: "no-repeat",
+          backgroundSize: "20px 100%, 20px 100%, 10px 100%, 10px 100%",
+          backgroundAttachment: "local, local, scroll, scroll",
+        }}
+      >
         <table className="w-full text-sm" aria-label="Workflow runs">
           <thead>
             <tr className="border-b border-border bg-background/50">

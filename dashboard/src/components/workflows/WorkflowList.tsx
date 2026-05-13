@@ -1,9 +1,28 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { WorkflowCard } from "@/components/workflows/WorkflowCard";
 import type { WorkflowStats } from "@/components/workflows/WorkflowCard";
 import { usePinnedWorkflows } from "@/hooks/usePinnedWorkflows";
+import { api } from "@/api/client";
+
+interface WorkflowStatsApiEntry {
+  name: string;
+  total_runs: number;
+  success_rate: number;
+  avg_cost_usd: number;
+  last_run_status: string | null;
+  last_run_ago: string | null;
+}
+
+function mapStatus(
+  raw: string | null
+): WorkflowStats["lastRunStatus"] {
+  if (raw === "completed") return "completed";
+  if (raw === "failed") return "failed";
+  if (raw === "running" || raw === "queued") return "running";
+  return null;
+}
 
 interface WorkflowInfo {
   name: string;
@@ -33,12 +52,37 @@ export function WorkflowList({ workflows, selectedNames, onSelectionChange, onRu
   const allSelected = selectedNames != null && workflows.length > 0 && workflows.every((wf) => selectedNames.has(wf.file_name.replace(".yaml", "")));
   const { isPinned, togglePin } = usePinnedWorkflows();
 
-  // Stats are only shown when a real per-workflow stats API endpoint
-  // is available. Until then, cards render without the metrics row.
-  const statsMap = useMemo(
-    () => new Map<string, WorkflowStats>(),
-    [],
+  const [statsByName, setStatsByName] = useState<Map<string, WorkflowStats>>(
+    () => new Map()
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .get<WorkflowStatsApiEntry[]>("/workflows/stats")
+      .then((res) => {
+        if (cancelled || !res.data) return;
+        const next = new Map<string, WorkflowStats>();
+        for (const row of res.data) {
+          next.set(row.name, {
+            totalRuns: row.total_runs ?? 0,
+            successRate: row.success_rate ?? 0,
+            avgCost: row.avg_cost_usd ?? 0,
+            lastRunStatus: mapStatus(row.last_run_status),
+            lastRunAgo: row.last_run_ago,
+          });
+        }
+        setStatsByName(next);
+      })
+      .catch(() => {
+        // Stats are optional — render cards without metrics on failure.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const statsMap = useMemo(() => statsByName, [statsByName]);
 
   const handleSelectAll = () => {
     if (!onSelectionChange) return;
@@ -100,7 +144,7 @@ export function WorkflowList({ workflows, selectedNames, onSelectionChange, onRu
               totalVersions={wf.total_versions}
               selected={selectedNames?.has(wfKey)}
               pinned={isPinned(wf.name)}
-              stats={statsMap.get(wf.file_name)}
+              stats={statsMap.get(wf.name)}
               owners={owners}
               doctorStatus={wf.doctor_status}
               doctorRisk={wf.doctor_risk}

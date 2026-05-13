@@ -381,7 +381,12 @@ export function getDismissedIds(): Set<string> {
 export function dismissInsight(id: string): void {
   const dismissed = getDismissedIds();
   dismissed.add(id);
-  localStorage.setItem(DISMISS_KEY, JSON.stringify([...dismissed]));
+  try {
+    localStorage.setItem(DISMISS_KEY, JSON.stringify([...dismissed]));
+  } catch {
+    // Storage unavailable - insight is dismissed for the current session
+    // only, will reappear after reload.
+  }
 }
 
 export function filterDismissed(insights: Insight[]): Insight[] {

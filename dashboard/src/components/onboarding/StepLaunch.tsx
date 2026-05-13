@@ -109,7 +109,7 @@ export function StepLaunch({
           className={cn(
             "w-full inline-flex items-center justify-center gap-2 rounded-xl bg-accent px-6 py-3 text-sm font-medium text-accent-foreground btn-shimmer",
             "hover:bg-accent-hover transition-all duration-200 shadow-sm hover:shadow-md",
-            "disabled:opacity-40 disabled:cursor-not-allowed"
+            "disabled:opacity-60 disabled:cursor-not-allowed"
           )}
         >
           {launching ? (
@@ -135,7 +135,7 @@ export function StepLaunch({
         <button
           onClick={onBack}
           disabled={launching}
-          className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-foreground transition-colors disabled:opacity-40"
+          className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-foreground transition-colors disabled:opacity-60"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
           Back
@@ -143,7 +143,7 @@ export function StepLaunch({
         <button
           onClick={onFinish}
           disabled={launching}
-          className="inline-flex items-center gap-1.5 text-xs text-muted hover:text-foreground transition-colors disabled:opacity-40"
+          className="inline-flex items-center gap-1.5 text-xs text-muted hover:text-foreground transition-colors disabled:opacity-60"
         >
           <LayoutDashboard className="h-3 w-3" />
           Skip to dashboard

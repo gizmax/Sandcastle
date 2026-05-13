@@ -428,9 +428,14 @@ export function OnboardingWizard({ onFinish }: OnboardingWizardProps) {
 
   const [stepKey, setStepKey] = useState(0);
 
-  // Save progress to localStorage on step change
+  // Save progress to localStorage on step change. Wrapped so private
+  // browsing / quota exceeded never breaks the wizard mid-flight.
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, String(currentStep));
+    try {
+      localStorage.setItem(STORAGE_KEY, String(currentStep));
+    } catch {
+      // Best-effort: progress isn't persisted across reloads in this mode.
+    }
   }, [currentStep]);
 
   const goTo = useCallback((step: number) => {
@@ -439,14 +444,23 @@ export function OnboardingWizard({ onFinish }: OnboardingWizardProps) {
   }, []);
 
   const handleSkipToDashboard = useCallback(() => {
-    localStorage.setItem("sandcastle-onboarding-done", "true");
-    localStorage.removeItem(STORAGE_KEY);
+    try {
+      localStorage.setItem("sandcastle-onboarding-done", "true");
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // Storage unavailable - the user can still proceed; onboarding will
+      // re-appear next visit.
+    }
     navigate("/");
   }, [navigate]);
 
   const handleFinish = useCallback(() => {
-    localStorage.setItem("sandcastle-onboarding-done", "true");
-    localStorage.removeItem(STORAGE_KEY);
+    try {
+      localStorage.setItem("sandcastle-onboarding-done", "true");
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // Storage unavailable - proceed anyway.
+    }
     onFinish();
   }, [onFinish]);
 

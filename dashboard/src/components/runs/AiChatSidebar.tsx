@@ -461,7 +461,7 @@ export function AiChatSidebar({ open, onClose, run }: AiChatSidebarProps) {
               "flex items-center justify-center h-8 w-8 rounded-lg",
               "bg-accent text-accent-foreground",
               "hover:bg-accent/90 transition-colors",
-              "disabled:opacity-40 disabled:cursor-not-allowed"
+              "disabled:opacity-60 disabled:cursor-not-allowed"
             )}
           >
             <Send className="h-3.5 w-3.5" />

@@ -31,7 +31,10 @@ export function ConfirmDialog({
   useEffect(() => {
     if (!open) return;
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onCancel();
+      if (e.key === "Escape") {
+        onCancel();
+        cancelBtnRef.current?.focus();
+      }
     }
     window.addEventListener("keydown", handleKeyDown);
     cancelBtnRef.current?.focus();
@@ -42,7 +45,11 @@ export function ConfirmDialog({
 
   return (
     <>
-      <div className="fixed inset-0 z-50 bg-black/40" onClick={onCancel} />
+      <div
+        className="fixed inset-0 z-50 bg-black/40"
+        onClick={onCancel}
+        aria-hidden="true"
+      />
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
         <div role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descId} className="w-full max-w-sm rounded-xl border border-border bg-surface p-6 shadow-xl">
           <div className="mb-4 flex items-start gap-3">
@@ -65,6 +72,7 @@ export function ConfirmDialog({
               <p id={descId} className="mt-1 text-sm text-muted">{description}</p>
             </div>
             <button
+              type="button"
               onClick={onCancel}
               aria-label="Close dialog"
               className="rounded-lg p-1 text-muted hover:text-foreground transition-colors"
@@ -74,21 +82,23 @@ export function ConfirmDialog({
           </div>
           <div className="flex justify-end gap-2">
             <button
+              type="button"
               ref={cancelBtnRef}
               onClick={onCancel}
-              className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-muted hover:text-foreground transition-colors"
+              className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-muted hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
             >
               Cancel
             </button>
             <button
+              type="button"
               onClick={onConfirm}
               disabled={confirmDisabled}
               className={cn(
-                "rounded-lg px-3 py-1.5 text-sm font-medium text-white transition-colors",
+                "rounded-lg px-3 py-1.5 text-sm font-medium text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface",
                 variant === "danger"
                   ? "bg-error hover:bg-error/90"
                   : "bg-warning hover:bg-warning/90",
-                "disabled:opacity-50 disabled:cursor-not-allowed"
+                "disabled:opacity-60 disabled:cursor-not-allowed"
               )}
             >
               {confirmLabel}

@@ -230,11 +230,14 @@ export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: Sid
                   {section.collapsible ? (
                     <>
                       <button
+                        type="button"
                         onClick={toggleOps}
                         className="mb-1.5 flex w-full items-center gap-1 px-3 group"
                         aria-expanded={opsExpanded}
+                        aria-controls="sidebar-ops-section"
                       >
                         <ChevronRight
+                          aria-hidden="true"
                           className={cn(
                             "h-3 w-3 text-muted-foreground transition-transform duration-200",
                             opsExpanded && "rotate-90"
@@ -244,12 +247,16 @@ export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: Sid
                           {section.label}
                         </span>
                         {!opsExpanded && opsBadgeCount > 0 && (
-                          <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-warning/80 px-1 text-[10px] font-semibold text-white">
+                          <span
+                            aria-label={`${opsBadgeCount} items need attention`}
+                            className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-warning/80 px-1 text-[10px] font-semibold text-white"
+                          >
                             {opsBadgeCount}
                           </span>
                         )}
                       </button>
                       <div
+                        id="sidebar-ops-section"
                         ref={opsContentRef}
                         className="overflow-hidden transition-[max-height] duration-300 ease-in-out"
                         style={{ maxHeight: opsExpanded ? "none" : "0px" }}
