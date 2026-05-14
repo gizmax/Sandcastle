@@ -84,3 +84,48 @@ export class ErrorBoundary extends Component<Props, State> {
     return this.props.children;
   }
 }
+
+interface SectionErrorBoundaryProps {
+  children: ReactNode;
+  /** Short label for the failing section, shown inline (e.g. "charts", "heatmap"). */
+  section: string;
+}
+
+/**
+ * Compact per-section error boundary. Renders an inline retry card instead of
+ * the full page-level fallback, so a single failing API does not crash the
+ * whole page.
+ */
+export function SectionErrorBoundary({ children, section }: SectionErrorBoundaryProps) {
+  return (
+    <ErrorBoundary
+      name={`section:${section}`}
+      fallback={<SectionErrorFallback section={section} />}
+    >
+      {children}
+    </ErrorBoundary>
+  );
+}
+
+function SectionErrorFallback({ section }: { section: string }) {
+  return (
+    <div
+      role="alert"
+      className="flex items-center justify-between gap-3 rounded-2xl border border-error/30 bg-error/5 px-4 py-3"
+    >
+      <div className="flex items-center gap-2.5 min-w-0">
+        <AlertTriangle className="h-4 w-4 text-error shrink-0" />
+        <p className="text-sm text-foreground truncate">
+          The <span className="font-semibold">{section}</span> section failed to load.
+        </p>
+      </div>
+      <button
+        onClick={() => window.location.reload()}
+        className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-foreground hover:border-accent/40 transition-colors shrink-0"
+      >
+        <RotateCcw className="h-3 w-3" />
+        Retry
+      </button>
+    </div>
+  );
+}
