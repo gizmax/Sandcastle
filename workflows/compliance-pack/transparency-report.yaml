@@ -1,0 +1,96 @@
+name: "Annex IV Transparency Report"
+description: "Generate the technical documentation required by Article 11 and Annex IV of Regulation (EU) 2024/1689. Aggregates run history, model usage, evaluation metrics, and human oversight events into the seven Annex IV sections."
+default_model: sonnet
+default_max_turns: 12
+default_timeout: 900
+risk_level: limited
+
+input_schema:
+  required: ["workflow_id", "reporting_period_start", "reporting_period_end"]
+  properties:
+    workflow_id:
+      type: string
+      description: "Sandcastle workflow ID to document"
+    reporting_period_start:
+      type: string
+      description: "ISO 8601 start of reporting period"
+    reporting_period_end:
+      type: string
+      description: "ISO 8601 end of reporting period"
+    intended_purpose:
+      type: string
+      description: "Declared intended purpose of the system"
+
+steps:
+  - id: "section_1_general_description"
+    prompt: |
+      Draft Annex IV section 1 (general description) for workflow {input.workflow_id}.
+      Intended purpose: {input.intended_purpose}.
+      Include: provider name, version, hardware/software requirements, instructions
+      for use, and a description of the forms in which the system is placed on the market.
+
+  - id: "section_2_detailed_description"
+    prompt: |
+      Draft Annex IV section 2 (detailed description) covering: development methods,
+      design specifications, system architecture, data requirements (datasheets per
+      Annex IV(2)(d)), assessment of human oversight measures (Article 14), and
+      pre-determined changes via the post-market monitoring plan.
+    depends_on:
+      - "section_1_general_description"
+
+  - id: "section_3_monitoring_and_control"
+    prompt: |
+      Draft Annex IV section 3 (monitoring, functioning and control). Describe how
+      the audit-trail (Article 12 logging), risk-level enforcement (Article 9),
+      and human-oversight gates (Article 14) operate in practice for this workflow
+      during the period {input.reporting_period_start} to {input.reporting_period_end}.
+    depends_on:
+      - "section_2_detailed_description"
+
+  - id: "section_4_risk_management"
+    prompt: |
+      Draft Annex IV section 4 (risk management system documentation under Article 9).
+      Cover: identified risks, mitigation measures, residual risk acceptance, and
+      the iterative review cycle.
+    depends_on:
+      - "section_3_monitoring_and_control"
+
+  - id: "section_5_changes"
+    prompt: |
+      Draft Annex IV section 5 (any change made to the system through its lifecycle)
+      based on workflow version history. Highlight changes that triggered re-assessment.
+    depends_on:
+      - "section_4_risk_management"
+
+  - id: "section_6_standards"
+    prompt: |
+      Draft Annex IV section 6 (list of harmonised standards applied). Reference
+      ISO/IEC 42001 if implemented, plus internal procedures and any sector-specific
+      standards.
+    depends_on:
+      - "section_5_changes"
+
+  - id: "section_7_eu_declaration"
+    prompt: |
+      Draft Annex IV section 7 (copy of the EU declaration of conformity per Article 47).
+      Generate the declaration text with placeholder fields for legal review.
+    depends_on:
+      - "section_6_standards"
+
+  - id: "render_pdf"
+    type: "report"
+    prompt: "Render Annex IV as PDF"
+    report_config:
+      template: "research-report"
+      format: "pdf"
+      theme: "professional"
+      title: "Annex IV Transparency Report - {input.workflow_id}"
+      subtitle: "EU AI Act Article 11 - Period {input.reporting_period_start} to {input.reporting_period_end}"
+      author: "Sandcastle Compliance Pack"
+      include_toc: true
+      include_page_numbers: true
+    depends_on:
+      - "section_7_eu_declaration"
+
+on_complete:
+  storage_path: "compliance/annex-iv/{run_id}/annex-iv.pdf"

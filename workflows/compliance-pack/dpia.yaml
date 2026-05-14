@@ -1,0 +1,88 @@
+name: "Data Protection Impact Assessment (DPIA)"
+description: "Walk through a structured Data Protection Impact Assessment for an AI system, mapping each section to Annex IV of Regulation (EU) 2024/1689 (the EU AI Act) and Article 35 of the GDPR. Produces a signed PDF ready for the DPO and the supervisory authority."
+default_model: sonnet
+default_max_turns: 12
+default_timeout: 900
+risk_level: high
+
+input_schema:
+  required: ["system_name", "purpose", "data_categories"]
+  properties:
+    system_name:
+      type: string
+      description: "Name of the AI system under assessment"
+    purpose:
+      type: string
+      description: "Intended purpose and deployment context"
+    data_categories:
+      type: string
+      description: "Comma-separated personal data categories processed"
+    risk_appetite:
+      type: string
+      description: "Organisation risk appetite statement"
+
+steps:
+  - id: "scope_and_necessity"
+    prompt: |
+      Draft section 1 of the DPIA for AI system "{input.system_name}".
+      Document the intended purpose ({input.purpose}), the necessity and proportionality
+      test under GDPR Article 35(7)(b), and the link to Annex IV section 1 of the AI Act
+      (general description of the AI system). Be specific and avoid boilerplate.
+
+  - id: "data_inventory"
+    prompt: |
+      Section 2 - data inventory. Categories declared: {input.data_categories}.
+      For each category, document lawful basis (GDPR Art. 6), special category basis
+      if applicable (Art. 9), source, retention period, recipients, and cross-border
+      transfers. Map to Annex IV section 2(d) (data requirements).
+    depends_on:
+      - "scope_and_necessity"
+
+  - id: "risk_assessment"
+    prompt: |
+      Section 3 - risk assessment. Using the data inventory:
+      {steps.data_inventory.output}
+      Identify risks to rights and freedoms of data subjects. Score severity 1-5
+      and likelihood 1-5. Reference AI Act Article 9 risk management requirements
+      and Annex IV section 3 (monitoring, functioning and control).
+    depends_on:
+      - "data_inventory"
+
+  - id: "mitigation_plan"
+    prompt: |
+      Section 4 - mitigations. For each risk in:
+      {steps.risk_assessment.output}
+      Propose technical and organisational measures. Reference Sandcastle controls
+      (audit trail per Art. 12, approval gates per Art. 14, privacy router per Art. 10)
+      where applicable.
+    depends_on:
+      - "risk_assessment"
+
+  - id: "dpo_approval"
+    type: "approval"
+    prompt: "DPO review of completed DPIA"
+    approval_config:
+      message: "Review the DPIA for {input.system_name} and approve, edit, or reject. This is the GDPR Article 35 sign-off and the Article 14 human oversight checkpoint."
+      timeout_hours: 168
+      on_timeout: "abort"
+      allow_edit: true
+    depends_on:
+      - "mitigation_plan"
+
+  - id: "render_pdf"
+    type: "report"
+    prompt: "Render DPIA as PDF"
+    report_config:
+      template: "research-report"
+      format: "pdf"
+      theme: "professional"
+      title: "DPIA - {input.system_name}"
+      subtitle: "GDPR Art. 35 + EU AI Act Annex IV"
+      author: "Sandcastle Compliance Pack"
+      include_toc: true
+      include_page_numbers: true
+    depends_on:
+      - "dpo_approval"
+
+on_complete:
+  storage_path: "compliance/dpia/{run_id}/dpia.pdf"

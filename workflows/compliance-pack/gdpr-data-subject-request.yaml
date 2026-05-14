@@ -1,0 +1,77 @@
+name: "GDPR Data Subject Access Request (DSAR)"
+description: "Fulfil a GDPR Article 15 right-of-access request that involves AI-processed data. Searches the audit trail for the data subject, redacts third-party personal data, and packages a response within the one-month statutory window."
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 600
+risk_level: high
+
+input_schema:
+  required: ["data_subject_id", "request_received_at"]
+  properties:
+    data_subject_id:
+      type: string
+      description: "Internal identifier of the data subject (email or customer ID)"
+    request_received_at:
+      type: string
+      description: "ISO 8601 date the request was received (Article 12(3) clock start)"
+    request_type:
+      type: string
+      description: "access | rectification | erasure | portability | objection"
+
+steps:
+  - id: "identity_verification"
+    type: "approval"
+    prompt: "Verify the requester's identity"
+    approval_config:
+      message: "Confirm the identity of the data subject {input.data_subject_id} per GDPR Article 12(6). Attach evidence used. Article 14 oversight checkpoint."
+      timeout_hours: 168
+      on_timeout: "abort"
+      allow_edit: true
+
+  - id: "search_audit_trail"
+    type: "code"
+    prompt: "Search audit trail for the data subject"
+    code_config:
+      language: "python"
+      code: |
+        # Query the Sandcastle audit trail for any run, prompt, or output
+        # mentioning the data subject. Production wiring: /api/audit/search?subject=
+        import json
+        print(json.dumps({"events": [], "runs": [], "note": "wire to audit search"}))
+    depends_on:
+      - "identity_verification"
+
+  - id: "redact_third_party_data"
+    prompt: |
+      Review the audit search results:
+      {steps.search_audit_trail.output}
+      Identify any personal data of OTHER data subjects in the response. Mark them
+      for redaction. Article 15(4) requires that the right of access does not
+      adversely affect the rights and freedoms of others.
+    depends_on:
+      - "search_audit_trail"
+
+  - id: "draft_response"
+    prompt: |
+      Draft the DSAR response letter. Request type: {input.request_type}.
+      Include: copy of personal data held, purposes of processing, categories,
+      recipients, retention period, source if not from data subject, and the
+      existence of automated decision-making per Article 22 (with meaningful
+      information about the logic involved - this is where the AI Act Annex IV
+      transparency report is attached).
+    depends_on:
+      - "redact_third_party_data"
+
+  - id: "dpo_signoff"
+    type: "approval"
+    prompt: "DPO sign-off before sending"
+    approval_config:
+      message: "Final DPO review of the DSAR response for {input.data_subject_id}. The Article 12(3) one-month clock is running from {input.request_received_at}."
+      timeout_hours: 72
+      on_timeout: "abort"
+      allow_edit: true
+    depends_on:
+      - "draft_response"
+
+on_complete:
+  storage_path: "compliance/dsar/{run_id}/response.txt"

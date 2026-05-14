@@ -1,0 +1,87 @@
+name: "Bias and Fairness Audit"
+description: "Run a fairness audit over a labelled dataset and an AI system's predictions. Computes demographic-parity, equal-opportunity, and disparate-impact metrics, then produces remediation recommendations aligned with Article 10 (data and data governance) of the EU AI Act."
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 600
+risk_level: high
+
+input_schema:
+  required: ["dataset_path", "protected_attribute", "outcome_column"]
+  properties:
+    dataset_path:
+      type: string
+      description: "Path or URL to the labelled dataset (CSV)"
+    protected_attribute:
+      type: string
+      description: "Column representing the protected characteristic (e.g. gender, age_band)"
+    outcome_column:
+      type: string
+      description: "Column with the model's prediction or decision"
+    favorable_outcome:
+      type: string
+      description: "Value in outcome_column considered favourable"
+
+steps:
+  - id: "load_dataset"
+    type: "code"
+    prompt: "Load and validate dataset"
+    code_config:
+      language: "python"
+      code: |
+        # Validate the dataset path and load schema.
+        # In production: csv.DictReader on input.dataset_path,
+        # check for protected_attribute and outcome_column presence.
+        print('{"loaded": true, "note": "dataset validation placeholder"}')
+
+  - id: "compute_metrics"
+    type: "code"
+    prompt: "Compute fairness metrics"
+    code_config:
+      language: "python"
+      code: |
+        # Compute demographic parity difference, equal opportunity difference,
+        # and disparate impact ratio per protected_attribute slice.
+        # Real implementation uses fairlearn or aequitas.
+        result = {
+            "demographic_parity_diff": 0.0,
+            "equal_opportunity_diff": 0.0,
+            "disparate_impact_ratio": 1.0,
+            "slices": []
+        }
+        import json
+        print(json.dumps(result))
+
+  - id: "interpret_results"
+    prompt: |
+      Interpret the fairness metrics:
+      {steps.compute_metrics.output}
+      For protected attribute "{input.protected_attribute}" with favourable outcome
+      "{input.favorable_outcome}". Compare against the four-fifths rule (US EEOC) and
+      ECJ jurisprudence on indirect discrimination. Reference AI Act Article 10(2)(f),(g)
+      requirements on bias examination, prevention and mitigation.
+    depends_on:
+      - "compute_metrics"
+
+  - id: "remediation_plan"
+    prompt: |
+      Based on the interpretation:
+      {steps.interpret_results.output}
+      Produce a prioritised remediation plan. Cover: dataset rebalancing options,
+      reweighting, post-processing calibration, and process controls (additional
+      human review on flagged slices per Article 14).
+    depends_on:
+      - "interpret_results"
+
+  - id: "ethics_committee_approval"
+    type: "approval"
+    prompt: "Ethics committee sign-off"
+    approval_config:
+      message: "Review the bias audit and remediation plan before the model is released or re-released. This is the Article 9(2)(a) iterative risk management checkpoint."
+      timeout_hours: 168
+      on_timeout: "abort"
+      allow_edit: true
+    depends_on:
+      - "remediation_plan"
+
+on_complete:
+  storage_path: "compliance/bias-audits/{run_id}/audit.json"

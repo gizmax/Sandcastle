@@ -1,0 +1,86 @@
+name: "Serious Incident Report (AI Act Article 73)"
+description: "Triage and report a serious AI incident to the relevant market surveillance authority within the 15-day window required by Article 73 of Regulation (EU) 2024/1689. Drafts the notification, attaches the audit trail, and routes to the responsible reviewer."
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 600
+risk_level: high
+
+input_schema:
+  required: ["system_name", "incident_summary", "occurred_at"]
+  properties:
+    system_name:
+      type: string
+      description: "Name of the AI system involved"
+    incident_summary:
+      type: string
+      description: "Short summary of what went wrong"
+    occurred_at:
+      type: string
+      description: "ISO 8601 timestamp when incident occurred"
+    affected_users:
+      type: string
+      description: "Number or description of affected users"
+
+steps:
+  - id: "classify_severity"
+    prompt: |
+      Classify the incident for AI Act Article 73 reporting:
+      System: {input.system_name}
+      Summary: {input.incident_summary}
+      Occurred: {input.occurred_at}
+      Affected: {input.affected_users}
+      Determine whether this is a serious incident as defined in Article 3(49):
+      death or serious harm to health, serious disruption of critical infrastructure,
+      infringement of fundamental rights, or serious harm to property or environment.
+      Output severity tier and the specific Article 3(49) sub-clause matched.
+    output_schema:
+      type: object
+      properties:
+        is_serious: { type: boolean }
+        severity_tier: { type: string }
+        article_clause: { type: string }
+        rationale: { type: string }
+
+  - id: "collect_audit_evidence"
+    type: "code"
+    prompt: "Collect audit trail for the affected workflow"
+    code_config:
+      language: "python"
+      code: |
+        # Sandcastle audit chain is queryable via the local audit API.
+        # In production this would call the audit endpoint with the run_id
+        # and incident timeframe and return the SHA-256 hash-chain evidence.
+        import json
+        evidence = {
+            "system": "placeholder",
+            "audit_chain_intact": True,
+            "events_collected": 0,
+            "note": "Wire to /api/audit/export at runtime"
+        }
+        print(json.dumps(evidence))
+
+  - id: "draft_notification"
+    prompt: |
+      Draft the Article 73 notification to the market surveillance authority.
+      Classification: {steps.classify_severity.output}
+      Evidence: {steps.collect_audit_evidence.output}
+      Required fields per Article 73(2): description of the incident, identification
+      of the AI system, provider details, suspected cause, corrective measures taken.
+      Output as a structured letter ready for legal review.
+    depends_on:
+      - "classify_severity"
+      - "collect_audit_evidence"
+
+  - id: "legal_review"
+    type: "approval"
+    prompt: "Legal review before submission"
+    approval_config:
+      message: "Review the Article 73 notification draft before submission to the market surveillance authority. The 15-day reporting clock is running."
+      timeout_hours: 48
+      on_timeout: "abort"
+      allow_edit: true
+    depends_on:
+      - "draft_notification"
+
+on_complete:
+  storage_path: "compliance/incidents/{run_id}/notification.txt"

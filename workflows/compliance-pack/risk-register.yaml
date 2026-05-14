@@ -1,0 +1,85 @@
+name: "AI Risk Register Update"
+description: "Maintain an ongoing AI risk register across the organisation. Captures new risks, scores severity and likelihood, tracks mitigation status, and produces the quarterly review artefact required by Article 9 (risk management system) of the EU AI Act."
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 600
+risk_level: limited
+
+input_schema:
+  required: ["quarter", "register_path"]
+  properties:
+    quarter:
+      type: string
+      description: "Reporting quarter, e.g. 2026-Q3"
+    register_path:
+      type: string
+      description: "Path to current risk register (JSON or CSV)"
+    new_risks:
+      type: string
+      description: "Free-text list of new risks identified this quarter"
+
+steps:
+  - id: "load_existing_register"
+    type: "code"
+    prompt: "Load existing register"
+    code_config:
+      language: "python"
+      code: |
+        # Read the existing register from input.register_path.
+        # Production wiring uses pathlib + json/csv. Placeholder for parsing.
+        import json
+        print(json.dumps({"loaded": True, "entries": 0}))
+
+  - id: "classify_new_risks"
+    prompt: |
+      Classify each of the new risks reported this quarter:
+      {input.new_risks}
+      For each item, output: risk_id, category (data, model, deployment,
+      operational, regulatory), severity (1-5), likelihood (1-5), affected
+      workflows, and the AI Act article(s) it relates to.
+    depends_on:
+      - "load_existing_register"
+    output_schema:
+      type: object
+      properties:
+        new_entries:
+          type: array
+          items:
+            type: object
+
+  - id: "review_existing_risks"
+    prompt: |
+      Review the existing register entries:
+      {steps.load_existing_register.output}
+      For each, decide whether status changes (open, mitigated, accepted, closed).
+      Note any risks now reclassified after Sandcastle controls were applied
+      (audit trail, approval gates, privacy router).
+    depends_on:
+      - "load_existing_register"
+
+  - id: "merge_and_prioritise"
+    prompt: |
+      Merge new and reviewed entries into the updated register for {input.quarter}.
+      Sort by severity x likelihood. Highlight the top 10. Reference Article 9(2)
+      iterative risk management process.
+    depends_on:
+      - "classify_new_risks"
+      - "review_existing_risks"
+
+  - id: "render_pdf"
+    type: "report"
+    prompt: "Render risk register report"
+    report_config:
+      template: "research-report"
+      format: "pdf"
+      theme: "professional"
+      title: "AI Risk Register - {input.quarter}"
+      subtitle: "EU AI Act Article 9 - Risk Management System"
+      author: "Sandcastle Compliance Pack"
+      include_toc: true
+      include_page_numbers: true
+    depends_on:
+      - "merge_and_prioritise"
+
+on_complete:
+  storage_path: "compliance/risk-register/{input.quarter}/register.pdf"

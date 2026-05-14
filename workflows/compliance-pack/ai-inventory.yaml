@@ -1,0 +1,77 @@
+name: "AI System Inventory"
+description: "Build an organisation-wide inventory of every AI system in use, mapped to AI Act Article 49 registration obligations for high-risk systems and to internal AI governance policy. Pulls from Sandcastle workflow metadata and external system declarations."
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 600
+risk_level: limited
+
+input_schema:
+  required: ["organisation"]
+  properties:
+    organisation:
+      type: string
+      description: "Legal entity name for the inventory"
+    external_systems:
+      type: string
+      description: "Free-text description of AI systems not orchestrated by Sandcastle"
+    inventory_owner:
+      type: string
+      description: "Person responsible for maintaining the inventory"
+
+steps:
+  - id: "scan_workflows"
+    type: "code"
+    prompt: "Enumerate Sandcastle workflows"
+    code_config:
+      language: "python"
+      code: |
+        # Production wiring lists workflows/*.yaml, reads name, risk_level,
+        # default_model, and providers used. Placeholder JSON below.
+        import json
+        print(json.dumps({"workflows": [], "note": "wire to local workflow registry"}))
+
+  - id: "parse_external_systems"
+    prompt: |
+      Parse the free-text description of external (non-Sandcastle) AI systems:
+      {input.external_systems}
+      For each, extract: name, provider, intended purpose, data class processed,
+      risk classification (minimal / limited / high / unacceptable per Article 6
+      and Annex III), and whether registration under Article 49 is required.
+    depends_on:
+      - "scan_workflows"
+    output_schema:
+      type: object
+      properties:
+        systems:
+          type: array
+          items:
+            type: object
+
+  - id: "build_inventory"
+    prompt: |
+      Combine Sandcastle workflows ({steps.scan_workflows.output}) and external
+      systems ({steps.parse_external_systems.output}) into a single inventory
+      table for {input.organisation}. Owner: {input.inventory_owner}.
+      Columns: system_id, name, provider, risk_level, article_49_required,
+      data_classes, last_assessed, next_review_due. Sort by risk_level descending.
+    depends_on:
+      - "scan_workflows"
+      - "parse_external_systems"
+
+  - id: "render_pdf"
+    type: "report"
+    prompt: "Render inventory as PDF"
+    report_config:
+      template: "research-report"
+      format: "pdf"
+      theme: "professional"
+      title: "AI System Inventory - {input.organisation}"
+      subtitle: "EU AI Act Article 49 readiness"
+      author: "Sandcastle Compliance Pack"
+      include_toc: true
+      include_page_numbers: true
+    depends_on:
+      - "build_inventory"
+
+on_complete:
+  storage_path: "compliance/inventory/{run_id}/inventory.pdf"

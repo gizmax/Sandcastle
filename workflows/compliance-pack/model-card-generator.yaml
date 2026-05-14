@@ -1,0 +1,81 @@
+name: "Model Card Generator"
+description: "Produce a model card aligned with the Article 53 obligations for providers of general-purpose AI models. Covers training data summary, evaluation results, limitations, and intended use cases. Output is a portable markdown plus PDF."
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 600
+risk_level: limited
+
+input_schema:
+  required: ["model_name", "intended_use"]
+  properties:
+    model_name:
+      type: string
+      description: "Name and version of the model"
+    intended_use:
+      type: string
+      description: "Intended use cases and out-of-scope uses"
+    training_data_summary:
+      type: string
+      description: "High-level summary of training data sources"
+    evaluation_results:
+      type: string
+      description: "Summary of evaluation benchmarks and results"
+
+steps:
+  - id: "section_overview"
+    prompt: |
+      Draft the overview section of a model card for {input.model_name}.
+      Cover: model type, architecture family, parameter count (or 'not disclosed'),
+      release date, license, and provider contact.
+
+  - id: "section_intended_use"
+    prompt: |
+      Draft the intended-use section for {input.model_name}.
+      Declared intended use: {input.intended_use}.
+      Explicitly enumerate out-of-scope and prohibited uses per AI Act Article 5
+      (prohibited practices).
+    depends_on:
+      - "section_overview"
+
+  - id: "section_training_data"
+    prompt: |
+      Draft the training-data section. Summary provided: {input.training_data_summary}.
+      Reference Article 10 data-governance expectations and Article 53(1)(c) summary
+      of content used for training (the AI Office template). Note known data-quality
+      caveats.
+    depends_on:
+      - "section_intended_use"
+
+  - id: "section_evaluation"
+    prompt: |
+      Draft the evaluation section. Results provided: {input.evaluation_results}.
+      Cover benchmarks, metrics, slice performance, and any known regressions.
+      Reference Article 55 testing obligations for GPAI models with systemic risk.
+    depends_on:
+      - "section_training_data"
+
+  - id: "section_limitations"
+    prompt: |
+      Draft the limitations and risks section. Document known failure modes,
+      bias risks, and dependencies. This section feeds the Article 9 risk
+      management system and the Annex IV Section 4 risk documentation.
+    depends_on:
+      - "section_evaluation"
+
+  - id: "render_pdf"
+    type: "report"
+    prompt: "Render model card as PDF"
+    report_config:
+      template: "research-report"
+      format: "pdf"
+      theme: "minimal"
+      title: "Model Card - {input.model_name}"
+      subtitle: "EU AI Act Article 53 disclosure"
+      author: "Sandcastle Compliance Pack"
+      include_toc: true
+      include_page_numbers: true
+    depends_on:
+      - "section_limitations"
+
+on_complete:
+  storage_path: "compliance/model-cards/{run_id}/model-card.pdf"

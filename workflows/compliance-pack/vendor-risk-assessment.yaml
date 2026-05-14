@@ -1,0 +1,81 @@
+name: "Third-Party AI Vendor Risk Assessment"
+description: "Score a third-party AI vendor against EU AI Act Article 25 (provider obligations), Article 28 (importer obligations), and Article 53 (GPAI provider obligations). Produces a comparable risk score and a go / no-go recommendation."
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 600
+risk_level: limited
+
+input_schema:
+  required: ["vendor_name", "vendor_url"]
+  properties:
+    vendor_name:
+      type: string
+      description: "Vendor or model provider name"
+    vendor_url:
+      type: string
+      description: "Vendor website or documentation URL"
+    use_case:
+      type: string
+      description: "Intended use case in your organisation"
+    data_sensitivity:
+      type: string
+      description: "Sensitivity tier of data the vendor will process"
+
+steps:
+  - id: "fetch_vendor_docs"
+    type: "http"
+    prompt: "Fetch vendor documentation"
+    http_config:
+      url: "{input.vendor_url}"
+      method: "GET"
+
+  - id: "data_residency_check"
+    prompt: |
+      Based on vendor documentation:
+      {steps.fetch_vendor_docs.output}
+      Determine where {input.vendor_name} processes and stores data. Is EU residency
+      offered? Is there an EU-only routing tier? Document under AI Act Article 25
+      (provider obligations) and GDPR Chapter V (transfers).
+    depends_on:
+      - "fetch_vendor_docs"
+
+  - id: "audit_capability_check"
+    prompt: |
+      Assess whether {input.vendor_name} supports the logging and traceability
+      required by AI Act Article 12. Specifically: tamper-evident logs, retention
+      for at least six months, log export format, and access controls.
+    depends_on:
+      - "fetch_vendor_docs"
+
+  - id: "model_lineage_check"
+    prompt: |
+      Does {input.vendor_name} publish a model card or Annex IV summary covering
+      training data sources, evaluation, and limitations as required by Article 53
+      for general-purpose AI providers?
+    depends_on:
+      - "fetch_vendor_docs"
+
+  - id: "score_and_recommend"
+    prompt: |
+      Combine findings and produce a structured score:
+      - data_residency: {steps.data_residency_check.output}
+      - audit_capability: {steps.audit_capability_check.output}
+      - model_lineage: {steps.model_lineage_check.output}
+      Score each dimension 1-5. Output a final go / hold / no-go recommendation
+      for use case "{input.use_case}" with data sensitivity "{input.data_sensitivity}".
+    depends_on:
+      - "data_residency_check"
+      - "audit_capability_check"
+      - "model_lineage_check"
+    output_schema:
+      type: object
+      properties:
+        data_residency_score: { type: integer }
+        audit_capability_score: { type: integer }
+        model_lineage_score: { type: integer }
+        overall_score: { type: integer }
+        recommendation: { type: string }
+        rationale: { type: string }
+
+on_complete:
+  storage_path: "compliance/vendors/{run_id}/assessment.json"
