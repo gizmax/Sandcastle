@@ -7,8 +7,10 @@ the change based on a composite score.
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import logging
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -21,26 +23,164 @@ logger = logging.getLogger(__name__)
 # Model upgrade/downgrade ladder
 MODEL_LADDER = ["haiku", "sonnet", "opus"]
 
-# Per-run cost estimates derived from provider pricing (assumes ~1K tokens/run).
-# Single source of truth is PROVIDER_REGISTRY in providers.py.
-_TOKENS_PER_RUN = 1000  # approximate tokens per typical evolution run
+# Fallback default used when no historical run data is available.
+_DEFAULT_TOKENS_PER_RUN = 1000
+
+# Midprice used to back-derive tokens from total_cost_usd when RunStep has no
+# explicit token columns. Sonnet baseline blended (2:1 input:output) per 1M tokens.
+# 2 * 3 + 15 = 21 / 3 = 7.0 USD per 1M blended tokens.
+_BASELINE_BLENDED_USD_PER_M = 7.0
+
+# In-process cache: workflow_name -> (tokens, timestamp_monotonic).
+_TOKEN_CACHE: dict[str, tuple[int, float]] = {}
+_TOKEN_CACHE_TTL_SECONDS = 60.0
+_TOKEN_CACHE_LOCK = threading.Lock()
 
 
-def _build_cost_estimates() -> dict[str, float]:
+def _cache_get(workflow_name: str) -> int | None:
+    with _TOKEN_CACHE_LOCK:
+        entry = _TOKEN_CACHE.get(workflow_name)
+        if entry is None:
+            return None
+        tokens, ts = entry
+        if time.monotonic() - ts > _TOKEN_CACHE_TTL_SECONDS:
+            _TOKEN_CACHE.pop(workflow_name, None)
+            return None
+        return tokens
+
+
+def _cache_set(workflow_name: str, tokens: int) -> None:
+    with _TOKEN_CACHE_LOCK:
+        _TOKEN_CACHE[workflow_name] = (tokens, time.monotonic())
+
+
+def _cache_clear() -> None:
+    """Clear cache - mainly for tests."""
+    with _TOKEN_CACHE_LOCK:
+        _TOKEN_CACHE.clear()
+
+
+async def _estimate_tokens_per_run(
+    workflow_name: str,
+    default: int = _DEFAULT_TOKENS_PER_RUN,
+) -> int:
+    """Estimate tokens per run for a workflow from recent run history.
+
+    Queries the last 20 completed runs for this workflow_name. If RunStep rows
+    exist with token columns those are summed; otherwise tokens are derived
+    from total_cost_usd using a blended baseline price. Results are cached in
+    process for `_TOKEN_CACHE_TTL_SECONDS` seconds. Falls back to `default`
+    on any error or when no history exists.
+    """
+    if not workflow_name:
+        return default
+
+    cached = _cache_get(workflow_name)
+    if cached is not None:
+        return cached
+
+    try:
+        from sqlalchemy import select
+
+        from sandcastle.models.db import Run, RunStatus, async_session
+    except Exception as exc:  # pragma: no cover - import failure
+        logger.debug("token estimate: import failed: %s", exc)
+        return default
+
+    try:
+        async with async_session() as session:
+            stmt = (
+                select(Run.total_cost_usd)
+                .where(Run.workflow_name == workflow_name)
+                .where(Run.status == RunStatus.COMPLETED)
+                .order_by(Run.created_at.desc())
+                .limit(20)
+            )
+            result = await session.execute(stmt)
+            costs = [row[0] for row in result.all() if row[0] is not None]
+    except Exception as exc:
+        logger.debug("token estimate: DB query failed for %s: %s", workflow_name, exc)
+        return default
+
+    if not costs:
+        return default
+
+    # Derive tokens from cost using blended baseline price.
+    avg_cost = sum(costs) / len(costs)
+    if avg_cost <= 0:
+        return default
+
+    tokens = int(round(avg_cost * 1_000_000 / _BASELINE_BLENDED_USD_PER_M))
+    if tokens <= 0:
+        tokens = default
+    _cache_set(workflow_name, tokens)
+    return tokens
+
+
+def _sync_estimate_tokens_per_run(
+    workflow_name: str,
+    default: int = _DEFAULT_TOKENS_PER_RUN,
+) -> int:
+    """Synchronous wrapper around _estimate_tokens_per_run.
+
+    Uses the cache fast-path when possible. Otherwise runs the coroutine
+    via asyncio.run, or falls back to default if a loop is already running
+    in the current thread (cannot block).
+    """
+    if not workflow_name:
+        return default
+
+    cached = _cache_get(workflow_name)
+    if cached is not None:
+        return cached
+
+    try:
+        asyncio.get_running_loop()
+        # We are already inside an event loop; cannot block. Use default.
+        # Callers in async context should await _estimate_tokens_per_run directly.
+        return default
+    except RuntimeError:
+        pass
+
+    try:
+        return asyncio.run(_estimate_tokens_per_run(workflow_name, default))
+    except Exception as exc:
+        logger.debug("sync token estimate failed for %s: %s", workflow_name, exc)
+        return default
+
+
+def _build_cost_estimates(tokens_per_run: int = _DEFAULT_TOKENS_PER_RUN) -> dict[str, float]:
+    """Build per-model cost estimates for `tokens_per_run` tokens.
+
+    Uses PROVIDER_REGISTRY (single source of truth) and a blended
+    2:1 input:output token ratio.
+    """
     from sandcastle.engine.providers import PROVIDER_REGISTRY
 
     estimates: dict[str, float] = {}
     for name in MODEL_LADDER:
         info = PROVIDER_REGISTRY.get(name)
         if info:
-            # Blended cost: 2:1 input:output ratio, per 1M tokens -> per 1K tokens
             blended_per_m = (info.input_price_per_m * 2 + info.output_price_per_m) / 3
-            estimates[name] = round(blended_per_m * _TOKENS_PER_RUN / 1_000_000, 6)
+            estimates[name] = round(blended_per_m * tokens_per_run / 1_000_000, 6)
         else:
             estimates[name] = 0.0
     return estimates
 
 
+async def estimate_model_costs(
+    workflow_name: str,
+    default: int = _DEFAULT_TOKENS_PER_RUN,
+) -> dict[str, float]:
+    """Return per-model cost estimates calibrated to workflow_name's history.
+
+    Falls back to the default tokens-per-run baseline when no history exists.
+    """
+    tokens = await _estimate_tokens_per_run(workflow_name, default=default)
+    return _build_cost_estimates(tokens)
+
+
+# Backwards-compatible module-level default estimates (1K tokens baseline).
 MODEL_COST_ESTIMATES: dict[str, float] = _build_cost_estimates()
 
 
@@ -469,6 +609,17 @@ async def run_evolution(
     except Exception as exc:
         logger.warning("Evolution %s: could not read advisor config: %s", evolution_id, exc)
         locked_config = None
+
+    # Calibrate per-model cost estimates against this workflow's run history.
+    try:
+        estimated_tokens = await _estimate_tokens_per_run(workflow_name)
+        cost_estimates = _build_cost_estimates(estimated_tokens)
+        logger.info(
+            "Evolution %s: tokens_per_run=%d cost_estimates=%s",
+            evolution_id, estimated_tokens, cost_estimates,
+        )
+    except Exception as exc:
+        logger.debug("Evolution %s: token estimate failed: %s", evolution_id, exc)
 
     # --- Load baseline workflow ---
     try:
