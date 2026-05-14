@@ -595,17 +595,22 @@ class TestToolRegistration:
     """Verify all tools and resources are properly registered."""
 
     def test_all_tools_registered(self, mcp_server):
+        # Core tools must always be present. v0.31 publishing adds one
+        # extra tool per published workflow plus request_llm_completion
+        # for sampling, so we check the core subset only.
         tool_names = {t.name for t in mcp_server._tool_manager.list_tools()}
         expected = {
             "run_workflow", "run_workflow_yaml", "get_run_status",
             "cancel_run", "list_runs", "save_workflow",
             "create_schedule", "delete_schedule",
         }
-        assert expected == tool_names
+        assert expected.issubset(tool_names)
 
     def test_tool_count(self, mcp_server):
+        # 8 core tools + request_llm_completion (sampling) = 9 baseline.
+        # Per-workflow tools come on top when workflows exist on disk.
         tools = list(mcp_server._tool_manager.list_tools())
-        assert len(tools) == 8
+        assert len(tools) >= 9
 
     def test_all_resources_registered(self, mcp_server):
         resources = list(mcp_server._resource_manager.list_resources())
@@ -615,11 +620,12 @@ class TestToolRegistration:
             "sandcastle://schedules",
             "sandcastle://health",
         }
-        assert expected == uris
+        assert expected.issubset(uris)
 
     def test_resource_count(self, mcp_server):
+        # Core 3 plus sandcastle://roots and sandcastle://manifest.
         resources = list(mcp_server._resource_manager.list_resources())
-        assert len(resources) == 3
+        assert len(resources) >= 5
 
     def test_tools_have_descriptions(self, mcp_server):
         """All tools should have non-empty descriptions."""

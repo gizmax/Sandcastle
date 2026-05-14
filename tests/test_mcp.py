@@ -444,15 +444,18 @@ class TestMcpToolRegistration:
         assert expected.issubset(uris), f"Missing resources: {expected - uris}"
 
     def test_tool_count(self):
+        # 8 core tools + request_llm_completion (sampling) = 9 baseline.
+        # Workflow-publishing adds one tool per workflow on disk.
         from sandcastle.mcp_server import create_mcp_server
 
         server = create_mcp_server()
         tools = list(server._tool_manager.list_tools())
-        assert len(tools) == 8
+        assert len(tools) >= 9
 
     def test_resource_count(self):
+        # Core 3 plus sandcastle://roots and sandcastle://manifest.
         from sandcastle.mcp_server import create_mcp_server
 
         server = create_mcp_server()
         resources = list(server._resource_manager.list_resources())
-        assert len(resources) == 3
+        assert len(resources) >= 5

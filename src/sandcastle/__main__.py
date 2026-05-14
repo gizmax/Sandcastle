@@ -1223,6 +1223,68 @@ def _cmd_mcp(args: argparse.Namespace) -> None:
     mcp_main()
 
 
+def _cmd_publish_mcp(args: argparse.Namespace) -> None:
+    """List or emit MCP client config for publishable workflows.
+
+    With no workflow argument: prints a JSON list of every workflow that
+    can be exposed as an MCP tool, with the tool name + description.
+
+    With a workflow name: prints a Claude Desktop / Cursor 'mcpServers'
+    config snippet (JSON to stdout) and short paste instructions to stderr.
+    """
+    try:
+        from sandcastle.mcp_server import (
+            build_client_config,
+            discover_publishable_workflows,
+        )
+    except ImportError:
+        print(
+            "Error: MCP support requires the 'mcp' package.\n"
+            "Install it with: pip install sandcastle-ai[mcp]",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    workflow = getattr(args, "workflow", None)
+    if not workflow:
+        # Listing mode - emit JSON-parseable inventory.
+        rows = [
+            {
+                "name": wf["name"],
+                "tool_name": wf["tool_name"],
+                "description": wf["description"],
+                "source_path": wf["source_path"],
+            }
+            for wf in discover_publishable_workflows()
+        ]
+        print(json.dumps(rows, indent=2))
+        return
+
+    # Snippet mode - emit a ready-to-paste mcpServers config block.
+    available = discover_publishable_workflows()
+    names = {wf["name"] for wf in available}
+    if workflow not in names:
+        print(
+            f"Error: workflow '{workflow}' is not publishable. "
+            f"Run 'sandcastle publish-mcp' to see the list.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    config = build_client_config(workflow)
+    print(json.dumps(config, indent=2))
+    print(
+        "\nPaste the snippet above into your MCP client config:\n"
+        "  - Claude Desktop: ~/Library/Application Support/Claude/"
+        "claude_desktop_config.json (macOS)\n"
+        "                    %APPDATA%/Claude/claude_desktop_config.json (Windows)\n"
+        "  - Cursor:         ~/.cursor/mcp.json\n"
+        "  - Windsurf:       ~/.codeium/windsurf/mcp_config.json\n"
+        "\nThen restart the client. Sandcastle will appear as a new MCP server.",
+        file=sys.stderr,
+    )
+
+
 def _cmd_doctor(args: argparse.Namespace) -> None:
     """Run local diagnostics - no running server needed."""
     import importlib
@@ -4341,6 +4403,18 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_connection_args(p_mcp)
 
+    # --- publish-mcp ---
+    p_publish_mcp = subparsers.add_parser(
+        "publish-mcp",
+        help="List MCP-publishable workflows or emit a client config snippet",
+    )
+    p_publish_mcp.add_argument(
+        "workflow",
+        nargs="?",
+        default=None,
+        help="Workflow name (omit to list all publishable workflows as JSON)",
+    )
+
     # --- doctor ---
     p_doctor = subparsers.add_parser("doctor", help="Run local diagnostics")
     p_doctor.add_argument("workflow", nargs="?", default=None, help="Workflow YAML file to diagnose (optional)")
@@ -4669,6 +4743,7 @@ def main() -> None:
         "worker": _cmd_worker,
         "health": _cmd_health,
         "mcp": _cmd_mcp,
+        "publish-mcp": _cmd_publish_mcp,
         "doctor": _cmd_doctor,
         "generate": _cmd_generate,
         "eval": _cmd_eval,
