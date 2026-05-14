@@ -4,20 +4,20 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>What's New - Sandcastle</title>
-  <meta name="description" content="Sandcastle release history. v0.30: Agents Unleashed. Claude Managed Agents as workflow steps, 15 agent templates, Describe Mode, GLM-OCR, token waste detection. Every release documented.">
+  <meta name="description" content="Sandcastle release history. v0.31: Compliance & Connections. EU AI Act landing + 10 compliance templates, MCP-first publishing, eval gates, dashboard error boundaries. Eighty days to the deadline.">
   <meta name="author" content="Tomas Pflanzer @gizmax">
 
   <!-- Open Graph -->
-  <meta property="og:title" content="What's New - Sandcastle v0.30">
-  <meta property="og:description" content="Agents Unleashed. Claude Managed Agents as workflow steps, 15 agent templates, Describe Mode, GLM-OCR with 94.6% accuracy, token waste detection. See what Sandcastle ships.">
+  <meta property="og:title" content="What's New - Sandcastle v0.31">
+  <meta property="og:description" content="Compliance & Connections. EU AI Act landing + 10 compliance workflow templates, MCP-first publishing, eval gates, error boundaries. Eighty days to August 2.">
   <meta property="og:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
   <meta property="og:url" content="https://sandcastle-ai.eu/whatsnew/">
   <meta property="og:type" content="website">
 
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="What's New - Sandcastle v0.30">
-  <meta name="twitter:description" content="Agents Unleashed. Claude Managed Agents as workflow steps, 15 agent templates, Describe Mode, GLM-OCR, token waste detection.">
+  <meta name="twitter:title" content="What's New - Sandcastle v0.31">
+  <meta name="twitter:description" content="Compliance & Connections. EU AI Act landing + 10 templates, MCP publishing, eval gates. Eighty days to the deadline.">
   <meta name="twitter:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
 
   <link rel="canonical" href="https://sandcastle-ai.eu/whatsnew/">
@@ -194,11 +194,100 @@
   <main>
     <div class="container releases">
 
+      <!-- v0.31 -->
+      <div class="release fade-in">
+        <div class="release-header">
+          <span class="release-version">v0.31</span>
+          <span class="release-name">Compliance & Connections <span class="badge-latest">Latest</span></span>
+          <span class="release-date">May 14, 2026</span>
+        </div>
+
+        <p style="max-width: 720px; color: var(--text-muted); font-size: 15px; line-height: 1.7; margin-bottom: 28px;">
+          Eighty days. That is how long you have until the EU AI Act's general-purpose obligations go live. After 2 August 2026, "we'll figure it out later" stops being an acceptable answer. v0.31 is the answer you can ship today: a dedicated EU AI Act landing your CISO can actually read, ten ready-made compliance workflow templates mapped to specific Articles and Annex IV, eval gates that block a regressing model from getting promoted, and MCP-first publishing that turns every workflow you've already built into a first-class tool inside Claude Desktop, Cursor, Windsurf, or any MCP client. The work was quiet. The result is loud.
+        </p>
+
+        <div class="feature-grid">
+
+          <div class="feature-card wide">
+            <span class="feature-tag amber">Headline</span>
+            <h4>Built for August 2, 2026</h4>
+            <p>The EU AI Act deadline is on the calendar whether you like it or not. v0.31 ships a dedicated <a href="/eu-ai-act/">landing page</a> mapping every Sandcastle control to a specific Article (9, 11, 12, 14, 25, 49, 50, 73) and Annex IV, plus ten production-ready compliance workflow templates: DPIA, vendor risk assessment, incident reporting, bias audit, model card generator, AI inventory, risk register, GDPR data-subject request, human oversight log, and Annex IV transparency report.</p>
+            <p>Bring the templates. Customize the prompts. Hand the auditor the audit trail. Done.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag blue">New</span>
+            <h4>MCP-First Publishing</h4>
+            <p>One command: <code>sandcastle publish-mcp researcher</code>. Paste the snippet into Claude Desktop, Cursor, or Windsurf. Your workflow is now a tool the AI client can call. Every workflow you already built becomes reachable from every MCP client in the ecosystem - the full five-primitive spec (tools, resources, prompts, sampling, roots) and a <code>.well-known/mcp.json</code> discovery manifest included.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag green">New</span>
+            <h4>Eval Gates That Block Bad Models</h4>
+            <p>Define a golden dataset of inputs and expected scores. Set a minimum threshold. Promote with <code>?strict=true</code> and Sandcastle runs the gate before flipping the production version. The new model regresses by even a hair? Promotion fails closed. Eval-driven development is no longer a future plan.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag amber">Polish</span>
+            <h4>A Dashboard That Doesn't Crash</h4>
+            <p>Overview page split into twenty focused components, each wrapped in its own error boundary. One slow API endpoint no longer wipes the page. Every section that loads stays loaded. The 2,261-line monolith is now a 241-line orchestrator.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag purple">Fix</span>
+            <h4>Cost Estimates That Tell the Truth</h4>
+            <p>The token estimator used to assume 1,000 tokens per run for every workflow on Earth. Now it reads each workflow's actual run history, blends the price per million, and gives each one its own number. Evolution makes better keep/discard calls. AutoPilot stops lying about the cost of an experiment.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag green">Security</span>
+            <h4>Codex Audit Rounds 9 + 10</h4>
+            <p>Five HIGH findings closed: tenant-scoped cache and Mem0 scope, XSS-safe report config, SSRF-guarded WeasyPrint URL fetching, A2A budget enforcement, version-list 404 correctness. Plus one MEDIUM: cross-tenant prompt injection in the workflow generator. <code>tenant_id</code> threaded through every executor path so neighbouring tenants cannot see each other's cache hits, memory reads, or prompt context.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag blue">Polish</span>
+            <h4>Dashboard accessibility pass</h4>
+            <p><code>aria-expanded</code>, <code>aria-controls</code>, <code>aria-hidden</code>, focus-visible rings, sr-only labels on every search and filter input, modal widths that scale up on tablet, disabled opacity bumped to WCAG-AA contrast, and localStorage wrapped in try/catch so private browsing degrades gracefully. Eight separate polish items in one release.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag amber">New</span>
+            <h4>Per-workflow stats API</h4>
+            <p><code>GET /api/workflows/stats</code> returns run count, success rate, average cost, and last-run status for every workflow visible to your tenant. Cached in-process for 30 seconds. The dashboard grid now shows real metrics instead of placeholder data.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag purple">Milestone</span>
+            <h4>By the numbers</h4>
+            <div class="stat-row">
+              <div class="stat-item">
+                <div class="stat-num">15,014</div>
+                <div class="stat-label">Tests passing</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-num">10</div>
+                <div class="stat-label">Compliance YAMLs</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-num">5</div>
+                <div class="stat-label">MCP primitives</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-num">80</div>
+                <div class="stat-label">Days to deadline</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
       <!-- v0.30 -->
       <div class="release fade-in">
         <div class="release-header">
           <span class="release-version">v0.30</span>
-          <span class="release-name">Agents Unleashed <span class="badge-latest">Latest</span></span>
+          <span class="release-name">Agents Unleashed</span>
           <span class="release-date">April 10, 2026</span>
         </div>
 

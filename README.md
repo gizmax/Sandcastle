@@ -2,13 +2,23 @@
 
 **Describe what you want. Go home. Sandcastle ships it.** Production-ready workflow orchestrator for AI agents. 7 AI providers with auto-failover, 22 step types including Claude Managed Agents, 15 agent templates, 4 OCR engines, EU AI Act compliance, and a full-featured dashboard. Define workflows in YAML or let AI design them for you.
 
-[![PyPI](https://img.shields.io/badge/PyPI-v0.30.2-blue?style=flat-square)](https://pypi.org/project/sandcastle-ai/0.30.2/)
+[![PyPI](https://img.shields.io/badge/PyPI-v0.31.0-blue?style=flat-square)](https://pypi.org/project/sandcastle-ai/0.31.0/)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-14600%2B%20passing-brightgreen?style=flat-square)](https://github.com/gizmax/Sandcastle/actions)
-[![EU AI Act](https://img.shields.io/badge/EU%20AI%20Act-Compliant-009639?style=flat-square)](https://sandcastle-ai.eu/security/)
+[![Tests](https://img.shields.io/badge/tests-15000%2B%20passing-brightgreen?style=flat-square)](https://github.com/gizmax/Sandcastle/actions)
+[![EU AI Act](https://img.shields.io/badge/EU%20AI%20Act-Compliant-009639?style=flat-square)](https://sandcastle-ai.eu/eu-ai-act/)
 [![Website](https://img.shields.io/badge/Website-sandcastle--ai.eu-blue?style=flat-square)](https://sandcastle-ai.eu)
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Dashboard-F59E0B?style=flat-square)](https://gizmax.github.io/Sandcastle/)
+
+> **v0.31 - "Compliance & Connections"** Shipped May 14, 2026. Eighty days to the EU AI Act deadline. We built the answer.
+>
+> - **EU AI Act landing + 10 compliance workflow templates** mapped to Articles 9, 11, 12, 14, 25, 49, 50, 73 and Annex IV. DPIA, bias audit, incident report, vendor risk, model card, AI inventory, GDPR DSAR, human oversight log, transparency report, risk register. Bring the templates. Customize the prompts. Hand the auditor the audit trail.
+> - **MCP-first publishing.** `sandcastle publish-mcp` turns every workflow you've built into a first-class tool inside Claude Desktop, Cursor, Windsurf, or any MCP client.
+> - **Eval gates that block bad promotions.** Define a golden dataset, set a minimum score, ship with confidence. Eval-driven development is a query parameter, not a future plan.
+> - **A dashboard that doesn't crash.** Overview split into 20 focused components with per-section error boundaries.
+> - **Codex audit rounds 9 + 10** closed: 5 HIGH + 1 MEDIUM findings fixed - cross-tenant cache, memory, prompts, XSS, SSRF, A2A budgets.
+> - 15,014 tests passing. PyPI: `pip install sandcastle-ai==0.31.0`.
+>
 
 <p align="center">
   <a href="https://gizmax.github.io/Sandcastle/">

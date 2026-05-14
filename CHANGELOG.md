@@ -7,36 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.30.3] - 2026-05-14 - "Polish & Close"
+## [0.31.0] - 2026-05-14 - "Compliance & Connections"
 
-Closeout release for the v0.30 line: finishes the multi-tenant security work started in Codex audit round 9, addresses the lone MEDIUM finding deferred to round 10, adds a per-workflow stats API the dashboard was already wired to consume, and rolls up accessibility + UX polish across the dashboard.
+Eighty days to the EU AI Act deadline (2 August 2026). This release is the answer: a dedicated landing page mapping every Sandcastle control to a specific Article, ten compliance workflow templates, MCP-first publishing so every workflow becomes a tool inside Claude Desktop / Cursor / Windsurf, eval gates that block regressing models from getting promoted, and a dashboard that doesn't crash when one API hiccups. Plus the closeout of v0.30: Codex audit rounds 9 and 10 fully fixed.
 
-### Added
-- **Per-workflow stats API** - `GET /api/workflows/stats` (bulk) and `GET /api/workflows/{name}/stats` aggregate run counts, success rate, average cost, and last-run status. Tenant-scoped, 30s in-process cache. The dashboard workflow grid wires up to the bulk endpoint and renders real metrics in each card (previous mock generator removed).
-- **Schedule detail endpoint** - `GET /api/schedules/{schedule_id}` returns a single schedule (was missing; previously surfaced as 405).
+### Added - EU AI Act (the deadline)
+- **Dedicated EU AI Act landing page** at `/eu-ai-act/` with live countdown to 2 August 2026, three fear pillars (fines, audit, transparency), six feature blocks mapped to Articles 9, 11, 12, 14, 25, 49, 50, 73 and Annex IV, JSON-LD Organization + BreadcrumbList, GA tag, and dual CTAs.
+- **10 compliance workflow templates** in `workflows/compliance-pack/`: DPIA (Article 27 + Annex IV), vendor risk assessment, incident report (Article 73), Annex IV transparency report, bias audit, human oversight log (Article 14), model card generator, risk register, GDPR data-subject request, AI inventory. Four are marked `risk_level: high` and include mandatory approval steps; six are `limited`. All parse and validate against the engine schema.
+- "EU AI Act" link added to nav and footer on every site page so the landing is reachable from anywhere on sandcastle-ai.eu.
 
-### Security
-- **Round 9 fixes (5 HIGH)** - A2A endpoint now honours `allowed_workflows` and per-key `max_cost_usd` budgets; Mem0 scope IDs are tenant-prefixed so memory and cache reads cannot cross tenant boundaries; ReportConfig fields HTML-escaped and `accent_color` validated against a strict hex regex (stored XSS in PDF/HTML reports); WeasyPrint URL fetching now blocks private IPs and non-http(s) schemes (SSRF).
-- **Round 10 MEDIUM** - the workflow generator no longer inlines content from the shared `workflows_dir` into the LLM system prompt when a `tenant_id` is provided. This prevents cross-tenant prompt injection through neighbour YAML files.
-- Tenant-scoped executor cache keys (`tenant_id` now part of step cache hash) and tenant-prefixed Mem0 scopes also rolled forward into all `execute_workflow` callers.
+### Added - MCP-First Publishing (the connections)
+- **`sandcastle publish-mcp [<workflow>]` CLI command.** No arguments: JSON-parseable list of publishable workflows. With a workflow name: ready-to-paste `mcpServers` config block for Claude Desktop (macOS / Windows), Cursor, and Windsurf, plus stderr instructions for where each client expects the snippet.
+- **MCP server now ships all five primitives:** tools (existing 8 + one auto-registered per published workflow, capped at 64), resources (existing 3 + `sandcastle://roots` and `sandcastle://manifest`), prompts (new `workflow_help`), sampling (`request_llm_completion` via `ctx.session.create_message()`), and roots.
+- **`.well-known/mcp.json` discovery manifest** exposed on HTTP transports (stdio clients read the manifest resource). `SANDCASTLE_PUBLISH` env var narrows the per-workflow tool list when set.
+- Each published workflow becomes one MCP tool whose input schema mirrors the workflow's `input_schema`; invocations route through the existing `execute_workflow` path.
 
-### Changed
-- Dashboard a11y pass: `aria-expanded`, `aria-controls`, `aria-hidden`, `type="button"` consistently applied across Sidebar, ConfirmDialog, RunWorkflowModal, BatchRunModal, TemplatesPage, and OnboardingWizard; focus-visible rings on dialog action buttons.
-- Visible (sr-only) labels added to search and filter inputs on the Runs page.
-- All `localStorage` reads/writes in `useTheme`, `useDashboardLayout`, `usePinnedWorkflows`, `useEventStream`, and `lib/insights.ts` wrapped in try/catch with in-memory fallback so private browsing and quota-exceeded conditions degrade gracefully.
-- `useEventStream` resets the reconnect attempt counter and reconnects when the API client transitions back from mock mode (previously gave up silently after MOCK_MAX_ATTEMPTS).
-- Modal widths scale up on tablet (`md:max-w-2xl` / `md:max-w-xl`) so form inputs are no longer cramped.
-- Disabled button opacity bumped from `40%` to `60%` across Runs, Evaluations, Onboarding, and AI chat to satisfy WCAG contrast.
-- Runs table has a subtle horizontal scroll affordance on narrow viewports.
-- Skeleton row count on Runs page adapts to the previously observed total to avoid layout jumps when results come in smaller than expected.
+### Added - Eval Gates
+- **`GoldenDataset` and `GoldenCase` DB models** (tenant-scoped, versioned, `is_active` flag, FK cascade to cases). Unique on (tenant, workflow, name, version); `expected_score_min` validated to 0..1.
+- **Engine helpers `evaluate_against_golden()` and `gate_promotion()`** that replay a dataset against a workflow and return aggregate score + per-case results.
+- **API endpoints:** `POST /api/golden-datasets`, `GET /api/golden-datasets/{name}`, `POST /api/workflows/{name}/eval-gate`.
+- **Promotion gating:** the existing `/workflows/{name}/publish` endpoint accepts `?strict=true` to enforce the gate. With strict mode, promotion fails closed with `EVAL_GATE_FAILED` / `EVAL_GATE_DATASET_MISSING` (422). Non-strict callers unchanged.
+
+### Added - Per-Workflow Stats API
+- `GET /api/workflows/stats` (bulk) and `GET /api/workflows/{name}/stats` aggregate run counts, success rate, average cost, last-run status, and time-since-last-run. Tenant-scoped, 30s in-process cache. Dashboard workflow grid wires up to the bulk endpoint and renders real metrics per card (the previous mock generator is gone).
+- `GET /api/schedules/{schedule_id}` returns a single schedule by ID (was missing; previously returned 405).
+
+### Changed - Dashboard (the polish)
+- **Overview page split** from a 2,261-line monolith into a 241-line orchestrator + 20 focused sub-components in `dashboard/src/components/overview/`. Each section is wrapped in a `SectionErrorBoundary`; a single failing fetch no longer collapses the whole page.
+- A11y pass: `aria-expanded`, `aria-controls`, `aria-hidden`, `type="button"` consistently applied across Sidebar, ConfirmDialog, RunWorkflowModal, BatchRunModal, TemplatesPage, OnboardingWizard. Focus-visible rings on dialog action buttons. Sr-only labels on every search and filter input on the Runs page.
+- `localStorage` reads/writes in `useTheme`, `useDashboardLayout`, `usePinnedWorkflows`, `useEventStream`, `lib/insights.ts` wrapped in try/catch with in-memory fallback so private browsing and quota-exceeded conditions degrade gracefully.
+- `useEventStream` resets the reconnect attempt counter and reconnects when the API client transitions back from mock mode.
+- Modal widths scale up on tablet (`md:max-w-2xl` / `md:max-w-xl`).
+- Disabled button opacity bumped from 40% to 60% (WCAG-AA contrast).
+- Runs table gains a horizontal scroll affordance on narrow viewports.
+- Runs page skeleton row count adapts to total to avoid layout jumps.
 - BatchRun poll interval extracted to a named constant.
 
+### Security - Codex Audit Rounds 9 + 10 (5 HIGH + 1 MEDIUM, all fixed)
+- A2A endpoint now honours `allowed_workflows` and per-key `max_cost_usd` budgets that restricted API keys could previously bypass.
+- Mem0 scope IDs are tenant-prefixed (`tenant:<id>/workflow:<name>`); `tenant_id` threaded through every `execute_workflow` caller and step-cache key. Cross-tenant memory and cache reads can no longer happen.
+- `ReportConfig` fields HTML-escaped and `accent_color` validated against a strict hex regex (stored XSS in PDF/HTML reports).
+- Custom `_safe_url_fetcher` for WeasyPrint blocks private IPs and non-http(s) schemes; `logo_url` pre-validated (SSRF via `@import url(...)` and logo path).
+- `list_workflow_versions` returns 404 for unknown workflows and synthesises a "disk" version for YAML-only workflows.
+- Round 10: the workflow generator no longer inlines content from the shared `workflows_dir` into the LLM system prompt when a `tenant_id` is provided (cross-tenant prompt injection).
+
 ### Fixed
-- `list_workflow_versions` returns 404 for unknown workflows instead of an empty list, and synthesises a "disk" version for YAML-only workflows.
+- Evolution cost estimator no longer assumes a hardcoded 1,000 tokens per run. It queries the last 20 completed runs for the workflow, derives tokens from `total_cost_usd` against a blended baseline, caches the result for 60 seconds, and falls back to 1,000 only when no history exists or the DB query fails. AutoPilot and Workflow Evolution now make experiment keep/discard decisions on numbers that match reality.
 
 ### Tests
+- 240 MCP-related tests passing (13 new in `test_mcp_publish.py`, plus 350 across the existing MCP suite still passing).
+- 266 eval-related tests passing (14 new in `test_eval_gates.py`).
+- 37 compliance pack tests + 6 skips (high-risk approval requirement).
+- 69 evolution tests passing (8 new in `test_evolution_tokens.py`).
 - 9 new tests for the stats endpoint and tenant-scoped generator prompt.
-- Test fixture signal updates for round 9 changes (composite idempotency key, admin-trusted e2e flag, oMLX placeholder URLs, `input_schema=None` defaults, widened fuzz status codes).
+- 784/784 dashboard vitest passing after the OverviewBento split.
+- Full suite: 15,014 passing.
 
 ## [0.25.1] - 2026-03-21 — "UI Finetuning"
 
