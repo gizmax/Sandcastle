@@ -576,6 +576,74 @@ class EvalCaseResult(Base):
     eval_run: Mapped[EvalRun] = relationship(back_populates="case_results")
 
 
+class GoldenDataset(Base):
+    """Curated test dataset that gates workflow promotion.
+
+    A dataset is a named, versioned collection of input/expected-output cases
+    bound to a workflow. When a workflow promotion runs in strict mode, the
+    active dataset for that workflow is replayed and the aggregate score must
+    clear a threshold before the new version is published.
+    """
+
+    __tablename__ = "golden_datasets"
+    __table_args__ = (
+        Index("ix_golden_datasets_tenant_workflow", "tenant_id", "workflow_name"),
+        Index("ix_golden_datasets_workflow_name", "workflow_name"),
+        Index("ix_golden_datasets_is_active", "is_active"),
+        UniqueConstraint(
+            "tenant_id", "workflow_name", "name", "version",
+            name="uq_golden_datasets_tenant_workflow_name_version",
+        ),
+        CheckConstraint("version >= 1", name="ck_golden_datasets_version_positive"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    workflow_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    cases: Mapped[list[GoldenCase]] = relationship(
+        back_populates="dataset", cascade="all, delete-orphan"
+    )
+
+
+class GoldenCase(Base):
+    """A single golden input/expected pair belonging to a GoldenDataset."""
+
+    __tablename__ = "golden_cases"
+    __table_args__ = (
+        Index("ix_golden_cases_dataset_id", "dataset_id"),
+        CheckConstraint(
+            "expected_score_min >= 0 AND expected_score_min <= 1",
+            name="ck_golden_cases_expected_score_range",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, primary_key=True, default=uuid.uuid4
+    )
+    dataset_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("golden_datasets.id", ondelete="CASCADE"), nullable=False
+    )
+    case_label: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    input_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    expected_output: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    expected_score_min: Mapped[float] = mapped_column(Float, default=0.7)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    dataset: Mapped[GoldenDataset] = relationship(back_populates="cases")
+
+
 class Setting(Base):
     """Key-value configuration stored in the database."""
 

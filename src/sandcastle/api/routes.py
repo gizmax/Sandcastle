@@ -142,6 +142,8 @@ from sandcastle.models.db import (
     DeadLetterItem,
     EvalRun,
     EvalRunStatus,
+    GoldenCase,
+    GoldenDataset,
     EvolutionIteration,
     ExperimentStatus,
     HubSubmission,
@@ -9987,11 +9989,26 @@ async def cancel_batch(batch_id: str, req: Request) -> ApiResponse:
 
 
 @router.post("/workflows/{name}/publish")
-async def publish_workflow_api(name: str, req: Request) -> ApiResponse:
+async def publish_workflow_api(
+    name: str,
+    req: Request,
+    strict: bool = Query(
+        False,
+        description=(
+            "If true, enforce the eval gate: a GoldenDataset must exist and "
+            "pass the score threshold before promotion."
+        ),
+    ),
+    min_score: float = Query(0.7, ge=0.0, le=1.0),
+) -> ApiResponse:
     """Publish a workflow as a public API endpoint.
 
     Sets is_public=True on the latest production version so it can be
     called via POST /api/v1/{name}. Admin only.
+
+    When `strict=true`, runs the eval gate against the active golden
+    dataset before publishing. A failing gate returns HTTP 422 and the
+    workflow stays unpublished.
     """
     _require_admin(req)
 
@@ -10022,6 +10039,67 @@ async def publish_workflow_api(name: str, req: Request) -> ApiResponse:
                     )
                 ).model_dump(),
             )
+
+        # Strict mode: run the eval gate before flipping the public flag.
+        if strict:
+            from sandcastle.engine.evals import gate_promotion
+
+            tenant_id = get_tenant_id(req)
+            try:
+                passed, gate_result = await gate_promotion(
+                    workflow_name=name,
+                    target_version=wv.version,
+                    min_score=min_score,
+                    tenant_id=tenant_id,
+                )
+            except LookupError as exc:
+                raise HTTPException(
+                    status_code=422,
+                    detail=ApiResponse(
+                        error=ErrorResponse(
+                            code="EVAL_GATE_DATASET_MISSING",
+                            message=str(exc),
+                        )
+                    ).model_dump(),
+                )
+
+            if gate_result is None:
+                # strict mode requires a dataset
+                raise HTTPException(
+                    status_code=422,
+                    detail=ApiResponse(
+                        error=ErrorResponse(
+                            code="EVAL_GATE_DATASET_MISSING",
+                            message=(
+                                "strict=true requires an active GoldenDataset "
+                                f"for workflow '{name}'"
+                            ),
+                        )
+                    ).model_dump(),
+                )
+
+            if not passed:
+                raise HTTPException(
+                    status_code=422,
+                    detail=ApiResponse(
+                        error=ErrorResponse(
+                            code="EVAL_GATE_FAILED",
+                            message=(
+                                f"Eval gate failed: aggregate score "
+                                f"{gate_result.aggregate_score:.3f} below "
+                                f"threshold {gate_result.threshold:.3f}"
+                            ),
+                            details={
+                                "aggregate_score": round(gate_result.aggregate_score, 4),
+                                "threshold": gate_result.threshold,
+                                "total_cases": gate_result.total_cases,
+                                "passed_cases": gate_result.passed_cases,
+                                "dataset_id": gate_result.dataset_id,
+                                "dataset_name": gate_result.dataset_name,
+                            },
+                        )
+                    ).model_dump(),
+                )
 
         wv.is_public = True
         await session.commit()
@@ -11294,6 +11372,226 @@ async def eval_stats(req: Request) -> ApiResponse:
             last_run_at=last_run_at,
             pass_rate_trend=pass_rate_trend,
         )
+    )
+
+
+# ---------------------------------------------------------------------------
+# Golden datasets + eval gates
+# ---------------------------------------------------------------------------
+
+
+def _serialize_dataset(dataset: GoldenDataset, cases: list[GoldenCase]) -> dict[str, Any]:
+    """Serialize a GoldenDataset (+cases) into a JSON-friendly dict."""
+    return {
+        "id": str(dataset.id),
+        "tenant_id": dataset.tenant_id,
+        "name": dataset.name,
+        "workflow_name": dataset.workflow_name,
+        "version": dataset.version,
+        "description": dataset.description,
+        "is_active": dataset.is_active,
+        "created_at": dataset.created_at.isoformat() if dataset.created_at else None,
+        "cases": [
+            {
+                "id": str(c.id),
+                "case_label": c.case_label,
+                "input_data": c.input_data,
+                "expected_output": c.expected_output,
+                "expected_score_min": c.expected_score_min,
+            }
+            for c in cases
+        ],
+    }
+
+
+@router.post("/golden-datasets", status_code=201)
+async def create_golden_dataset(req: Request) -> ApiResponse:
+    """Create a golden dataset (with its cases) for a workflow.
+
+    Body:
+        {
+          "name": "summarize-v1",
+          "workflow_name": "summarize",
+          "version": 1,                  # optional, default 1
+          "description": "...",          # optional
+          "is_active": true,             # optional
+          "cases": [
+            {
+              "case_label": "short text",
+              "input_data": {"text": "..."},
+              "expected_output": {"summary": "..."},
+              "expected_score_min": 0.7
+            }
+          ]
+        }
+    """
+    _require_admin(req)
+    try:
+        body = await req.json()
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_BODY", message="Invalid JSON body")
+            ).model_dump(),
+        )
+
+    name = (body or {}).get("name")
+    workflow_name = (body or {}).get("workflow_name")
+    if not name or not workflow_name:
+        raise HTTPException(
+            status_code=422,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_DATASET",
+                    message="'name' and 'workflow_name' are required",
+                )
+            ).model_dump(),
+        )
+
+    tenant_id = get_tenant_id(req)
+    cases_payload = body.get("cases", []) or []
+    if not isinstance(cases_payload, list):
+        raise HTTPException(
+            status_code=422,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="INVALID_CASES",
+                    message="'cases' must be a list",
+                )
+            ).model_dump(),
+        )
+
+    dataset = GoldenDataset(
+        tenant_id=tenant_id,
+        name=name,
+        workflow_name=workflow_name,
+        version=int(body.get("version", 1) or 1),
+        description=str(body.get("description", "") or ""),
+        is_active=bool(body.get("is_active", True)),
+    )
+
+    cases_models: list[GoldenCase] = []
+    for c in cases_payload:
+        if not isinstance(c, dict):
+            continue
+        score_min = c.get("expected_score_min", 0.7)
+        try:
+            score_min = float(score_min)
+        except (TypeError, ValueError):
+            score_min = 0.7
+        score_min = max(0.0, min(1.0, score_min))
+        cases_models.append(
+            GoldenCase(
+                case_label=str(c.get("case_label", "") or ""),
+                input_data=c.get("input_data") or {},
+                expected_output=c.get("expected_output"),
+                expected_score_min=score_min,
+            )
+        )
+    # Attach via relationship so the FK is populated on flush.
+    dataset.cases = cases_models
+
+    async with async_session() as session:
+        session.add(dataset)
+        await session.commit()
+
+    return ApiResponse(data=_serialize_dataset(dataset, cases_models))
+
+
+@router.get("/golden-datasets/{name}")
+async def get_golden_dataset(req: Request, name: str) -> ApiResponse:
+    """Retrieve a golden dataset by name (most recent version)."""
+    _require_admin(req)
+    tenant_id = get_tenant_id(req)
+
+    async with async_session() as session:
+        stmt = (
+            select(GoldenDataset)
+            .options(selectinload(GoldenDataset.cases))
+            .where(GoldenDataset.name == name)
+            .order_by(GoldenDataset.version.desc(), GoldenDataset.created_at.desc())
+        )
+        stmt = _apply_tenant_filter(stmt, tenant_id, GoldenDataset.tenant_id)
+        dataset = (await session.execute(stmt)).scalars().first()
+
+    if dataset is None:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="NOT_FOUND", message=f"Golden dataset '{name}' not found"
+                )
+            ).model_dump(),
+        )
+
+    return ApiResponse(data=_serialize_dataset(dataset, list(dataset.cases)))
+
+
+@router.post("/workflows/{name}/eval-gate")
+async def run_workflow_eval_gate(
+    name: str,
+    req: Request,
+    version: int | None = Query(None, ge=1),
+    min_score: float = Query(0.7, ge=0.0, le=1.0),
+) -> ApiResponse:
+    """Run the eval gate for a workflow without promoting it.
+
+    Looks up the active golden dataset for the workflow and replays it.
+    Returns pass/fail + aggregate score + per-case results.
+    """
+    _require_admin(req)
+    tenant_id = get_tenant_id(req)
+
+    from sandcastle.engine.evals import gate_promotion
+
+    try:
+        passed, gate_result = await gate_promotion(
+            workflow_name=name,
+            target_version=version,
+            min_score=min_score,
+            tenant_id=tenant_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message=str(exc))
+            ).model_dump(),
+        )
+
+    if gate_result is None:
+        return ApiResponse(
+            data={
+                "workflow_name": name,
+                "passed": True,
+                "skipped": True,
+                "reason": "no active golden dataset",
+            }
+        )
+
+    return ApiResponse(
+        data={
+            "workflow_name": name,
+            "version": version,
+            "dataset_id": gate_result.dataset_id,
+            "dataset_name": gate_result.dataset_name,
+            "passed": passed,
+            "aggregate_score": round(gate_result.aggregate_score, 4),
+            "threshold": gate_result.threshold,
+            "total_cases": gate_result.total_cases,
+            "passed_cases": gate_result.passed_cases,
+            "cases": [
+                {
+                    "case_label": c.case_label,
+                    "passed": c.passed,
+                    "score": round(c.score, 4),
+                    "expected_score_min": c.expected_score_min,
+                    "error": c.error,
+                }
+                for c in gate_result.cases
+            ],
+        }
     )
 
 
