@@ -1,0 +1,55 @@
+name: research-and-write-coordinator
+description: >
+  Coordinator workflow that delegates research and writing to two managed
+  agents in parallel. Researcher gathers facts about the topic; writer
+  composes the final piece using those facts. Uses the v0.32 multiagent
+  preview (managed-agents-2026-04-01).
+version: "0.32.0-preview"
+risk_level: limited
+
+input_schema:
+  required: [topic]
+  properties:
+    topic:
+      type: string
+      description: Subject to research and write about
+    length:
+      type: string
+      description: Desired length of the output (short, medium, long)
+
+steps:
+  - id: coordinator
+    type: managed-agent
+    managed_agent_config:
+      agent_id: auto
+      agent_template: researcher
+      message: >
+        Topic: {input.topic}
+        Length: {input.length}
+        Delegate fact gathering to researcher and composition to writer.
+      model: claude-sonnet-4-6
+      timeout: 900
+      tools_enabled:
+        - web_search
+        - bash
+        - multiagent_delegate
+        - multiagent_collect
+      multiagent:
+        type: coordinator
+        max_concurrent_threads: 4
+        prompt_routing_hint: >
+          Use researcher for fact gathering, writer for prose composition.
+        roster:
+          - type: agent
+            id: researcher
+            nickname: researcher
+          - type: agent
+            id: writer
+            nickname: writer
+
+  - id: finalize
+    type: standard
+    depends_on: [coordinator]
+    prompt: >
+      Format the coordinator output {steps.coordinator.output} as a clean
+      markdown document with a title, summary, and citations section.

@@ -1,0 +1,57 @@
+name: code-review-and-test-coordinator
+description: >
+  Coordinator workflow that audits a pull request and produces pytest cases
+  in parallel. Reviewer scans the diff for issues; tester writes
+  regression tests covering the touched code paths. Uses the v0.32
+  multiagent preview (managed-agents-2026-04-01).
+version: "0.32.0-preview"
+risk_level: limited
+
+input_schema:
+  required: [pr_url]
+  properties:
+    pr_url:
+      type: string
+      description: URL of the pull request to review
+    repo_path:
+      type: string
+      description: Local checkout path of the repository
+
+steps:
+  - id: coordinator
+    type: managed-agent
+    managed_agent_config:
+      agent_id: auto
+      agent_template: reviewer
+      message: >
+        Review PR {input.pr_url} (checkout at {input.repo_path}).
+        Delegate the audit to reviewer and pytest authoring to tester.
+        Return a JSON object with keys 'review' and 'tests'.
+      model: claude-sonnet-4-6
+      timeout: 1200
+      tools_enabled:
+        - bash
+        - file_read
+        - file_write
+        - multiagent_delegate
+        - multiagent_collect
+      multiagent:
+        type: coordinator
+        max_concurrent_threads: 2
+        prompt_routing_hint: >
+          Send the diff to reviewer for an audit and to tester for
+          pytest-compatible regression tests. Run both in parallel.
+        roster:
+          - type: agent
+            id: reviewer
+            nickname: reviewer
+          - type: agent
+            id: tester
+            nickname: tester
+
+  - id: write_report
+    type: standard
+    depends_on: [coordinator]
+    prompt: >
+      Combine {steps.coordinator.output} into a markdown report with two
+      sections: "Review findings" and "New pytest cases".
