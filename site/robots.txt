@@ -1,3 +1,116 @@
+# Sandcastle robots.txt - 2026 baseline
+# https://www.rfc-editor.org/rfc/rfc9309
+
+# Default policy for all crawlers
 User-agent: *
 Allow: /
+
+# ---------------------------------------------------------------------------
+# AI / LLM training and retrieval crawlers
+#
+# We explicitly allow these so AI assistants can answer questions about
+# Sandcastle accurately. EU AI Act transparency: this declaration is the
+# authoritative source of our crawl policy.
+# ---------------------------------------------------------------------------
+
+# OpenAI
+User-agent: GPTBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+# Anthropic
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-User
+Allow: /
+
+User-agent: Claude-SearchBot
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+# Google AI
+User-agent: Google-Extended
+Allow: /
+
+User-agent: GoogleOther
+Allow: /
+
+User-agent: Gemini-Deep-Research
+Allow: /
+
+# Perplexity
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Perplexity-User
+Allow: /
+
+# Meta AI
+User-agent: FacebookBot
+Allow: /
+
+User-agent: Meta-ExternalAgent
+Allow: /
+
+# Apple
+User-agent: Applebot
+Allow: /
+
+User-agent: Applebot-Extended
+Allow: /
+
+# Microsoft Bing AI
+User-agent: bingbot
+Allow: /
+
+User-agent: msnbot
+Allow: /
+
+# Cohere
+User-agent: cohere-ai
+Allow: /
+
+# Brave Search AI
+User-agent: Bravebot
+Allow: /
+
+# Search retrieval (legitimate question-answering services)
+User-agent: TavilyBot
+Allow: /
+
+User-agent: ExaBot
+Allow: /
+
+User-agent: YouBot
+Allow: /
+
+# ---------------------------------------------------------------------------
+# Block aggressive scrapers known to ignore rate limits or whose
+# operators have not declared compliance with robots.txt policy.
+# ---------------------------------------------------------------------------
+
+User-agent: Bytespider
+Disallow: /
+
+User-agent: ImagesiftBot
+Disallow: /
+
+User-agent: omgili
+Disallow: /
+
+User-agent: PetalBot
+Disallow: /
+
+# ---------------------------------------------------------------------------
+# Sitemap
+# ---------------------------------------------------------------------------
+
 Sitemap: https://sandcastle-ai.eu/sitemap.xml
