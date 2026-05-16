@@ -1,0 +1,56 @@
+name: analyst-with-translator-coordinator
+description: >
+  Coordinator workflow that runs a data analysis then fans out translation
+  of the result into 3 target languages in parallel. Analyst performs the
+  analysis once; translator is delegated three times concurrently. Uses
+  the v0.32 multiagent preview (managed-agents-2026-04-01).
+version: "0.32.0-preview"
+risk_level: limited
+
+input_schema:
+  required: [dataset_url]
+  properties:
+    dataset_url:
+      type: string
+      description: URL of the dataset to analyze
+    target_languages:
+      type: array
+      description: Three target language codes (e.g. ["cs", "de", "fr"])
+
+steps:
+  - id: coordinator
+    type: managed-agent
+    managed_agent_config:
+      agent_id: auto
+      agent_template: analyst
+      message: >
+        Analyze {input.dataset_url}, then translate the executive summary
+        into each of {input.target_languages} (exactly 3 languages, run
+        the three translations concurrently).
+      model: claude-sonnet-4-6
+      timeout: 1200
+      tools_enabled:
+        - bash
+        - web_search
+        - multiagent_delegate
+        - multiagent_collect
+      multiagent:
+        type: coordinator
+        max_concurrent_threads: 4
+        prompt_routing_hint: >
+          Run analyst once for the data work. Then dispatch three
+          translator threads in parallel, one per language code.
+        roster:
+          - type: agent
+            id: analyst
+            nickname: analyst
+          - type: agent
+            id: translator
+            nickname: translator
+
+  - id: bundle
+    type: standard
+    depends_on: [coordinator]
+    prompt: >
+      Bundle {steps.coordinator.output} into a single JSON object keyed by
+      language code, with the source analysis at key 'source'.

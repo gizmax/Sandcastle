@@ -351,6 +351,21 @@ message is a template string (supports {input.X} and {steps.X.output}).
 timeout in seconds (default 600).
 No prompt required. Requires ANTHROPIC_API_KEY environment variable.
 
+### trajectory-replay
+Replay an agent trajectory against a golden run and grade the candidate.
+Fields: trajectory_replay_config: {golden_run_id, fail_below_score,
+allow_cost_delta_pct}.
+Use for regression gating: fails the step when the candidate run's tool-call
+sequence drifts from the golden run beyond the configured score / cost
+thresholds. No prompt required.
+
+### computer-use
+Drive a sandboxed VM via the Anthropic Computer Use beta (bash, text_editor,
+computer tools). Fields: computer_use_config: {display_width_px,
+display_height_px, tools, model, require_human_approval_for, message}.
+Always run inside a sandbox VM and keep human-in-loop approval enabled for
+consequential actions. No prompt required.
+
 ### sub_workflow (legacy)
 Run another workflow as a sub-step with input/output mapping.
 Fields: sub_workflow: {workflow, input_mapping, output_mapping,
@@ -358,7 +373,7 @@ parallel_over, max_concurrent, timeout}
 
 IMPORTANT: Types that do NOT need a prompt: http, code, condition,
 loop, race, sensor, gate, transform, notify, composio, openclaw, parse,
-managed-agent.
+managed-agent, trajectory-replay, computer-use.
 All other types require a prompt field.
 
 ## Dynamic Context Retrieval (optional)

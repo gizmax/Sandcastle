@@ -312,10 +312,63 @@ class ManagedAgentConfig:
     output_format: str = "text"     # "text" | "json" | "files" | "markdown"
     # Agent collaboration: mount file outputs from previous steps
     shared_files: list[str] | None = None  # step IDs whose file outputs to mount
-    # Retry with different template on failure
-    fallback_template: str = ""     # retry with this template if primary fails
+    # Retry with different template on failure - accepts a single template name
+    # or an ordered list walked left-to-right until one succeeds.
+    fallback_template: str | list[str] = ""
     # Runtime abstraction: "auto" | "anthropic" | "local"
     runtime: str = "auto"
+    # Sampling controls forwarded to the agent-create call. When None, the
+    # field is omitted from the request and Anthropic uses its default.
+    temperature: float | None = None
+    max_tokens: int | None = None
+    thinking_budget: int | None = None
+    # v0.32 prep: Memory Stores, multiagent coordinator, outcomes
+    memory_stores: list[str] | None = None  # IDs of memory_stores to mount
+    multiagent: dict | None = None          # raw multiagent config (validated at runtime)
+    outcomes: list[dict] | None = None      # list of OutcomeDefinition payloads
+
+
+@dataclass
+class TrajectoryReplayConfig:
+    """Configuration for a ``type: trajectory-replay`` step.
+
+    Mirrors the public types in ``sandcastle.engine.trajectory_replay``.
+    The step loads a golden trajectory by ``golden_run_id``, extracts the
+    candidate trajectory from the current run, diffs them, and fails when
+    either the replay score drops below ``fail_below_score`` or the
+    cost delta exceeds ``allow_cost_delta_pct`` percent.
+    """
+
+    golden_run_id: str = ""
+    fail_below_score: float = 0.8
+    allow_cost_delta_pct: float = 10.0
+    weights: dict | None = None  # forwarded to replay_score()
+    cost_budget_usd: float = 0.01
+
+
+@dataclass
+class ComputerUseStepConfig:
+    """Configuration for a ``type: computer-use`` step.
+
+    Mirrors :class:`sandcastle.engine.computer_use.ComputerUseConfig` but
+    is intentionally a plain dataclass on the YAML side so the executor
+    can build the actual :class:`ComputerUseConfig` at runtime without
+    coupling the DAG parser to the computer_use module.
+    """
+
+    display_width_px: int = 1280
+    display_height_px: int = 800
+    tools: list[str] = field(
+        default_factory=lambda: ["bash", "text_editor", "computer"]
+    )
+    model: str = "claude-sonnet-4-6"
+    require_human_approval_for: list[str] = field(
+        default_factory=lambda: ["mouse_click", "key_combo", "submit_form"]
+    )
+    sandbox_url: str | None = None
+    message: str = ""  # initial message / task description
+    max_turns: int = 20
+    timeout: int = 600
 
 
 @dataclass
@@ -436,6 +489,8 @@ VALID_STEP_TYPES = frozenset(
         "report",
         "managed-agent",
         "agent",
+        "trajectory-replay",
+        "computer-use",
     }
 )
 
@@ -444,7 +499,7 @@ NON_PROMPT_TYPES = frozenset(
     {
         "http", "code", "condition", "loop", "race", "sensor", "gate",
         "transform", "notify", "composio", "openclaw", "parse",
-        "managed-agent", "agent",
+        "managed-agent", "agent", "trajectory-replay", "computer-use",
     }
 )
 
@@ -453,7 +508,7 @@ NON_LLM_TYPES = frozenset(
     {
         "http", "code", "condition", "loop", "race", "sensor",
         "transform", "notify", "composio", "openclaw", "parse",
-        "managed-agent", "agent",
+        "managed-agent", "agent", "trajectory-replay", "computer-use",
     }
 )
 
@@ -505,6 +560,8 @@ class StepDefinition:
     parse_config: ParseConfig | None = None
     report_config: ReportConfig | None = None
     managed_agent_config: ManagedAgentConfig | None = None
+    trajectory_replay_config: dict | None = None
+    computer_use_config: dict | None = None
     # Dynamic context retrieval before execution
     context_query: str = ""  # Search query to fetch relevant context
     context_source: str = "memory"  # "memory" | "web" | "files" | "custom"
@@ -1107,6 +1164,10 @@ def _parse_managed_agent_config(data: dict | None) -> ManagedAgentConfig | None:
     shared = data.get("shared_files")
     if shared is not None and not isinstance(shared, list):
         shared = [str(shared)]
+    # fallback_template accepts a single template name (str) or a list of names
+    fb = data.get("fallback_template", "")
+    if isinstance(fb, list):
+        fb = [str(x) for x in fb]
     return ManagedAgentConfig(
         agent_id=data.get("agent_id", ""),
         environment_id=data.get("environment_id", ""),
@@ -1122,8 +1183,26 @@ def _parse_managed_agent_config(data: dict | None) -> ManagedAgentConfig | None:
         describe=data.get("describe", ""),
         output_format=data.get("output_format", "text"),
         shared_files=shared,
-        fallback_template=data.get("fallback_template", ""),
+        fallback_template=fb,
         runtime=data.get("runtime", "auto"),
+        temperature=data.get("temperature"),
+        max_tokens=data.get("max_tokens"),
+        thinking_budget=data.get("thinking_budget"),
+        memory_stores=(
+            [str(s) for s in data["memory_stores"]]
+            if isinstance(data.get("memory_stores"), list)
+            else None
+        ),
+        multiagent=(
+            dict(data["multiagent"])
+            if isinstance(data.get("multiagent"), dict)
+            else None
+        ),
+        outcomes=(
+            [dict(o) for o in data["outcomes"] if isinstance(o, dict)]
+            if isinstance(data.get("outcomes"), list)
+            else None
+        ),
     )
 
 
@@ -1222,6 +1301,16 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
         managed_agent_config=_parse_managed_agent_config(
             data.get("managed_agent_config") if "managed_agent_config" in data
             else data.get("agent_config")
+        ),
+        trajectory_replay_config=(
+            dict(data["trajectory_replay_config"])
+            if isinstance(data.get("trajectory_replay_config"), dict)
+            else None
+        ),
+        computer_use_config=(
+            dict(data["computer_use_config"])
+            if isinstance(data.get("computer_use_config"), dict)
+            else None
         ),
         # Dynamic context retrieval
         context_query=data.get("context_query", ""),
@@ -1549,12 +1638,18 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
                     )
             if cfg and cfg.fallback_template:
                 from sandcastle.engine.agent_templates import VALID_AGENT_TEMPLATES as _vat
-                if cfg.fallback_template not in _vat:
-                    errors.append(
-                        f"Managed-agent step '{step.id}' has unknown fallback_template "
-                        f"'{cfg.fallback_template}'. Valid templates: "
-                        f"{', '.join(sorted(_vat))}"
-                    )
+                # Accept either a single name (str) or an ordered list of names
+                if isinstance(cfg.fallback_template, str):
+                    _fb_chain: list[str] = [cfg.fallback_template]
+                else:
+                    _fb_chain = list(cfg.fallback_template)
+                for _fb in _fb_chain:
+                    if _fb and _fb not in _vat:
+                        errors.append(
+                            f"Managed-agent step '{step.id}' has unknown fallback_template "
+                            f"'{_fb}'. Valid templates: "
+                            f"{', '.join(sorted(_vat))}"
+                        )
             if cfg and cfg.output_format not in ("text", "json", "files", "markdown"):
                 errors.append(
                     f"Managed-agent step '{step.id}' has invalid output_format "
