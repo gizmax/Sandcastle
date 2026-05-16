@@ -295,7 +295,7 @@ class TestRequestFormat:
     def test_anthropic_request_format(self) -> None:
         """Anthropic requests use top-level system field."""
         body = _build_request_body(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             system="You are a helper.",
             messages=[{"role": "user", "content": "Hello"}],
             max_tokens=1024,
@@ -303,7 +303,7 @@ class TestRequestFormat:
         )
         assert "system" in body
         assert body["system"] == "You are a helper."
-        assert body["model"] == "claude-sonnet-4-20250514"
+        assert body["model"] == "claude-sonnet-4-6"
         assert body["max_tokens"] == 1024
         assert body["messages"] == [{"role": "user", "content": "Hello"}]
         # Anthropic format should NOT have system in messages
@@ -351,7 +351,7 @@ class TestRequestFormat:
             {"role": "user", "content": "Second"},
         ]
         body = _build_request_body(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             system="System",
             messages=messages,
             is_anthropic=True,

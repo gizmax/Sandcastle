@@ -117,7 +117,7 @@ class TestProviderSwitching:
              patch("sandcastle.config.settings", _fake_settings()):
             cfg = _get_advisor_config()
         assert cfg["api_key_env"] == "ANTHROPIC_API_KEY"
-        assert cfg["model"] == "claude-sonnet-4-20250514"
+        assert cfg["model"] == "claude-sonnet-4-6"
 
     def test_switch_to_openai(self):
         """Switching to openai configures correct base URL and key env."""
@@ -480,7 +480,7 @@ class TestSLORouting:
     def test_high_tier_anthropic_resolves_to_sonnet(self):
         """For anthropic, high tier should select claude-sonnet-4."""
         model = _resolve_model_for_tier("anthropic", "high")
-        assert model == "claude-sonnet-4-20250514"
+        assert model == "claude-sonnet-4-6"
 
     def test_low_tier_anthropic_resolves_to_haiku(self):
         """For anthropic, low tier should select claude-haiku-4."""

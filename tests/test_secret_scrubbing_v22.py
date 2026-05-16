@@ -524,7 +524,7 @@ class TestFalsePositivesModelNames:
     """Model names should not be scrubbed."""
 
     def test_claude_sonnet(self):
-        text = "claude-sonnet-4-20250514"
+        text = "claude-sonnet-4-6"
         assert _scrub_secrets(text) == text
 
     def test_gpt_4o(self):
@@ -536,7 +536,7 @@ class TestFalsePositivesModelNames:
         assert _scrub_secrets(text) == text
 
     def test_model_in_error(self):
-        text = "Model 'claude-sonnet-4-20250514' returned 429"
+        text = "Model 'claude-sonnet-4-6' returned 429"
         assert _scrub_secrets(text) == text
 
 
@@ -714,7 +714,7 @@ class TestAdversarialCases:
 
     def test_mixed_legitimate_and_secret(self):
         text = (
-            "Step 'fetch-data' using model claude-sonnet-4-20250514 "
+            "Step 'fetch-data' using model claude-sonnet-4-6 "
             "failed at 2026-03-17T12:00:00Z with error: "
             "Authorization: Bearer sk-ant-api03-leak1234567890abcdef"
         )
@@ -723,7 +723,7 @@ class TestAdversarialCases:
         assert "sk-ant-api03-leak1234567890abcdef" not in result
         # Legitimate text preserved
         assert "fetch-data" in result
-        assert "claude-sonnet-4-20250514" in result
+        assert "claude-sonnet-4-6" in result
         assert "2026-03-17T12:00:00Z" in result
 
     def test_hex_string_not_followed_by_delimiter(self):
@@ -859,7 +859,7 @@ class TestCoverageSummary:
             "=== Workflow Execution Report ===\n"
             "Workflow: data-pipeline\n"
             "Step: fetch-api (type: http)\n"
-            "Model: claude-sonnet-4-20250514\n"
+            "Model: claude-sonnet-4-6\n"
             "Started: 2026-03-17T12:00:00Z\n"
             "Duration: 4.2s\n"
             "Status: FAILED\n"
@@ -892,7 +892,7 @@ class TestCoverageSummary:
         # All legitimate content must survive
         assert "data-pipeline" in result
         assert "fetch-api" in result
-        assert "claude-sonnet-4-20250514" in result
+        assert "claude-sonnet-4-6" in result
         assert "2026-03-17T12:00:00Z" in result
         assert "httpx.HTTPStatusError" in result
         assert "https://api.anthropic.com/v1/messages" in result

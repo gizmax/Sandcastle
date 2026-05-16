@@ -290,7 +290,7 @@ class TestAdvisorConfigure:
     def test_configure_valid_provider(self):
         resp = client.post("/api/advisor/configure", json={
             "provider": "anthropic",
-            "model": "claude-sonnet-4-20250514",
+            "model": "claude-sonnet-4-6",
         })
         assert resp.status_code == 200
         data = resp.json()["data"]

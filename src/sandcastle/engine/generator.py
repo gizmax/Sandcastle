@@ -631,9 +631,9 @@ ADVISOR_QUALITY_TIERS: dict[str, str] = {
 # "high" = best available, "medium" = balanced, "low" = cheapest.
 ADVISOR_MODEL_TIERS: dict[str, dict[str, str]] = {
     "anthropic": {
-        "high": "claude-sonnet-4-20250514",
-        "medium": "claude-haiku-4-20250514",
-        "low": "claude-haiku-4-20250514",
+        "high": "claude-opus-4-7",
+        "medium": "claude-sonnet-4-6",
+        "low": "claude-haiku-4-5",
     },
     "mistral": {
         "high": "mistral-large-latest",
@@ -688,7 +688,7 @@ def _resolve_model_for_tier(provider_name: str, quality_tier: str) -> str | None
 _PROVIDER_CONFIGS = {
     "anthropic": {
         "api_url": "https://api.anthropic.com/v1/messages",
-        "model": "claude-sonnet-4-20250514",
+        "model": "claude-sonnet-4-6",
         "api_key_env": "ANTHROPIC_API_KEY",
         "region": "us",
         "headers_fn": lambda key: {
@@ -900,7 +900,7 @@ def _get_headers(api_key: str) -> dict:
 
 # Defaults (used when no env override)
 _API_URL = "https://api.anthropic.com/v1/messages"
-_MODEL = "claude-sonnet-4-20250514"
+_MODEL = "claude-sonnet-4-6"
 _MAX_TOKENS = 4096
 _TIMEOUT = 60
 
