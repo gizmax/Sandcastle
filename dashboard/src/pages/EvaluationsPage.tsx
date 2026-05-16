@@ -275,10 +275,10 @@ export default function EvaluationsPage() {
                     borderRadius: 8,
                     fontSize: 12,
                   }}
-                  formatter={(value: number | undefined) => [
-                    `${((value ?? 0) * 100).toFixed(1)}%`,
-                    "Pass Rate",
-                  ]}
+                  formatter={(value) => {
+                    const num = typeof value === "number" ? value : Number(value ?? 0);
+                    return [`${(num * 100).toFixed(1)}%`, "Pass Rate"];
+                  }}
                 />
                 <Line
                   type="monotone"
