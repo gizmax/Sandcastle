@@ -1285,6 +1285,54 @@ def _cmd_publish_mcp(args: argparse.Namespace) -> None:
     )
 
 
+def _cmd_publish_skills(args: argparse.Namespace) -> None:
+    """Publish workflows as Anthropic Skills.
+
+    Without ``--upload``: dry-run, prints a JSON list of workflows that would
+    be published (one entry per .yaml/.yml file under the workflows dir).
+    With ``--upload``: invokes ``publish_workflows_as_skills(dry_run=False)``
+    so each skill is POSTed via :class:`AnthropicSkillsClient`. ``--dir``
+    overrides ``settings.workflows_dir``.
+    """
+    import asyncio
+
+    from sandcastle.config import settings
+    from sandcastle.engine.agent_skills import (
+        AnthropicSkillsClient,
+        SkillValidationError,
+        publish_workflows_as_skills,
+    )
+
+    workflow_dir = getattr(args, "dir", None) or settings.workflows_dir
+    upload = bool(getattr(args, "upload", False))
+
+    async def _run() -> list[dict]:
+        client: AnthropicSkillsClient | None = None
+        if upload:
+            api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+            if not api_key:
+                raise RuntimeError(
+                    "ANTHROPIC_API_KEY is required for --upload"
+                )
+            client = AnthropicSkillsClient(api_key=api_key)
+        return await publish_workflows_as_skills(
+            workflow_dir=workflow_dir,
+            dry_run=not upload,
+            client=client,
+        )
+
+    try:
+        results = asyncio.run(_run())
+    except SkillValidationError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    print(json.dumps(results, indent=2, default=str))
+
+
 def _cmd_doctor(args: argparse.Namespace) -> None:
     """Run local diagnostics - no running server needed."""
     import importlib
@@ -4415,6 +4463,23 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Workflow name (omit to list all publishable workflows as JSON)",
     )
 
+    # --- publish-skills ---
+    p_publish_skills = subparsers.add_parser(
+        "publish-skills",
+        help="Publish workflows as Anthropic Skills (dry-run by default)",
+    )
+    p_publish_skills.add_argument(
+        "--upload",
+        action="store_true",
+        default=False,
+        help="Actually POST each skill via AnthropicSkillsClient (default: dry-run)",
+    )
+    p_publish_skills.add_argument(
+        "--dir",
+        default=None,
+        help="Override the workflows directory (defaults to settings.workflows_dir)",
+    )
+
     # --- doctor ---
     p_doctor = subparsers.add_parser("doctor", help="Run local diagnostics")
     p_doctor.add_argument("workflow", nargs="?", default=None, help="Workflow YAML file to diagnose (optional)")
@@ -4744,6 +4809,7 @@ def main() -> None:
         "health": _cmd_health,
         "mcp": _cmd_mcp,
         "publish-mcp": _cmd_publish_mcp,
+        "publish-skills": _cmd_publish_skills,
         "doctor": _cmd_doctor,
         "generate": _cmd_generate,
         "eval": _cmd_eval,

@@ -189,6 +189,61 @@ class AnthropicRuntime(AgentRuntime):
                         logger.debug("Failed to clean up session %s", session_id)
 
 
+class AgentSDKRuntimeAdapter(AgentRuntime):
+    """Bridge from the AgentRuntime ABC to AgentSDKRunner.
+
+    Routes ``runtime: "agent-sdk"`` to the in-process Claude Agent SDK loop
+    defined in :mod:`sandcastle.engine.agent_sdk_runtime`. Lets operators
+    keep workflow traffic on their own infra (only the model API call
+    leaves) while reusing the rest of Sandcastle's executor pipeline.
+    """
+
+    name = "agent-sdk"
+
+    async def is_available(self) -> bool:
+        from sandcastle.engine.agent_sdk_runtime import is_available as sdk_available
+
+        return sdk_available()
+
+    async def execute(
+        self,
+        system_prompt: str,
+        tools: list[str],
+        packages: list[str],
+        message: str,
+        model: str,
+        timeout: int,
+        network: str,
+    ) -> dict:
+        from sandcastle.engine.agent_sdk_runtime import (
+            AgentSDKConfig,
+            AgentSDKRunner,
+        )
+
+        # ``tools`` arrives as a list of bare tool names; the SDK expects a
+        # list of dicts. We let the runner / SDK reject unknown shapes.
+        sdk_tools: list[dict] = [
+            {"name": t} if isinstance(t, str) else t for t in (tools or [])
+        ]
+        config = AgentSDKConfig(
+            model=model,
+            system_prompt=system_prompt or None,
+            tools=sdk_tools,
+            timeout_seconds=timeout,
+        )
+        runner = AgentSDKRunner()
+        result = await runner.run(message, config)
+        return {
+            "output": result.output,
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "runtime": "agent-sdk",
+            "cost_usd": result.cost_usd,
+            "duration_ms": result.duration_ms,
+            "error": result.error,
+        }
+
+
 class LocalRuntime(AgentRuntime):
     """Local agent execution via Ollama - no cloud, no cost."""
 
@@ -294,6 +349,7 @@ RUNTIMES: dict[str, AgentRuntime] = {
     "auto": AutoRuntime(),
     "anthropic": AnthropicRuntime(),
     "local": LocalRuntime(),
+    "agent-sdk": AgentSDKRuntimeAdapter(),
 }
 
 
