@@ -322,6 +322,10 @@ class ManagedAgentConfig:
     temperature: float | None = None
     max_tokens: int | None = None
     thinking_budget: int | None = None
+    # v0.32 prep: Memory Stores, multiagent coordinator, outcomes
+    memory_stores: list[str] | None = None  # IDs of memory_stores to mount
+    multiagent: dict | None = None          # raw multiagent config (validated at runtime)
+    outcomes: list[dict] | None = None      # list of OutcomeDefinition payloads
 
 
 @dataclass
@@ -1184,6 +1188,21 @@ def _parse_managed_agent_config(data: dict | None) -> ManagedAgentConfig | None:
         temperature=data.get("temperature"),
         max_tokens=data.get("max_tokens"),
         thinking_budget=data.get("thinking_budget"),
+        memory_stores=(
+            [str(s) for s in data["memory_stores"]]
+            if isinstance(data.get("memory_stores"), list)
+            else None
+        ),
+        multiagent=(
+            dict(data["multiagent"])
+            if isinstance(data.get("multiagent"), dict)
+            else None
+        ),
+        outcomes=(
+            [dict(o) for o in data["outcomes"] if isinstance(o, dict)]
+            if isinstance(data.get("outcomes"), list)
+            else None
+        ),
     )
 
 

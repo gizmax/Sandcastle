@@ -3470,6 +3470,44 @@ async def _execute_managed_agent_step(
                             "type": "enabled",
                             "budget_tokens": config.thinking_budget,
                         }
+                    # Multiagent coordinator wiring (v0.32 prep). Validation
+                    # surfaces as a step.failed; we do not attempt fallback.
+                    if config.multiagent:
+                        from sandcastle.engine.multiagent import (
+                            MultiagentConfig,
+                            MultiagentRosterEntry,
+                            RosterValidationError,
+                            build_coordinator_payload,
+                        )
+                        try:
+                            roster_data = config.multiagent.get("roster", [])
+                            roster = [
+                                MultiagentRosterEntry(
+                                    type=str(r.get("type", "agent")),
+                                    id=r.get("id"),
+                                    version=r.get("version"),
+                                    nickname=r.get("nickname"),
+                                )
+                                for r in roster_data
+                                if isinstance(r, dict)
+                            ]
+                            ma_cfg = MultiagentConfig(
+                                roster=roster,
+                                max_concurrent_threads=int(
+                                    config.multiagent.get("max_concurrent_threads", 25)
+                                ),
+                                prompt_routing_hint=config.multiagent.get(
+                                    "prompt_routing_hint"
+                                ),
+                            )
+                            agent_payload.update(build_coordinator_payload(ma_cfg))
+                        except RosterValidationError as exc:
+                            return StepResult(
+                                step_id=step.id,
+                                status="failed",
+                                error=f"Invalid multiagent roster: {exc}",
+                                duration_seconds=time.monotonic() - started_at,
+                            )
                     agent_resp = await client.post(
                         f"{base_url}/agents", headers=headers, json=agent_payload,
                     )
@@ -3523,6 +3561,29 @@ async def _execute_managed_agent_step(
                 "agent": agent_id,
                 "environment_id": env_id,
             }
+            # Memory Stores attachment (v0.32 prep). Server-side cap of 8 is
+            # mirrored client-side via MemoryStoresClient.attach_to_session_payload.
+            if config.memory_stores:
+                from sandcastle.engine.memory_stores import (
+                    MemoryStoresClient,
+                    MemoryStoresLimitError,
+                )
+                try:
+                    mem_resources = MemoryStoresClient.attach_to_session_payload(
+                        list(config.memory_stores)
+                    )
+                except MemoryStoresLimitError as exc:
+                    return StepResult(
+                        step_id=step.id,
+                        status="failed",
+                        error=str(exc),
+                        duration_seconds=time.monotonic() - started_at,
+                    )
+                existing = session_body.get("resources")
+                if isinstance(existing, list):
+                    existing.extend(mem_resources)
+                else:
+                    session_body["resources"] = list(mem_resources)
             session_resp = await client.post(
                 f"{base_url}/sessions", headers=headers, json=session_body,
             )
@@ -3537,6 +3598,40 @@ async def _execute_managed_agent_step(
                     duration_seconds=time.monotonic() - started_at,
                 )
             session_id = session_resp.json()["id"]
+
+            # --- Define outcomes (v0.32 prep) ---
+            outcome_post_errors: list[str] = []
+            if config.outcomes:
+                from sandcastle.engine.outcomes import (
+                    OutcomeDefinition,
+                    OutcomeValidationError,
+                    build_define_outcome_event,
+                )
+                for raw_def in config.outcomes:
+                    try:
+                        definition = OutcomeDefinition(
+                            name=str(raw_def.get("name", "")),
+                            description=str(raw_def.get("description", "")),
+                            success_criteria=list(raw_def.get("success_criteria") or []),
+                            weight=float(raw_def.get("weight", 1.0)),
+                            model=raw_def.get("model"),
+                        )
+                    except (OutcomeValidationError, TypeError, ValueError) as exc:
+                        outcome_post_errors.append(
+                            f"outcome '{raw_def.get('name', '?')}': {exc}"
+                        )
+                        continue
+                    body = build_define_outcome_event(definition)
+                    try:
+                        await client.post(
+                            f"{base_url}/sessions/{session_id}/events",
+                            headers=headers,
+                            json={"events": [body]},
+                        )
+                    except Exception as exc:  # noqa: BLE001 - surface via output
+                        outcome_post_errors.append(
+                            f"outcome '{definition.name}': POST failed: {exc}"
+                        )
 
             # --- Send user message with content blocks format ---
             await client.post(
@@ -3558,6 +3653,12 @@ async def _execute_managed_agent_step(
             total_input_tokens = 0
             total_output_tokens = 0
             buffered_events: list[dict] = []
+            outcome_evaluations: list[dict] = []
+
+            from sandcastle.engine.outcomes import (
+                OUTCOME_EVAL_END_TYPE,
+                parse_outcome_evaluation,
+            )
 
             async with client.stream(
                 "GET",
@@ -3589,6 +3690,19 @@ async def _execute_managed_agent_step(
                     else:
                         # Buffer everything; nothing is surfaced mid-stream
                         buffered_events.append(event)
+
+                    # Capture outcome evaluations regardless of stream mode.
+                    if event_type == OUTCOME_EVAL_END_TYPE:
+                        ev = parse_outcome_evaluation(event)
+                        if ev is not None:
+                            outcome_evaluations.append({
+                                "name": ev.outcome_name,
+                                "passed": ev.passed,
+                                "score": ev.score,
+                                "reasoning": ev.reasoning,
+                                "evaluator_model": ev.evaluator_model,
+                                "cost_usd": ev.cost_usd,
+                            })
 
                     # Session finished: agent idle or session terminated
                     if event_type in (
@@ -3631,6 +3745,20 @@ async def _execute_managed_agent_step(
                     "files": {},
                     "_output_format": "files",
                 }
+
+            # Surface outcomes (v0.32 prep) when present. Wrap text output in
+            # a structured envelope so callers can read both text + outcomes.
+            if outcome_evaluations or outcome_post_errors:
+                envelope: dict[str, Any] = {
+                    "outcomes": outcome_evaluations,
+                }
+                if outcome_post_errors:
+                    envelope["outcome_errors"] = outcome_post_errors
+                if isinstance(final_output, dict):
+                    final_output = {**final_output, **envelope}
+                else:
+                    envelope["text"] = final_output
+                    final_output = envelope
 
             return StepResult(
                 step_id=step.id,
