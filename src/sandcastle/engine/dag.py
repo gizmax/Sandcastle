@@ -325,6 +325,49 @@ class ManagedAgentConfig:
 
 
 @dataclass
+class TrajectoryReplayConfig:
+    """Configuration for a ``type: trajectory-replay`` step.
+
+    Mirrors the public types in ``sandcastle.engine.trajectory_replay``.
+    The step loads a golden trajectory by ``golden_run_id``, extracts the
+    candidate trajectory from the current run, diffs them, and fails when
+    either the replay score drops below ``fail_below_score`` or the
+    cost delta exceeds ``allow_cost_delta_pct`` percent.
+    """
+
+    golden_run_id: str = ""
+    fail_below_score: float = 0.8
+    allow_cost_delta_pct: float = 10.0
+    weights: dict | None = None  # forwarded to replay_score()
+    cost_budget_usd: float = 0.01
+
+
+@dataclass
+class ComputerUseStepConfig:
+    """Configuration for a ``type: computer-use`` step.
+
+    Mirrors :class:`sandcastle.engine.computer_use.ComputerUseConfig` but
+    is intentionally a plain dataclass on the YAML side so the executor
+    can build the actual :class:`ComputerUseConfig` at runtime without
+    coupling the DAG parser to the computer_use module.
+    """
+
+    display_width_px: int = 1280
+    display_height_px: int = 800
+    tools: list[str] = field(
+        default_factory=lambda: ["bash", "text_editor", "computer"]
+    )
+    model: str = "claude-sonnet-4-6"
+    require_human_approval_for: list[str] = field(
+        default_factory=lambda: ["mouse_click", "key_combo", "submit_form"]
+    )
+    sandbox_url: str | None = None
+    message: str = ""  # initial message / task description
+    max_turns: int = 20
+    timeout: int = 600
+
+
+@dataclass
 class ParseConfig:
     """Configuration for document parsing step."""
 
@@ -442,6 +485,8 @@ VALID_STEP_TYPES = frozenset(
         "report",
         "managed-agent",
         "agent",
+        "trajectory-replay",
+        "computer-use",
     }
 )
 
@@ -450,7 +495,7 @@ NON_PROMPT_TYPES = frozenset(
     {
         "http", "code", "condition", "loop", "race", "sensor", "gate",
         "transform", "notify", "composio", "openclaw", "parse",
-        "managed-agent", "agent",
+        "managed-agent", "agent", "trajectory-replay", "computer-use",
     }
 )
 
@@ -459,7 +504,7 @@ NON_LLM_TYPES = frozenset(
     {
         "http", "code", "condition", "loop", "race", "sensor",
         "transform", "notify", "composio", "openclaw", "parse",
-        "managed-agent", "agent",
+        "managed-agent", "agent", "trajectory-replay", "computer-use",
     }
 )
 
@@ -511,6 +556,8 @@ class StepDefinition:
     parse_config: ParseConfig | None = None
     report_config: ReportConfig | None = None
     managed_agent_config: ManagedAgentConfig | None = None
+    trajectory_replay_config: dict | None = None
+    computer_use_config: dict | None = None
     # Dynamic context retrieval before execution
     context_query: str = ""  # Search query to fetch relevant context
     context_source: str = "memory"  # "memory" | "web" | "files" | "custom"
@@ -1235,6 +1282,16 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
         managed_agent_config=_parse_managed_agent_config(
             data.get("managed_agent_config") if "managed_agent_config" in data
             else data.get("agent_config")
+        ),
+        trajectory_replay_config=(
+            dict(data["trajectory_replay_config"])
+            if isinstance(data.get("trajectory_replay_config"), dict)
+            else None
+        ),
+        computer_use_config=(
+            dict(data["computer_use_config"])
+            if isinstance(data.get("computer_use_config"), dict)
+            else None
         ),
         # Dynamic context retrieval
         context_query=data.get("context_query", ""),

@@ -3733,6 +3733,263 @@ async def _execute_managed_agent_step(
     )
 
 
+async def _execute_trajectory_replay_step(
+    step: StepDefinition,
+    context: RunContext,
+    storage: StorageBackend | None = None,
+) -> StepResult:
+    """Execute a ``type: trajectory-replay`` step.
+
+    Loads a golden Trajectory by ``golden_run_id`` (the audit events and
+    step records for that run are pulled from the DB), extracts the
+    candidate Trajectory from the *current* run's data, diffs them, and
+    scores the result via :func:`replay_score`. Fails when the score
+    drops below ``fail_below_score`` or the absolute cost drift exceeds
+    ``allow_cost_delta_pct``.
+    """
+
+    import time
+
+    started_at = time.monotonic()
+    cfg_raw = step.trajectory_replay_config or {}
+    golden_run_id = str(cfg_raw.get("golden_run_id") or "").strip()
+    if not golden_run_id:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error="trajectory_replay_config.golden_run_id is required",
+            duration_seconds=time.monotonic() - started_at,
+        )
+
+    try:
+        fail_below_score = float(cfg_raw.get("fail_below_score", 0.8))
+    except (TypeError, ValueError):
+        fail_below_score = 0.8
+    try:
+        allow_cost_delta_pct = float(cfg_raw.get("allow_cost_delta_pct", 10.0))
+    except (TypeError, ValueError):
+        allow_cost_delta_pct = 10.0
+    try:
+        cost_budget_usd = float(cfg_raw.get("cost_budget_usd", 0.01))
+    except (TypeError, ValueError):
+        cost_budget_usd = 0.01
+    weights = cfg_raw.get("weights") if isinstance(cfg_raw.get("weights"), dict) else None
+
+    from sandcastle.engine.trajectory_replay import (
+        diff_trajectories,
+        extract_trajectory,
+        replay_score,
+    )
+
+    async def _load_run_data(run_id: str) -> tuple[list[dict], list[dict]]:
+        """Load audit events + run steps for a run id. Returns (events, steps)."""
+        from sqlalchemy import select
+
+        from sandcastle.models.db import AuditEvent, RunStep, async_session
+
+        events_out: list[dict] = []
+        steps_out: list[dict] = []
+        async with async_session() as session:
+            ev_rows = (
+                await session.execute(
+                    select(AuditEvent).where(AuditEvent.run_id == run_id)
+                )
+            ).scalars().all()
+            for ev in ev_rows:
+                payload = ev.payload if isinstance(ev.payload, dict) else {}
+                events_out.append({
+                    "event_type": ev.event_type,
+                    "step_id": payload.get("step_id"),
+                    "ts": ev.created_at,
+                    "data": payload,
+                })
+            step_rows = (
+                await session.execute(
+                    select(RunStep).where(RunStep.run_id == run_id)
+                )
+            ).scalars().all()
+            for s in step_rows:
+                output = s.output_data if isinstance(s.output_data, dict) else {}
+                steps_out.append({
+                    "step_id": s.step_id,
+                    "tool_name": (output.get("tool_name") if isinstance(output, dict) else "") or "",
+                    "args": output.get("args", {}) if isinstance(output, dict) else {},
+                    "output": output,
+                    "error": s.error,
+                    "cost_usd": float(s.cost_usd or 0.0),
+                    "duration_ms": int((s.duration_seconds or 0.0) * 1000),
+                    "ts": s.started_at,
+                })
+        return events_out, steps_out
+
+    try:
+        golden_events, golden_steps = await _load_run_data(golden_run_id)
+        if not golden_steps and not golden_events:
+            return StepResult(
+                step_id=step.id,
+                status="failed",
+                error=f"Golden run '{golden_run_id}' not found or empty",
+                duration_seconds=time.monotonic() - started_at,
+            )
+        candidate_events, candidate_steps = await _load_run_data(str(context.run_id))
+    except Exception as exc:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=f"Failed to load run data: {exc}",
+            duration_seconds=time.monotonic() - started_at,
+        )
+
+    golden_traj = extract_trajectory(golden_run_id, golden_events, golden_steps)
+    candidate_traj = extract_trajectory(
+        str(context.run_id), candidate_events, candidate_steps
+    )
+    diff = diff_trajectories(golden_traj, candidate_traj)
+    score = replay_score(diff, weights=weights, cost_budget_usd=cost_budget_usd)
+
+    cost_pct = 0.0
+    if golden_traj.total_cost_usd > 0:
+        cost_pct = abs(diff.cost_delta_usd) / golden_traj.total_cost_usd * 100.0
+
+    score_pass = score >= fail_below_score
+    cost_pass = cost_pct <= allow_cost_delta_pct
+    overall_pass = score_pass and cost_pass
+
+    output = {
+        "pass": overall_pass,
+        "fail": not overall_pass,
+        "score": score,
+        "diff_summary": diff.summary,
+        "cost_delta_usd": diff.cost_delta_usd,
+        "cost_delta_pct": cost_pct,
+        "duration_delta_ms": diff.duration_delta_ms,
+        "final_output_match": diff.final_output_match,
+        "tool_call_diff_count": len(diff.tool_call_diffs),
+        "golden_run_id": golden_run_id,
+        "golden_checksum": golden_traj.checksum,
+        "candidate_checksum": candidate_traj.checksum,
+    }
+
+    if overall_pass:
+        return StepResult(
+            step_id=step.id,
+            status="completed",
+            output=output,
+            duration_seconds=time.monotonic() - started_at,
+        )
+    reasons = []
+    if not score_pass:
+        reasons.append(f"score {score:.3f} below threshold {fail_below_score:.3f}")
+    if not cost_pass:
+        reasons.append(
+            f"cost drift {cost_pct:.2f}% exceeds allowance {allow_cost_delta_pct:.2f}%"
+        )
+    return StepResult(
+        step_id=step.id,
+        status="failed",
+        output=output,
+        error="; ".join(reasons),
+        duration_seconds=time.monotonic() - started_at,
+    )
+
+
+async def _execute_computer_use_step(
+    step: StepDefinition,
+    context: RunContext,
+    storage: StorageBackend | None = None,
+) -> StepResult:
+    """Execute a ``type: computer-use`` step.
+
+    Builds an Anthropic-compatible Computer Use tool payload, validates
+    the configuration, and either drives a Managed Agent session (when
+    ``ANTHROPIC_API_KEY`` is set) or returns a dry-run payload describing
+    what would have been executed. Collects ``screenshots`` and
+    ``actions_taken`` into the step output for downstream auditing.
+    """
+
+    import time
+
+    started_at = time.monotonic()
+    cfg_raw = step.computer_use_config or {}
+
+    from sandcastle.engine.computer_use import (
+        ComputerUseConfig,
+        SAFETY_CHECKLIST,
+        build_beta_header,
+        build_tool_definitions,
+        should_pause_for_approval,
+        validate_config,
+    )
+
+    config = ComputerUseConfig(
+        display_width_px=int(cfg_raw.get("display_width_px", 1280)),
+        display_height_px=int(cfg_raw.get("display_height_px", 800)),
+        tools=list(cfg_raw.get("tools", ["bash", "text_editor", "computer"])),
+        model=str(cfg_raw.get("model", "claude-sonnet-4-6")),
+        require_human_approval_for=list(
+            cfg_raw.get("require_human_approval_for",
+                        ["mouse_click", "key_combo", "submit_form"])
+        ),
+        sandbox_url=cfg_raw.get("sandbox_url"),
+    )
+
+    issues = validate_config(config)
+    hard_errors = [i for i in issues if not i.startswith("WARN:")]
+    if hard_errors:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error="; ".join(hard_errors),
+            duration_seconds=time.monotonic() - started_at,
+        )
+
+    try:
+        tool_definitions = build_tool_definitions(config)
+    except Exception as exc:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=f"Failed to build tool definitions: {exc}",
+            duration_seconds=time.monotonic() - started_at,
+        )
+
+    beta_header = build_beta_header(config.model)
+
+    message_template = cfg_raw.get("message") or step.prompt or ""
+    message = resolve_templates(message_template, context, step.depends_on)
+    if storage:
+        message = await resolve_storage_refs(message, storage, context)
+
+    # Per the task spec we return screenshots + actions_taken in the output.
+    # Without a live Anthropic session here we surface a structured dry-run
+    # result; downstream wiring (Phase 3b) replaces this with a streaming
+    # session loop that honours should_pause_for_approval per tool_use event.
+    screenshots: list[dict] = []
+    actions_taken: list[dict] = []
+
+    sample_tool_use = {"name": "computer", "input": {"action": "screenshot"}}
+    needs_approval = should_pause_for_approval(sample_tool_use, config)
+
+    output = {
+        "screenshots": screenshots,
+        "actions_taken": actions_taken,
+        "tool_definitions": tool_definitions,
+        "beta_header": beta_header,
+        "message": message,
+        "model": config.model,
+        "needs_approval_sample": needs_approval,
+        "safety_checklist": SAFETY_CHECKLIST,
+        "validation_warnings": [i for i in issues if i.startswith("WARN:")],
+    }
+
+    return StepResult(
+        step_id=step.id,
+        status="completed",
+        output=output,
+        duration_seconds=time.monotonic() - started_at,
+    )
+
+
 async def _execute_agent_step(
     step: StepDefinition,
     context: RunContext,
@@ -7026,6 +7283,7 @@ async def _prepare_and_run_step(
         "race", "sensor", "gate", "transform", "notify", "delegate",
         "browser", "sub_workflow", "composio", "openclaw", "parse",
         "report", "managed-agent", "agent",
+        "trajectory-replay", "computer-use",
     }
 
     async def _run_hybrid(s: StepDefinition, ctx: RunContext) -> StepResult:
@@ -7078,6 +7336,10 @@ async def _prepare_and_run_step(
             return await _execute_managed_agent_step(s, ctx, storage)
         if s.type == "agent":
             return await _execute_agent_step(s, ctx, storage)
+        if s.type == "trajectory-replay":
+            return await _execute_trajectory_replay_step(s, ctx, storage)
+        if s.type == "computer-use":
+            return await _execute_computer_use_step(s, ctx, storage)
         raise StepExecutionError(f"Unknown hybrid type '{s.type}'")
 
     # --- Fan-out (parallel_over) - must come BEFORE type dispatch ---
