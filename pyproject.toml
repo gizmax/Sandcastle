@@ -25,17 +25,17 @@ classifiers = [
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
-    "httpx>=0.27",
+    "httpx>=0.28",
     "httpx-sse>=0.4",
-    "sqlalchemy[asyncio]>=2.0",
+    "sqlalchemy[asyncio]>=2.0.40",
     "aiosqlite>=0.20",
     "asyncpg>=0.30",
     "alembic>=1.14",
     "arq>=0.26",
     "apscheduler>=3.10",
     "pyyaml>=6.0",
-    "pydantic>=2.0",
-    "pydantic-settings>=2.0",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.5",
     "aioboto3>=13",
     "python-dotenv>=1.0",
     "simpleeval>=1.0",
@@ -49,10 +49,10 @@ dependencies = [
 memory = [
     "mem0ai>=0.1.0",
     "fastembed>=0.3.6,<0.4",
-    "anthropic>=0.50",
+    "anthropic>=0.95",
 ]
 parse = [
-    "pymupdf>=1.25",
+    "pymupdf>=1.26",
     "python-docx>=1.0",
     "openpyxl>=3.1",
 ]
@@ -60,7 +60,7 @@ ocr = [
     "chandra-ocr>=2.0",
 ]
 report = [
-    "weasyprint>=62",
+    "weasyprint>=68",
     "jinja2>=3.1",
     "markdown>=3.5",
     "matplotlib>=3.8",
@@ -69,27 +69,27 @@ docker = [
     "aiodocker>=0.22",
 ]
 mcp = [
-    "mcp>=1.0",
+    "mcp>=1.23",
 ]
 security = [
-    "cryptography>=42.0",
+    "cryptography>=43.0",
 ]
 telemetry = [
     "sentry-sdk[fastapi]>=2.0",
 ]
 otel = [
-    "opentelemetry-api>=1.20",
-    "opentelemetry-sdk>=1.20",
-    "opentelemetry-exporter-otlp-proto-http>=1.20",
+    "opentelemetry-api>=1.40",
+    "opentelemetry-sdk>=1.40",
+    "opentelemetry-exporter-otlp-proto-http>=1.40",
 ]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "ruff>=0.8",
     "aiodocker>=0.22",
-    "mcp>=1.0",
+    "mcp>=1.23",
     "sentry-sdk[fastapi]>=2.0",
-    "cryptography>=42.0",
+    "cryptography>=43.0",
 ]
 
 [project.urls]
