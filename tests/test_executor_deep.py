@@ -1085,13 +1085,13 @@ class TestFieldPreservation:
         assert result.autopilot is None
 
     def test_dataclasses_replace_count(self):
-        """Sanity check: StepDefinition has 38 fields."""
+        """Sanity check: StepDefinition has 49 fields (v0.32 prep added 2)."""
         import dataclasses as dc
         fields = dc.fields(StepDefinition)
         # If someone adds a field, this test reminds them to check
         # all places that construct StepDefinitions
-        assert len(fields) == 38, (
-            f"StepDefinition has {len(fields)} fields (expected 38). "
+        assert len(fields) == 49, (
+            f"StepDefinition has {len(fields)} fields (expected 49). "
             "If you added a new field, verify all dataclasses.replace() "
             "callers handle it correctly."
         )
