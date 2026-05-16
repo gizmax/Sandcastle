@@ -3166,6 +3166,35 @@ _managed_agent_cache: dict[str, str] = {}   # cache_key -> agent_id
 _managed_env_cache: dict[str, str] = {}     # cache_key -> environment_id
 
 
+# Per-million-token pricing (input, output) used for cost accounting on
+# managed-agent steps. Unknown models fall back to Sonnet 4.6 rates and the
+# warning is suppressed after the first occurrence per process per model.
+_AGENT_MODEL_PRICING: dict[str, tuple[float, float]] = {
+    "claude-opus-4-7": (5.0, 25.0),
+    "claude-opus-4-6": (15.0, 75.0),
+    "claude-sonnet-4-6": (3.0, 15.0),
+    "claude-sonnet-4-5": (3.0, 15.0),
+    "claude-haiku-4-5": (1.0, 5.0),
+}
+_AGENT_PRICING_FALLBACK: tuple[float, float] = (3.0, 15.0)
+_warned_unknown_agent_models: set[str] = set()
+
+
+def _agent_model_pricing(model: str) -> tuple[float, float]:
+    """Return (input_per_mtok, output_per_mtok) for a managed-agent model."""
+    price = _AGENT_MODEL_PRICING.get(model)
+    if price is not None:
+        return price
+    if model not in _warned_unknown_agent_models:
+        _warned_unknown_agent_models.add(model)
+        logger.warning(
+            "Unknown managed-agent model '%s'; falling back to Sonnet 4.6 pricing %s",
+            model,
+            _AGENT_PRICING_FALLBACK,
+        )
+    return _AGENT_PRICING_FALLBACK
+
+
 def _managed_agent_cache_key(step: StepDefinition) -> str:
     """Build a deterministic cache key from step config for agent reuse."""
     cfg = step.managed_agent_config
@@ -3417,13 +3446,30 @@ async def _execute_managed_agent_step(
                 if cached_agent:
                     agent_id = cached_agent
                 else:
+                    # Wire tools_enabled: bare tool names get wrapped as {type: name};
+                    # when unset/empty, fall back to the default managed toolset.
+                    if config.tools_enabled:
+                        tools_payload = [{"type": t} for t in config.tools_enabled]
+                    else:
+                        tools_payload = [{"type": "agent_toolset_20260401"}]
                     agent_payload: dict = {
                         "name": f"sandcastle-{step.id}",
                         "model": config.model,
-                        "tools": [{"type": "agent_toolset_20260401"}],
+                        "tools": tools_payload,
                     }
                     if config.system_prompt:
                         agent_payload["system"] = config.system_prompt
+                    # Sampling params: only forward when explicitly set; otherwise
+                    # let Anthropic apply its defaults.
+                    if config.temperature is not None:
+                        agent_payload["temperature"] = config.temperature
+                    if config.max_tokens is not None:
+                        agent_payload["max_tokens"] = config.max_tokens
+                    if config.thinking_budget is not None:
+                        agent_payload["thinking"] = {
+                            "type": "enabled",
+                            "budget_tokens": config.thinking_budget,
+                        }
                     agent_resp = await client.post(
                         f"{base_url}/agents", headers=headers, json=agent_payload,
                     )
@@ -3505,9 +3551,13 @@ async def _execute_managed_agent_step(
             )
 
             # --- Stream SSE response ---
+            # stream=True (default): assemble text incrementally as events arrive.
+            # stream=False: buffer events server-side and only assemble the final
+            # text at the end, never surfacing intermediate deltas.
             result_text = ""
             total_input_tokens = 0
             total_output_tokens = 0
+            buffered_events: list[dict] = []
 
             async with client.stream(
                 "GET",
@@ -3524,17 +3574,21 @@ async def _execute_managed_agent_step(
 
                     event_type = event.get("type", "")
 
-                    # Collect agent text output
-                    if event_type == "agent.message":
-                        for block in event.get("content", []):
-                            if block.get("type") == "text":
-                                result_text += block.get("text", "")
+                    if config.stream:
+                        # Collect agent text output incrementally
+                        if event_type == "agent.message":
+                            for block in event.get("content", []):
+                                if block.get("type") == "text":
+                                    result_text += block.get("text", "")
 
-                    # Track token usage from any event that includes it
-                    usage = event.get("usage")
-                    if usage:
-                        total_input_tokens += usage.get("input_tokens", 0)
-                        total_output_tokens += usage.get("output_tokens", 0)
+                        # Track token usage from any event that includes it
+                        usage = event.get("usage")
+                        if usage:
+                            total_input_tokens += usage.get("input_tokens", 0)
+                            total_output_tokens += usage.get("output_tokens", 0)
+                    else:
+                        # Buffer everything; nothing is surfaced mid-stream
+                        buffered_events.append(event)
 
                     # Session finished: agent idle or session terminated
                     if event_type in (
@@ -3543,10 +3597,23 @@ async def _execute_managed_agent_step(
                     ):
                         break
 
-            # Compute cost (Sonnet pricing by default)
+            if not config.stream:
+                # Assemble final result from buffered events only at the end
+                for event in buffered_events:
+                    if event.get("type") == "agent.message":
+                        for block in event.get("content", []):
+                            if block.get("type") == "text":
+                                result_text += block.get("text", "")
+                    usage = event.get("usage")
+                    if usage:
+                        total_input_tokens += usage.get("input_tokens", 0)
+                        total_output_tokens += usage.get("output_tokens", 0)
+
+            # Compute cost using the per-model pricing table
+            in_price, out_price = _agent_model_pricing(config.model)
             cost = _safe_cost(
                 total_input_tokens, total_output_tokens,
-                3.0, 15.0,  # Default Sonnet pricing per 1M tokens
+                in_price, out_price,
             )
 
             # Process output_format for agent chaining
@@ -3597,19 +3664,35 @@ async def _execute_managed_agent_step(
             except Exception:
                 logger.debug("Failed to delete session %s (non-critical)", session_id)
 
-    # Fallback template retry: if primary failed and fallback_template is set
+    # Fallback chain retry: accept either a single template name or an ordered
+    # list of names; walk them left-to-right with a hard safety stop.
     if config.fallback_template:
         from sandcastle.engine.agent_templates import VALID_AGENT_TEMPLATES
         from sandcastle.engine.dag import ManagedAgentConfig
-        if config.fallback_template in VALID_AGENT_TEMPLATES:
+        from copy import copy as _copy
+
+        if isinstance(config.fallback_template, str):
+            chain: list[str] = [config.fallback_template]
+        else:
+            chain = list(config.fallback_template)
+        # Hard cap to prevent runaway fallback walks
+        MAX_FALLBACKS = 5
+        chain = [c for c in chain if c][:MAX_FALLBACKS]
+
+        last_error = primary_error
+        last_template = ""
+        for fb_name in chain:
+            if fb_name not in VALID_AGENT_TEMPLATES:
+                last_error = f"Unknown fallback template: {fb_name}"
+                last_template = fb_name
+                continue
             logger.info(
                 "Step '%s' failed with template '%s', retrying with fallback '%s'",
-                step.id, config.agent_template or "(explicit)", config.fallback_template,
+                step.id, config.agent_template or "(explicit)", fb_name,
             )
-            from copy import copy
-            fallback_step = copy(step)
+            fallback_step = _copy(step)
             fallback_config = ManagedAgentConfig(
-                agent_template=config.fallback_template,
+                agent_template=fb_name,
                 message=config.message,
                 timeout=config.timeout,
                 model=config.model,
@@ -3618,6 +3701,9 @@ async def _execute_managed_agent_step(
                 network_access=config.network_access,
                 output_format=config.output_format,
                 shared_files=config.shared_files,
+                temperature=config.temperature,
+                max_tokens=config.max_tokens,
+                thinking_budget=config.thinking_budget,
                 fallback_template="",  # prevent infinite retry
             )
             fallback_step.managed_agent_config = fallback_config
@@ -3626,17 +3712,18 @@ async def _execute_managed_agent_step(
             )
             if fallback_result.status == "completed":
                 return fallback_result
-            # Both failed - report both errors
-            return StepResult(
-                step_id=step.id,
-                status="failed",
-                error=(
-                    f"Primary failed: {primary_error}; "
-                    f"Fallback ({config.fallback_template}) also failed: "
-                    f"{fallback_result.error}"
-                ),
-                duration_seconds=time.monotonic() - started_at,
-            )
+            last_error = fallback_result.error or "unknown error"
+            last_template = fb_name
+
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=(
+                f"Primary failed: {primary_error}; "
+                f"Fallback ({last_template}) also failed: {last_error}"
+            ),
+            duration_seconds=time.monotonic() - started_at,
+        )
 
     return StepResult(
         step_id=step.id,

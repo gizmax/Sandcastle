@@ -312,10 +312,16 @@ class ManagedAgentConfig:
     output_format: str = "text"     # "text" | "json" | "files" | "markdown"
     # Agent collaboration: mount file outputs from previous steps
     shared_files: list[str] | None = None  # step IDs whose file outputs to mount
-    # Retry with different template on failure
-    fallback_template: str = ""     # retry with this template if primary fails
+    # Retry with different template on failure - accepts a single template name
+    # or an ordered list walked left-to-right until one succeeds.
+    fallback_template: str | list[str] = ""
     # Runtime abstraction: "auto" | "anthropic" | "local"
     runtime: str = "auto"
+    # Sampling controls forwarded to the agent-create call. When None, the
+    # field is omitted from the request and Anthropic uses its default.
+    temperature: float | None = None
+    max_tokens: int | None = None
+    thinking_budget: int | None = None
 
 
 @dataclass
@@ -1107,6 +1113,10 @@ def _parse_managed_agent_config(data: dict | None) -> ManagedAgentConfig | None:
     shared = data.get("shared_files")
     if shared is not None and not isinstance(shared, list):
         shared = [str(shared)]
+    # fallback_template accepts a single template name (str) or a list of names
+    fb = data.get("fallback_template", "")
+    if isinstance(fb, list):
+        fb = [str(x) for x in fb]
     return ManagedAgentConfig(
         agent_id=data.get("agent_id", ""),
         environment_id=data.get("environment_id", ""),
@@ -1122,8 +1132,11 @@ def _parse_managed_agent_config(data: dict | None) -> ManagedAgentConfig | None:
         describe=data.get("describe", ""),
         output_format=data.get("output_format", "text"),
         shared_files=shared,
-        fallback_template=data.get("fallback_template", ""),
+        fallback_template=fb,
         runtime=data.get("runtime", "auto"),
+        temperature=data.get("temperature"),
+        max_tokens=data.get("max_tokens"),
+        thinking_budget=data.get("thinking_budget"),
     )
 
 
@@ -1549,12 +1562,18 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
                     )
             if cfg and cfg.fallback_template:
                 from sandcastle.engine.agent_templates import VALID_AGENT_TEMPLATES as _vat
-                if cfg.fallback_template not in _vat:
-                    errors.append(
-                        f"Managed-agent step '{step.id}' has unknown fallback_template "
-                        f"'{cfg.fallback_template}'. Valid templates: "
-                        f"{', '.join(sorted(_vat))}"
-                    )
+                # Accept either a single name (str) or an ordered list of names
+                if isinstance(cfg.fallback_template, str):
+                    _fb_chain: list[str] = [cfg.fallback_template]
+                else:
+                    _fb_chain = list(cfg.fallback_template)
+                for _fb in _fb_chain:
+                    if _fb and _fb not in _vat:
+                        errors.append(
+                            f"Managed-agent step '{step.id}' has unknown fallback_template "
+                            f"'{_fb}'. Valid templates: "
+                            f"{', '.join(sorted(_vat))}"
+                        )
             if cfg and cfg.output_format not in ("text", "json", "files", "markdown"):
                 errors.append(
                     f"Managed-agent step '{step.id}' has invalid output_format "
