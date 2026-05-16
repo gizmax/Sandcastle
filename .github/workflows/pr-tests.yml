@@ -1,0 +1,70 @@
+name: PR Tests
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "dashboard/**"
+      - "pyproject.toml"
+      - ".github/workflows/pr-tests.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: pr-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package + test extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,mcp,memory,otel,parse,report,docker,security]" pytest-timeout
+
+      - name: Run pytest
+        run: |
+          python -m pytest tests/ -q --tb=line --timeout=60
+
+  dashboard:
+    name: Dashboard build + tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Install
+        working-directory: dashboard
+        run: npm ci
+
+      - name: TypeScript typecheck
+        working-directory: dashboard
+        run: npx tsc -b --noEmit
+
+      - name: ESLint
+        working-directory: dashboard
+        run: npm run lint
+
+      - name: Vitest
+        working-directory: dashboard
+        run: npx vitest run
+
+      - name: Production build
+        working-directory: dashboard
+        run: npm run build
