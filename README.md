@@ -2,7 +2,7 @@
 
 **Describe what you want. Go home. Sandcastle ships it.** Production-ready workflow orchestrator for AI agents. 7 AI providers with auto-failover, 22 step types including Claude Managed Agents, 15 agent templates, 4 OCR engines, EU AI Act compliance, and a full-featured dashboard. Define workflows in YAML or let AI design them for you.
 
-[![PyPI](https://img.shields.io/badge/PyPI-v0.31.0-blue?style=flat-square)](https://pypi.org/project/sandcastle-ai/0.31.0/)
+[![PyPI](https://img.shields.io/badge/PyPI-v0.32.0-blue?style=flat-square)](https://pypi.org/project/sandcastle-ai/0.32.0/)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-15000%2B%20passing-brightgreen?style=flat-square)](https://github.com/gizmax/Sandcastle/actions)
@@ -10,14 +10,19 @@
 [![Website](https://img.shields.io/badge/Website-sandcastle--ai.eu-blue?style=flat-square)](https://sandcastle-ai.eu)
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Dashboard-F59E0B?style=flat-square)](https://gizmax.github.io/Sandcastle/)
 
-> **v0.31 - "Compliance & Connections"** Shipped May 14, 2026. Eighty days to the EU AI Act deadline. We built the answer.
+> **v0.32 - "Claude Agents Deep Integration"** Shipped May 16, 2026. Every Anthropic Managed Agents primitive surfaced, plus the things Anthropic doesn't ship.
 >
-> - **EU AI Act landing + 10 compliance workflow templates** mapped to Articles 9, 11, 12, 14, 25, 49, 50, 73 and Annex IV. DPIA, bias audit, incident report, vendor risk, model card, AI inventory, GDPR DSAR, human oversight log, transparency report, risk register. Bring the templates. Customize the prompts. Hand the auditor the audit trail.
-> - **MCP-first publishing.** `sandcastle publish-mcp` turns every workflow you've built into a first-class tool inside Claude Desktop, Cursor, Windsurf, or any MCP client.
-> - **Eval gates that block bad promotions.** Define a golden dataset, set a minimum score, ship with confidence. Eval-driven development is a query parameter, not a future plan.
-> - **A dashboard that doesn't crash.** Overview split into 20 focused components with per-section error boundaries.
-> - **Codex audit rounds 9 + 10** closed: 5 HIGH + 1 MEDIUM findings fixed - cross-tenant cache, memory, prompts, XSS, SSRF, A2A budgets.
-> - 15,014 tests passing. PyPI: `pip install sandcastle-ai==0.31.0`.
+> - **Memory Stores + Multiagent + Outcomes + Webhooks** wired into the YAML. One workflow can attach versioned memory at /mnt/memory/, spawn 20 parallel specialist agents, define outcomes the eval pipeline reads automatically, and emit lifecycle events to a webhook endpoint.
+> - **Skills Publisher.** `sandcastle publish-skills --upload` converts every workflow into a tar.gz SKILL.md and uploads to `/v1/skills`. Workflows now callable from every Anthropic Skills-aware client.
+> - **Trajectory Replay step type.** SHA-256 over a recorded tool-call sequence + diff against the candidate run. Because the audit trail is a hash chain, the replay is **cryptographically verifiable** - LangSmith and Braintrust don't ship this.
+> - **Agent SDK runtime** as `runtime: "agent-sdk"` alternative. In-process Claude agents for EU sovereignty / air-gapped / regulated teams.
+> - **Computer Use** integration (`computer_20251124` beta) with 8-item safety pre-flight + new `type: computer-use` step.
+> - **MCP Elicitation** (6th primitive, spec rev 2025-11-25). Workflows can ask the user for missing input mid-execution.
+> - **Live Agent Reasoning panel** in the dashboard - SSE stream of agent.thinking, agent.tool_use, agent.message events on the run detail page.
+> - Plus 5 Tier 1 wire fixes (`tools_enabled`, sampling params, `stream`, pricing table, fallback chain).
+> - 15,176 tests passing, 169 new. PyPI: `pip install sandcastle-ai==0.32.0`.
+>
+> Previous: **v0.31 - "Compliance & Connections"** (May 14, 2026): EU AI Act landing + 10 compliance templates, MCP-first publishing, eval gates, dashboard error boundaries, Codex audit rounds 9+10.
 >
 
 <p align="center">
