@@ -200,9 +200,11 @@ class TestMcpServerRegistersWorkflows:
         from sandcastle.mcp_server import _manifest_payload
 
         payload = _manifest_payload()
+        # MCP spec rev 2025-11-25 added Elicitation as the 6th primitive.
         assert set(payload["primitives"]) == {
-            "tools", "resources", "prompts", "sampling", "roots",
+            "tools", "resources", "prompts", "sampling", "roots", "elicitation",
         }
+        assert payload.get("spec_revision") == "2025-11-25"
         tools = payload["tools"]
         assert any(t["workflow"] == "mcp-publish-demo" for t in tools)
 

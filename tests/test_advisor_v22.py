@@ -232,7 +232,7 @@ class TestScrubSecretsPreservesNormal:
         assert _scrub_secrets("") == ""
 
     def test_model_names_preserved(self):
-        text = "Using model claude-sonnet-4-20250514 with max_tokens=4096"
+        text = "Using model claude-sonnet-4-6 with max_tokens=4096"
         assert _scrub_secrets(text) == text
 
     def test_url_without_secrets(self):
@@ -253,7 +253,7 @@ class TestGetAdvisorConfig:
         cfg = _get_advisor_config()
         assert cfg["api_key_env"] == "ANTHROPIC_API_KEY"
         assert "anthropic" in cfg["api_url"]
-        assert cfg["model"] == "claude-sonnet-4-20250514"
+        assert cfg["model"] == "claude-sonnet-4-6"
 
     @patch.dict(os.environ, {"SANDCASTLE_ADVISOR_PROVIDER": "anthropic"}, clear=True)
     def test_explicit_anthropic(self):
@@ -327,12 +327,12 @@ class TestGetAdvisorConfigModelOverride:
     @patch.dict(os.environ, {"SANDCASTLE_ADVISOR_MODEL": ""}, clear=True)
     def test_empty_model_override_uses_default(self):
         cfg = _get_advisor_config()
-        assert cfg["model"] == "claude-sonnet-4-20250514"
+        assert cfg["model"] == "claude-sonnet-4-6"
 
     @patch.dict(os.environ, {}, clear=True)
     def test_no_model_override_uses_default(self):
         cfg = _get_advisor_config()
-        assert cfg["model"] == "claude-sonnet-4-20250514"
+        assert cfg["model"] == "claude-sonnet-4-6"
 
 
 # ===================================================================
@@ -376,7 +376,7 @@ class TestBuildRequestBody:
     @patch.dict(os.environ, {}, clear=True)
     def test_anthropic_format_has_system_top_level(self):
         body = _build_request_body(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             system="You are a helper.",
             messages=[{"role": "user", "content": "Hello"}],
             max_tokens=1024,
@@ -384,7 +384,7 @@ class TestBuildRequestBody:
         # Anthropic format: system is a top-level field
         assert "system" in body
         assert body["system"] == "You are a helper."
-        assert body["model"] == "claude-sonnet-4-20250514"
+        assert body["model"] == "claude-sonnet-4-6"
         assert body["max_tokens"] == 1024
         assert body["messages"] == [{"role": "user", "content": "Hello"}]
         # System should NOT be in messages

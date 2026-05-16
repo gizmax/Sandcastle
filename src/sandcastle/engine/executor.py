@@ -2642,9 +2642,9 @@ async def _execute_llm_step(
 
     # Map short aliases to real Anthropic model IDs for direct API calls
     _CLAUDE_MODEL_ALIASES = {
-        "sonnet": "claude-sonnet-4-20250514",
-        "haiku": "claude-haiku-4-5-20251001",
-        "opus": "claude-opus-4-20250115",
+        "sonnet": "claude-sonnet-4-6",
+        "haiku": "claude-haiku-4-5",
+        "opus": "claude-opus-4-7",
     }
 
     try:
@@ -3939,9 +3939,9 @@ async def _execute_report_step(
     api_key = get_api_key(model_info)
 
     _CLAUDE_MODEL_ALIASES = {
-        "sonnet": "claude-sonnet-4-20250514",
-        "haiku": "claude-haiku-4-5-20251001",
-        "opus": "claude-opus-4-20250115",
+        "sonnet": "claude-sonnet-4-6",
+        "haiku": "claude-haiku-4-5",
+        "opus": "claude-opus-4-7",
     }
 
     try:

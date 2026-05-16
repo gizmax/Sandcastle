@@ -27,7 +27,7 @@ async def computer_use_loop(
     action_fn: Callable[..., Awaitable[dict]],
     api_key: str,
     max_iterations: int = 30,
-    model: str = "claude-sonnet-4-20250514",
+    model: str = "claude-sonnet-4-6",
     wait_after_action: float = 0.5,
 ) -> dict[str, Any]:
     """Run a computer use automation loop.

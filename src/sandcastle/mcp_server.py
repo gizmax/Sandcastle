@@ -10,10 +10,12 @@ Configuration via environment variables:
     SANDCASTLE_URL      - API server URL (default: http://localhost:8080)
     SANDCASTLE_API_KEY  - API key for authentication
 
-MCP-first publishing (v0.31 prep)
----------------------------------
-This module covers all 5 MCP primitives so Sandcastle is a first-class
-provider for Claude Desktop, Cursor, Windsurf, and any MCP client:
+MCP-first publishing (v0.31 prep, expanded in v0.32)
+----------------------------------------------------
+This module implements all 6 MCP primitives so Sandcastle is a
+first-class provider for Claude Desktop, Cursor, Windsurf, and any MCP
+client. The 6th primitive (Elicitation) was added in MCP spec revision
+2025-11-25; before that Sandcastle covered the original 5.
 
   - tools         - run/cancel/list workflows, plus 1 tool per published workflow
   - resources     - sandcastle://workflows, sandcastle://schedules,
@@ -21,6 +23,9 @@ provider for Claude Desktop, Cursor, Windsurf, and any MCP client:
   - prompts       - workflow_help (composable prompt for client UIs)
   - sampling      - request_llm_completion (uses ctx.session.create_message)
   - roots         - sandcastle://roots exposes workflow source dirs
+  - elicitation   - request_workflow_input asks the client for missing
+                    input fields when a workflow needs them mid-run
+                    (uses ctx.session.elicit per MCP rev 2025-11-25)
 
 Discovery: a .well-known/mcp.json manifest is exposed when the server is
 run over HTTP (streamable-http / sse). The stdio transport answers the same
@@ -412,7 +417,8 @@ def _manifest_payload() -> dict[str, Any]:
         "version": __version__,
         "description": "Sandcastle workflow orchestrator exposed via MCP.",
         "spec_version": "2026-03-26",
-        "primitives": ["tools", "resources", "prompts", "sampling", "roots"],
+        "primitives": ["tools", "resources", "prompts", "sampling", "roots", "elicitation"],
+        "spec_revision": "2025-11-25",
         "transport": ["stdio", "streamable-http"],
         "tools": tools,
         "endpoints": {
@@ -750,6 +756,10 @@ def create_mcp_server() -> FastMCP:
     # -------------------------------------------------------------------
     # Sampling (the 4th MCP primitive)
     # -------------------------------------------------------------------
+    #
+    # The 5th and 6th primitives (Roots + Elicitation) come right after.
+    # Elicitation was added in MCP spec revision 2025-11-25 so its block
+    # appears later in this file under "Elicitation (6th primitive)".
 
     @mcp.tool()
     async def request_llm_completion(
@@ -798,6 +808,93 @@ def create_mcp_server() -> FastMCP:
                 "stop_reason": getattr(response, "stopReason", None)
                 or getattr(response, "stop_reason", None),
                 "text": text,
+            })
+        except Exception as exc:
+            return _error_result(exc)
+
+    # -------------------------------------------------------------------
+    # Elicitation (the 6th MCP primitive, MCP spec rev 2025-11-25)
+    # -------------------------------------------------------------------
+
+    @mcp.tool()
+    async def request_workflow_input(
+        prompt: str,
+        field_name: str,
+        field_type: str = "string",
+        required: bool = True,
+        ctx: Context | None = None,
+    ) -> str:
+        """Ask the MCP client to elicit a missing input value from the user.
+
+        Uses the MCP elicitation primitive (elicitation/create) introduced
+        in spec revision 2025-11-25. A Sandcastle workflow that hits a
+        gap during execution (a missing API key, an ambiguous target
+        company, a yes/no approval) can call this to surface a typed
+        prompt in the client UI (Claude Desktop, Cursor, Windsurf) and
+        receive the user's response without restarting the workflow.
+
+        Args:
+            prompt: Question shown to the user.
+            field_name: Field key the answer will be bound to.
+            field_type: JSON Schema type: string | number | boolean.
+            required: Whether the field must be answered (clients that
+                support cancellation honour this).
+        """
+        if not prompt or not prompt.strip():
+            return _error_result(ValueError("prompt must not be empty"))
+        if len(prompt) > _MAX_PARAM_LENGTH:
+            return _error_result(
+                ValueError(f"prompt exceeds {_MAX_PARAM_LENGTH} characters"),
+            )
+        if not field_name or not _SAFE_ID_RE.match(field_name):
+            return _error_result(
+                ValueError("field_name must be alphanumeric, dot, hyphen, underscore"),
+            )
+        if field_type not in ("string", "number", "integer", "boolean"):
+            return _error_result(
+                ValueError("field_type must be string | number | integer | boolean"),
+            )
+        if ctx is None:
+            return _error_result(
+                RuntimeError("elicitation requires an active MCP session"),
+            )
+
+        schema: dict[str, Any] = {
+            "type": "object",
+            "properties": {
+                field_name: {"type": field_type, "description": prompt},
+            },
+        }
+        if required:
+            schema["required"] = [field_name]
+
+        try:
+            # Lazy import - mcp.types receives the elicitation types
+            # in mcp>=1.23. Older clients will return an error which we
+            # surface to the caller.
+            session = ctx.session
+            elicit_fn = getattr(session, "elicit", None) or getattr(
+                session, "create_elicitation", None,
+            )
+            if elicit_fn is None:
+                return _error_result(
+                    RuntimeError(
+                        "Connected MCP client does not implement elicitation "
+                        "(spec rev 2025-11-25 required)"
+                    ),
+                )
+            response = await elicit_fn(
+                message=prompt,
+                requestedSchema=schema,
+            )
+            action = getattr(response, "action", None) or "accept"
+            content = getattr(response, "content", None) or {}
+            value = content.get(field_name) if isinstance(content, dict) else None
+            return _json_result({
+                "action": action,
+                "field_name": field_name,
+                "value": value,
+                "raw": str(content) if value is None else None,
             })
         except Exception as exc:
             return _error_result(exc)

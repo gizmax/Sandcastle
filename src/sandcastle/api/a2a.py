@@ -128,21 +128,39 @@ async def _resolve_tenant_budget(tenant_id: str | None) -> float | None:
 
 
 def _build_agent_card(base_url: str) -> dict[str, Any]:
-    """Build the A2A Agent Card payload."""
+    """Build the A2A Agent Card payload (A2A v1.0.0 spec).
+
+    Spec: https://github.com/a2aproject - the canonical Linux Foundation
+    A2A protocol v1.0.0. This shape is OpenAPI-aligned: securitySchemes +
+    provider + protocolVersion are required for v1.0 compliance.
+    """
+    auth_required = bool(getattr(settings, "auth_required", False))
     return {
+        "protocolVersion": "1.0.0",
         "name": "Sandcastle",
         "description": "AI Agent Workflow Orchestrator",
         "url": base_url,
         "version": __version__,
+        "provider": {
+            "organization": "Sandcastle",
+            "url": "https://sandcastle-ai.eu",
+        },
+        "documentationUrl": "https://github.com/gizmax/Sandcastle/blob/main/README.md",
         "capabilities": {
             "streaming": True,
             "pushNotifications": False,
+            "stateTransitionHistory": True,
         },
         "skills": [
             {
                 "id": "run-workflow",
                 "name": "Run Workflow",
                 "description": "Execute a named workflow with optional input parameters",
+                "tags": ["workflow", "orchestration", "ai-agents"],
+                "examples": [
+                    {"text": "Run the deep-research workflow with topic=Acme Corp"},
+                    {"text": "Execute lead-enrichment for example@acme.com"},
+                ],
                 "inputModes": ["text/plain", "application/json"],
                 "outputModes": ["application/json"],
             },
@@ -150,16 +168,32 @@ def _build_agent_card(base_url: str) -> dict[str, Any]:
                 "id": "list-workflows",
                 "name": "List Workflows",
                 "description": "List all available workflow templates",
+                "tags": ["discovery", "metadata"],
+                "examples": [{"text": "What workflows can I run?"}],
                 "inputModes": ["text/plain"],
                 "outputModes": ["application/json"],
             },
         ],
         "defaultInputModes": ["text/plain", "application/json"],
         "defaultOutputModes": ["application/json"],
-        "authentication": {
-            "schemes": ["apiKey"],
-            "credentials": None if not settings.auth_required else "required",
+        # A2A v1.0 uses OpenAPI-style securitySchemes (replaces v0.x
+        # `authentication` block). Sandcastle ships an apiKey scheme by
+        # default; when settings.auth_required is False the API is open
+        # in local mode but the scheme is still declared for clients.
+        "securitySchemes": {
+            "apiKey": {
+                "type": "apiKey",
+                "in": "header",
+                "name": "X-API-Key",
+                "description": (
+                    "Bearer-equivalent API key. Required in production "
+                    "(auth_required=True); optional in local mode."
+                ),
+            },
         },
+        "security": (
+            [{"apiKey": []}] if auth_required else []
+        ),
     }
 
 

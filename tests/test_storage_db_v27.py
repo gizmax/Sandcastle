@@ -445,14 +445,14 @@ class TestRunStepModel:
             status=StepStatus.COMPLETED,
             cost_usd=0.0042,
             duration_seconds=1.5,
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
         )
         db_session.add(step)
         await db_session.commit()
         await db_session.refresh(step)
         assert step.run_id == run.id
         assert step.cost_usd == pytest.approx(0.0042)
-        assert step.model == "claude-sonnet-4-20250514"
+        assert step.model == "claude-sonnet-4-6"
 
     @pytest.mark.asyncio
     async def test_step_default_status_pending(self, db_session: AsyncSession):

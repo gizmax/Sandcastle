@@ -3818,7 +3818,7 @@ async def advisor_status() -> ApiResponse:
         current_model = "llama3.2"
     else:
         current_provider = "anthropic"
-        current_model = "claude-sonnet-4-20250514"
+        current_model = "claude-sonnet-4-6"
 
     data_residency: str | None = None
     if current_provider == "mistral":
@@ -3985,11 +3985,11 @@ async def advisor_cost_estimate() -> ApiResponse:
     elif openai_configured:
         current = CostEstimateEntry(provider="openai", model="gpt-4o", estimated_cost=0.030)
     else:
-        current = CostEstimateEntry(provider="anthropic", model="claude-sonnet-4-20250514", estimated_cost=0.045)
+        current = CostEstimateEntry(provider="anthropic", model="claude-sonnet-4-6", estimated_cost=0.045)
 
     alternatives: list[CostEstimateEntry] = []
     if current.provider != "anthropic" and anthropic_configured:
-        alternatives.append(CostEstimateEntry(provider="anthropic", model="claude-sonnet-4-20250514", estimated_cost=0.045))
+        alternatives.append(CostEstimateEntry(provider="anthropic", model="claude-sonnet-4-6", estimated_cost=0.045))
     if current.provider != "mistral":
         alternatives.append(CostEstimateEntry(provider="mistral", model="mistral-large", estimated_cost=0.008))
     if current.provider != "openai" and openai_configured:

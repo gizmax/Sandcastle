@@ -2115,7 +2115,7 @@ steps:
 name: blog-to-social
 description: Transform a blog post into platform-specific social media content
 
-default_model: claude-sonnet-4-20250514
+default_model: claude-sonnet-4-6
 default_max_turns: 5
 default_timeout: 180
 
@@ -2126,7 +2126,7 @@ steps:
       target audience, and core message. Identify the most shareable insights
       and any statistics or quotes worth highlighting.
       Blog post: {input.blog_post}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 5
 
   - id: linkedin-post
@@ -2137,7 +2137,7 @@ steps:
       hook in the first line, add relevant line breaks for readability, and
       end with a call-to-action. Keep it under 1300 characters.
       Analysis: {steps.analyze-post.output}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 3
 
   - id: twitter-thread
@@ -2148,7 +2148,7 @@ steps:
       question. Each tweet must be under 280 characters. Number them 1/5
       through 5/5 and make the last tweet link back to the original post.
       Analysis: {steps.analyze-post.output}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 3
 
   - id: instagram-caption
@@ -2182,7 +2182,7 @@ steps:
 name: seo-content-writer
 description: Research keywords and create SEO-optimized article with meta tags
 
-default_model: claude-sonnet-4-20250514
+default_model: claude-sonnet-4-6
 default_max_turns: 10
 default_timeout: 300
 
@@ -2194,7 +2194,7 @@ steps:
       For each keyword, describe the likely search intent (informational,
       transactional, navigational) and estimated competition level.
       Topic: {input.topic}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 5
 
   - id: outline
@@ -2206,7 +2206,7 @@ steps:
       place primary and secondary keywords. Plan for approximately 1500-2000
       words total.
       Keywords: {steps.keyword-research.output}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 5
 
   - id: write-article
@@ -2218,7 +2218,7 @@ steps:
       in an authoritative yet accessible tone. Add a strong introduction
       and a conclusion with a clear call-to-action.
       Outline: {steps.outline.output}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 10
 
   - id: meta-tags
@@ -2239,7 +2239,7 @@ steps:
 name: email-campaign-generator
 description: Generate email campaign with subject line variants and A/B copy
 
-default_model: claude-sonnet-4-20250514
+default_model: claude-sonnet-4-6
 default_max_turns: 5
 default_timeout: 180
 
@@ -2251,7 +2251,7 @@ steps:
       action you want them to take. Define the tone of voice and any brand
       guidelines to follow.
       Campaign brief: {input.campaign_brief}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 5
 
   - id: subject-lines
@@ -2262,7 +2262,7 @@ steps:
       personalization, benefit-driven, social proof). Explain the reasoning
       behind each and predict which audience segment it would resonate with most.
       Audience brief: {steps.audience-brief.output}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 3
 
   - id: body-variant-a
@@ -2273,7 +2273,7 @@ steps:
       include one testimonial placeholder, and end with a clear CTA button
       text. Keep the email concise - under 200 words for the body copy.
       Audience brief: {steps.audience-brief.output}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 3
 
   - id: body-variant-b
@@ -2284,7 +2284,7 @@ steps:
       then transition to the product as the solution. End with a soft CTA
       that feels like a natural next step. Keep it under 250 words.
       Audience brief: {steps.audience-brief.output}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 3
 
   - id: review
@@ -2307,7 +2307,7 @@ steps:
 name: competitor-analysis
 description: Analyze competitor positioning, strengths, weaknesses, and opportunities
 
-default_model: claude-sonnet-4-20250514
+default_model: claude-sonnet-4-6
 default_max_turns: 10
 default_timeout: 300
 
@@ -2319,7 +2319,7 @@ steps:
       target market segments, and overall market share. Identify their
       marketing channels and recent strategic moves.
       Competitor: {input.competitor}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 10
 
   - id: analyze-strengths
@@ -2330,7 +2330,7 @@ steps:
       perception, customer experience, market positioning, and technical
       capabilities. Rank each strength by impact on their market position.
       Research: {steps.gather-info.output}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 5
 
   - id: analyze-weaknesses
@@ -2342,7 +2342,7 @@ steps:
       strategic blind spots. Highlight areas that represent opportunities
       for differentiation.
       Research: {steps.gather-info.output}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 5
 
   - id: swot-report
@@ -2355,7 +2355,7 @@ steps:
       for competitive positioning.
       Strengths: {steps.analyze-strengths.output}
       Weaknesses: {steps.analyze-weaknesses.output}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 10
 `,
   "ad-copy-generator": `# name: Ad Copy Generator
@@ -2365,7 +2365,7 @@ steps:
 name: ad-copy-generator
 description: Generate ad copy variants for Google Ads and Meta Ads campaigns
 
-default_model: claude-sonnet-4-20250514
+default_model: claude-sonnet-4-6
 default_max_turns: 5
 default_timeout: 180
 
@@ -2377,7 +2377,7 @@ steps:
       differentiators. Identify the primary emotional triggers and rational
       arguments that would drive conversions.
       Product brief: {input.product_brief}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 5
 
   - id: google-ads
@@ -2389,7 +2389,7 @@ steps:
       different angles for each variant - feature-focused, benefit-focused,
       urgency, social proof, and competitive comparison.
       Product analysis: {steps.analyze-product.output}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 5
 
   - id: meta-ads
@@ -2402,7 +2402,7 @@ steps:
       variants - storytelling, testimonial-style, direct response, question
       hook, and listicle format.
       Product analysis: {steps.analyze-product.output}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 5
 
   - id: compile-report
@@ -2436,7 +2436,7 @@ steps:
       and any known funding rounds or financial milestones.
       Company: {input.company_name}
       Domain: {input.company_domain}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 10
 
   - id: research-contacts
@@ -2448,7 +2448,7 @@ steps:
       professional profile insights.
       Company info: {steps.research-company.output}
       Target persona: {input.target_persona}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 8
 
   - id: score-lead
@@ -2473,7 +2473,7 @@ steps:
       Company info: {steps.research-company.output}
       Key contacts: {steps.research-contacts.output}
       Our value prop: {input.value_proposition}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 8
 
   - id: compile-profile
@@ -2486,7 +2486,7 @@ steps:
       Contacts: {steps.research-contacts.output}
       Lead score: {steps.score-lead.output}
       Outreach angles: {steps.outreach-angles.output}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 10
 `,
   "proposal-generator": `# name: Proposal Generator
@@ -2509,7 +2509,7 @@ steps:
       ambiguous or missing information that should be clarified.
       Meeting notes: {input.meeting_notes}
       Client name: {input.client_name}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 8
 
   - id: match-solutions
@@ -2521,7 +2521,7 @@ steps:
       where custom work or integrations may be needed.
       Client requirements: {steps.extract-requirements.output}
       Product catalog: {input.product_info}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 10
 
   - id: write-proposal
@@ -2534,7 +2534,7 @@ steps:
       Solution mapping: {steps.match-solutions.output}
       Client name: {input.client_name}
       Pricing tier: {input.pricing_tier}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 10
 
   - id: review-gate
@@ -2568,7 +2568,7 @@ steps:
       most important outcomes clearly.
       Transcript: {input.transcript}
       Meeting title: {input.meeting_title}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 8
 
   - id: action-items
@@ -2593,7 +2593,7 @@ steps:
       Meeting summary: {steps.summarize.output}
       Action items: {steps.action-items.output}
       Sender name: {input.sender_name}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 8
 `,
   "ticket-classifier": `# name: Ticket Classifier
@@ -2655,7 +2655,7 @@ steps:
       Original ticket: {input.body}
       Classification: {steps.classify.output}
       Priority: {steps.prioritize.output}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 8
 
   - id: suggest-routing
@@ -2704,7 +2704,7 @@ steps:
       themes (e.g. bugs, missing features, slow performance). Group reviews
       by sentiment tier and highlight representative quotes.
       Parsed reviews: {steps.parse-reviews.output}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 10
 
   - id: trend-detection
@@ -2716,7 +2716,7 @@ steps:
       over time. Flag urgent issues that appear in multiple negative reviews
       and highlight opportunities from positive feedback patterns.
       Sentiment results: {steps.sentiment-analysis.output}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 8
 
   - id: insights-report
@@ -2729,7 +2729,7 @@ steps:
       recommendations for the product and support teams.
       Trend analysis: {steps.trend-detection.output}
       Product name: {input.product_name}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 10
 `,
   "job-description-generator": `# name: Job Description Generator
@@ -2750,7 +2750,7 @@ steps:
       required and preferred skills, seniority level, team context, and reporting structure.
       Identify any implicit requirements and suggest a clear job title if not provided.
       Role brief: {input.role_brief}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 5
 
   - id: write-jd
@@ -2760,7 +2760,7 @@ steps:
       analysis. Include sections for About the Role, Responsibilities, Requirements (must-have
       vs nice-to-have), Benefits, and Growth Opportunities. Avoid gendered pronouns and
       unnecessary jargon. Role analysis: {steps.analyze-role.output}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 10
 
   - id: bias-check
@@ -2770,7 +2770,7 @@ steps:
       age-coded terms, unnecessary degree requirements, culturally exclusive phrases, and
       inflated experience requirements. Provide a corrected version with all issues fixed
       and a summary of changes made. Job description: {steps.write-jd.output}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 5
 
   - id: interview-plan
@@ -2780,7 +2780,7 @@ steps:
       screening questions, technical assessment criteria, behavioral interview questions
       mapped to key competencies, and a scoring rubric. Ensure questions are legal and
       non-discriminatory. Role analysis: {steps.analyze-role.output}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 5
 `,
   "resume-screener": `# name: Resume Screener
@@ -2801,7 +2801,7 @@ steps:
       experience (company, role, duration, achievements), technical and soft skills,
       education and certifications, notable projects, and any quantified accomplishments.
       Resume: {input.resume_text}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 5
     output_schema:
       type: object
@@ -2849,7 +2849,7 @@ steps:
       identify specific gaps, and highlight standout qualifications that exceed requirements.
       Parsed resume: {steps.parse-resume.output}
       Job description: {input.job_description}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 5
 
   - id: interview-questions
@@ -2860,7 +2860,7 @@ steps:
       career motivations, and assess cultural fit. Prioritize questions by importance.
       Parsed resume: {steps.parse-resume.output}
       Match analysis: {steps.match-analysis.output}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 5
 
   - id: summary-card
@@ -2892,7 +2892,7 @@ steps:
       effective and termination dates, core obligations for each party, payment terms and
       schedule, liability caps, indemnification clauses, intellectual property provisions,
       termination conditions, and governing law. Contract: {input.contract_text}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 10
     output_schema:
       type: object
@@ -2943,7 +2943,7 @@ steps:
       majeure, dispute resolution), auto-renewal traps, broad non-compete provisions,
       and any terms that deviate from market standards. Rate each risk as low, medium,
       or high severity. Extracted terms: {steps.extract-terms.output}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 10
 
   - id: compliance-check
@@ -2954,7 +2954,7 @@ steps:
       insurance and bonding clauses, accessibility and non-discrimination language,
       and record-keeping obligations. Flag any missing or insufficient provisions.
       Extracted terms: {steps.extract-terms.output}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 5
 
   - id: plain-summary
@@ -2967,7 +2967,7 @@ steps:
       Extracted terms: {steps.extract-terms.output}
       Risk analysis: {steps.risk-analysis.output}
       Compliance check: {steps.compliance-check.output}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 10
 `,
   "release-notes-generator": `# name: Release Notes Generator
@@ -2989,7 +2989,7 @@ steps:
       existing features), breaking changes (backwards-incompatible modifications), or
       internal (refactoring, dependencies, CI). For each change, extract a short summary,
       affected components, and severity. Changes: {input.changelog}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 5
 
   - id: user-release-notes
@@ -3000,7 +3000,7 @@ steps:
       helpful, clearly call out breaking changes with migration steps, and close with a
       thank-you note. Format with markdown headings and bullet points.
       Categorized changes: {steps.parse-changes.output}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 10
 
   - id: internal-changelog
@@ -3011,7 +3011,7 @@ steps:
       changes with code examples, infrastructure and dependency updates, performance
       impact notes, and known issues or follow-up tasks.
       Categorized changes: {steps.parse-changes.output}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 10
 
   - id: social-announcement
@@ -3042,7 +3042,7 @@ steps:
       letter, etc.) and structure. Identify all extractable fields, their expected data
       types, and any repeating sections or tables. Note the document quality and any
       areas that may be difficult to extract accurately. Document: {input.document_text}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 5
 
   - id: extract-data
@@ -3054,7 +3054,7 @@ steps:
       by marking them as null with an explanation.
       Document analysis: {steps.analyze-document.output}
       Original document: {input.document_text}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 10
     output_schema:
       type: object
@@ -3100,7 +3100,7 @@ steps:
       cross-reference related fields for logical consistency (e.g., line items sum to total),
       and flag any values that appear anomalous or potentially incorrect.
       Extracted data: {steps.extract-data.output}
-    model: claude-sonnet-4-20250514
+    model: claude-sonnet-4-6
     max_turns: 5
 
   - id: format-output
@@ -5947,7 +5947,7 @@ const MOCK_COMPLIANCE_STATUS = {
 
 const MOCK_AUDIT_EVENTS = [
   { id: "aud-001", event_type: "workflow.started", actor: "api-key:sc_live_abc1", run_id: "a1b2c3d4-1111-4000-8000-000000000001", workflow_name: "lead-enrichment", risk_level: "minimal", metadata: { input_hash: "sha256:a3f9...", pii_detected: false }, timestamp: h(0.5), hash: "sha256:e3b0c44298fc1c149afb" },
-  { id: "aud-002", event_type: "step.executed", actor: "system", run_id: "a1b2c3d4-1111-4000-8000-000000000001", workflow_name: "lead-enrichment", risk_level: "minimal", metadata: { step_id: "scrape", model: "claude-sonnet-4-20250514", cost_usd: 0.52 }, timestamp: h(0.49), hash: "sha256:9f86d081884c7d659a2f" },
+  { id: "aud-002", event_type: "step.executed", actor: "system", run_id: "a1b2c3d4-1111-4000-8000-000000000001", workflow_name: "lead-enrichment", risk_level: "minimal", metadata: { step_id: "scrape", model: "claude-sonnet-4-6", cost_usd: 0.52 }, timestamp: h(0.49), hash: "sha256:9f86d081884c7d659a2f" },
   { id: "aud-003", event_type: "workflow.completed", actor: "system", run_id: "a1b2c3d4-1111-4000-8000-000000000001", workflow_name: "lead-enrichment", risk_level: "minimal", metadata: { total_cost_usd: 1.84, duration_seconds: 39.2 }, timestamp: h(0.45), hash: "sha256:4e07408562bedb8b60ce" },
   { id: "aud-004", event_type: "privacy.pii_redacted", actor: "privacy-router", run_id: "a1b2c3d4-2222-4000-8000-000000000002", workflow_name: "competitor-monitor", risk_level: "limited", metadata: { patterns_matched: ["email", "phone"], redacted_count: 3 }, timestamp: h(0.15), hash: "sha256:2c624232cdd221771294" },
   { id: "aud-005", event_type: "workflow.started", actor: "api-key:sc_live_def2", run_id: "a1b2c3d4-2222-4000-8000-000000000002", workflow_name: "competitor-monitor", risk_level: "limited", metadata: { input_hash: "sha256:b7c2...", pii_detected: true }, timestamp: h(0.1), hash: "sha256:19ca14e7ea6328a42e0e" },
@@ -5982,8 +5982,8 @@ const MOCK_TRANSPARENCY_REPORT = {
     pii_redacted: false,
   },
   model_usage: [
-    { step_id: "scrape", model: "claude-sonnet-4-20250514", provider: "Anthropic", purpose: "Web content extraction", cost_usd: 0.52 },
-    { step_id: "enrich", model: "claude-sonnet-4-20250514", provider: "Anthropic", purpose: "Data enrichment and structuring", cost_usd: 0.89 },
+    { step_id: "scrape", model: "claude-sonnet-4-6", provider: "Anthropic", purpose: "Web content extraction", cost_usd: 0.52 },
+    { step_id: "enrich", model: "claude-sonnet-4-6", provider: "Anthropic", purpose: "Data enrichment and structuring", cost_usd: 0.89 },
     { step_id: "score", model: "claude-haiku-4-20250514", provider: "Anthropic", purpose: "Lead scoring classification", cost_usd: 0.43 },
   ],
   performance_metrics: {
@@ -7577,7 +7577,7 @@ const routes: MockRoute[] = [
     handler: () => ({
       current: { provider: "mistral", model: "mistral-large", estimated_cost: 0.008 },
       alternatives: [
-        { provider: "anthropic", model: "claude-sonnet-4-20250514", estimated_cost: 0.045 },
+        { provider: "anthropic", model: "claude-sonnet-4-6", estimated_cost: 0.045 },
         { provider: "openai", model: "gpt-4o", estimated_cost: 0.030 },
         { provider: "ollama", model: "llama3.2", estimated_cost: 0.000 },
       ],

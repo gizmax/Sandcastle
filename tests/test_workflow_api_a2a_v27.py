@@ -592,12 +592,14 @@ class TestA2AAgentCard:
         assert "list-workflows" in skill_ids
 
     def test_agent_card_contains_authentication_info(self):
-        """Agent card includes authentication scheme details."""
+        """Agent card declares its security schemes (A2A v1.0)."""
         resp = client.get("/.well-known/agent.json")
         card = resp.json()
-        assert "authentication" in card
-        assert "schemes" in card["authentication"]
-        assert "apiKey" in card["authentication"]["schemes"]
+        # A2A v1.0 uses OpenAPI-style securitySchemes; the legacy
+        # `authentication` block was removed in the v1.0 spec.
+        assert "securitySchemes" in card
+        assert "apiKey" in card["securitySchemes"]
+        assert card["securitySchemes"]["apiKey"]["type"] == "apiKey"
 
     def test_agent_card_contains_io_modes(self):
         """Agent card specifies default input and output modes."""
