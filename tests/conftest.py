@@ -13,16 +13,57 @@ os.environ["DATABASE_URL"] = "sqlite+aiosqlite://"
 import pytest  # noqa: E402
 
 
+def _run_async(coro):
+    """Run a coroutine on a fresh event loop.
+
+    Used by autouse session/module fixtures that run outside any
+    pytest-asyncio test - they must not borrow the asyncio.get_event_loop()
+    that pytest-asyncio uses for individual tests.
+    """
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _create_test_tables():
     """Create all DB tables in the in-memory SQLite database."""
     from sandcastle.models.db import Base, engine
 
-    loop = asyncio.new_event_loop()
-
     async def _create():
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 
-    loop.run_until_complete(_create())
-    loop.close()
+    _run_async(_create())
+
+
+@pytest.fixture(autouse=True)
+def _reset_module_globals():
+    """Clear in-memory module caches between tests.
+
+    Several routes.py module-level dicts (_hub_cache, _batch_store,
+    _stats_cache) plus the rate-limiter window store accumulate state
+    that bleeds across unrelated tests. Cheap to reset (microseconds),
+    eliminates a whole class of order-dependent failures.
+    """
+    try:
+        from sandcastle.api import rate_limit as _rl
+        from sandcastle.api import routes as _routes
+
+        for name in ("_hub_cache", "_batch_store", "_stats_cache"):
+            cache = getattr(_routes, name, None)
+            if isinstance(cache, dict):
+                cache.clear()
+
+        backend = getattr(_rl.execution_limiter, "_backend", None)
+        windows = getattr(backend, "_windows", None)
+        if hasattr(windows, "clear"):
+            windows.clear()
+        if hasattr(backend, "_call_count"):
+            backend._call_count = 0
+    except Exception:
+        # Never let cleanup itself break tests
+        pass
+    yield

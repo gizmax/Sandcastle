@@ -875,6 +875,23 @@ def _build_engine_url() -> str:
     return f"sqlite+aiosqlite:///{data_path}/sandcastle.db"
 
 
+def _is_in_memory_sqlite(url: str) -> bool:
+    """Detect SQLite URLs that resolve to an in-memory database.
+
+    Three shapes count as in-memory:
+    - ``sqlite+aiosqlite://``      (no path - used by the test suite via
+      DATABASE_URL env var)
+    - ``sqlite+aiosqlite:///:memory:``
+    - ``sqlite:///:memory:``
+    """
+    if not url.startswith("sqlite"):
+        return False
+    if ":memory:" in url:
+        return True
+    # "sqlite+aiosqlite://" with nothing after the scheme separator
+    return url.rstrip("/").endswith(":")
+
+
 def _build_engine_kwargs(url: str | None = None) -> dict:
     """Build engine kwargs based on database type."""
     if url is None:
@@ -882,6 +899,15 @@ def _build_engine_kwargs(url: str | None = None) -> dict:
     kwargs: dict = {"echo": False}
     if url.startswith("sqlite"):
         kwargs["connect_args"] = {"check_same_thread": False, "timeout": 30}
+        if _is_in_memory_sqlite(url):
+            # In-memory SQLite needs StaticPool: every session must share
+            # the same connection, otherwise each new aiosqlite connection
+            # sees an empty in-memory database. Without this, the test
+            # suite hits "no such table" / "data not visible" race
+            # conditions that masquerade as test pollution.
+            from sqlalchemy.pool import StaticPool
+
+            kwargs["poolclass"] = StaticPool
     else:
         # PostgreSQL pool tuning for production multi-tenant workloads
         kwargs["pool_size"] = 20
