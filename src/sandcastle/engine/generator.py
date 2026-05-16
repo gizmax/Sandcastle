@@ -631,8 +631,8 @@ ADVISOR_QUALITY_TIERS: dict[str, str] = {
 # "high" = best available, "medium" = balanced, "low" = cheapest.
 ADVISOR_MODEL_TIERS: dict[str, dict[str, str]] = {
     "anthropic": {
-        "high": "claude-opus-4-7",
-        "medium": "claude-sonnet-4-6",
+        "high": "claude-sonnet-4-6",
+        "medium": "claude-haiku-4-5",
         "low": "claude-haiku-4-5",
     },
     "mistral": {

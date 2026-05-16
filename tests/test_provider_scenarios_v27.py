@@ -485,7 +485,7 @@ class TestSLORouting:
     def test_low_tier_anthropic_resolves_to_haiku(self):
         """For anthropic, low tier should select claude-haiku-4."""
         model = _resolve_model_for_tier("anthropic", "low")
-        assert model == "claude-haiku-4-20250514"
+        assert model == "claude-haiku-4-5"
 
     def test_high_tier_mistral_resolves_to_large(self):
         """For mistral, high tier should select mistral-large-latest."""
