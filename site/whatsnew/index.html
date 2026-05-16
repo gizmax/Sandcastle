@@ -4,20 +4,20 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>What's New - Sandcastle</title>
-  <meta name="description" content="Sandcastle release history. v0.31: Compliance & Connections. EU AI Act landing + 10 compliance templates, MCP-first publishing, eval gates, dashboard error boundaries. Eighty days to the deadline.">
+  <meta name="description" content="Sandcastle release history. v0.32: Claude Agents Deep Integration. Memory Stores, Multiagent coordinator, Outcomes API, Skills publisher, Agent SDK runtime, Trajectory Replay, Computer Use, MCP Elicitation. Every Anthropic primitive surfaced.">
   <meta name="author" content="Tomas Pflanzer @gizmax">
 
   <!-- Open Graph -->
-  <meta property="og:title" content="What's New - Sandcastle v0.31">
-  <meta property="og:description" content="Compliance & Connections. EU AI Act landing + 10 compliance workflow templates, MCP-first publishing, eval gates, error boundaries. Eighty days to August 2.">
+  <meta property="og:title" content="What's New - Sandcastle v0.32">
+  <meta property="og:description" content="Claude Agents Deep Integration. Every Anthropic Managed Agents primitive surfaced, plus Skills publisher, Trajectory Replay, Computer Use, Agent SDK runtime.">
   <meta property="og:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
   <meta property="og:url" content="https://sandcastle-ai.eu/whatsnew/">
   <meta property="og:type" content="website">
 
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="What's New - Sandcastle v0.31">
-  <meta name="twitter:description" content="Compliance & Connections. EU AI Act landing + 10 templates, MCP publishing, eval gates. Eighty days to the deadline.">
+  <meta name="twitter:title" content="What's New - Sandcastle v0.32">
+  <meta name="twitter:description" content="Claude Agents Deep Integration. Memory Stores, Multiagent, Outcomes, Skills publisher, Trajectory Replay, Computer Use. 169 new tests.">
   <meta name="twitter:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
 
   <link rel="canonical" href="https://sandcastle-ai.eu/whatsnew/">
@@ -194,11 +194,100 @@
   <main>
     <div class="container releases">
 
+      <!-- v0.32 -->
+      <div class="release fade-in">
+        <div class="release-header">
+          <span class="release-version">v0.32</span>
+          <span class="release-name">Claude Agents Deep Integration <span class="badge-latest">Latest</span></span>
+          <span class="release-date">May 16, 2026</span>
+        </div>
+
+        <p style="max-width: 720px; color: var(--text-muted); font-size: 15px; line-height: 1.7; margin-bottom: 28px;">
+          You shipped the agent. The client wants the integration. The auditor wants the trail. The user wants you to ask the next question without restarting the whole workflow. v0.32 is the answer to every one of those. Sandcastle now exposes every Anthropic Managed Agents primitive shipped under the managed-agents-2026-04-01 beta umbrella, plus the things Anthropic doesn't ship: cryptographically verifiable trajectory replay, a Skills publisher that turns workflows into uploadable Claude Skills, and an Agent SDK runtime for teams that want in-process execution. Two weeks of work, 169 new tests, one release.
+        </p>
+
+        <div class="feature-grid">
+
+          <div class="feature-card wide">
+            <span class="feature-tag amber">Headline</span>
+            <h4>Every Anthropic primitive surfaced</h4>
+            <p>Memory Stores, Multiagent coordinator, Outcomes API, Webhooks. All four came out from Anthropic under the same beta header in April and May 2026; Sandcastle now wires each one into the YAML and the dashboard so a single workflow can attach versioned memory, spawn 20 parallel specialist agents, define outcomes the eval pipeline reads automatically, and emit lifecycle events to a webhook endpoint.</p>
+            <p>Add three lines of YAML, get a multi-agent system that meets your eval gate.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag blue">New</span>
+            <h4>Skills Publisher</h4>
+            <p><code>sandcastle publish-skills --upload</code> converts every workflow into a tar.gz SKILL.md package with strict frontmatter and uploads to <code>/v1/skills</code>. Your workflows are now callable from every Anthropic Skills-aware client. Pair with v0.31 MCP-first publishing and Sandcastle covers both major distribution channels.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag green">New</span>
+            <h4>Trajectory Replay</h4>
+            <p>New <code>type: trajectory-replay</code> step computes SHA-256 over a recorded tool-call sequence and diffs against a candidate run. Sandcastle's audit trail is a hash chain, so the replay is cryptographically verifiable - a property neither LangSmith nor Braintrust ships. EU AI Act auditors love this.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag blue">New</span>
+            <h4>Agent SDK runtime</h4>
+            <p><code>runtime: "agent-sdk"</code> swaps Managed Agents for in-process Claude Agent SDK. For EU sovereignty, air-gapped, regulated teams who can't send session state to Anthropic's hosted infra. Lazy-imports the SDK; graceful error when not installed.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag amber">Polish</span>
+            <h4>Live Agent Reasoning panel</h4>
+            <p>Run detail page now subscribes to an SSE event stream and shows agent.thinking, agent.tool_use, and agent.message events as they fire. Thread-grouped, collapsible. The dashboard finally shows what the agent is actually doing.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag purple">Fix</span>
+            <h4>Five wire fixes (table stakes)</h4>
+            <p>tools_enabled finally reaches the API (was parsed but ignored). temperature, max_tokens, thinking_budget on ManagedAgentConfig. stream config field actually used. Pricing table mapping every Claude 4.x model. Fallback chains of up to 5 templates.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag green">New</span>
+            <h4>Tool Search + examples convention</h4>
+            <p>Mark tools with <code>defer_loading: true</code> and 1-5 invocation examples per tool. Anthropic's own measurements: tool-selection accuracy 49% to 74%, usable context up 85%, parameter accuracy 72% to 90%. New docs/tool-examples-convention.md.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag blue">New</span>
+            <h4>Computer Use + MCP Elicitation</h4>
+            <p>New <code>type: computer-use</code> step type with the <code>computer_20251124</code> beta + an 8-item safety pre-flight (prompt-injection guard, page-load deadline, screenshot bounds). Plus the 6th MCP primitive (Elicitation, spec rev 2025-11-25) lets workflows ask the user for a missing input mid-run.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag purple">Milestone</span>
+            <h4>By the numbers</h4>
+            <div class="stat-row">
+              <div class="stat-item">
+                <div class="stat-num">15,176</div>
+                <div class="stat-label">Tests passing</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-num">169</div>
+                <div class="stat-label">New v0.32 tests</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-num">9</div>
+                <div class="stat-label">New modules</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-num">24</div>
+                <div class="stat-label">Step types</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
       <!-- v0.31 -->
       <div class="release fade-in">
         <div class="release-header">
           <span class="release-version">v0.31</span>
-          <span class="release-name">Compliance & Connections <span class="badge-latest">Latest</span></span>
+          <span class="release-name">Compliance & Connections</span>
           <span class="release-date">May 14, 2026</span>
         </div>
 

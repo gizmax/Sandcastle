@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-05-16 - "Claude Agents Deep Integration"
+
+You shipped the agent. The client wants the integration. The auditor wants the trail. The user wants you to ask the next question without restarting the whole workflow. v0.32 is the answer to every one of those. Sandcastle now exposes every Anthropic Managed Agents primitive shipped under the managed-agents-2026-04-01 beta umbrella, plus the things Anthropic doesn't ship: a cryptographically verifiable trajectory replay, a Skills publisher that turns workflows into uploadable Claude Skills, and an Agent SDK runtime for teams that want in-process execution. Two weeks of work, 169 new tests, one release.
+
+### Added - Anthropic primitives (the things the beta header gives you)
+
+- **Memory Stores** client (`sandcastle.engine.memory_stores.MemoryStoresClient`). Versioned per-session memory mounted at /mnt/memory/, optimistic-concurrency writes via If-Match, redact endpoint for GDPR right-to-be-forgotten, 100 kB per file, 8 stores per session. `attach_to_session_payload()` helper builds the resources block for session-create.
+- **Multiagent coordinator** (`sandcastle.engine.multiagent`). Up to 20 specialist agents in parallel, 25 threads, 1-level depth per Anthropic spec. Three pre-baked templates: `research-and-write`, `code-review-and-test`, `analyst-with-translator`. `validate_roster()` + `build_coordinator_payload()` + `parse_thread_event()`.
+- **Outcomes API** (`sandcastle.engine.outcomes`). `user.define_outcome` events on session start, `span.outcome_evaluation_end` captured into step output. Composite aggregator at module level so AutoPilot and Workflow Evolution can read native Anthropic eval signals.
+- **Webhooks** (`sandcastle.api.agent_webhooks`). HMAC-signed session lifecycle events at `/agent-webhooks/anthropic`. Fire-and-forget dispatch, integrates with the existing arq scheduler.
+- **Elicitation** (the 6th MCP primitive, added in spec rev 2025-11-25). New `request_workflow_input` tool wraps `ctx.session.elicit()` with JSON Schema validation so a workflow that hits a gap mid-execution can ask the user for a typed value without restarting.
+
+### Added - managed-agent step extensions
+
+The `type: managed-agent` step now accepts three new config fields that thread directly into the Anthropic primitives above:
+
+- `memory_stores: list[str]` - attach existing memory store IDs to the session
+- `multiagent: dict` - build a coordinator payload with validated roster
+- `outcomes: list[dict]` - define outcomes at session start, capture eval results in step output
+
+### Added - Sandcastle differentiators (the things Anthropic doesn't ship)
+
+- **Skills publisher** (`sandcastle.engine.agent_skills`). `sandcastle publish-skills [--upload] [--dir]` converts every workflow into a SKILL.md tar.gz package with strict frontmatter validation (kebab-case name, no reserved tokens, ≤1024-char description) and uploads to `/v1/skills`. Workflows are now reachable from every Anthropic Skills-aware client.
+- **Trajectory Replay step type** (`sandcastle.engine.trajectory_replay`). New `type: trajectory-replay` step computes SHA-256 over a recorded tool-call sequence, diffs against a candidate run, returns score + diff_summary. Because Sandcastle's audit trail is a hash chain, the replay is cryptographically verifiable - a property neither LangSmith nor Braintrust ships.
+- **Computer Use integration helper** (`sandcastle.engine.computer_use`). New `type: computer-use` step type. Builds the `computer_20251124` tool definitions, sets the beta header, runs an 8-item safety pre-flight (prompt-injection guard, screenshot dimensions, page-load deadline).
+- **Agent SDK runtime** (`sandcastle.engine.agent_sdk_runtime`). New `runtime: "agent-sdk"` dispatch. For teams who want in-process Claude agents (EU sovereignty, air-gapped, no Managed Agents infra). Lazy-imports `anthropic_agent_sdk`; falls back to a typed `AgentSDKNotInstalled` error when the optional package isn't installed.
+
+### Added - Tool Search + tool-use-examples convention
+
+New `sandcastle.engine.tool_search.ToolRegistry` lets workflows mark tools with `defer_loading: true` (loaded on first selection) and `examples: [...]` (1-5 realistic invocations per tool). Anthropic measured the result on Opus 4: tool-selection accuracy from 49% to 74%, usable context from 122,800 to 191,300 tokens (85% saving), parameter accuracy from 72% to 90%. New docs/tool-examples-convention.md.
+
+### Added - Tier 1 wire fixes (table stakes that had been broken)
+
+- `tools_enabled` config field is now actually sent to the agent-create API (previously parsed but ignored - users thought they were restricting tools).
+- `temperature`, `max_tokens`, `thinking_budget` on `ManagedAgentConfig`. None-aware: omitted from request when unset.
+- `stream` config field is now honoured (was dead code).
+- Pricing table for Opus 4.7 (5/25), Sonnet 4.6 (3/15), Haiku 4.5 (1/5), Opus 4.6 (15/75), Sonnet 4.5 (3/15). Unknown model falls back to Sonnet 4.6 rates with a one-time warning.
+- `fallback_template` accepts a list (chain of up to 5 templates) in addition to a single string.
+
+### Added - dashboard
+
+- Live "Agent Reasoning" panel on the run detail page. Subscribes to `/api/runs/{id}/agent-stream` SSE, renders agent.thinking, agent.tool_use, agent.message, agent.complete, agent.error events. Thread-grouped, collapsible, graceful 404 fallback.
+
+### Changed
+
+- New step types `trajectory-replay` and `computer-use` registered (VALID_STEP_TYPES count 22 -> 24).
+- `agent_webhooks_router` mounted on the FastAPI app alongside `a2a_router` and `agui_router`.
+- MCP server manifest now advertises 6 primitives (added Elicitation) and declares `spec_revision: "2025-11-25"`.
+
+### Tests
+
+- 18 new tests for Tier 1 wire fixes (tests/test_managed_agent_wires.py)
+- 156 new tests for the 9 modules in isolation
+- 13 new e2e wiring tests (tests/test_v032_wiring.py)
+- 169 v0.32-related tests total, all green in 1.8s
+- Full suite: 15,176 passing (vs 15,009 baseline) - the +167 are this release's new tests
+
 ## [0.31.0] - 2026-05-14 - "Compliance & Connections"
 
 Eighty days to the EU AI Act deadline (2 August 2026). This release is the answer: a dedicated landing page mapping every Sandcastle control to a specific Article, ten compliance workflow templates, MCP-first publishing so every workflow becomes a tool inside Claude Desktop / Cursor / Windsurf, eval gates that block regressing models from getting promoted, and a dashboard that doesn't crash when one API hiccups. Plus the closeout of v0.30: Codex audit rounds 9 and 10 fully fixed.
