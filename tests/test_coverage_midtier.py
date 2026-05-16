@@ -1305,20 +1305,24 @@ class TestAgentCardBuilder:
         assert card["capabilities"]["streaming"] is True
 
     def test_agent_card_auth_not_required(self):
+        """A2A v1.0: auth-not-required -> empty `security` array."""
         from sandcastle.api.a2a import _build_agent_card
 
         with patch("sandcastle.api.a2a.settings") as mock_settings:
             mock_settings.auth_required = False
             card = _build_agent_card("https://example.com")
-        assert card["authentication"]["credentials"] is None
+        assert card["security"] == []
+        assert card["securitySchemes"]["apiKey"]["type"] == "apiKey"
 
     def test_agent_card_auth_required(self):
+        """A2A v1.0: auth-required -> non-empty `security` array."""
         from sandcastle.api.a2a import _build_agent_card
 
         with patch("sandcastle.api.a2a.settings") as mock_settings:
             mock_settings.auth_required = True
             card = _build_agent_card("https://example.com")
-        assert card["authentication"]["credentials"] == "required"
+        assert card["security"] == [{"apiKey": []}]
+        assert card["securitySchemes"]["apiKey"]["type"] == "apiKey"
 
 
 class TestJsonRpcHelpers:

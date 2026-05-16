@@ -254,11 +254,15 @@ class TestAgentCardWave7:
     """Agent Card tests including auth info."""
 
     def test_agent_card_includes_auth_info(self):
-        """Agent card should include authentication section."""
+        """Agent card should declare its security schemes (A2A v1.0)."""
         response = client.get("/.well-known/agent.json")
         assert response.status_code == 200
         data = response.json()
-        assert "authentication" in data
+        # A2A v1.0 uses OpenAPI-style securitySchemes (replaces the v0.x
+        # `authentication` block).
+        assert "securitySchemes" in data
+        assert "apiKey" in data["securitySchemes"]
+        assert data["securitySchemes"]["apiKey"]["type"] == "apiKey"
 
     def test_agent_card_public_when_auth_enabled(self):
         """Agent card should remain accessible even when auth is required."""

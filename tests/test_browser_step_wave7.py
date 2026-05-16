@@ -130,7 +130,7 @@ def _make_httpx_mock_multi(responses: list[dict]) -> type:
 
 def _make_mock_model() -> MagicMock:
     mock_model = MagicMock()
-    mock_model.api_model_id = "claude-sonnet-4-20250514"
+    mock_model.api_model_id = "claude-sonnet-4-6"
     mock_model.input_price_per_m = 3.0
     mock_model.output_price_per_m = 15.0
     return mock_model
@@ -1142,7 +1142,7 @@ class TestBrowserComputerUseMode:
         storage = _make_mock_storage()
 
         mock_model = MagicMock()
-        mock_model.api_model_id = "claude-sonnet-4-20250514"
+        mock_model.api_model_id = "claude-sonnet-4-6"
         mock_model.input_price_per_m = 3.0
         mock_model.output_price_per_m = 15.0
 

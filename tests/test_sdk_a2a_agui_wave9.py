@@ -1220,6 +1220,7 @@ class TestA2ATasksCancelValidation:
 
 class TestA2AAgentCardAuth:
     def test_auth_required_shows_required(self):
+        """A2A v1.0: auth_required=True should populate the security list."""
         from fastapi.testclient import TestClient
         from sandcastle.main import app
         tc = TestClient(app, raise_server_exceptions=False)
@@ -1227,9 +1228,13 @@ class TestA2AAgentCardAuth:
             mock_settings.auth_required = True
             response = tc.get("/.well-known/agent.json")
         data = response.json()
-        assert data["authentication"]["credentials"] == "required"
+        # v1.0 expresses required auth via the OpenAPI-style `security`
+        # array (non-empty) plus a declared scheme in `securitySchemes`.
+        assert data["security"] == [{"apiKey": []}]
+        assert "apiKey" in data["securitySchemes"]
 
     def test_auth_not_required_shows_none(self):
+        """A2A v1.0: auth_required=False should leave security empty."""
         from fastapi.testclient import TestClient
         from sandcastle.main import app
         tc = TestClient(app, raise_server_exceptions=False)
@@ -1237,7 +1242,8 @@ class TestA2AAgentCardAuth:
             mock_settings.auth_required = False
             response = tc.get("/.well-known/agent.json")
         data = response.json()
-        assert data["authentication"]["credentials"] is None
+        assert data["security"] == []
+        assert "apiKey" in data["securitySchemes"]
 
 
 # ===================================================================
