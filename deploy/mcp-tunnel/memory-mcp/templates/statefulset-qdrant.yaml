@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "memory-mcp.fullname" . }}-qdrant
+  labels:
+    {{- include "memory-mcp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: qdrant
+spec:
+  serviceName: {{ include "memory-mcp.fullname" . }}-qdrant
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "memory-mcp.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: qdrant
+  template:
+    metadata:
+      labels:
+        {{- include "memory-mcp.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: qdrant
+    spec:
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      containers:
+        - name: qdrant
+          image: "{{ .Values.qdrant.image.repository }}:{{ .Values.qdrant.image.tag }}"
+          imagePullPolicy: {{ .Values.qdrant.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: {{ .Values.qdrant.port }}
+            - name: grpc
+              containerPort: {{ .Values.qdrant.grpcPort }}
+          env:
+            - name: QDRANT__SERVICE__HTTP_PORT
+              value: "{{ .Values.qdrant.port }}"
+            - name: QDRANT__SERVICE__GRPC_PORT
+              value: "{{ .Values.qdrant.grpcPort }}"
+            - name: QDRANT__STORAGE__SNAPSHOTS_PATH
+              value: /qdrant/snapshots
+            - name: QDRANT__STORAGE__OPTIMIZERS__SNAPSHOT_INTERVAL
+              value: {{ .Values.qdrant.snapshotInterval | quote }}
+          resources:
+            {{- toYaml .Values.qdrant.resources | nindent 12 }}
+          volumeMounts:
+            - name: qdrant-storage
+              mountPath: /qdrant/storage
+            - name: qdrant-snapshots
+              mountPath: /qdrant/snapshots
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: {{ .Values.qdrant.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.qdrant.port }}
+            initialDelaySeconds: 15
+            periodSeconds: 30
+      volumes:
+        - name: qdrant-snapshots
+          emptyDir: {}
+  {{- if .Values.qdrant.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: qdrant-storage
+      spec:
+        accessModes:
+          - {{ .Values.qdrant.persistence.accessMode }}
+        {{- if .Values.qdrant.persistence.storageClass }}
+        storageClassName: {{ .Values.qdrant.persistence.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.qdrant.persistence.size }}
+  {{- end }}

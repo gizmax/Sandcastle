@@ -244,6 +244,101 @@ class AgentSDKRuntimeAdapter(AgentRuntime):
         }
 
 
+class SelfHostedSandboxRuntime(AgentRuntime):
+    """Routes managed-agent steps to a customer-hosted sandbox via SelfHostedWorker.
+
+    Customer hosts the sandbox (Cloudflare microVMs, Daytona, Modal, Vercel,
+    or plain Docker) and Sandcastle keeps a long-running poller that claims
+    work items from ``/v1/environments/{id}/work``. Each claimed item is
+    forwarded to a one-shot per-session container that runs the Anthropic
+    ``ant beta:worker`` CLI. See ``deploy/cookbooks/docker/`` for the
+    canonical reference layout.
+
+    The worker class lives in :mod:`sandcastle.engine.self_hosted_worker`
+    (shipped by the sibling Phase 2a agent). We lazy-import it so this
+    module stays loadable even if the worker module has not landed yet -
+    instantiation fails fast with an actionable error instead of an
+    obscure ``ModuleNotFoundError`` at import time.
+    """
+
+    name = "self-hosted-sandbox"
+
+    _INSTALL_HINT = (
+        "SelfHostedWorker is not available. Ensure "
+        "sandcastle.engine.self_hosted_worker is importable (Phase 2a "
+        "module) and that the optional 'self-hosted' extra is installed: "
+        "    pip install 'sandcastle-ai[self-hosted]'\n"
+        "See deploy/cookbooks/docker/README.md for the reference setup."
+    )
+
+    def __init__(self) -> None:
+        # Cache the worker class once we successfully import it; keep it
+        # None until first use so module-level import of this file does
+        # not require the sibling module to exist.
+        self._worker_cls: Any = None
+
+    def _load_worker_cls(self) -> Any:
+        if self._worker_cls is not None:
+            return self._worker_cls
+        try:
+            from sandcastle.engine.self_hosted_worker import (  # type: ignore[import-not-found]
+                SelfHostedWorker,
+            )
+        except ImportError as exc:
+            raise RuntimeError(self._INSTALL_HINT) from exc
+        self._worker_cls = SelfHostedWorker
+        return self._worker_cls
+
+    async def is_available(self) -> bool:
+        # Available iff (a) the worker module is importable, and (b) the
+        # environment key is set. We do NOT require ANTHROPIC_API_KEY -
+        # see assert_org_key_not_set in self_hosted_sandbox.py.
+        try:
+            self._load_worker_cls()
+        except RuntimeError:
+            return False
+        return bool(os.environ.get("ANTHROPIC_ENVIRONMENT_KEY"))
+
+    async def execute(
+        self,
+        system_prompt: str,
+        tools: list[str],
+        packages: list[str],
+        message: str,
+        model: str,
+        timeout: int,
+        network: str,
+    ) -> dict:
+        worker_cls = self._load_worker_cls()
+
+        worker = worker_cls(
+            environment_id=os.environ.get("ANTHROPIC_ENVIRONMENT_ID", ""),
+            environment_key=os.environ.get("ANTHROPIC_ENVIRONMENT_KEY", ""),
+        )
+        result = await worker.run(
+            prompt=message,
+            model=model,
+            max_turns=None,
+            timeout=timeout,
+            tools=tools or [],
+            system_prompt=system_prompt or None,
+            packages=packages or [],
+            network=network,
+        )
+
+        # Worker returns a dataclass-like object; normalise to the same
+        # shape AnthropicRuntime / AgentSDKRuntimeAdapter return.
+        return {
+            "output": getattr(result, "output", ""),
+            "tokens_in": getattr(result, "tokens_in", 0),
+            "tokens_out": getattr(result, "tokens_out", 0),
+            "runtime": "self-hosted-sandbox",
+            "cost_usd": getattr(result, "cost_usd", None),
+            "duration_ms": getattr(result, "duration_ms", None),
+            "error": getattr(result, "error", None),
+        }
+
+
 class LocalRuntime(AgentRuntime):
     """Local agent execution via Ollama - no cloud, no cost."""
 
@@ -350,6 +445,7 @@ RUNTIMES: dict[str, AgentRuntime] = {
     "anthropic": AnthropicRuntime(),
     "local": LocalRuntime(),
     "agent-sdk": AgentSDKRuntimeAdapter(),
+    "self-hosted-sandbox": SelfHostedSandboxRuntime(),
 }
 
 

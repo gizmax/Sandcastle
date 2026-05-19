@@ -1,0 +1,131 @@
+# Rogo Analyst on Private Data - reference workflow
+#
+# Anthropic's May 19 2026 blog cited Rogo as the canonical financial-
+# analyst deployment of Managed Agents. Rogo runs Claude over their
+# customers' proprietary financial data inside a Vercel Sandbox; the
+# critical design point is that the sandbox brokers credentials so the
+# raw data never leaves the customer's data-isolation boundary. The
+# blog calls this "credential brokering" - the agent receives only the
+# scoped tokens it needs for the current question, never the customer's
+# warehouse credentials directly.
+#
+# This template encodes that pattern. The managed-agent step is bound
+# to Rogo's "financial_analyst" template, runs on a customer-owned
+# Vercel environment, and reaches the customer's private financial-
+# data MCP server via an Anthropic MCP tunnel authenticated by WIF (so
+# no long-lived secrets land on disk). The workflow is risk_level=high
+# (financial data + Annex IV of EU AI Act), which is why the validator
+# forces an approval gate before any analyst session can start. The
+# eval gate after the analyst run blocks promotion of any agent build
+# scoring below 0.8 on the customer's golden-question dataset. No
+# Computer Use - the analyst is strictly read-only on tabular data.
+
+name: rogo-analyst-on-private-data
+description: >
+  Reference template mirroring Rogo's analyst-on-Vercel deployment
+  (Anthropic blog, 2026-05-19). Runs a financial-analyst managed agent
+  over a customer's private MCP-exposed financial dataset inside a
+  customer-owned Vercel sandbox. Credential brokering via the sandbox
+  + WIF tunnel auth keeps raw data inside the customer boundary.
+  EU AI Act high-risk: requires approval before first run, and the
+  eval-gate step refuses promotion below 0.8 on the golden dataset.
+version: "0.32.0-preview"
+default_model: sonnet
+risk_level: high
+
+mcp_tunnel:
+  tunnel_id: tunnel_rogo_analyst
+  auth_mode: workload_identity_federation
+  servers:
+    - name: customer-financials
+      hostname: financials.rogo-tunnel.anthropic.cloud
+      auth_token_env: ROGO_FINANCIALS_BEARER
+      allowed_tools:
+        - query_metric
+        - list_tables
+        - describe_schema
+
+input_schema:
+  required: [question]
+  properties:
+    question:
+      type: string
+      description: The analyst question to answer (natural language)
+    fiscal_period:
+      type: string
+      description: e.g. "Q1 2026" - scopes the answer to a specific window
+    customer_id:
+      type: string
+      description: Customer tenant key for credential brokering
+      default: tenant_default
+
+steps:
+  - id: human-greenlight
+    type: approval
+    responsibility: Human reviewer must approve before any analyst session starts
+    source_hint: EU AI Act Article 14 oversight for high-risk financial AI
+    owner: compliance
+    approval_config:
+      message: >
+        Approve analyst session for customer {input.customer_id},
+        question "{input.question}", fiscal_period {input.fiscal_period}.
+        Confirm the question does not request material non-public data
+        and that the customer's data-use agreement covers this use.
+      timeout_hours: 24
+      on_timeout: abort
+      allow_edit: false
+
+  - id: analyst
+    type: managed-agent
+    depends_on: [human-greenlight]
+    responsibility: Read-only financial analyst over private MCP data
+    source_hint: Rogo case study (Anthropic blog, 2026-05-19)
+    owner: analyst-eng
+    managed_agent_config:
+      agent_id: auto
+      agent_template: financial_analyst
+      message: >
+        Answer this analyst question using only data reachable via the
+        customer-financials MCP server. Cite every numeric claim by
+        the metric+period it came from. Do not write any data back.
+
+        Question: {input.question}
+        Fiscal period: {input.fiscal_period}
+        Customer: {input.customer_id}
+      model: claude-sonnet-4-6
+      timeout: 1800
+      tools_enabled:
+        - bash
+        - text_editor
+      network_access: false
+      self_hosted_sandbox:
+        environment_id: env_rogo_analyst
+        environment_key_env: ROGO_ENV_KEY
+        provider: vercel
+        metadata:
+          team: analyst-eng
+          case_study: rogo
+          customer_tenant: "{input.customer_id}"
+        max_concurrent_sessions: 4
+      outcomes:
+        - id: analyst_answer_faithfulness
+          description: Faithfulness of analyst answer to cited source data (0-1)
+          range: [0.0, 1.0]
+          target: 0.85
+
+  - id: golden-eval-gate
+    type: http
+    depends_on: [analyst]
+    responsibility: Block promotion if golden-dataset pass rate falls below 0.8
+    source_hint: Eval gate (strict=true) per Anthropic eval-driven promotion
+    owner: analyst-eng
+    http_config:
+      url: "https://evals.internal.example.com/v1/check?strict=true&min_pass_rate=0.8"
+      method: POST
+      headers:
+        Content-Type: application/json
+      body:
+        candidate_run_id: "{run.id}"
+        dataset: financial_analyst_golden_v3
+        agent_template: financial_analyst
+      auth: "bearer:${ROGO_EVAL_TOKEN}"

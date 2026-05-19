@@ -1,0 +1,173 @@
+# Clay Sculptor GTM - reference workflow
+#
+# Anthropic's May 19 2026 blog cited Clay's "Sculptor" as the canonical
+# go-to-market agent built on Managed Agents. Sculptor researches a
+# prospect, drafts personalized outreach, qualifies the lead against
+# Clay's ICP, then writes the qualification back to the customer CRM.
+# The blog specifically calls out Daytona as the sandbox of choice for
+# this style of agent because the work is long-running, stateful, and
+# benefits from the SSH-into-the-running-sandbox debugging path.
+#
+# This template wires the same shape: a coordinator agent with three
+# specialist subagents (researcher, writer, qualifier), running on a
+# customer-owned Daytona environment. The CRM write is a Composio step
+# so the workflow is portable across Salesforce / HubSpot / Attio with
+# no YAML edits, and the qualification confidence is captured as a
+# typed Outcome so the AB-analysis dashboards can rank prompts later.
+# Buyer-history persistence uses the Sandcastle Memory MCP behind an
+# optional MCP tunnel - drop the mcp_tunnel block to run stateless.
+
+name: clay-sculptor-gtm
+description: >
+  Reference template mirroring Clay Sculptor (Anthropic blog,
+  2026-05-19). Coordinator agent researches a prospect, drafts
+  personalized outreach, qualifies against an ICP, updates the CRM, and
+  notifies the rep on Slack. Built for nightly batch runs over a fresh
+  lead list. Daytona sandbox preserves session state for long-running
+  enrichment loops. See workflows/case-studies/README.md for the
+  customization checklist.
+version: "0.32.0-preview"
+default_model: sonnet
+risk_level: limited
+schedule: "0 2 * * *"
+
+mcp_tunnel:
+  tunnel_id: tunnel_clay_sculptor
+  auth_mode: workload_identity_federation
+  servers:
+    - name: buyer-memory
+      hostname: buyer-memory.clay-tunnel.anthropic.cloud
+      auth_token_env: CLAY_BUYER_MEMORY_BEARER
+      allowed_tools:
+        - add
+        - search
+
+input_schema:
+  required: [lead_domain]
+  properties:
+    lead_domain:
+      type: string
+      description: Primary email domain of the target account
+    contact_email:
+      type: string
+      description: Specific contact email to enrich and qualify
+    icp_definition:
+      type: string
+      description: Free-text definition of the ideal customer profile
+      default: "Series B+ SaaS, 50-500 employees, RevOps or GTM buyer"
+
+steps:
+  - id: enrich-contact
+    type: http
+    responsibility: Pull firmographic + technographic enrichment from LinkedIn
+    source_hint: Clay Sculptor case study (Anthropic blog, 2026-05-19)
+    owner: gtm-eng
+    http_config:
+      url: "https://api.linkedin-enrichment.example.com/v2/lookup"
+      method: POST
+      headers:
+        Content-Type: application/json
+      body:
+        domain: "{input.lead_domain}"
+        email: "{input.contact_email}"
+      auth: "bearer:${LINKEDIN_ENRICHMENT_TOKEN}"
+
+  - id: sculptor
+    type: managed-agent
+    depends_on: [enrich-contact]
+    responsibility: Coordinator agent that researches, writes, and qualifies
+    source_hint: Three-specialist roster mirrors Clay's published design
+    owner: gtm-eng
+    managed_agent_config:
+      agent_id: auto
+      agent_template: project_manager
+      message: >
+        Lead enrichment payload: {steps.enrich-contact.output}
+
+        Step 1: Delegate to `researcher` for buyer-context discovery
+        (call `search` on buyer-memory MCP first to dedupe against
+        prior runs).
+        Step 2: Delegate to `writer` for a 3-touch outreach sequence
+        personalized to the discovered buyer context.
+        Step 3: Delegate to `qualifier` to score against this ICP:
+        {input.icp_definition}
+
+        Persist new buyer facts to buyer-memory via `add` (one fact
+        per call). Return the qualification confidence as a number
+        in [0.0, 1.0] and the three drafted emails as Markdown.
+      model: claude-sonnet-4-6
+      timeout: 1800
+      tools_enabled:
+        - bash
+        - web_search
+        - text_editor
+      self_hosted_sandbox:
+        environment_id: env_clay_sculptor
+        environment_key_env: CLAY_ENV_KEY
+        provider: daytona
+        metadata:
+          team: gtm-eng
+          case_study: clay
+        max_concurrent_sessions: 16
+      multiagent:
+        type: coordinator
+        agents:
+          - type: agent
+            id: agent_clay_researcher
+            nickname: researcher
+          - type: agent
+            id: agent_clay_writer
+            nickname: writer
+          - type: agent
+            id: agent_clay_qualifier
+            nickname: qualifier
+        max_concurrent_threads: 6
+        prompt_routing_hint: >
+          researcher = discovery + buyer-memory lookups.
+          writer = email copy authoring.
+          qualifier = ICP scoring + confidence.
+      outcomes:
+        - id: lead_qualification_confidence
+          description: Qualifier subagent confidence 0-1
+          range: [0.0, 1.0]
+          target: 0.7
+
+  - id: update-crm
+    type: composio
+    depends_on: [sculptor]
+    responsibility: Push enriched contact + qualification back to CRM
+    source_hint: Composio keeps CRM choice declarative (SF, HubSpot, Attio)
+    owner: gtm-eng
+    composio_config:
+      action: salesforce_upsert_contact
+      app: salesforce
+      params:
+        email: "{input.contact_email}"
+        qualification_summary: "{steps.sculptor.output}"
+
+  - id: rep-notify
+    type: notify
+    depends_on: [update-crm]
+    responsibility: Ping the assigned rep with the qualified lead summary
+    source_hint: Slack handoff closes the loop on every Sculptor run
+    owner: gtm-eng
+    notify_config:
+      service: slack
+      channel: "#gtm-qualified-leads"
+      message: |
+        New qualified lead: {input.contact_email} (domain {input.lead_domain}).
+        Qualification:
+        {steps.sculptor.output}
+
+  - id: rep-brief
+    type: report
+    depends_on: [sculptor]
+    responsibility: Render the full rep briefing as a PDF for offline review
+    source_hint: PDF goes into the rep's daily digest folder
+    owner: gtm-eng
+    report_config:
+      template: research-report
+      format: pdf
+      theme: professional
+      title: "Sculptor brief: {input.contact_email}"
+      include_toc: true

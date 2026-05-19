@@ -1,0 +1,23 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/runner.mjs": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "api/spawn-helper.mjs": {
+      "maxDuration": 3600,
+      "memory": 1024
+    }
+  },
+  "env": {
+    "ANTHROPIC_ENVIRONMENT_ID": "@anthropic-environment-id",
+    "ANTHROPIC_ENVIRONMENT_KEY": "@anthropic-environment-key",
+    "ANTHROPIC_WEBHOOK_SECRET": "@anthropic-webhook-secret"
+  },
+  "build": {
+    "env": {
+      "ANTHROPIC_ENVIRONMENT_ID": "@anthropic-environment-id"
+    }
+  }
+}
