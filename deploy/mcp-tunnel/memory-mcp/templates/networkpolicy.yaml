@@ -1,0 +1,50 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "memory-mcp.fullname" . }}-egress
+  labels:
+    {{- include "memory-mcp.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "memory-mcp.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: mcp-server
+  policyTypes:
+    - Egress
+  egress:
+    # Allow DNS lookups
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Allow intra-pod traffic to Qdrant
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "memory-mcp.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: qdrant
+      ports:
+        - protocol: TCP
+          port: {{ .Values.qdrant.port }}
+    # Allow outbound to Cloudflare edges for the MCP tunnel
+    - to:
+        {{- range .Values.networkPolicy.cloudflareEdges.ipv4 }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+        {{- range .Values.networkPolicy.cloudflareEdges.ipv6 }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        {{- range .Values.networkPolicy.cloudflareTunnelPorts }}
+        - protocol: {{ .protocol }}
+          port: {{ .port }}
+        {{- end }}
+        - protocol: TCP
+          port: {{ .Values.networkPolicy.anthropicApi.port }}
+{{- end }}
