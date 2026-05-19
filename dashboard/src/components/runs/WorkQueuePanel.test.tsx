@@ -23,13 +23,14 @@ vi.mock("@/lib/constants", () => ({
 }));
 
 // Recharts uses ResizeObserver which jsdom does not implement.
-class _ResizeObserver {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
+class _ResizeObserver implements ResizeObserver {
+  observe(_target: Element, _options?: ResizeObserverOptions): void {}
+  unobserve(_target: Element): void {}
+  disconnect(): void {}
 }
-// @ts-expect-error - polyfill for tests
-globalThis.ResizeObserver = globalThis.ResizeObserver ?? _ResizeObserver;
+if (typeof globalThis.ResizeObserver === "undefined") {
+  globalThis.ResizeObserver = _ResizeObserver as unknown as typeof ResizeObserver;
+}
 
 import { WorkQueuePanel } from "./WorkQueuePanel";
 
