@@ -1,0 +1,30 @@
+[project]
+name = "daytona-managed-agent-runner"
+version = "0.1.0"
+description = "Daytona snapshot-backed sandbox runner for Anthropic Managed Agents."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Tomas Pflanzer @gizmax" }]
+
+dependencies = [
+    "anthropic>=0.45",
+    "daytona-sdk>=0.18",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "standardwebhooks>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+daytona-runner = "sandbox_runner:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

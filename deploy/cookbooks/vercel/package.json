@@ -1,0 +1,23 @@
+{
+  "name": "vercel-managed-agent-runner",
+  "version": "0.1.0",
+  "description": "Vercel microVM sandbox runner for Anthropic Managed Agents with credential brokering.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel deploy --prod",
+    "lint": "node --check api/runner.mjs && node --check sandbox-runner.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.34.0",
+    "@vercel/sandbox": "^1.0.0",
+    "ms": "^2.1.3"
+  },
+  "devDependencies": {
+    "vercel": "^39.0.0"
+  }
+}
