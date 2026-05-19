@@ -1,0 +1,44 @@
+# Sandcastle self-hosted sandbox - Cloudflare Containers cookbook.
+#
+# Mirrors Anthropic's cf/ reference cookbook at
+# https://github.com/anthropics/claude-cookbooks/tree/main/managed_agents/self_hosted_sandboxes/cf
+# - the Worker receives `session.status_run_started` webhooks, drains the
+# environment work queue, and dispatches each claimed work item to a
+# per-session Container running `ant beta:worker run`.
+
+name = "sandcastle-cf-sandbox"
+main = "src/index.ts"
+compatibility_date = "2026-03-01"
+compatibility_flags = ["nodejs_compat"]
+
+[observability]
+enabled = true
+
+[[durable_objects.bindings]]
+name = "SANDBOX_CONTAINER"
+class_name = "SandboxContainer"
+
+[[containers]]
+class_name = "SandboxContainer"
+image = "./Dockerfile"
+max_instances = 50
+# Enable `wrangler containers ssh <instance-id>` for debugging the runner.
+ssh = { enabled = true }
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SandboxContainer"]
+
+[vars]
+ANTHROPIC_BASE_URL = "https://api.anthropic.com"
+# Replace with your self-hosted environment id (Console -> Environments).
+ANTHROPIC_ENVIRONMENT_ID = "env_01..."
+
+# Secrets (set via `wrangler secret put`):
+#   ANTHROPIC_WEBHOOK_SECRET
+#   ANTHROPIC_ENVIRONMENT_KEY
+#
+# Zero-Trust bindings: both secrets are scoped to this Worker only and never
+# touch the Container image. The Worker forwards ANTHROPIC_ENVIRONMENT_KEY to
+# each Container instance via the dispatch() RPC, so the key lives in process
+# memory of one Container per session and is never written to disk.

@@ -1,0 +1,33 @@
+# Sandcastle self-hosted sandbox - Cloudflare Worker (Durable Object isolate)
+# cookbook. No Container. Tool execution runs inside the DO V8 isolate against
+# a RAM-only Map-backed fake filesystem, matching the toolset advertised by
+# `beta_agent_toolset_20260401`.
+#
+# Mirrors Anthropic's cf-worker/ reference cookbook at
+# https://github.com/anthropics/claude-cookbooks/tree/main/managed_agents/self_hosted_sandboxes/cf-worker
+
+name = "sandcastle-cf-worker-sandbox"
+main = "src/index.ts"
+compatibility_date = "2026-03-01"
+compatibility_flags = ["nodejs_compat"]
+
+[observability]
+enabled = true
+
+# Single Durable Object binding. No [[containers]] block.
+[[durable_objects.bindings]]
+name = "RUNNER"
+class_name = "SessionToolRunner"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SessionToolRunner"]
+
+[vars]
+ANTHROPIC_BASE_URL = "https://api.anthropic.com"
+# Replace with your self-hosted environment id (Console -> Environments).
+ANTHROPIC_ENVIRONMENT_ID = "env_01..."
+
+# Secrets (set via `wrangler secret put`):
+#   ANTHROPIC_WEBHOOK_SECRET
+#   ANTHROPIC_ENVIRONMENT_KEY
