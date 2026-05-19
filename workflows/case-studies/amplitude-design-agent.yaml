@@ -1,0 +1,132 @@
+# Amplitude Design Agent - reference workflow
+#
+# Anthropic's May 19 2026 blog cited Amplitude's "Design Agent" as one of
+# the early production deployments of Managed Agents. The Amplitude team
+# built an in-app assistant that takes a written design brief, generates
+# an interactive HTML mockup inside their own Cloudflare-isolated
+# sandbox, and then runs a follow-up accessibility review subagent
+# before the artifact is handed back to the PM who asked for it.
+#
+# This template mirrors that shape. The primary agent is a managed-agent
+# step bound to the in-tree "designer" template; it runs on a customer-
+# owned Cloudflare environment so no design brief or generated mockup
+# ever crosses the Anthropic-hosted runtime boundary. Per Anthropic's
+# published limitations, Memory Stores are not compatible with self-
+# hosted sandboxes, so we substitute a Sandcastle Memory MCP behind an
+# MCP tunnel for cross-run persistence of brand tokens and prior mockups.
+# A Computer Use sub-step drives a headless Chromium inside the sandbox
+# to screenshot the rendered mockup for the review thread.
+
+name: amplitude-design-agent
+description: >
+  Reference template mirroring the Amplitude Design Agent (Anthropic
+  blog, 2026-05-19). Generates an interactive HTML mockup from a design
+  brief inside a customer-owned Cloudflare sandbox, then runs an
+  accessibility-review specialist via the multiagent coordinator. Brand
+  tokens persist across runs via the Sandcastle Memory MCP behind an
+  Anthropic MCP tunnel (memory_stores would be incompatible with self-
+  hosted - see workflows/case-studies/README.md).
+version: "0.32.0-preview"
+default_model: sonnet
+risk_level: limited
+
+mcp_tunnel:
+  tunnel_id: tunnel_amplitude_design
+  auth_mode: workload_identity_federation
+  servers:
+    - name: design-memory
+      hostname: design-memory.amplitude-tunnel.anthropic.cloud
+      auth_token_env: AMPLITUDE_DESIGN_MEMORY_BEARER
+      allowed_tools:
+        - add
+        - search
+        - list_memories
+
+input_schema:
+  required: [brief]
+  properties:
+    brief:
+      type: string
+      description: Plain-text design brief from the requesting PM
+    target_surface:
+      type: string
+      description: "web | mobile | tablet (default: web)"
+      default: web
+    brand_token_namespace:
+      type: string
+      description: Optional namespace key for the brand-tokens memory bucket
+      default: amplitude-default
+
+steps:
+  - id: generate-mockup
+    type: managed-agent
+    responsibility: Generate an interactive HTML mockup from the design brief
+    source_hint: Amplitude case study (Anthropic blog, 2026-05-19)
+    owner: design-systems
+    managed_agent_config:
+      agent_id: auto
+      agent_template: designer
+      message: >
+        Read the design brief below, look up brand tokens via the
+        design-memory MCP (call `search` with namespace
+        {input.brand_token_namespace}), and produce a single self-
+        contained interactive HTML mockup. Write the file to
+        /mnt/session/outputs/mockup.html. Target surface:
+        {input.target_surface}.
+
+        Brief:
+        {input.brief}
+      model: claude-sonnet-4-6
+      timeout: 1200
+      tools_enabled:
+        - bash
+        - text_editor
+        - web_search
+      self_hosted_sandbox:
+        environment_id: env_amplitude_design
+        environment_key_env: AMPLITUDE_ENV_KEY
+        provider: cloudflare
+        metadata:
+          team: design-systems
+          case_study: amplitude
+      multiagent:
+        type: coordinator
+        agents:
+          - type: self
+            nickname: lead-designer
+          - type: agent
+            id: agent_amplitude_a11y_reviewer
+            nickname: accessibility-review
+        max_concurrent_threads: 2
+        prompt_routing_hint: >
+          Delegate WCAG and ARIA review of the generated mockup to
+          accessibility-review. Use lead-designer for visual iteration.
+      outcomes:
+        - id: design_quality
+          description: Heuristic design quality score 0-1
+          range: [0.0, 1.0]
+          target: 0.75
+
+  - id: screenshot-mockup
+    type: computer-use
+    depends_on: [generate-mockup]
+    responsibility: Drive headless Chromium to screenshot the rendered mockup
+    source_hint: Visual evidence for accessibility-review thread
+    owner: design-systems
+    computer_use_config:
+      display_width_px: 1440
+      display_height_px: 900
+      tools:
+        - bash
+        - text_editor
+        - computer
+      model: claude-sonnet-4-6
+      require_human_approval_for:
+        - submit_form
+      message: >
+        Open /mnt/session/outputs/mockup.html in headless Chromium,
+        scroll through each section, and capture screenshots to
+        /mnt/session/outputs/screenshots/. Do not click any external
+        links.
+      max_turns: 12
+      timeout: 600
