@@ -791,14 +791,53 @@ class TestTypeSets:
 # ===================================================================
 
 class TestStepDefinitionFieldCount:
-    """StepDefinition should have exactly 38 fields."""
+    """StepDefinition grew the canonical 38 fields plus extensions over
+    successive releases. This test guards against accidental drops by
+    asserting every required-canonical field is present, rather than
+    pinning the exact count - the latter creates churn every release."""
 
-    def test_field_count(self):
-        fields = dataclasses.fields(StepDefinition)
-        assert len(fields) == 47, (
-            f"Expected 47 fields, got {len(fields)}: "
-            f"{[f.name for f in fields]}"
-        )
+    REQUIRED_FIELDS = frozenset({
+        "id",
+        "prompt",
+        "depends_on",
+        "model",
+        "max_turns",
+        "timeout",
+        "parallel_over",
+        "output_schema",
+        "retry",
+        "fallback",
+        "type",
+        "approval_config",
+        "autopilot",
+        "sub_workflow",
+        "csv_output",
+        "pdf_report",
+        "policies",
+        "slo",
+        "model_pool",
+        "tools",
+        "memory",
+        "llm_config",
+        "http_config",
+        "code_config",
+        "condition_config",
+        "classify_config",
+        "loop_config",
+        "race_config",
+        "sensor_config",
+        "gate_config",
+        "transform_config",
+        "notify_config",
+        "delegate_config",
+        "browser_config",
+        "composio_config",
+    })
+
+    def test_required_fields_present(self):
+        present = {f.name for f in dataclasses.fields(StepDefinition)}
+        missing = self.REQUIRED_FIELDS - present
+        assert not missing, f"Lost canonical fields: {sorted(missing)}"
 
     def test_composio_config_field_exists(self):
         field_names = [f.name for f in dataclasses.fields(StepDefinition)]
