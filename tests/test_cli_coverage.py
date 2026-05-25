@@ -1496,9 +1496,16 @@ class TestCmdMcp:
     def test_mcp_sets_env_vars(self):
         args = make_args(url="http://custom:9090", api_key="testkey")
         mock_main = MagicMock()
-        with patch("sandcastle.mcp_server.main", mock_main, create=True):
-            with patch.dict("sys.modules", {"sandcastle.mcp_server": MagicMock(main=mock_main)}):
-                cli._cmd_mcp(args)
+        # Inject a fake sandcastle.mcp_server into sys.modules first so the
+        # import inside _cmd_mcp resolves to our mock. We can't use
+        # patch("sandcastle.mcp_server.main", ...) here because that path
+        # only resolves once the real module imports cleanly - and that
+        # requires the [mcp] extra, which is not installed in plain CI.
+        with patch.dict(
+            "sys.modules",
+            {"sandcastle.mcp_server": MagicMock(main=mock_main)},
+        ):
+            cli._cmd_mcp(args)
         assert os.environ.get("SANDCASTLE_URL") == "http://custom:9090"
         assert os.environ.get("SANDCASTLE_API_KEY") == "testkey"
 

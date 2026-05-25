@@ -215,7 +215,12 @@ class TestGetRuntime:
             get_runtime("quantum")
 
     def test_registry_contains_all(self):
-        assert set(RUNTIMES.keys()) == {"auto", "anthropic", "local", "agent-sdk"}
+        # v0.32.2 added "self-hosted-sandbox"; this assertion is a
+        # superset check, not an exact-equal, so future runtimes do not
+        # silently regress the test.
+        assert {"auto", "anthropic", "local", "agent-sdk"}.issubset(
+            set(RUNTIMES.keys())
+        )
 
 
 # ---------------------------------------------------------------------------
