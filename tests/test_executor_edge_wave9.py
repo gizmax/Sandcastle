@@ -825,9 +825,24 @@ class TestCacheKeyGeneration:
         assert len(key) == 64
 
     def test_key_matches_manual_sha256(self):
-        raw = "wf:s1:model:prompt"
+        # The cache key prepends a tenant scope so two tenants never
+        # share cached outputs even for identical workflow/step/model/prompt.
+        # None tenant_id encodes as the literal "_none_" so single-tenant
+        # mode also has a stable shape - see security fix in round 9.
+        raw = "_none_:wf:s1:model:prompt"
         expected = hashlib.sha256(raw.encode()).hexdigest()
         assert _compute_cache_key("wf", "s1", "prompt", "model") == expected
+
+    def test_key_tenant_scope_isolates_hashes(self):
+        # Same workflow + step + prompt + model but different tenants
+        # MUST produce different cache keys. Regression guard for the
+        # round 9 cross-tenant data-leak fix.
+        a = _compute_cache_key("wf", "s1", "prompt", "model", tenant_id="tenant-a")
+        b = _compute_cache_key("wf", "s1", "prompt", "model", tenant_id="tenant-b")
+        none = _compute_cache_key("wf", "s1", "prompt", "model")
+        assert a != b
+        assert a != none
+        assert b != none
 
 
 class TestIsCacheableOutput:
