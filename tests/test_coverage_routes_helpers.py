@@ -186,19 +186,20 @@ class TestRoutesNonLocalMode:
         assert response.status_code in (200, 400, 404, 500)
 
     def test_memory_list_endpoint_valid_scope(self):
-        """GET /api/memories with valid workflow scope returns memories."""
+        """GET /api/memories returns either data (200), missing data (404),
+        unavailable backend without [memory] extra (503), or server error (500)."""
         response = client.get("/api/memories?scope_id=workflow:test-workflow")
-        assert response.status_code in (200, 404, 500)
+        assert response.status_code in (200, 404, 500, 503)
 
     def test_memory_list_endpoint_agent_scope(self):
         """GET /api/memories with agent scope returns memories."""
         response = client.get("/api/memories?scope_id=agent:test-agent")
-        assert response.status_code in (200, 404, 500)
+        assert response.status_code in (200, 404, 500, 503)
 
     def test_memory_list_endpoint_global_scope(self):
         """GET /api/memories with global scope returns memories."""
         response = client.get("/api/memories?scope_id=global")
-        assert response.status_code in (200, 404, 500)
+        assert response.status_code in (200, 404, 500, 503)
 
     def test_run_audit_endpoint(self):
         """GET /api/runs/{id}/audit returns audit trail."""

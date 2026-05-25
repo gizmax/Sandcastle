@@ -11642,6 +11642,22 @@ def _validate_memory_id(memory_id: str) -> str:
     return memory_id
 
 
+def _memory_backend_unavailable(exc: Exception) -> HTTPException:
+    """503 with a useful hint when the [memory] extra is not installed."""
+    return HTTPException(
+        status_code=503,
+        detail=ApiResponse(
+            error=ErrorResponse(
+                code="MEMORY_BACKEND_UNAVAILABLE",
+                message=(
+                    f"Memory backend is not available: {exc}. "
+                    "Install the [memory] extra: pip install 'sandcastle-ai[memory]'"
+                ),
+            )
+        ).model_dump(),
+    )
+
+
 @router.get("/memories")
 async def list_memories(
     req: Request,
@@ -11653,9 +11669,12 @@ async def list_memories(
     """List all memories for a given scope."""
     _require_admin(req)
     _validate_scope_id(scope_id)
-    from sandcastle.engine.memory import load_memories
+    from sandcastle.engine.memory import MemoryBackendError, load_memories
 
-    memories = await load_memories(scope_id, limit=limit)
+    try:
+        memories = await load_memories(scope_id, limit=limit)
+    except MemoryBackendError as exc:
+        raise _memory_backend_unavailable(exc) from exc
     entries = [MemoryEntry(**m) for m in memories]
     return ApiResponse(data=MemoryListResponse(memories=entries, total=len(entries)))
 
@@ -11664,13 +11683,16 @@ async def list_memories(
 async def add_memory(req: Request, body: MemoryAddRequest):
     """Add a new memory. Mem0 auto-extracts facts and deduplicates."""
     _require_admin(req)
-    from sandcastle.engine.memory import save_memory
+    from sandcastle.engine.memory import MemoryBackendError, save_memory
 
-    result = await save_memory(
-        scope_id=body.scope_id,
-        content=body.content,
-        metadata=body.metadata,
-    )
+    try:
+        result = await save_memory(
+            scope_id=body.scope_id,
+            content=body.content,
+            metadata=body.metadata,
+        )
+    except MemoryBackendError as exc:
+        raise _memory_backend_unavailable(exc) from exc
     return ApiResponse(data={"added": len(result), "results": result})
 
 
@@ -11678,9 +11700,12 @@ async def add_memory(req: Request, body: MemoryAddRequest):
 async def search_memories(req: Request, body: MemorySearchRequest):
     """Semantic search over memories."""
     _require_admin(req)
-    from sandcastle.engine.memory import load_memories
+    from sandcastle.engine.memory import MemoryBackendError, load_memories
 
-    memories = await load_memories(body.scope_id, query=body.query, limit=body.limit)
+    try:
+        memories = await load_memories(body.scope_id, query=body.query, limit=body.limit)
+    except MemoryBackendError as exc:
+        raise _memory_backend_unavailable(exc) from exc
     entries = [MemoryEntry(**m) for m in memories]
     return ApiResponse(data=MemoryListResponse(memories=entries, total=len(entries)))
 
