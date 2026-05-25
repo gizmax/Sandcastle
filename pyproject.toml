@@ -37,6 +37,7 @@ dependencies = [
     "pyyaml>=6.0",
     "pydantic>=2.9",
     "pydantic-settings>=2.5",
+    "jsonschema>=4.0",
     "aioboto3>=13",
     "python-dotenv>=1.0",
     "simpleeval>=1.0",
