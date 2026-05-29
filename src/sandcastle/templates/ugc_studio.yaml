@@ -1,15 +1,16 @@
 # name: UGC Studio
-# description: Drop a product photo, pick a mode, get N platform-ready UGC shots. Reference-image generation keeps the product faithful; switchable nano-banana / gpt-image-1 backend.
-# tags: [Marketing, UGC, Product-Photography, Social-Media, E-Commerce]
+# description: Drop a product photo, pick a mode, get N platform-ready UGC shots. Reference-image generation keeps the product faithful; a vision judge scores every shot and failed ones are regenerated. Switchable nano-banana / gpt-image-1 backend.
+# tags: [Marketing, UGC, Product-Photography, Social-Media, E-Commerce, AI-Studio]
 # category: creative
 
 name: ugc-studio
 description: >
-  Fast, simple, high-quality UGC. One product photo in -> N platform-ready shots out.
-  The real product photo is passed as a reference image to the generator (nano-banana
-  Gemini or OpenAI gpt-image-1), so the product stays faithful while the prompt drives
-  authentic, mode-specific styling. Pick a mode (raw UGC, moody, lifestyle, studio,
-  flatlay) and a count - everything else is derived.
+  Fast, high-quality UGC. One product photo in -> N platform-ready shots out.
+  The real product photo is passed as a reference image to the generator
+  (nano-banana Gemini or OpenAI gpt-image-1), so the product stays faithful while
+  the prompt drives authentic, mode-specific styling. A Gemini vision judge scores
+  every shot against the original; anything that fails is regenerated with an
+  improved prompt. Pick a mode and a count - everything else is derived.
 default_model: sonnet
 default_timeout: 300
 
@@ -43,6 +44,10 @@ input_schema:
       enum: ["nano-banana", "openai"]
       description: "Image generator: nano-banana (Gemini 3 Pro Image) or openai (gpt-image-1). Both use the product photo as a reference."
       default: "nano-banana"
+    min_score:
+      type: number
+      description: "Minimum acceptable overall quality score (1-10). Shots below this are regenerated once."
+      default: 7.0
 
 steps:
   # ============================================================
@@ -159,7 +164,6 @@ steps:
       then: ["generate-openai"]
       else: ["generate-nano"]
 
-  # --- nano-banana (Gemini 3 Pro Image) ---
   - id: "generate-nano"
     depends_on: ["backend-router"]
     type: tool
@@ -180,7 +184,6 @@ steps:
       backoff: exponential
       on_failure: skip
 
-  # --- OpenAI gpt-image-1 ---
   - id: "generate-openai"
     depends_on: ["backend-router"]
     type: tool
@@ -202,26 +205,165 @@ steps:
       on_failure: skip
 
   # ============================================================
-  # 4. DELIVER - package the results
+  # 4. COLLECT - unify whichever backend ran into a flat list
+  # ============================================================
+  - id: "collect-images"
+    depends_on: ["generate-nano", "generate-openai"]
+    type: llm
+    prompt: |
+      Build a flat list of generated images. Exactly one of the two generator outputs
+      below is populated (only the selected backend ran); the other is empty/null.
+
+      nano-banana output: {steps.generate-nano.output}
+      openai output: {steps.generate-openai.output}
+      Shot plan (for aspect/mood per shot): {steps.compose-prompts.output}
+
+      Each generator result has a "files" array of written file paths. Produce a JSON
+      object { "images": [ { "shot_id", "file", "aspect" } ] } - one entry per generated
+      file. Derive shot_id from the filename (the part before the extension) and match
+      its aspect from the shot plan.
+    output_schema:
+      type: object
+      properties:
+        images:
+          type: array
+          items:
+            type: object
+            properties:
+              shot_id: { type: string }
+              file: { type: string }
+              aspect: { type: string }
+
+  # ============================================================
+  # 5. QUALITY JUDGE - vision model SEES each shot vs the reference
+  # ============================================================
+  - id: "quality-judge"
+    depends_on: ["collect-images"]
+    type: tool
+    parallel_over: "steps.collect-images.output.images"
+    tool_config:
+      tool: "gemini"
+      function: "analyze_image"
+      arguments:
+        - |
+          You are a UGC quality judge. The FIRST image is a generated UGC shot; the
+          SECOND is the original product reference. Score the generated shot 1-10 on:
+          product_accuracy (matches reference shape, colors, label, proportions),
+          authenticity (looks like real phone UGC, not an ad), composition,
+          lighting_quality, platform_fit. Compute overall_score (1-10). List concrete
+          issues and fix_suggestions if anything is weak.
+          Return ONLY JSON: { "shot_id": "REPLACE_SHOT", "product_accuracy", "authenticity",
+          "composition", "lighting_quality", "platform_fit", "overall_score",
+          "issues": [], "fix_suggestions": [] }
+        - images: ["{input._item.file}", "{input.product_photo}"]
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # ============================================================
+  # 6. AGGREGATE + SELF-HEALING (one bounded regeneration pass)
+  # ============================================================
+  - id: "quality-aggregate"
+    depends_on: ["quality-judge", "collect-images", "compose-prompts"]
+    prompt: |
+      Aggregate the per-image quality scores.
+
+      Judge results: {steps.quality-judge.output}
+      Images: {steps.collect-images.output}
+      Original prompts: {steps.compose-prompts.output}
+      Minimum acceptable score: {input.min_score}
+
+      For each image, read its overall_score (inside the judge "result"). An image FAILS
+      if overall_score < {input.min_score}. For every failed image, pair it with its
+      original prompt and the judge's fix_suggestions.
+
+      Return JSON: { "pass_count", "fail_count", "avg_score",
+      "failed": [ { "shot_id", "original_prompt", "aspect", "fix_suggestions": [] } ] }
+    output_schema:
+      type: object
+      properties:
+        pass_count: { type: integer }
+        fail_count: { type: integer }
+        avg_score: { type: number }
+        failed:
+          type: array
+          items:
+            type: object
+            properties:
+              shot_id: { type: string }
+              original_prompt: { type: string }
+              aspect: { type: string }
+              fix_suggestions: { type: array, items: { type: string } }
+
+  - id: "quality-check"
+    depends_on: ["quality-aggregate"]
+    type: condition
+    condition_config:
+      expression: "{steps.quality-aggregate.output.fail_count} > 0"
+      then: ["compose-fixes"]
+      else: []
+
+  - id: "compose-fixes"
+    depends_on: ["quality-check"]
+    type: llm
+    parallel_over: "steps.quality-aggregate.output.failed"
+    prompt: |
+      A generated UGC shot failed quality control. Rewrite its image prompt to fix the
+      issues while keeping the same scene intent. The product reference is passed
+      separately, so focus on fixing the flagged weaknesses.
+
+      Original prompt: {input._item.original_prompt}
+      Fix suggestions: {input._item.fix_suggestions}
+
+      Return JSON: { "shot_id": "{input._item.shot_id}", "prompt": "<improved prompt>", "aspect": "{input._item.aspect}" }
+    output_schema:
+      type: object
+      properties:
+        shot_id: { type: string }
+        prompt: { type: string }
+        aspect: { type: string }
+
+  - id: "regenerate"
+    depends_on: ["compose-fixes"]
+    type: tool
+    parallel_over: "steps.compose-fixes.output"
+    tool_config:
+      tool: "nano-banana"
+      function: "generate"
+      arguments:
+        - "{input._item.prompt}"
+        - model: "pro"
+          aspect: "{input._item.aspect}"
+          size: "2K"
+          reference_images: ["{input.product_photo}"]
+          output: "{input._item.shot_id}-v2"
+          output_dir: "/tmp/ugc/{run_id}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # ============================================================
+  # 7. DELIVER
   # ============================================================
   - id: "deliver"
-    depends_on: ["generate-nano", "generate-openai"]
+    depends_on: ["quality-aggregate", "regenerate"]
     prompt: |
       Compile the UGC Studio delivery package.
 
       Product: {input.product_name}
       Mode: {input.mode} | Platform: {input.platform} | Backend: {input.image_backend}
 
-      Generated (nano-banana): {steps.generate-nano.output}
-      Generated (openai): {steps.generate-openai.output}
-      Shot plan: {steps.art-direct.output}
+      Images + scores: {steps.collect-images.output} / {steps.quality-judge.output}
+      Quality summary: {steps.quality-aggregate.output}
+      Regenerated (if any): {steps.regenerate.output}
 
-      One of the two generator outputs will be empty (only the selected backend ran).
       Produce clean markdown with:
-      1. Summary: number of images delivered, mode, platform, total estimated cost
-      2. Image catalog: for each generated file - path, shot mood, aspect ratio,
-         and a suggested caption hook
-      3. A suggested posting order for the chosen platform
+      1. Summary: images delivered, average quality score, pass/fail count, mode, platform
+      2. Image catalog: for each final image - path, quality score, aspect ratio, and a
+         suggested caption hook. Prefer the regenerated "-v2" file when a shot was fixed.
+      3. Suggested posting order for the chosen platform
     output_schema:
       type: object
       properties:
@@ -232,6 +374,7 @@ steps:
             type: object
             properties:
               file: { type: string }
+              score: { type: number }
               caption_hook: { type: string }
               aspect: { type: string }
 

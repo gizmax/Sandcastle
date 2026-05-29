@@ -184,6 +184,70 @@ export async function generate_image(prompt, options = "{}") {
   }
 }
 
+// Build a chat image content block from a local path or URL.
+function imageBlock(ref) {
+  if (/^https?:\/\//i.test(ref)) {
+    return { type: "image_url", image_url: { url: ref } };
+  }
+  const ext = (ref.split(".").pop() || "png").toLowerCase();
+  const mime = MIME_BY_EXT[ext] || "image/png";
+  const b64 = readFileSync(ref).toString("base64");
+  return { type: "image_url", image_url: { url: `data:${mime};base64,${b64}` } };
+}
+
+/**
+ * Vision analysis / judging. Sends one or more images plus a text prompt to a
+ * vision model (default gpt-4o) and returns the model's answer. Lets a workflow
+ * actually SEE generated images - e.g. score a UGC shot against the original
+ * product reference. Returns parsed JSON when the model replies with JSON.
+ *
+ * options: model (default gpt-4o), images (string[] of local paths or URLs),
+ *   max_tokens, json (hint the model to return JSON).
+ */
+export async function analyze_image(prompt, options = "{}") {
+  if (!prompt || typeof prompt !== "string") {
+    throw new Error("prompt is required and must be a string");
+  }
+  const opts = typeof options === "string" ? JSON.parse(options) : options;
+  const images = Array.isArray(opts.images) ? opts.images : [];
+  if (images.length === 0) throw new Error("analyze_image requires options.images (>=1)");
+
+  const content = [{ type: "text", text: prompt }, ...images.map(imageBlock)];
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), IMAGE_TIMEOUT);
+  try {
+    const resp = await fetch(`${BASE}/chat/completions`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: opts.model || "gpt-4o",
+        max_tokens: opts.max_tokens || 1024,
+        messages: [{ role: "user", content }],
+      }),
+      signal: ctrl.signal,
+    });
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`OpenAI vision API ${resp.status}: ${text.slice(0, 500)}`);
+    }
+    const data = await resp.json();
+    let text = data.choices?.[0]?.message?.content ?? "";
+    text = text.trim();
+    if (text.startsWith("```")) {
+      text = text.replace(/^```[a-z]*\n?/i, "").replace(/```$/, "").trim();
+    }
+    let parsed = text;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      // not JSON - return raw text
+    }
+    return { result: parsed, model: data.model, usage: data.usage };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function transcribe_audio(fileUrl) {
   // Download the audio file first, then send to Whisper
   const ctrl = new AbortController();
@@ -241,9 +305,9 @@ export async function text_to_speech(text, voice = "alloy") {
 // CLI dispatch
 if (process.argv[1]?.endsWith("openai.mjs")) {
   const [fn, ...args] = process.argv.slice(2);
-  const dispatch = { chat_completion, create_embedding, generate_image, transcribe_audio, text_to_speech };
+  const dispatch = { chat_completion, create_embedding, generate_image, analyze_image, transcribe_audio, text_to_speech };
   if (!dispatch[fn]) {
-    console.error("Usage: node openai.mjs <chat_completion|create_embedding|generate_image|transcribe_audio|text_to_speech> [args...]");
+    console.error("Usage: node openai.mjs <chat_completion|create_embedding|generate_image|analyze_image|transcribe_audio|text_to_speech> [args...]");
     process.exit(1);
   }
   try {
