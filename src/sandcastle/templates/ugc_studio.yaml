@@ -1,0 +1,239 @@
+# name: UGC Studio
+# description: Drop a product photo, pick a mode, get N platform-ready UGC shots. Reference-image generation keeps the product faithful; switchable nano-banana / gpt-image-1 backend.
+# tags: [Marketing, UGC, Product-Photography, Social-Media, E-Commerce]
+# category: creative
+
+name: ugc-studio
+description: >
+  Fast, simple, high-quality UGC. One product photo in -> N platform-ready shots out.
+  The real product photo is passed as a reference image to the generator (nano-banana
+  Gemini or OpenAI gpt-image-1), so the product stays faithful while the prompt drives
+  authentic, mode-specific styling. Pick a mode (raw UGC, moody, lifestyle, studio,
+  flatlay) and a count - everything else is derived.
+default_model: sonnet
+default_timeout: 300
+
+input_schema:
+  required: ["product_photo"]
+  properties:
+    product_photo:
+      type: string
+      format: file-path
+      description: "Path to the product photo - passed as a reference image to keep the product faithful"
+      example: "/path/to/product.png"
+    product_name:
+      type: string
+      description: "Product name (helps art direction)"
+      default: ""
+    mode:
+      type: string
+      enum: ["raw_ugc", "moody", "lifestyle", "studio", "flatlay"]
+      description: "Visual mode. raw_ugc = authentic phone shot; moody = editorial/cinematic; lifestyle = bright in-use; studio = clean product hero; flatlay = top-down styled"
+      default: "raw_ugc"
+    count:
+      type: integer
+      description: "How many shots to generate"
+      default: 3
+    platform:
+      type: string
+      description: "Target platform (drives aspect ratio)"
+      default: "instagram"
+    image_backend:
+      type: string
+      enum: ["nano-banana", "openai"]
+      description: "Image generator: nano-banana (Gemini 3 Pro Image) or openai (gpt-image-1). Both use the product photo as a reference."
+      default: "nano-banana"
+
+steps:
+  # ============================================================
+  # 1. ART DIRECTION - turn 1 photo + mode + count into N shots
+  # ============================================================
+  - id: "art-direct"
+    prompt: |
+      You are an elite creative director for a UGC content studio.
+
+      Product: {input.product_name}
+      Mode: {input.mode}
+      Target platform: {input.platform}
+      Number of shots: {input.count}
+
+      The product itself is provided to the image generator as a reference photo, so
+      you do NOT need to describe the product's appearance. Your job is to design
+      {input.count} visually DISTINCT shots in the chosen mode - vary the scene, angle,
+      composition, props, and (where relevant) the person/action. Keep every shot
+      coherent with the mode below.
+
+      ## Mode guide
+      {% if input.mode == "raw_ugc" %}
+      Raw UGC: looks shot on a phone. Handheld, slightly imperfect angles, real homes/
+      outdoors, a real person holding or using the product, natural light, low polish,
+      authentic and candid.
+      {% elif input.mode == "moody" %}
+      Moody / editorial: directional light, deep shadows, cinematic color grade, 50mm
+      f1.8 shallow depth of field, minimal stylized scenes, aspirational.
+      {% elif input.mode == "lifestyle" %}
+      Lifestyle / bright: bright airy natural daylight, relatable in-use context, warm
+      clean grade, light human presence.
+      {% elif input.mode == "studio" %}
+      Clean studio: seamless neutral background, soft even light, sharp product hero,
+      no people.
+      {% else %}
+      Flat lay: top-down, complementary styled props around the product, even light,
+      Pinterest-worthy.
+      {% endif %}
+
+      Return a JSON object with a "shots" array of exactly {input.count} items:
+      shot_id, aspect (9:16 / 4:5 / 1:1 / 2:3 depending on platform & mode),
+      scene_description, camera (lens mm, aperture, focus point), lighting
+      (direction + quality), color_grade, props (array), human (description + action,
+      or "none"), product_placement, mood.
+    output_schema:
+      type: object
+      properties:
+        shots:
+          type: array
+          items:
+            type: object
+            properties:
+              shot_id: { type: string }
+              aspect: { type: string }
+              scene_description: { type: string }
+              camera: { type: string }
+              lighting: { type: string }
+              color_grade: { type: string }
+              props: { type: array, items: { type: string } }
+              human: { type: string }
+              product_placement: { type: string }
+              mood: { type: string }
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
+
+  # ============================================================
+  # 2. COMPOSE PROMPTS - dense, mode-specific image prompt per shot
+  # ============================================================
+  - id: "compose-prompts"
+    depends_on: ["art-direct"]
+    type: llm
+    parallel_over: "steps.art-direct.output.shots"
+    prompt: |
+      You are an expert image-generation prompt engineer. The product photo is passed
+      to the model as a reference image, so DO NOT redescribe the product - focus the
+      whole prompt on scene, styling, camera and authenticity.
+
+      Shot: {input._item.shot_id}
+      Scene: {input._item.scene_description}
+      Camera: {input._item.camera}
+      Lighting: {input._item.lighting}
+      Color grade: {input._item.color_grade}
+      Props: {input._item.props}
+      Person: {input._item.human}
+      Product placement: {input._item.product_placement}
+      Mood: {input._item.mood}
+
+      Requirements:
+      - Single paragraph, 110-170 words, extremely detailed
+      - {% if input.mode == "raw_ugc" %}Authentic phone-shot UGC look, natural skin with visible pores, slight handheld imperfection, light sensor grain{% elif input.mode == "moody" %}Cinematic editorial look, directional light, rich shadows, film-like color grade{% elif input.mode == "lifestyle" %}Bright airy lifestyle look, natural daylight, warm and clean{% elif input.mode == "studio" %}Clean studio product hero, crisp and sharp, even lighting{% else %}Top-down flat lay, balanced styled composition, even soft light{% endif %}
+      - The product must match the reference exactly in proportions, materials and colors
+      - Specify depth of field and time of day
+      - End with negative guidance: avoid AI-generated look, advertising gloss, plastic
+        skin, oversaturation, text overlays, watermarks, logos, extra products
+
+      Return JSON: { "shot_id": "{input._item.shot_id}", "prompt": "<the prompt>", "aspect": "{input._item.aspect}" }
+    output_schema:
+      type: object
+      properties:
+        shot_id: { type: string }
+        prompt: { type: string }
+        aspect: { type: string }
+
+  # ============================================================
+  # 3. BACKEND ROUTER - nano-banana (default) vs openai gpt-image-1
+  # ============================================================
+  - id: "backend-router"
+    depends_on: ["compose-prompts"]
+    type: condition
+    condition_config:
+      expression: "'{input.image_backend}' == 'openai'"
+      then: ["generate-openai"]
+      else: ["generate-nano"]
+
+  # --- nano-banana (Gemini 3 Pro Image) ---
+  - id: "generate-nano"
+    depends_on: ["backend-router"]
+    type: tool
+    parallel_over: "steps.compose-prompts.output"
+    tool_config:
+      tool: "nano-banana"
+      function: "generate"
+      arguments:
+        - "{input._item.prompt}"
+        - model: "pro"
+          aspect: "{input._item.aspect}"
+          size: "2K"
+          reference_images: ["{input.product_photo}"]
+          output: "{input._item.shot_id}"
+          output_dir: "/tmp/ugc/{run_id}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # --- OpenAI gpt-image-1 ---
+  - id: "generate-openai"
+    depends_on: ["backend-router"]
+    type: tool
+    parallel_over: "steps.compose-prompts.output"
+    tool_config:
+      tool: "openai"
+      function: "generate_image"
+      arguments:
+        - "{input._item.prompt}"
+        - model: "gpt-image-1"
+          aspect: "{input._item.aspect}"
+          quality: "high"
+          reference_images: ["{input.product_photo}"]
+          output: "{input._item.shot_id}"
+          output_dir: "/tmp/ugc/{run_id}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # ============================================================
+  # 4. DELIVER - package the results
+  # ============================================================
+  - id: "deliver"
+    depends_on: ["generate-nano", "generate-openai"]
+    prompt: |
+      Compile the UGC Studio delivery package.
+
+      Product: {input.product_name}
+      Mode: {input.mode} | Platform: {input.platform} | Backend: {input.image_backend}
+
+      Generated (nano-banana): {steps.generate-nano.output}
+      Generated (openai): {steps.generate-openai.output}
+      Shot plan: {steps.art-direct.output}
+
+      One of the two generator outputs will be empty (only the selected backend ran).
+      Produce clean markdown with:
+      1. Summary: number of images delivered, mode, platform, total estimated cost
+      2. Image catalog: for each generated file - path, shot mood, aspect ratio,
+         and a suggested caption hook
+      3. A suggested posting order for the chosen platform
+    output_schema:
+      type: object
+      properties:
+        summary: { type: string }
+        images:
+          type: array
+          items:
+            type: object
+            properties:
+              file: { type: string }
+              caption_hook: { type: string }
+              aspect: { type: string }
+
+on_complete:
+  storage_path: "ugc-studio/{run_id}/deliverables.json"

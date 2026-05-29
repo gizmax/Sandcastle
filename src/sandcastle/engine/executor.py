@@ -2936,6 +2936,140 @@ async def _execute_http_step(
         )
 
 
+async def _execute_tool_step(
+    step: StepDefinition,
+    context: RunContext,
+) -> StepResult:
+    """Execute a tool connector step.
+
+    Spawns a registered .mjs connector via its CLI dispatch
+    (`<runtime> connector.mjs <function> <arg1> <arg2> ...`), passing the tool's
+    credential env vars from the registry, and returns its JSON output as the
+    step output. Uses an args list (no shell), so there is no command injection.
+    """
+    import asyncio
+    import os
+    import shutil
+    import time
+
+    started_at = time.monotonic()
+    cfg = step.tool_config
+    if not cfg or not cfg.tool or not cfg.function:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error="Tool step missing tool_config with 'tool' and 'function'",
+        )
+
+    try:
+        from sandcastle.engine.tools import loader as _tool_loader
+        from sandcastle.engine.tools.credentials import get_tool_credentials
+        from sandcastle.engine.tools.registry import get_tool
+
+        try:
+            tool_def = get_tool(cfg.tool)
+        except KeyError as e:
+            return StepResult(
+                step_id=step.id, status="failed", error=str(e),
+                duration_seconds=time.monotonic() - started_at,
+            )
+
+        connector_path = (_tool_loader._CONNECTORS_DIR / tool_def.connector_file).resolve()
+        if not connector_path.exists():
+            return StepResult(
+                step_id=step.id, status="failed",
+                error=f"Connector file not found: {connector_path}",
+                duration_seconds=time.monotonic() - started_at,
+            )
+
+        # Resolve positional arguments. Strings get template resolution and are
+        # passed through; dict/list values are template-resolved then JSON-encoded
+        # (connectors JSON.parse object args arriving from the CLI as strings).
+        cli_args: list[str] = []
+        for arg in cfg.arguments:
+            if isinstance(arg, str):
+                cli_args.append(resolve_templates(arg, context))
+            else:
+                cli_args.append(resolve_templates(json.dumps(arg), context))
+
+        # Build subprocess env with the tool's credentials injected.
+        proc_env = os.environ.copy()
+        proc_env.update(get_tool_credentials([cfg.tool]))
+        # Ensure ~/.bun/bin is on PATH so bun-based connectors (e.g. nano-banana)
+        # can locate their CLI dependencies.
+        bun_bin = os.path.join(os.path.expanduser("~"), ".bun", "bin")
+        if os.path.isdir(bun_bin) and bun_bin not in proc_env.get("PATH", ""):
+            proc_env["PATH"] = bun_bin + os.pathsep + proc_env.get("PATH", "")
+
+        # Pick a JS runtime: prefer node (matches sandbox runner), fall back to bun.
+        runtime = shutil.which("node")
+        if not runtime:
+            bun_path = os.path.join(bun_bin, "bun")
+            runtime = bun_path if os.path.exists(bun_path) else (shutil.which("bun") or "node")
+
+        logger.info(
+            "Tool step '%s': %s.%s via %s (%d args)",
+            step.id, cfg.tool, cfg.function, os.path.basename(runtime), len(cli_args),
+        )
+
+        proc = await asyncio.create_subprocess_exec(
+            runtime, str(connector_path), cfg.function, *cli_args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=proc_env,
+        )
+        try:
+            stdout_b, stderr_b = await asyncio.wait_for(
+                proc.communicate(), timeout=step.timeout,
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            return StepResult(
+                step_id=step.id, status="failed",
+                error=f"Tool step timed out after {step.timeout}s",
+                duration_seconds=time.monotonic() - started_at,
+            )
+
+        stdout = (stdout_b or b"").decode("utf-8", "replace").strip()
+        stderr = (stderr_b or b"").decode("utf-8", "replace").strip()
+
+        if proc.returncode != 0:
+            return StepResult(
+                step_id=step.id, status="failed",
+                error=(
+                    f"Connector '{cfg.tool}.{cfg.function}' exited {proc.returncode}: "
+                    f"{(stderr or stdout)[:500]}"
+                ),
+                duration_seconds=time.monotonic() - started_at,
+            )
+
+        # Connectors print a single JSON document to stdout.
+        try:
+            output: Any = json.loads(stdout) if stdout else None
+        except (json.JSONDecodeError, ValueError):
+            output = {"raw": stdout[:5000]}
+
+        # Cost: declared cost_per_call, else read estimated/total cost from output.
+        cost = cfg.cost_per_call
+        if not cost and isinstance(output, dict):
+            cost = float(output.get("estimated_cost") or output.get("total_cost") or 0.0)
+
+        return StepResult(
+            step_id=step.id,
+            output=output,
+            cost_usd=cost,
+            duration_seconds=time.monotonic() - started_at,
+            status="completed",
+        )
+    except Exception as e:
+        duration = time.monotonic() - started_at
+        logger.warning("Tool step '%s' failed: %s", step.id, e)
+        return StepResult(
+            step_id=step.id, status="failed", error=str(e),
+            duration_seconds=duration,
+        )
+
+
 _CODE_STEP_MAX_SIZE = 50_000  # 50KB max code size
 _CODE_STEP_BLOCKED_PATTERNS = re.compile(
     r"__subclasses__|__bases__|__mro__|__class__|__globals__|__builtins__|"
@@ -7411,7 +7545,7 @@ async def _prepare_and_run_step(
         "race", "sensor", "gate", "transform", "notify", "delegate",
         "browser", "sub_workflow", "composio", "openclaw", "parse",
         "report", "managed-agent", "agent",
-        "trajectory-replay", "computer-use",
+        "trajectory-replay", "computer-use", "tool",
     }
 
     async def _run_hybrid(s: StepDefinition, ctx: RunContext) -> StepResult:
@@ -7468,6 +7602,8 @@ async def _prepare_and_run_step(
             return await _execute_trajectory_replay_step(s, ctx, storage)
         if s.type == "computer-use":
             return await _execute_computer_use_step(s, ctx, storage)
+        if s.type == "tool":
+            return await _execute_tool_step(s, ctx)
         raise StepExecutionError(f"Unknown hybrid type '{s.type}'")
 
     # --- Fan-out (parallel_over) - must come BEFORE type dispatch ---

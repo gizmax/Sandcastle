@@ -1652,12 +1652,23 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
             ),
             ToolFunction(
                 name="generate_image",
-                description="Generate image with DALL-E 3",
+                description=(
+                    "Generate image(s) with gpt-image-1 (default) or dall-e-3. "
+                    "Writes files to disk and returns their paths. Pass "
+                    "reference_images for faithful product/UGC editing."
+                ),
                 parameters={
                     "type": "object",
                     "properties": {
                         "prompt": {"type": "string"},
-                        "options": {"type": "object"},
+                        "options": {
+                            "type": "object",
+                            "description": (
+                                "model (gpt-image-1/dall-e-3), size or aspect "
+                                "(1:1/4:5/9:16/16:9), quality (low/medium/high), n, "
+                                "output, output_dir, reference_images (string[])"
+                            ),
+                        },
                     },
                     "required": ["prompt"],
                 },

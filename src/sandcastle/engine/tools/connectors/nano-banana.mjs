@@ -100,7 +100,11 @@ function parseFiles(output) {
   const re = /\+\s+(.+\.(jpe?g|png|webp))/g;
   let m;
   while ((m = re.exec(clean)) !== null) {
-    files.push(m[1].trim());
+    const p = m[1].trim();
+    // Skip the "+ Loaded reference: /path.webp" echo lines - those are inputs,
+    // not generated outputs.
+    if (/loaded reference/i.test(p)) continue;
+    files.push(p);
   }
   return files;
 }

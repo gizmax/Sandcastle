@@ -164,6 +164,25 @@ class CodeConfig:
 
 
 @dataclass
+class ToolConfig:
+    """Configuration for a tool connector invocation step.
+
+    Deterministically invokes a registered .mjs connector via its CLI dispatch
+    (spawning node/bun) and returns its JSON output as the step output. Lets a
+    workflow call connectors (e.g. nano-banana, openai) directly, including
+    passing reference images - no sandbox and no base64 plumbing required.
+    """
+
+    tool: str = ""  # Tool name from the registry (e.g. "nano-banana", "openai")
+    function: str = ""  # Connector function to call (e.g. "generate", "generate_image")
+    # Positional arguments passed to the connector function. Strings are passed
+    # through (after template resolution); dict/list values are JSON-encoded,
+    # matching the connector CLI convention `node x.mjs <fn> <arg1> <arg2>`.
+    arguments: list = field(default_factory=list)
+    cost_per_call: float = 0.0  # Optional declared cost per invocation
+
+
+@dataclass
 class ConditionConfig:
     """Configuration for if/else branching."""
 
@@ -491,6 +510,7 @@ VALID_STEP_TYPES = frozenset(
         "agent",
         "trajectory-replay",
         "computer-use",
+        "tool",
     }
 )
 
@@ -499,7 +519,7 @@ NON_PROMPT_TYPES = frozenset(
     {
         "http", "code", "condition", "loop", "race", "sensor", "gate",
         "transform", "notify", "composio", "openclaw", "parse",
-        "managed-agent", "agent", "trajectory-replay", "computer-use",
+        "managed-agent", "agent", "trajectory-replay", "computer-use", "tool",
     }
 )
 
@@ -508,7 +528,7 @@ NON_LLM_TYPES = frozenset(
     {
         "http", "code", "condition", "loop", "race", "sensor",
         "transform", "notify", "composio", "openclaw", "parse",
-        "managed-agent", "agent", "trajectory-replay", "computer-use",
+        "managed-agent", "agent", "trajectory-replay", "computer-use", "tool",
     }
 )
 
@@ -545,6 +565,7 @@ class StepDefinition:
     llm_config: LlmConfig | None = None
     http_config: HttpConfig | None = None
     code_config: CodeConfig | None = None
+    tool_config: ToolConfig | None = None
     condition_config: ConditionConfig | None = None
     classify_config: ClassifyConfig | None = None
     loop_config: LoopConfig | None = None
@@ -1000,6 +1021,21 @@ def _parse_code_config(data: dict | None) -> CodeConfig | None:
     )
 
 
+def _parse_tool_config(data: dict | None) -> ToolConfig | None:
+    """Parse tool connector step configuration from YAML data."""
+    if data is None:
+        return None
+    args = data.get("arguments", [])
+    if not isinstance(args, list):
+        args = [args]
+    return ToolConfig(
+        tool=data.get("tool", ""),
+        function=data.get("function", ""),
+        arguments=args,
+        cost_per_call=float(data.get("cost_per_call", 0.0)),
+    )
+
+
 def _parse_condition_config(data: dict | None) -> ConditionConfig | None:
     """Parse condition step configuration from YAML data."""
     if data is None:
@@ -1284,6 +1320,7 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
         llm_config=_parse_llm_config(data.get("llm_config")),
         http_config=_parse_http_config(data.get("http_config")),
         code_config=_parse_code_config(data.get("code_config")),
+        tool_config=_parse_tool_config(data.get("tool_config")),
         condition_config=_parse_condition_config(data.get("condition_config")),
         classify_config=_parse_classify_config(data.get("classify_config")),
         loop_config=_parse_loop_config(data.get("loop_config")),
@@ -1512,6 +1549,11 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
         elif step.type == "code":
             if not step.code_config or not step.code_config.code:
                 errors.append(f"Code step '{step.id}' must have code_config with code")
+        elif step.type == "tool":
+            if not step.tool_config or not step.tool_config.tool or not step.tool_config.function:
+                errors.append(
+                    f"Tool step '{step.id}' must have tool_config with 'tool' and 'function'"
+                )
         elif step.type == "condition":
             if not step.condition_config or not step.condition_config.expression:
                 errors.append(
