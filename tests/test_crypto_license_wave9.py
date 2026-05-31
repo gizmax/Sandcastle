@@ -16,6 +16,12 @@ from datetime import date, datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+pytest.importorskip(
+    "cryptography",
+    reason="license crypto tests require the [security] extra",
+)
+
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 

@@ -15,6 +15,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+pytest.importorskip("mcp", reason="MCP server tests require the [mcp] extra")
+
 from sandcastle.mcp_server import (
     _MAX_LIMIT,
     _MAX_PARAM_LENGTH,
