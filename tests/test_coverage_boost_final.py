@@ -550,6 +550,9 @@ class TestRoutesAdditional:
 class TestMCPResourceHandlers:
     """Cover MCP server resource handler functions."""
 
+    def setup_method(self):
+        pytest.importorskip("mcp", reason="MCP server tests require the [mcp] extra")
+
     def test_resource_workflows_error_path(self):
         """resource_workflows returns error JSON when client fails."""
         from sandcastle.mcp_server import create_mcp_server
