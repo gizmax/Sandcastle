@@ -5,10 +5,30 @@ module is imported during test collection.
 """
 
 import asyncio
+import atexit
 import os
+import tempfile
 
-# Force in-memory SQLite for all tests
-os.environ["DATABASE_URL"] = "sqlite+aiosqlite://"
+# Use a temp-file SQLite for the whole test session (not in-memory). In-memory
+# SQLite needs a single StaticPool connection shared across every session; that
+# connection is bound to one event loop and serializes all operations, so a step
+# that holds a transaction while concurrently writing on the same connection
+# (e.g. race-step branches) dead-locks and hangs. A file-backed DB lets each
+# session use its own connection (WAL serializes writers), and the schema/data
+# persist across connections and loops. The file is unique per process and
+# removed at exit.
+_test_db_fd, _test_db_path = tempfile.mkstemp(suffix=".sqlite", prefix="sandcastle-test-")
+os.close(_test_db_fd)
+os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_test_db_path}"
+
+
+@atexit.register
+def _cleanup_test_db() -> None:
+    for suffix in ("", "-wal", "-shm"):
+        try:
+            os.unlink(_test_db_path + suffix)
+        except OSError:
+            pass
 
 import pytest  # noqa: E402
 
@@ -29,16 +49,13 @@ def _run_async(coro):
 
 @pytest.fixture(scope="session", autouse=True)
 def _create_test_tables():
-    """Create all DB tables in the in-memory SQLite database.
+    """Create all DB tables in the file-backed test SQLite database.
 
-    Also registers a ``connect`` listener that recreates the schema on EVERY
-    new connection. The test DB is in-memory SQLite with StaticPool (a single
-    shared connection); if that connection is ever disposed, invalidated, or
-    recreated for any reason, the replacement connection sees an empty database
-    and unrelated later tests fail with ``no such table``. Running
-    ``CREATE TABLE IF NOT EXISTS`` on connect guarantees the schema exists on
-    whatever connection a session ends up using, healing the wipe at its source
-    regardless of cause (dispose, pool invalidation, module reload).
+    Also registers a ``connect`` listener that runs ``CREATE TABLE/INDEX IF NOT
+    EXISTS`` on every new connection. With the file-backed DB the schema already
+    persists across connections, so this is just a cheap safety net that
+    guarantees the schema exists on whatever connection a session ends up using
+    (e.g. if the engine is disposed and a fresh file connection is opened).
     """
     from sqlalchemy import event
     from sqlalchemy.dialects import sqlite as _sqlite
