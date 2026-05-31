@@ -106,19 +106,28 @@ connector + the `tool` step type without propagating the tripwire counts:
   `_call_advisor_llm` (the old patch target let a real advisor call through
   when an API key was in the env).
 
-## Known remaining issue (pre-existing, not from this sweep)
+## Known remaining issues (2 pre-existing flakes, not from this sweep)
 
-`test_workflow_e2e.py::TestRaceWorkflows::test_race_all_fail_fallback` times out
-in the full suite (it was the single e2e timeout in the original red CI too).
-Root cause traced: the **test body passes** - the timeout fires in pytest-asyncio
-loop **teardown** (`_cancel_all_tasks` blocks in `selector.select`). When one
-race branch wins while the other is still mid-DB-write, cancelling the loser
-leaves a dangling aiosqlite operation (its `async with async_session` cleanup
-runs on cancellation), and pytest-asyncio's loop close waits on it. `asyncio.run`
-does not hit this (both trivial branches finish in the same loop tick, so there
-is nothing to cancel). It is timing-dependent and orthogonal to this sweep, so
-it is left for a focused follow-up (the race step's branch-cancellation cleanup
-needs to drain in-flight session work before the task is dropped).
+This sweep took the PR's Python-tests check from **82 failures to 2** (after also
+merging current `main`, whose newer tests run in the PR merge ref). Both
+remaining are pre-existing, order/teardown dependent, and orthogonal to the
+audit work:
+
+1. `test_workflow_e2e.py::TestRaceWorkflows::test_race_all_fail_fallback` times
+   out in the full suite (it was the single e2e timeout in the original red CI).
+   The **test body passes**; the timeout fires in pytest-asyncio loop
+   **teardown** (`_cancel_all_tasks` blocks in `selector.select`). It does not
+   reproduce under `asyncio.run` - only under pytest-asyncio's function-scoped
+   loop, pointing at the in-memory-SQLite StaticPool connection (created on one
+   loop, reused across per-test loops) leaving an in-flight aiosqlite op that
+   the loop close waits on. A real fix likely needs a session-scoped test loop
+   or a per-test engine, which is a broad test-infra change deserving its own PR.
+2. `test_v028_features.py::TestBatchRunPost::test_valid_batch_returns_202` fails
+   only in full-suite order (passes in isolation and in large subsets). An
+   earlier test leaves module state the conftest reset does not yet cover; the
+   specific polluter was not pinned within this sweep.
+
+Both should be addressed in a dedicated test-isolation follow-up.
 
 ## Verification
 
