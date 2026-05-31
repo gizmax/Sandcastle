@@ -244,7 +244,7 @@ class TestDockerBackendHardening:
             captured_config = config or {}
             return mock_container
 
-        mock_docker.containers.create_or_run = capture_create
+        mock_docker.containers.create = capture_create
 
         with patch("sandcastle.engine.backends._RUNNER_DIR", tmp_path):
             backend._client = mock_docker
@@ -289,7 +289,7 @@ class TestDockerBackendHardening:
             captured_config = config or {}
             return mock_container
 
-        mock_docker.containers.create_or_run = capture_create
+        mock_docker.containers.create = capture_create
 
         with patch("sandcastle.engine.backends._RUNNER_DIR", tmp_path):
             backend._client = mock_docker
@@ -332,7 +332,7 @@ class TestDockerBackendHardening:
             captured_config = config or {}
             return mock_container
 
-        mock_docker.containers.create_or_run = capture_create
+        mock_docker.containers.create = capture_create
 
         with patch("sandcastle.engine.backends._RUNNER_DIR", tmp_path):
             backend._client = mock_docker
@@ -375,7 +375,7 @@ class TestDockerBackendHardening:
             captured_config = config or {}
             return mock_container
 
-        mock_docker.containers.create_or_run = capture_create
+        mock_docker.containers.create = capture_create
 
         with patch("sandcastle.engine.backends._RUNNER_DIR", tmp_path):
             backend._client = mock_docker

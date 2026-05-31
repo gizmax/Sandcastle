@@ -243,6 +243,30 @@ steps:
     agent_config:
       template: researcher
       task: "Investigate {steps.std-step.output}"
+
+  - id: computer-use-step
+    type: computer-use
+    depends_on: [std-step]
+    computer_use_config:
+      display_width_px: 1280
+      display_height_px: 800
+      message: "Open the report and take a screenshot"
+
+  - id: tool-step
+    type: tool
+    depends_on: [std-step]
+    tool_config:
+      tool: openai
+      function: chat_completion
+      arguments:
+        - "Summarize {steps.std-step.output}"
+
+  - id: trajectory-replay-step
+    type: trajectory-replay
+    depends_on: [std-step]
+    trajectory_replay_config:
+      golden_run_id: "00000000-0000-0000-0000-000000000000"
+      fail_below_score: 0.7
 """
 
 COMPOSIO_TEMPLATE_ACTION = """\

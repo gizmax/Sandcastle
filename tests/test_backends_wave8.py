@@ -312,7 +312,7 @@ class TestDockerBackendToolValidation:
         mock_docker_cls = MagicMock()
         mock_docker_instance = AsyncMock()
         mock_container = AsyncMock()
-        mock_docker_instance.containers.create_or_run = AsyncMock(
+        mock_docker_instance.containers.create = AsyncMock(
             return_value=mock_container
         )
         mock_docker_cls.return_value = mock_docker_instance
@@ -343,7 +343,7 @@ class TestDockerBackendToolValidation:
         mock_docker_cls = MagicMock()
         mock_docker_instance = AsyncMock()
         mock_container = AsyncMock()
-        mock_docker_instance.containers.create_or_run = AsyncMock(
+        mock_docker_instance.containers.create = AsyncMock(
             return_value=mock_container
         )
         mock_docker_cls.return_value = mock_docker_instance
@@ -598,7 +598,7 @@ class TestDockerContainerCleanup:
         mock_container.start = AsyncMock()
         mock_container.log = AsyncMock(side_effect=Exception("Log stream error"))
         mock_container.delete = AsyncMock()
-        mock_docker_instance.containers.create_or_run = AsyncMock(
+        mock_docker_instance.containers.create = AsyncMock(
             return_value=mock_container
         )
         mock_docker_cls.return_value = mock_docker_instance
