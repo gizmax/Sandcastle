@@ -270,16 +270,21 @@ async def maybe_complete_experiment(
         )
         total = await session.scalar(count_stmt)
 
-        if total < config.min_samples:
-            # Safety cap: force completion if samples exceed hard limit
-            if total < MAX_SAMPLES_PER_EXPERIMENT:
-                return None
+        # Hard safety cap, checked first and unconditionally so it actually
+        # engages. (Nesting it inside the min_samples branch made it dead code,
+        # since min_samples defaults to 10 << MAX_SAMPLES_PER_EXPERIMENT.) When
+        # tripped, force a terminal winner selection even if the result is not
+        # yet statistically significant, to bound sampling cost.
+        forced = total >= MAX_SAMPLES_PER_EXPERIMENT
+        if forced:
             logger.warning(
-                "AutoPilot experiment %s hit safety cap (%d samples). "
-                "Forcing winner selection.",
+                "AutoPilot experiment %s hit safety cap (%d samples). Forcing "
+                "winner selection and completing experiment.",
                 experiment_id,
                 total,
             )
+        elif total < config.min_samples:
+            return None
 
         # Get stats per variant
         stats_stmt = (
@@ -326,7 +331,7 @@ async def maybe_complete_experiment(
         winner["p_value"] = p_value
         winner["is_significant"] = is_significant
 
-        if not is_significant:
+        if not is_significant and not forced:
             logger.info(
                 "AutoPilot experiment %s: winner %s not yet statistically "
                 "significant (p=%.3f). Continuing.",

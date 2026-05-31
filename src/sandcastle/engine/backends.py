@@ -481,7 +481,10 @@ class DockerBackend:
                 },
             }
 
-            container = await docker.containers.create_or_run(config=config)
+            # create() returns a created-but-not-started container; the
+            # explicit container.start() below then launches it. (aiodocker has
+            # no create_or_run; run() would auto-start and double-start here.)
+            container = await docker.containers.create(config=config)
 
             # Validate tool filenames before building the tar archive
             if tool_files:

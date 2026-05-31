@@ -1554,6 +1554,25 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
                 errors.append(
                     f"Tool step '{step.id}' must have tool_config with 'tool' and 'function'"
                 )
+            else:
+                # Validate the connector and function exist in the registry so
+                # typos fail at parse time instead of at runtime (mirrors how
+                # the executor resolves tool_config.tool via get_tool()).
+                from sandcastle.engine.tools.registry import get_tool
+
+                try:
+                    tool_def = get_tool(step.tool_config.tool)
+                except KeyError as exc:
+                    errors.append(f"Tool step '{step.id}': {exc}")
+                else:
+                    valid_fns = {fn.name for fn in tool_def.functions}
+                    if step.tool_config.function not in valid_fns:
+                        errors.append(
+                            f"Tool step '{step.id}': function "
+                            f"'{step.tool_config.function}' is not defined for tool "
+                            f"'{step.tool_config.tool}'. Available: "
+                            f"{', '.join(sorted(valid_fns))}"
+                        )
         elif step.type == "condition":
             if not step.condition_config or not step.condition_config.expression:
                 errors.append(
@@ -1645,9 +1664,16 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
         elif step.type == "browser":
             if not step.browser_config:
                 errors.append(f"Browser step '{step.id}' must have browser_config")
-            elif step.browser_config.mode not in ("playwright", "computer_use", "dom"):
+            elif step.browser_config.mode not in (
+                "playwright",
+                "computer_use",
+                "dom",
+                "lightpanda",
+                "browserbase",
+            ):
                 errors.append(
-                    f"Step '{step.id}': browser mode must be 'playwright', 'computer_use', or 'dom'"
+                    f"Step '{step.id}': browser mode must be one of 'playwright', "
+                    "'computer_use', 'dom', 'lightpanda', 'browserbase'"
                 )
         elif step.type == "composio":
             if not step.composio_config or not step.composio_config.action:
@@ -1966,6 +1992,17 @@ def _collect_step_template_fields(step: StepDefinition) -> list[str]:
         fields.append(step.managed_agent_config.agent_id)
         if step.managed_agent_config.message:
             fields.append(step.managed_agent_config.message)
+    if step.tool_config:
+        # Tool arguments carry {steps.X.output} / {input.X} refs that drive
+        # both implicit dependency ordering and unknown-ref validation. dict/
+        # list args are JSON-encoded at runtime, so scan their JSON form too.
+        for arg in step.tool_config.arguments:
+            if isinstance(arg, str):
+                fields.append(arg)
+            elif isinstance(arg, (dict, list)):
+                import json as _json
+
+                fields.append(_json.dumps(arg))
     return fields
 
 

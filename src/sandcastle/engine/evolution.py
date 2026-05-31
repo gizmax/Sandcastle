@@ -703,6 +703,10 @@ async def run_evolution(
     best_yaml = baseline_yaml
     best_quality = baseline_quality
     best_cost = baseline_cost
+    # Cumulative spend across the baseline run plus every iteration's eval
+    # suite. budget_limit is enforced against this running total (stop check
+    # below), not against a single run's cost.
+    total_spend = baseline_cost or 0.0
     total_keeps = 0
     total_discards = 0
 
@@ -815,6 +819,7 @@ async def run_evolution(
         # Compute score
         iter_quality = eval_result.pass_rate
         iter_cost = eval_result.total_cost_usd
+        total_spend += iter_cost or 0.0
         iter_duration = eval_result.total_duration_seconds
         iter_eval_runs = eval_result.total
 
@@ -896,10 +901,14 @@ async def run_evolution(
                 ev.total_discards = total_discards
             await session.commit()
 
-        # Check budget stop condition
-        if budget_limit and best_cost > budget_limit * max_iterations:
+        # Check budget stop condition against cumulative spend
+        if budget_limit and total_spend > budget_limit:
             logger.warning(
-                "Evolution %s: budget exhausted after %d iterations", evolution_id, iteration + 1
+                "Evolution %s: budget exhausted ($%.4f > $%.4f limit) after %d iterations",
+                evolution_id,
+                total_spend,
+                budget_limit,
+                iteration + 1,
             )
             break
 

@@ -467,13 +467,19 @@ class CostLatencyOptimizer:
                 # Query from autopilot_samples (higher quality)
                 from sandcastle.models.db import AutoPilotExperiment
 
+                # Pull raw per-sample rows and aggregate by the REAL model name
+                # (variant_config["model"]) in Python. variant_id (e.g. "v1") is
+                # not a model name, so grouping by it never merges into the model
+                # pool keyed by ModelOption.model in _enrich_pool. Aggregating in
+                # Python keeps this DB-portable (no Postgres-only JSON operators,
+                # since tests run on SQLite).
                 sample_q = (
                     select(
                         AutoPilotSample.variant_id,
-                        func.avg(AutoPilotSample.quality_score).label("avg_quality"),
-                        func.avg(AutoPilotSample.cost_usd).label("avg_cost"),
-                        func.avg(AutoPilotSample.duration_seconds).label("avg_duration"),
-                        func.count(AutoPilotSample.id).label("count"),
+                        AutoPilotSample.variant_config,
+                        AutoPilotSample.quality_score,
+                        AutoPilotSample.cost_usd,
+                        AutoPilotSample.duration_seconds,
                     )
                     .join(
                         AutoPilotExperiment,
@@ -483,18 +489,29 @@ class CostLatencyOptimizer:
                         AutoPilotExperiment.step_id == step_id,
                         AutoPilotExperiment.workflow_name == workflow_name,
                     )
-                    .group_by(AutoPilotSample.variant_id)
                 )
                 sample_rows = (await session.execute(sample_q)).all()
+                _agg: dict[str, dict] = {}
                 for srow in sample_rows:
-                    # Try to extract model from variant config
-                    model_name = srow.variant_id  # variant_id often contains model hint
+                    cfg = srow.variant_config if isinstance(srow.variant_config, dict) else {}
+                    model_name = cfg.get("model") or srow.variant_id
+                    a = _agg.setdefault(
+                        model_name,
+                        {"q_sum": 0.0, "q_n": 0, "cost_sum": 0.0, "dur_sum": 0.0, "n": 0},
+                    )
+                    if srow.quality_score is not None:
+                        a["q_sum"] += float(srow.quality_score)
+                        a["q_n"] += 1
+                    a["cost_sum"] += float(srow.cost_usd or 0)
+                    a["dur_sum"] += float(srow.duration_seconds or 0)
+                    a["n"] += 1
+                for model_name, a in _agg.items():
                     stats_by_model[model_name] = PerformanceStats(
                         model=model_name,
-                        avg_quality=float(srow.avg_quality) if srow.avg_quality else None,
-                        avg_cost=float(srow.avg_cost or 0),
-                        avg_latency=float(srow.avg_duration or 0),
-                        sample_count=int(srow.count),
+                        avg_quality=(a["q_sum"] / a["q_n"]) if a["q_n"] else None,
+                        avg_cost=(a["cost_sum"] / a["n"]) if a["n"] else 0.0,
+                        avg_latency=(a["dur_sum"] / a["n"]) if a["n"] else 0.0,
+                        sample_count=a["n"],
                     )
 
             return list(stats_by_model.values())
