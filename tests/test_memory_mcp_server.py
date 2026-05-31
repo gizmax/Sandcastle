@@ -42,8 +42,15 @@ class _FakeMemoryModule(types.ModuleType):
 @pytest.fixture()
 def fake_memory(monkeypatch: pytest.MonkeyPatch) -> _FakeMemoryModule:
     """Inject a fake memory module so tool calls do not touch mem0."""
+    import sandcastle.engine as _engine_pkg
+
     fake = _FakeMemoryModule()
     monkeypatch.setitem(sys.modules, "sandcastle.engine.memory", fake)
+    # `from sandcastle.engine import memory` resolves the parent package's
+    # attribute first, so once the real submodule has been imported by an
+    # earlier test the sys.modules swap alone is bypassed. Patch the attribute
+    # too so the fake is injected regardless of prior import state.
+    monkeypatch.setattr(_engine_pkg, "memory", fake, raising=False)
     return fake
 
 

@@ -103,4 +103,28 @@ def _reset_module_globals():
     except Exception:
         # Never let cleanup itself break tests
         pass
+
+    # Memory client cache: a cached (real or failed) Mem0 client leaks across
+    # tests and is returned by _get_client() before per-test backend mocks can
+    # take effect, so a later test's mock is silently bypassed. Reset the graph
+    # client flag too.
+    try:
+        from sandcastle.engine import memory as _mem
+
+        with _mem._clients_lock:
+            _mem._clients.clear()
+        _mem._graph_client = None
+        _mem._graph_client_initialized = False
+    except Exception:
+        pass
+
+    # OpenTelemetry module tracer: init_otel() sets a process-global tracer that
+    # otherwise bleeds into tests asserting telemetry is disabled.
+    try:
+        from sandcastle.engine import otel as _otel
+
+        _otel._tracer = None
+    except Exception:
+        pass
+
     yield

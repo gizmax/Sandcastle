@@ -215,7 +215,13 @@ class TestGetRuntime:
             get_runtime("quantum")
 
     def test_registry_contains_all(self):
-        assert set(RUNTIMES.keys()) == {"auto", "anthropic", "local", "agent-sdk"}
+        assert set(RUNTIMES.keys()) == {
+            "auto",
+            "anthropic",
+            "local",
+            "agent-sdk",
+            "self-hosted-sandbox",
+        }
 
 
 # ---------------------------------------------------------------------------
