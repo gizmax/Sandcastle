@@ -56,19 +56,27 @@ async def _validate_providers() -> None:
         """Check a single provider. Returns (provider_name, success)."""
         key_env = cfg.get("api_key_env", "")
         if not key_env:
-            # Ollama - check if running locally
+            # Local keyless providers (ollama / omlx). Derive the health URL
+            # from settings so omlx is probed on its own port instead of the
+            # hardcoded Ollama port.
+            if provider_name == "omlx":
+                base = settings.omlx_base_url.rstrip("/")
+                health_url = f"{base}/v1/models"  # OpenAI-compatible endpoint
+                unreachable_msg = f"omlx server not running at {base}"
+            else:
+                base = settings.ollama_host.rstrip("/")
+                health_url = f"{base}/api/tags"
+                unreachable_msg = f"Ollama not running at {base}"
             start = time.monotonic()
             try:
                 async with httpx.AsyncClient(timeout=3.0) as client:
-                    resp = await client.get("http://localhost:11434/api/tags")
+                    resp = await client.get(health_url)
                     resp.raise_for_status()
                 latency_ms = round((time.monotonic() - start) * 1000)
                 logger.info("Provider %s: ok (%dms, region=local)", provider_name, latency_ms)
                 return provider_name, True
             except Exception:
-                logger.warning(
-                    "Provider %s: not reachable (Ollama not running locally)", provider_name
-                )
+                logger.warning("Provider %s: not reachable (%s)", provider_name, unreachable_msg)
                 return provider_name, False
 
         api_key = os.environ.get(key_env, "")
@@ -401,13 +409,21 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
-    from sandcastle.models.db import engine
+    from sandcastle.models.db import _engine_url, _is_in_memory_sqlite, engine
 
     if settings.scheduler_enabled:
         from sandcastle.queue.scheduler import stop_scheduler
 
         await stop_scheduler()
-    await engine.dispose()
+    # Disposing an in-memory SQLite engine (StaticPool holds a single shared
+    # connection) destroys the entire database. That is harmless in production
+    # (file SQLite / PostgreSQL), but in the test suite - where many tests
+    # drive the app through its lifespan - it wipes the schema for every
+    # subsequent test, surfacing as cascading "no such table" failures. The
+    # in-memory connection is owned by the process and reclaimed on exit, so
+    # skipping dispose for it is safe.
+    if not _is_in_memory_sqlite(_engine_url):
+        await engine.dispose()
     logger.info("Sandcastle shut down")
 
 

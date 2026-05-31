@@ -191,9 +191,14 @@ def scan_template(yaml_content: str) -> ScanResult:
 
     # Pre-parse anchor/alias density check to mitigate YAML bomb CPU spike.
     # safe_load handles billion-laughs but nested aliases can still be slow.
-    anchor_count = cleaned.count("&")
-    alias_count = cleaned.count("*")
-    if anchor_count > 50 or alias_count > 200:
+    # Count only real YAML anchor (&name) / alias (*name) TOKENS - i.e. an
+    # ampersand/asterisk that starts an identifier in a value position - rather
+    # than every '&'/'*' character. Counting raw characters flagged prose-heavy
+    # templates (markdown emphasis, multiplication, URL query strings) as bombs.
+    # A bomb also requires anchors for aliases to expand, so 0 anchors is safe.
+    anchor_count = len(re.findall(r"(?:^|[\s\[\]{},])&[A-Za-z0-9_][\w-]*", cleaned))
+    alias_count = len(re.findall(r"(?:^|[\s\[\]{},])\*[A-Za-z0-9_][\w-]*", cleaned))
+    if anchor_count > 50 or (anchor_count > 0 and alias_count > 200):
         errors.append(ScanIssue(
             code="YAML_BOMB",
             message=(

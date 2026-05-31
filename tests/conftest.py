@@ -29,14 +29,51 @@ def _run_async(coro):
 
 @pytest.fixture(scope="session", autouse=True)
 def _create_test_tables():
-    """Create all DB tables in the in-memory SQLite database."""
+    """Create all DB tables in the in-memory SQLite database.
+
+    Also registers a ``connect`` listener that recreates the schema on EVERY
+    new connection. The test DB is in-memory SQLite with StaticPool (a single
+    shared connection); if that connection is ever disposed, invalidated, or
+    recreated for any reason, the replacement connection sees an empty database
+    and unrelated later tests fail with ``no such table``. Running
+    ``CREATE TABLE IF NOT EXISTS`` on connect guarantees the schema exists on
+    whatever connection a session ends up using, healing the wipe at its source
+    regardless of cause (dispose, pool invalidation, module reload).
+    """
+    from sqlalchemy import event
+    from sqlalchemy.dialects import sqlite as _sqlite
+    from sqlalchemy.schema import CreateIndex, CreateTable
+
     from sandcastle.models.db import Base, engine
+
+    # Full schema DDL: tables first, then indexes (incl. UNIQUE indexes from
+    # unique=True columns, which CreateTable does not render - omitting them
+    # would silently drop uniqueness constraints after a heal).
+    _dialect = _sqlite.dialect()
+    _create_ddl = []
+    for table in Base.metadata.sorted_tables:
+        _create_ddl.append(str(CreateTable(table, if_not_exists=True).compile(dialect=_dialect)))
+    for table in Base.metadata.sorted_tables:
+        for index in table.indexes:
+            _create_ddl.append(str(CreateIndex(index, if_not_exists=True).compile(dialect=_dialect)))
+
+    def _ensure_schema(dbapi_connection, _record):
+        cursor = dbapi_connection.cursor()
+        try:
+            for stmt in _create_ddl:
+                cursor.execute(stmt)
+        finally:
+            cursor.close()
+
+    event.listen(engine.sync_engine, "connect", _ensure_schema)
 
     async def _create():
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 
     _run_async(_create())
+    yield
+    event.remove(engine.sync_engine, "connect", _ensure_schema)
 
 
 @pytest.fixture(autouse=True)

@@ -8928,6 +8928,7 @@ _SENSITIVE_KEYS = frozenset({
     "tool_jira_api_token",
     "tool_github_token",
     "tool_notion_api_key",
+    "tool_gemini_api_key",
     "tool_hubspot_api_key",
     "tool_salesforce_client_id",
     "tool_salesforce_client_secret",
