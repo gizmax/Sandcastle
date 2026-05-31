@@ -127,7 +127,12 @@ audit work:
    earlier test leaves module state the conftest reset does not yet cover; the
    specific polluter was not pinned within this sweep.
 
-Both should be addressed in a dedicated test-isolation follow-up.
+Both should be addressed in a dedicated test-isolation follow-up. CI confirms
+the net effect: PR #232 Python-tests went from **82 failed to 1 failed + 1
+error** (15459 passed); hub-validate and the dashboard build are green. Fixing
+the last two requires a broad, separately-validated test-infra change (per-test
+DB row cleanup for the cumulative-state batch flake, and a session-scoped event
+loop or file-based test DB for the StaticPool/aiosqlite teardown flake).
 
 ## Verification
 
