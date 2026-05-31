@@ -1,0 +1,20 @@
+{
+  "name": "sandcastle-cf-worker-sandbox",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-hosted Anthropic Managed Agents sandbox on a Cloudflare Worker Durable Object isolate.",
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.40.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260301.0",
+    "typescript": "^5.5.0",
+    "wrangler": "^4.0.0"
+  }
+}

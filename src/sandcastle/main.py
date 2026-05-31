@@ -17,6 +17,7 @@ from starlette.middleware.gzip import GZipMiddleware
 from sandcastle import __version__
 from sandcastle.api.a2a import a2a_router
 from sandcastle.api.agent_webhooks import router as agent_webhooks_router
+from sandcastle.api.environments_admin import router as environments_admin_router
 from sandcastle.api.agui import agui_router
 from sandcastle.api.auth import auth_middleware
 from sandcastle.api.routes import router
@@ -481,6 +482,7 @@ app.include_router(agui_router, prefix="/api/agui")
 
 # Anthropic Managed Agents webhook receiver (root level - /agent-webhooks/anthropic)
 app.include_router(agent_webhooks_router)
+app.include_router(environments_admin_router)
 
 # ---------------------------------------------------------------------------
 # Dashboard static files (served from the same port)

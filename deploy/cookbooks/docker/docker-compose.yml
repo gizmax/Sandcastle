@@ -1,0 +1,65 @@
+# docker-compose.yml - reference layout for the self-hosted sandbox runtime.
+#
+# Two pieces:
+#   1. sandcastle-worker  - the long-running poller that claims work items
+#                           from /v1/environments/{id}/work and shells out
+#                           to spawn.sh for each one.
+#   2. session-net        - bridge network that spawned per-session
+#                           containers attach to (declared external=false
+#                           here, but spawn.sh assumes it exists by name).
+#
+# Usage:
+#   cp .env.example .env  # fill in ANTHROPIC_ENVIRONMENT_* values
+#   docker compose up -d
+#   docker compose logs -f sandcastle-worker
+#
+# The poller MUST NOT have ANTHROPIC_API_KEY in its env (org-scoped key
+# would be exposed to every tool call); the entrypoint asserts this and
+# refuses to start. Set ANTHROPIC_ENVIRONMENT_KEY (sk-ant-oat01-...) only.
+
+services:
+  sandcastle-worker:
+    image: sandcastle/worker:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sandcastle-worker
+    restart: unless-stopped
+    # Poller needs the Docker socket so it can spawn per-session
+    # containers via spawn.sh. Mount it read-write (Docker API has no
+    # finer-grained scoping); pair this with the user namespace mapping
+    # below in production.
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./spawn.sh:/usr/local/bin/spawn.sh:ro
+    environment:
+      ANTHROPIC_ENVIRONMENT_ID: "${ANTHROPIC_ENVIRONMENT_ID:?set in .env}"
+      ANTHROPIC_ENVIRONMENT_KEY: "${ANTHROPIC_ENVIRONMENT_KEY:?set in .env}"
+      ANTHROPIC_BASE_URL: "${ANTHROPIC_BASE_URL:-https://api.anthropic.com}"
+      SANDCASTLE_WORKER_IMAGE: "sandcastle/worker:latest"
+      SANDCASTLE_SESSION_TIMEOUT: "${SANDCASTLE_SESSION_TIMEOUT:-1800}"
+      SANDCASTLE_SPAWN_SCRIPT: "/usr/local/bin/spawn.sh"
+    networks:
+      - session-net
+    ports:
+      - "8081:8081"  # /healthz
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8081/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1024M
+
+networks:
+  # Per-session containers attach here. Internal-only by default; flip to
+  # `internal: false` if your agent needs egress (tradeoff: tool calls
+  # can hit arbitrary hosts).
+  session-net:
+    name: session-net
+    driver: bridge
+    internal: false

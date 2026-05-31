@@ -40,6 +40,7 @@ SUPPORTED_EVENTS: tuple[str, ...] = (
     "session.status_idle",
     "session.status_running",
     "session.status_rescheduled",
+    "session.status_run_started",  # self-hosted-sandbox May 19 2026 addition
     "session.status_terminated",
     "session.error",
     "vault.credential_refreshed",

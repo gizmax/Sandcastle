@@ -1,0 +1,22 @@
+apiVersion: v2
+name: memory-mcp
+description: Sandcastle Memory MCP server behind a Cloudflare MCP tunnel (outbound-only, no inbound ingress required)
+type: application
+version: 0.1.0
+appVersion: "0.32.2"
+keywords:
+  - sandcastle
+  - mcp
+  - memory
+  - qdrant
+  - cloudflared
+  - anthropic
+home: https://sandcastle-ai.eu
+sources:
+  - https://github.com/gizmax/Sandcastle
+maintainers:
+  - name: Tomas Pflanzer
+    email: tom@pflanzer.cz
+annotations:
+  category: AI/Agents
+  licenses: MIT

@@ -1,0 +1,117 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "memory-mcp.fullname" . }}
+  labels:
+    {{- include "memory-mcp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mcp-server
+spec:
+  replicas: {{ .Values.mcpServer.replicas }}
+  selector:
+    matchLabels:
+      {{- include "memory-mcp.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: mcp-server
+  template:
+    metadata:
+      labels:
+        {{- include "memory-mcp.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: mcp-server
+    spec:
+      serviceAccountName: {{ include "memory-mcp.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      containers:
+        - name: mcp-server
+          image: "{{ .Values.mcpServer.image.repository }}:{{ .Values.mcpServer.image.tag }}"
+          imagePullPolicy: {{ .Values.mcpServer.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.mcpServer.port }}
+              protocol: TCP
+          envFrom:
+            {{- toYaml .Values.mcpServer.envFrom | nindent 12 }}
+          env:
+            {{- toYaml .Values.mcpServer.env | nindent 12 }}
+          resources:
+            {{- toYaml .Values.mcpServer.resources | nindent 12 }}
+          livenessProbe:
+            {{- toYaml .Values.mcpServer.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.mcpServer.readinessProbe | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+        # Cloudflared sidecar runs in the same pod so it can reach the
+        # MCP server on localhost. See deployment-cloudflared.yaml partial
+        # for sidecar container definition.
+        - name: cloudflared
+          image: "{{ .Values.cloudflared.image.repository }}:{{ .Values.cloudflared.image.tag }}"
+          imagePullPolicy: {{ .Values.cloudflared.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          args:
+            - tunnel
+            - --config
+            - /etc/cloudflared/config/config.yaml
+            - run
+            - {{ .Values.cloudflared.tunnelId }}
+          env:
+            {{- if eq .Values.cloudflared.auth.mode "manual" }}
+            - name: TUNNEL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.cloudflared.auth.manual.tokenSecret }}
+                  key: {{ .Values.cloudflared.auth.manual.tokenKey }}
+            {{- end }}
+            - name: TUNNEL_METRICS
+              value: "0.0.0.0:2000"
+          ports:
+            - name: metrics
+              containerPort: 2000
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.cloudflared.resources | nindent 12 }}
+          volumeMounts:
+            - name: cloudflared-config
+              mountPath: /etc/cloudflared/config
+              readOnly: true
+            {{- if eq .Values.cloudflared.auth.mode "wif" }}
+            - name: wif-token
+              mountPath: /var/run/secrets/anthropic.com
+              readOnly: true
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: 2000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: cloudflared-config
+          configMap:
+            name: {{ include "memory-mcp.fullname" . }}-cloudflared
+        {{- if eq .Values.cloudflared.auth.mode "wif" }}
+        - name: wif-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  audience: {{ .Values.cloudflared.auth.wif.audience | quote }}
+                  expirationSeconds: {{ .Values.cloudflared.auth.wif.expirationSeconds }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

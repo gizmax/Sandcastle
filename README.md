@@ -2,7 +2,7 @@
 
 **Describe what you want. Go home. Sandcastle ships it.** Production-ready workflow orchestrator for AI agents. 7 AI providers with auto-failover, 22 step types including Claude Managed Agents, 15 agent templates, 4 OCR engines, EU AI Act compliance, and a full-featured dashboard. Define workflows in YAML or let AI design them for you.
 
-[![PyPI](https://img.shields.io/badge/PyPI-v0.32.0-blue?style=flat-square)](https://pypi.org/project/sandcastle-ai/0.32.0/)
+[![PyPI](https://img.shields.io/badge/PyPI-v0.32.2-blue?style=flat-square)](https://pypi.org/project/sandcastle-ai/0.32.2/)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-15000%2B%20passing-brightgreen?style=flat-square)](https://github.com/gizmax/Sandcastle/actions)
@@ -10,19 +10,19 @@
 [![Website](https://img.shields.io/badge/Website-sandcastle--ai.eu-blue?style=flat-square)](https://sandcastle-ai.eu)
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Dashboard-F59E0B?style=flat-square)](https://gizmax.github.io/Sandcastle/)
 
-> **v0.32 - "Claude Agents Deep Integration"** Shipped May 16, 2026. Every Anthropic Managed Agents primitive surfaced, plus the things Anthropic doesn't ship.
+> **v0.32.2 - "Your Sandbox, Your Silicon"** Shipped May 19, 2026. Anthropic gave you a model. We gave you a place to put it.
 >
-> - **Memory Stores + Multiagent + Outcomes + Webhooks** wired into the YAML. One workflow can attach versioned memory at /mnt/memory/, spawn 20 parallel specialist agents, define outcomes the eval pipeline reads automatically, and emit lifecycle events to a webhook endpoint.
-> - **Skills Publisher.** `sandcastle publish-skills --upload` converts every workflow into a tar.gz SKILL.md and uploads to `/v1/skills`. Workflows now callable from every Anthropic Skills-aware client.
-> - **Trajectory Replay step type.** SHA-256 over a recorded tool-call sequence + diff against the candidate run. Because the audit trail is a hash chain, the replay is **cryptographically verifiable** - LangSmith and Braintrust don't ship this.
-> - **Agent SDK runtime** as `runtime: "agent-sdk"` alternative. In-process Claude agents for EU sovereignty / air-gapped / regulated teams.
-> - **Computer Use** integration (`computer_20251124` beta) with 8-item safety pre-flight + new `type: computer-use` step.
-> - **MCP Elicitation** (6th primitive, spec rev 2025-11-25). Workflows can ask the user for missing input mid-execution.
-> - **Live Agent Reasoning panel** in the dashboard - SSE stream of agent.thinking, agent.tool_use, agent.message events on the run detail page.
-> - Plus 5 Tier 1 wire fixes (`tools_enabled`, sampling params, `stream`, pricing table, fallback chain).
-> - 15,176 tests passing, 169 new. PyPI: `pip install sandcastle-ai==0.32.0`.
+> - **Self-hosted sandboxes** on the four blog partners + Docker reference (`cloudflare`, `daytona`, `modal`, `vercel`, `docker`). Five cookbooks under `deploy/cookbooks/`. Your org key never leaves your boundary - the worker refuses to start if `ANTHROPIC_API_KEY` is present in the sandbox env, only `sk-ant-oat01-` environment-scoped keys get past the gate.
+> - **Memory MCP server.** Anthropic declared `memory_stores` incompatible with self-hosted sandboxes. We filled the gap: `sandcastle.engine.memory_mcp_server` wraps mem0 + persistent Qdrant + Haiku decisions. Four tools (`add`, `search`, `forget`, `list_memories`), two resources, one prompt. Helm chart + docker-compose included.
+> - **MCP tunnels** (gated beta, header `mcp-client-2025-11-20`). WIF token exchange so your private Jira / Snowflake / Confluence is reachable from a managed agent with no static secrets. `cloudflared` sidecar pattern documented end to end.
+> - **Live work-queue dashboard.** `WorkQueuePanel` on the runs page, SSE-driven depth + sparkline + pill (green < 5, amber 5-50, red > 50), aria-live polite. You see the backlog before the pager fires.
+> - **Webhook workers.** New `session.status_run_started` event lets a worker run as a webhook handler instead of long-polling - saves RAM, latency, and your AWS bill.
+> - **Three production case-study workflows** at `workflows/case-studies/` - Amplitude designer, Clay GTM, Rogo analyst on private data. Not tutorials. Blueprints.
+> - **150 new tests** validated across 6 iterations (sequential / isolation / random + pollution / stress-repeat / smoke / consolidation). Zero regressions.
 >
-> Previous: **v0.31 - "Compliance & Connections"** (May 14, 2026): EU AI Act landing + 10 compliance templates, MCP-first publishing, eval gates, dashboard error boundaries, Codex audit rounds 9+10.
+> PyPI: `pip install sandcastle-ai==0.32.2`.
+>
+> Previous: **v0.32.0 - "Claude Agents Deep Integration"** (May 16, 2026): Memory Stores, Multiagent, Outcomes, Webhooks, Skills Publisher, Trajectory Replay, Agent SDK runtime, Computer Use, MCP Elicitation, Live Agent Reasoning panel.
 >
 
 <p align="center">

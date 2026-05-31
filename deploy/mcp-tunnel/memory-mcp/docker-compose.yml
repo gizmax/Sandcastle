@@ -1,0 +1,89 @@
+# docker-compose.yml - alternative to the Helm chart for single-host installs.
+#
+# Required environment:
+#   SANDCASTLE_ENV_KEY    - encryption key for the Memory MCP server
+#   ANTHROPIC_TUNNEL_TOKEN - tunnel token (manual auth mode)
+#   ANTHROPIC_API_KEY     - optional, only when the server calls Anthropic directly
+#
+# Usage:
+#   docker compose up -d
+#   docker compose logs -f cloudflared
+
+version: "3.9"
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.11.0
+    container_name: memory-mcp-qdrant
+    restart: unless-stopped
+    environment:
+      QDRANT__SERVICE__HTTP_PORT: "6333"
+      QDRANT__SERVICE__GRPC_PORT: "6334"
+      QDRANT__STORAGE__OPTIMIZERS__SNAPSHOT_INTERVAL: "1h"
+    volumes:
+      - qdrant-storage:/qdrant/storage
+    networks:
+      - memory-mcp-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:6333/readyz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  memory-mcp-server:
+    image: ghcr.io/gizmax/sandcastle-memory-mcp:0.32.2
+    container_name: memory-mcp-server
+    restart: unless-stopped
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    environment:
+      SANDCASTLE_ENV_KEY: "${SANDCASTLE_ENV_KEY:?SANDCASTLE_ENV_KEY is required}"
+      QDRANT_URL: "http://qdrant:6333"
+      MCP_BIND_ADDR: "0.0.0.0:8080"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+    networks:
+      - memory-mcp-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: memory-mcp-cloudflared
+    restart: unless-stopped
+    depends_on:
+      memory-mcp-server:
+        condition: service_healthy
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token
+      - ${ANTHROPIC_TUNNEL_TOKEN:?ANTHROPIC_TUNNEL_TOKEN is required}
+    environment:
+      TUNNEL_METRICS: "0.0.0.0:2000"
+    networks:
+      - memory-mcp-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:2000/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  qdrant-storage:
+    driver: local
+
+networks:
+  memory-mcp-net:
+    driver: bridge

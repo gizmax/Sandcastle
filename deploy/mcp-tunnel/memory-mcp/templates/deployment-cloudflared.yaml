@@ -1,0 +1,12 @@
+# NOTE: the cloudflared container runs as a *sidecar* inside the MCP server
+# pod (see deployment-mcp-server.yaml) so it can reach the upstream on
+# localhost without a NetworkPolicy hop. This file is kept as a marker so
+# operators searching for "cloudflared" find the wiring quickly. No separate
+# Deployment is emitted.
+#
+# To inspect the sidecar:
+#   kubectl logs deploy/{{ include "memory-mcp.fullname" . }} -c cloudflared
+#
+# Tunnel ID:     {{ .Values.cloudflared.tunnelId }}
+# Auth mode:     {{ .Values.cloudflared.auth.mode }}
+# Upstream URL:  {{ .Values.cloudflared.upstreamUrl }}

@@ -7,6 +7,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.2] - 2026-05-19 - "Your Sandbox, Your Silicon"
+
+Anthropic shipped a managed-agents update on May 19. Most teams will read the blog post and move on. We extracted everything. Self-hosted sandboxes that keep your org key inside your boundary. A Memory MCP server that fills the gap Anthropic left when they declared memory_stores incompatible with self-hosted runs. MCP tunnels with WIF token exchange so your private Jira can be reached by a managed agent without static secrets. Live work-queue telemetry in the dashboard. Three production case-study blueprints. Five sandbox cookbooks. 150 new tests, validated across six iterations. Zero regressions.
+
+You wanted control over where your model runs. Here it is.
+
+### Added - Self-hosted sandboxes (the four blog partners + Docker reference)
+
+- **SelfHostedSandboxConfig** (`sandcastle.engine.self_hosted_sandbox`). Five providers in the enum: `cloudflare`, `daytona`, `modal`, `vercel`, `docker`. Each gets a cookbook under `deploy/cookbooks/`.
+- **Org-key leak guard** (`OrgKeyLeakError`). The worker refuses to start if `ANTHROPIC_API_KEY` is present in the sandbox environment. Only `sk-ant-oat01-` environment-scoped keys make it past the gate. A foot-gun that would have leaked your org budget now raises before the first network call.
+- **MemoryStoresIncompatibleError**. Anthropic explicitly documented that memory_stores cannot be combined with self-hosted sandboxes. The validator catches the combination at session-payload assembly time instead of letting the API 400 you in production.
+- **AWS region warning**. If `ANTHROPIC_REGION=aws-*` or `AWS_REGION=us-*` leaks into worker env, the runtime logs a warning. AWS is not a supported sandbox host for managed-agents per the May 19 spec.
+- **SelfHostedWorker** (`sandcastle.engine.self_hosted_worker`). Async worker that polls `/v1/environments/{id}/work`, claims one work item at a time, reclaims abandoned work after 2 s, executes the default 6-tool toolset (`bash`, `read`, `write`, `edit`, `glob`, `grep`) matching `beta_agent_toolset_20260401`.
+- **SelfHostedSandboxRuntime** registered in `sandcastle.engine.agent_runtime`. `RUNTIMES = {"auto", "anthropic", "local", "agent-sdk", "self-hosted-sandbox"}`.
+
+### Added - Sandbox cookbooks (`deploy/cookbooks/`)
+
+- **`docker/`** - canonical reference. Two-stage Dockerfile, USER 10001, tini entrypoint, `--rm --network=session-net --tmpfs /workspace --read-only --cap-drop=ALL`, exit codes 64/65/124 mapped to Anthropic's reclaim semantics.
+- **`cloudflare/`** - Containers via Workers, environment binding for the env key.
+- **`cf-worker/`** - Durable Object + RAM FakeFS, sub-100 ms cold start.
+- **`daytona/`** - snapshot-based stateful sandboxes (good for long-running research).
+- **`modal/`** - GPU sandboxes (mount `gpu="A10G"` in the Python config).
+- **`vercel/`** - VPC + credential brokering, env key NEVER enters the sandbox (broker injects per-call).
+
+### Added - Memory MCP server (the gap Anthropic left)
+
+- **`sandcastle.engine.memory_mcp_server`** - production-grade MCP server wrapping mem0 + persistent Qdrant + Anthropic Haiku for memory decisions. Four tools: `add(text, user_id, metadata)`, `search(query, user_id, limit)`, `forget(memory_id)`, `list_memories(user_id, limit)`. Two resources: `sandcastle://memory/users`, `sandcastle://memory/health`. One prompt: `memory_qa`. CLI entrypoint via `python -m sandcastle.engine.memory_mcp_server`.
+- **`MemoryMCPError`** with `code='memory_unavailable'` if mem0 missing - lazy import, typed install hint.
+- **Helm chart** at `deploy/mcp-tunnel/memory-mcp/`. Chart.yaml v2, appVersion 0.32.2. 8 templates including deployment with cloudflared sidecar (same pod), Qdrant StatefulSet with 10 Gi PVC, NetworkPolicy egress to Cloudflare CIDR `198.41.192.0/19` + `2606:4700:a0::/44` on TCP+UDP 7844. ServiceAccount, ConfigMap, Secret stub, _helpers.tpl.
+- **docker-compose.yml** for local development - 3 services with healthchecks.
+
+### Added - MCP tunnels prep (gated beta, header `mcp-client-2025-11-20`)
+
+- **WIFTokenExchangeClient** (`sandcastle.engine.mcp_tunnel_wif`). OIDC token exchange against a configured issuer, 60 s skew-cached. `assemble_cloudflared_env(config)` produces the env block for WIF or manual-cert modes.
+- **MCPTunnelConfig** with `TunnelAuthMode.WIF` and `TunnelAuthMode.MANUAL`. Validator rejects empty tunnel_id, missing servers, duplicate server names, non-FQDN hostnames, missing token/CA in manual mode.
+- **`build_mcp_servers_block(cfg, env)`** assembles the `mcp_servers` payload block with `authorization_token` injected from env, `tool_configuration.allowed_tools` whitelist, missing-token warning that still emits the block (lets upstream 401 explicitly).
+- **Reference workflow** at `workflows/case-studies/rogo-analyst-on-private-data.yaml` with `risk_level: high`, mandatory approval gate, eval gate, Vercel sandbox + WIF tunnel.
+
+### Added - Admin environments API + dashboard work-queue panel
+
+- **`/admin/environments` CRUD** in `sandcastle.api.environments_admin`. POST/GET/DELETE proxy to Anthropic `/v1/environments` with beta header `managed-agents-2026-04-01`. Tenant scoping via `metadata.sandcastle_tenant_id`. Audit hook via `engine.audit.append_audit_event`.
+- **`/admin/environments/{id}/work/stats`** with 5 s in-process cache.
+- **`/admin/environments/{id}/work/stream`** SSE feed polling every 2 s.
+- **WorkQueuePanel** (`dashboard/src/components/runs/WorkQueuePanel.tsx`). SSE-driven panel with depth, sparkline (Recharts), pill (green < 5, amber 5-50, red > 50), `aria-live="polite"`, exponential backoff up to 30 s. 7 vitest cases.
+
+### Added - Webhook-driven workers
+
+- New event type **`session.status_run_started`** in `agent_webhooks.SUPPORTED_EVENTS`. Lets a worker run as a webhook handler instead of long-polling - saves RAM, latency, and your AWS bill.
+- HMAC verification round-trips `sha256=` prefix and bare digest forms.
+
+### Added - Three production case-study workflows
+
+- **`workflows/case-studies/amplitude-design-agent.yaml`** - designer template + multiagent + accessibility-review specialist + computer-use step + Cloudflare provider.
+- **`workflows/case-studies/clay-sculptor-gtm.yaml`** - project_manager coordinator + researcher / writer / qualifier specialists + Daytona snapshot sandbox + HTTP + Composio + Slack + report.
+- **`workflows/case-studies/rogo-analyst-on-private-data.yaml`** - financial_analyst + Vercel + WIF tunnel + risk_level high + mandatory approval + eval gate.
+
+### Added - Documentation
+
+- `docs/managed-agents-self-hosted.md` (8 sections, 176 lines).
+- `docs/managed-agents-mcp-tunnels.md` (158 lines).
+- `docs/anthropic-2026-may-19-integration.md` (147 lines, Mermaid diagrams).
+
+### Tested
+
+- **150 new tests** across 10 files: self_hosted_sandbox, self_hosted_worker, mcp_tunnel, mcp_tunnel_wif, memory_mcp_server, environments_admin, agent_runtime_self_hosted, webhook_session_started, workflow_case_studies, self_hosted_cookbooks.
+- **6 iterations** of rigorous validation:
+  1. 5x sequential re-run - 750 / 750 deterministic
+  2. Each file in isolation - 150 / 150
+  3. Random order + pollution cluster - 221 / 221
+  4. pytest-repeat 10x stress on the two heaviest files - 260 / 260
+  5. Module import + CLI smoke across 15 modules - clean
+  6. Consolidated verdict - no flake, no cross-pollution, zero new regression categories
+
+### Versioning
+
+PyPI: `pip install sandcastle-ai==0.32.2`
+
 ## [0.32.0] - 2026-05-16 - "Claude Agents Deep Integration"
 
 You shipped the agent. The client wants the integration. The auditor wants the trail. The user wants you to ask the next question without restarting the whole workflow. v0.32 is the answer to every one of those. Sandcastle now exposes every Anthropic Managed Agents primitive shipped under the managed-agents-2026-04-01 beta umbrella, plus the things Anthropic doesn't ship: a cryptographically verifiable trajectory replay, a Skills publisher that turns workflows into uploadable Claude Skills, and an Agent SDK runtime for teams that want in-process execution. Two weeks of work, 169 new tests, one release.

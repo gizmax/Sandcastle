@@ -4,20 +4,20 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>What's New - Sandcastle</title>
-  <meta name="description" content="Sandcastle release history. v0.32: Claude Agents Deep Integration. Memory Stores, Multiagent coordinator, Outcomes API, Skills publisher, Agent SDK runtime, Trajectory Replay, Computer Use, MCP Elicitation. Every Anthropic primitive surfaced.">
+  <meta name="description" content="Sandcastle release history. v0.32.2 - Your Sandbox, Your Silicon: self-hosted sandboxes on Cloudflare/Daytona/Modal/Vercel/Docker, Memory MCP server, MCP tunnels with WIF, live work-queue dashboard, webhook workers, 3 production case studies, 150 new tests.">
   <meta name="author" content="Tomas Pflanzer @gizmax">
 
   <!-- Open Graph -->
-  <meta property="og:title" content="What's New - Sandcastle v0.32">
-  <meta property="og:description" content="Claude Agents Deep Integration. Every Anthropic Managed Agents primitive surfaced, plus Skills publisher, Trajectory Replay, Computer Use, Agent SDK runtime.">
+  <meta property="og:title" content="What's New - Sandcastle v0.32.2">
+  <meta property="og:description" content="Your Sandbox, Your Silicon. Self-hosted sandboxes on Cloudflare/Daytona/Modal/Vercel/Docker, Memory MCP server (the gap Anthropic left), MCP tunnels with WIF, live work-queue dashboard. 150 new tests, zero regressions.">
   <meta property="og:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
   <meta property="og:url" content="https://sandcastle-ai.eu/whatsnew/">
   <meta property="og:type" content="website">
 
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="What's New - Sandcastle v0.32">
-  <meta name="twitter:description" content="Claude Agents Deep Integration. Memory Stores, Multiagent, Outcomes, Skills publisher, Trajectory Replay, Computer Use. 169 new tests.">
+  <meta name="twitter:title" content="What's New - Sandcastle v0.32.2">
+  <meta name="twitter:description" content="Your Sandbox, Your Silicon. Self-hosted sandboxes, Memory MCP server, MCP tunnels with WIF, live work-queue dashboard. 150 new tests, zero regressions.">
   <meta name="twitter:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
 
   <link rel="canonical" href="https://sandcastle-ai.eu/whatsnew/">
@@ -194,11 +194,93 @@
   <main>
     <div class="container releases">
 
+      <!-- v0.32.2 -->
+      <div class="release fade-in">
+        <div class="release-header">
+          <span class="release-version">v0.32.2</span>
+          <span class="release-name">Your Sandbox, Your Silicon <span class="badge-latest">Latest</span></span>
+          <span class="release-date">May 19, 2026</span>
+        </div>
+
+        <p style="max-width: 720px; color: var(--text-muted); font-size: 15px; line-height: 1.7; margin-bottom: 28px;">
+          Anthropic shipped a managed-agents update on May 19. Most teams will read the blog post and move on. We extracted everything. Self-hosted sandboxes that keep your org key inside your boundary. A Memory MCP server that fills the gap Anthropic left when they declared memory_stores incompatible with self-hosted runs. MCP tunnels with WIF token exchange so your private Jira can be reached by a managed agent without static secrets. Live work-queue telemetry in the dashboard. Three production case-study blueprints. Five sandbox cookbooks. 150 new tests, validated across six iterations. Zero regressions. You wanted control over where your model runs. Here it is.
+        </p>
+
+        <div class="feature-grid">
+
+          <div class="feature-card wide">
+            <span class="feature-tag amber">Headline</span>
+            <h4>Self-hosted sandboxes - your code, your silicon</h4>
+            <p>Five providers in the runtime enum: <code>cloudflare</code>, <code>daytona</code>, <code>modal</code>, <code>vercel</code>, <code>docker</code>. Each gets a cookbook under <code>deploy/cookbooks/</code> with a copy-paste-ready spawn script and image. Your org key never leaves your boundary - the worker refuses to start if <code>ANTHROPIC_API_KEY</code> is present in the sandbox env. Only <code>sk-ant-oat01-</code> environment-scoped keys get past the gate. A foot-gun that would have leaked your org budget now raises before the first network call.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag green">New</span>
+            <h4>Memory MCP server</h4>
+            <p>Anthropic explicitly documented that <code>memory_stores</code> cannot be combined with self-hosted sandboxes. We filled the gap. <code>sandcastle.engine.memory_mcp_server</code> wraps mem0 + persistent Qdrant + Anthropic Haiku for memory decisions. Four tools, two resources, one prompt. Helm chart + docker-compose. NetworkPolicy egress to Cloudflare CIDR only.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag blue">New</span>
+            <h4>MCP tunnels with WIF auth</h4>
+            <p>Gated beta, header <code>mcp-client-2025-11-20</code>. Your internal Jira / Snowflake / Confluence is reachable from a managed agent through a cloudflared tunnel authenticated with WIF tokens. No static secrets. 60s skew-cached token exchange. Manual cert mode also supported for air-gapped setups.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag green">New</span>
+            <h4>Live work-queue dashboard</h4>
+            <p><code>WorkQueuePanel</code> on the run detail page, SSE-driven. Depth, sparkline (Recharts), pill (green &lt; 5, amber 5-50, red &gt; 50), <code>aria-live="polite"</code>, exponential backoff up to 30 s. You see the backlog before the pager fires.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag blue">New</span>
+            <h4>Webhook-driven workers</h4>
+            <p>New <code>session.status_run_started</code> event in <code>SUPPORTED_EVENTS</code>. A worker can now run as a webhook handler instead of a long-poll loop - saves RAM, latency, and your AWS bill. HMAC verification round-trips <code>sha256=</code> prefix and bare digest forms.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag purple">Templates</span>
+            <h4>Three production case studies</h4>
+            <p>Not tutorials. Blueprints. Amplitude designer (multiagent + accessibility specialist + computer-use + Cloudflare). Clay GTM (project_manager + researcher / writer / qualifier + Daytona). Rogo analyst on private data (Vercel + WIF tunnel + risk_level high + mandatory approval + eval gate).</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag amber">Quality</span>
+            <h4>Tested six different ways</h4>
+            <p>150 new tests. Sequential re-run, file isolation, randomized + pollution cluster, pytest-repeat 10x stress, module + CLI smoke, consolidated verdict. Zero flakes. Zero new regression categories. Documented in the PR.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag purple">Milestone</span>
+            <h4>By the numbers</h4>
+            <div class="stat-row">
+              <div class="stat-item">
+                <div class="stat-num">150</div>
+                <div class="stat-label">New v0.32.2 tests</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-num">5</div>
+                <div class="stat-label">Sandbox cookbooks</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-num">6</div>
+                <div class="stat-label">Validation iterations</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-num">0</div>
+                <div class="stat-label">Regressions</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
       <!-- v0.32 -->
       <div class="release fade-in">
         <div class="release-header">
           <span class="release-version">v0.32</span>
-          <span class="release-name">Claude Agents Deep Integration <span class="badge-latest">Latest</span></span>
+          <span class="release-name">Claude Agents Deep Integration</span>
           <span class="release-date">May 16, 2026</span>
         </div>
 

@@ -1,0 +1,171 @@
+# Default values for memory-mcp.
+# Override with: helm install memory-mcp ./memory-mcp -f my-values.yaml
+
+nameOverride: ""
+fullnameOverride: ""
+
+# -----------------------------------------------------------------------------
+# Memory MCP server (the application container)
+# -----------------------------------------------------------------------------
+mcpServer:
+  image:
+    repository: ghcr.io/gizmax/sandcastle-memory-mcp
+    tag: "0.32.2"
+    pullPolicy: IfNotPresent
+  replicas: 1
+  port: 8080
+  # envFrom can reference a Secret (preferred for SANDCASTLE_ENV_KEY,
+  # ANTHROPIC_API_KEY, etc.) created out-of-band:
+  #   kubectl create secret generic memory-mcp-env --from-env-file=.env
+  envFrom:
+    - secretRef:
+        name: memory-mcp-env
+  env:
+    - name: QDRANT_URL
+      value: "http://memory-mcp-qdrant:6333"
+    - name: MCP_BIND_ADDR
+      value: "0.0.0.0:8080"
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  livenessProbe:
+    httpGet:
+      path: /healthz
+      port: 8080
+    initialDelaySeconds: 15
+    periodSeconds: 30
+  readinessProbe:
+    httpGet:
+      path: /readyz
+      port: 8080
+    initialDelaySeconds: 5
+    periodSeconds: 10
+
+# -----------------------------------------------------------------------------
+# Cloudflared sidecar: outbound-only MCP tunnel (Anthropic, May 19 2026)
+# -----------------------------------------------------------------------------
+cloudflared:
+  image:
+    repository: cloudflare/cloudflared
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  # ID of the tunnel you created via Anthropic Console or `ant beta:tunnel create`.
+  tunnelId: "REPLACE-WITH-YOUR-TUNNEL-ID"
+  # Forward traffic from the tunnel to this in-cluster URL:
+  upstreamUrl: "http://localhost:8080"
+  auth:
+    # mode: wif | manual
+    #   wif    -> use Kubernetes projected service-account tokens (recommended)
+    #   manual -> mount a static tunnel token from a Secret
+    mode: wif
+    wif:
+      audience: "anthropic-mcp-tunnel"
+      # Lifetime of the projected token in seconds (1h default).
+      expirationSeconds: 3600
+    manual:
+      # Only used when mode=manual. Create the Secret yourself:
+      #   kubectl create secret generic anthropic-tunnel-token \
+      #     --from-literal=token=<TUNNEL_TOKEN>
+      tokenSecret: anthropic-tunnel-token
+      tokenKey: token
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# -----------------------------------------------------------------------------
+# Qdrant vector store (persistent)
+# -----------------------------------------------------------------------------
+qdrant:
+  image:
+    repository: qdrant/qdrant
+    tag: "v1.11.0"
+    pullPolicy: IfNotPresent
+  port: 6333
+  grpcPort: 6334
+  url: "http://memory-mcp-qdrant:6333"
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+  snapshotInterval: "1h"
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+
+# -----------------------------------------------------------------------------
+# Pod-level security (hardened defaults; required for many EU enterprise envs)
+# -----------------------------------------------------------------------------
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# -----------------------------------------------------------------------------
+# Service (ClusterIP only; no Ingress because tunnel is outbound)
+# -----------------------------------------------------------------------------
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  # MCP tunnels are outbound-only, so Ingress is OFF by default. Do not enable
+  # unless you explicitly want non-tunnel clients to reach the server.
+  enabled: false
+
+# -----------------------------------------------------------------------------
+# NetworkPolicy: egress restricted to Cloudflare edges + api.anthropic.com
+# -----------------------------------------------------------------------------
+networkPolicy:
+  enabled: true
+  cloudflareEdges:
+    # Cloudflare MCP tunnel edge ranges (per Anthropic docs, 2026-05-19).
+    ipv4:
+      - 198.41.192.0/19
+    ipv6:
+      - "2606:4700:a0::/44"
+  cloudflareTunnelPorts:
+    - protocol: TCP
+      port: 7844
+    - protocol: UDP
+      port: 7844
+  anthropicApi:
+    # api.anthropic.com is fronted by Cloudflare; we additionally allow 443.
+    port: 443
+
+# -----------------------------------------------------------------------------
+# ServiceAccount (used for WIF projected tokens)
+# -----------------------------------------------------------------------------
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# -----------------------------------------------------------------------------
+# Scheduling
+# -----------------------------------------------------------------------------
+nodeSelector: {}
+tolerations: []
+affinity: {}

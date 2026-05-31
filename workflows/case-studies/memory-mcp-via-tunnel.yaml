@@ -1,0 +1,69 @@
+# Memory MCP via MCP Tunnel - reference workflow
+#
+# This case study composes three Sandcastle pieces: the self-hosted sandbox
+# runtime (where the managed-agent step actually executes), the in-tree
+# Memory MCP server (a small Sandcastle-shipped MCP server that persists
+# notes between runs), and Anthropic's MCP tunnels preview (which gives the
+# Claude API a private, outbound-only path to reach that server). The agent
+# never sees the Memory MCP's hostname directly; the API resolves the
+# Anthropic-assigned tunnel hostname over an mTLS-pinned cloudflared
+# sidecar that the operator pre-deploys in the same Kubernetes namespace.
+#
+# Why WIF and not a static bearer? The tunnels preview lets cloudflared
+# authenticate via Workload Identity Federation, exchanging a Kubernetes-
+# projected service-account token for a short-lived tunnel token at
+# request time. No long-lived secret ever lands on disk or in a git repo.
+# Sandcastle's WIF helper (mcp_tunnel_wif.py) drives that token exchange
+# and feeds the resulting bearer into the cloudflared subprocess env. The
+# workflow YAML below stays declarative - the operator only names the
+# tunnel and the upstream OAuth env var; everything else is plumbing.
+
+name: memory-mcp-via-tunnel
+description: >
+  Long-running research agent with persistent memory via MCP tunnel.
+  Demonstrates the Phase 1 wiring: self-hosted sandbox + Memory MCP +
+  MCP tunnels (WIF auth). Agent persists notes across runs by calling
+  the Sandcastle Memory MCP through Anthropic's private-network proxy.
+version: "0.32.0-preview"
+default_model: sonnet
+risk_level: minimal
+
+mcp_tunnel:
+  tunnel_id: tunnel_acme_research
+  auth_mode: workload_identity_federation
+  servers:
+    - name: sandcastle-memory
+      hostname: memory.acme-tunnel.anthropic.cloud
+      auth_token_env: ACME_MEMORY_BEARER
+      allowed_tools:
+        - add
+        - search
+        - list_memories
+
+input_schema:
+  required: [topic]
+  properties:
+    topic:
+      type: string
+      description: Research subject to investigate and persist notes about
+    depth:
+      type: string
+      description: How deep to go (shallow, medium, deep)
+      default: medium
+
+steps:
+  - id: research
+    type: managed-agent
+    managed_agent_config:
+      agent_id: auto
+      agent_template: researcher
+      message: >
+        Research {input.topic} at {input.depth} depth and persist notes to
+        memory via the sandcastle-memory MCP server. Use the `add` tool for
+        each discrete fact (one fact per call). Before writing, call
+        `search` to dedupe against existing notes.
+      model: claude-sonnet-4-6
+      timeout: 900
+      tools_enabled:
+        - web_search
+        - bash
