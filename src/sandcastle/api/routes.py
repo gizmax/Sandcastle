@@ -11654,9 +11654,17 @@ async def list_memories(
     """List all memories for a given scope."""
     _require_admin(req)
     _validate_scope_id(scope_id)
-    from sandcastle.engine.memory import load_memories
+    from sandcastle.engine.memory import MemoryBackendError, load_memories
 
-    memories = await load_memories(scope_id, limit=limit)
+    try:
+        memories = await load_memories(scope_id, limit=limit)
+    except MemoryBackendError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=ApiResponse(
+                error=ErrorResponse(code="MEMORY_UNAVAILABLE", message=str(exc))
+            ).model_dump(),
+        )
     entries = [MemoryEntry(**m) for m in memories]
     return ApiResponse(data=MemoryListResponse(memories=entries, total=len(entries)))
 
@@ -11679,9 +11687,17 @@ async def add_memory(req: Request, body: MemoryAddRequest):
 async def search_memories(req: Request, body: MemorySearchRequest):
     """Semantic search over memories."""
     _require_admin(req)
-    from sandcastle.engine.memory import load_memories
+    from sandcastle.engine.memory import MemoryBackendError, load_memories
 
-    memories = await load_memories(body.scope_id, query=body.query, limit=body.limit)
+    try:
+        memories = await load_memories(body.scope_id, query=body.query, limit=body.limit)
+    except MemoryBackendError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=ApiResponse(
+                error=ErrorResponse(code="MEMORY_UNAVAILABLE", message=str(exc))
+            ).model_dump(),
+        )
     entries = [MemoryEntry(**m) for m in memories]
     return ApiResponse(data=MemoryListResponse(memories=entries, total=len(entries)))
 
