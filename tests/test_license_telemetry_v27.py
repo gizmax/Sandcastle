@@ -776,7 +776,12 @@ class TestOtelDisabledByDefault:
         assert otel_module._tracer is None
 
     def test_init_otel_noop_without_deps(self):
-        otel_module.init_otel("sandcastle", "http://localhost:4318")
+        # Force the opentelemetry import to fail so the no-deps no-op path is
+        # exercised whether or not otel is installed in the environment (CI
+        # installs the [otel] extra, which would otherwise initialize a real
+        # tracer here).
+        with patch.dict(sys.modules, {"opentelemetry": None}):
+            otel_module.init_otel("sandcastle", "http://localhost:4318")
         assert otel_module._tracer is None
 
     def test_config_otel_enabled_default_false(self):

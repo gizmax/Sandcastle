@@ -650,7 +650,7 @@ class TestDockerBackendV27:
 
         mock_docker = MagicMock()
         mock_docker.containers = MagicMock()
-        mock_docker.containers.create_or_run = AsyncMock(return_value=mock_container)
+        mock_docker.containers.create = AsyncMock(return_value=mock_container)
 
         backend._client = mock_docker
 
@@ -677,8 +677,8 @@ class TestDockerBackendV27:
                 ):
                     events.append(event)
 
-            # Verify create_or_run was called with correct config
-            call_args = mock_docker.containers.create_or_run.call_args
+            # Verify create was called with correct config
+            call_args = mock_docker.containers.create.call_args
             config = call_args[1]["config"] if "config" in call_args[1] else call_args[0][0] if call_args[0] else call_args[1].get("config")
             assert config["HostConfig"]["AutoRemove"] is True
             assert config["HostConfig"]["CapDrop"] == ["ALL"]

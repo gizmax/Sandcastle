@@ -1812,7 +1812,14 @@ class TestEvaluateResult:
         )
         s = StepDefinition(id="test", prompt="test")
 
-        with patch("sandcastle.engine.sandshore.get_sandshore_runtime", side_effect=ImportError("no sandshore")):
+        # The llm_judge path calls _call_advisor_llm; force it to fail so the
+        # 0.5 middle-score fallback is exercised deterministically (patching an
+        # unrelated symbol let a real advisor call through when an API key was
+        # present in the environment).
+        with patch(
+            "sandcastle.engine.generator._call_advisor_llm",
+            side_effect=Exception("no advisor"),
+        ):
             score = await evaluate_result(config, s, "output")
 
         assert score == 0.5

@@ -273,9 +273,12 @@ No prompt required. Requires TOOL_COMPOSIO_API_KEY env var.
 
 ### parse
 Parse documents (PDF, DOCX, XLSX, CSV). Extracts text or markdown from files.
-Fields: parse_config: {input_path, output_format, pages, ocr_engine, languages}
-input_path is a file path or variable (e.g. "{input.file_path}").
-output_format: "markdown" (default), "text", or "json".
+Fields: parse_config: {output, pages, ocr, ocr_engine, languages}
+output: "markdown" (default), "text", or "json".
+The file to parse is supplied via the step prompt - a file path, @upload:file_id,
+@file:/path, an absolute /path, or a {template} variable (e.g. "{input.file_path}") -
+NOT via parse_config.
+ocr: set true to force OCR even on digital PDFs (default false).
 pages: optional page range for PDFs (e.g. "1-5").
 ocr_engine: "auto" (default) | "pymupdf" | "chandra" | "glm-ocr"
   - pymupdf: fast text extraction from digital PDFs.
@@ -366,6 +369,20 @@ display_height_px, tools, model, require_human_approval_for, message}.
 Always run inside a sandbox VM and keep human-in-loop approval enabled for
 consequential actions. No prompt required.
 
+### tool
+Deterministically invoke a registered connector (e.g. nano-banana, openai)
+via its CLI dispatch - no agent loop, no sandbox, no base64 plumbing. Best for
+direct API calls such as image generation or vision analysis.
+Fields: tool_config: {tool, function, arguments, cost_per_call}
+tool: connector name from the registry (e.g. "nano-banana", "openai", "gemini").
+function: connector function to call (e.g. "generate", "generate_image",
+  "analyze_image").
+arguments: list of positional args. Strings pass through after template
+  resolution; dict/list values are JSON-encoded. Reference images and outputs
+  of earlier steps via {input.x} / {steps.x.output} inside the arguments.
+cost_per_call: optional declared USD cost per invocation.
+No prompt required.
+
 ### sub_workflow (legacy)
 Run another workflow as a sub-step with input/output mapping.
 Fields: sub_workflow: {workflow, input_mapping, output_mapping,
@@ -373,7 +390,7 @@ parallel_over, max_concurrent, timeout}
 
 IMPORTANT: Types that do NOT need a prompt: http, code, condition,
 loop, race, sensor, gate, transform, notify, composio, openclaw, parse,
-managed-agent, trajectory-replay, computer-use.
+tool, managed-agent, trajectory-replay, computer-use.
 All other types require a prompt field.
 
 ## Dynamic Context Retrieval (optional)

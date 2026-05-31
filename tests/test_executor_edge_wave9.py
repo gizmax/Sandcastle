@@ -825,7 +825,9 @@ class TestCacheKeyGeneration:
         assert len(key) == 64
 
     def test_key_matches_manual_sha256(self):
-        raw = "wf:s1:model:prompt"
+        # The cache key is tenant-scoped (cross-tenant leak fix); a None
+        # tenant_id is encoded as the literal "_none_".
+        raw = "_none_:wf:s1:model:prompt"
         expected = hashlib.sha256(raw.encode()).hexdigest()
         assert _compute_cache_key("wf", "s1", "prompt", "model") == expected
 

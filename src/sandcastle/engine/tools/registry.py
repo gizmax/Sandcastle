@@ -1652,12 +1652,45 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
             ),
             ToolFunction(
                 name="generate_image",
-                description="Generate image with DALL-E 3",
+                description=(
+                    "Generate image(s) with gpt-image-1 (default) or dall-e-3. "
+                    "Writes files to disk and returns their paths. Pass "
+                    "reference_images for faithful product/UGC editing."
+                ),
                 parameters={
                     "type": "object",
                     "properties": {
                         "prompt": {"type": "string"},
-                        "options": {"type": "object"},
+                        "options": {
+                            "type": "object",
+                            "description": (
+                                "model (gpt-image-1/dall-e-3), size or aspect "
+                                "(1:1/4:5/9:16/16:9), quality (low/medium/high), n, "
+                                "output, output_dir, reference_images (string[])"
+                            ),
+                        },
+                    },
+                    "required": ["prompt"],
+                },
+            ),
+            ToolFunction(
+                name="analyze_image",
+                description=(
+                    "Vision analysis/judging - send image(s) + a prompt to a vision "
+                    "model (default gpt-4o) and get the answer. Use to score generated "
+                    "images against a reference. Returns JSON when the model replies JSON."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "prompt": {"type": "string"},
+                        "options": {
+                            "type": "object",
+                            "description": (
+                                "images (string[] of local paths or URLs), "
+                                "model (default gpt-4o), max_tokens"
+                            ),
+                        },
                     },
                     "required": ["prompt"],
                 },
@@ -2258,6 +2291,38 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
         ],
         credential_env_vars=["TOOL_NANO_BANANA_API_KEY"],
         connector_file="nano-banana.mjs",
+        icon="image",
+    ),
+    "gemini": ToolDefinition(
+        name="gemini",
+        description="Gemini vision analysis - see and judge images (e.g. score UGC shots vs a reference)",
+        category="ai",
+        functions=[
+            ToolFunction(
+                name="analyze_image",
+                description=(
+                    "Send image(s) + a prompt to a Gemini vision model and get the "
+                    "answer. Use to score generated images against a reference. "
+                    "Returns JSON when the model replies JSON."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "prompt": {"type": "string"},
+                        "options": {
+                            "type": "object",
+                            "description": (
+                                "images (string[] of local paths or URLs), "
+                                "model (default gemini-2.5-flash), max_output_tokens"
+                            ),
+                        },
+                    },
+                    "required": ["prompt"],
+                },
+            ),
+        ],
+        credential_env_vars=["TOOL_GEMINI_API_KEY"],
+        connector_file="gemini.mjs",
         icon="image",
     ),
     # --- Tier 3: Bold integrations ---

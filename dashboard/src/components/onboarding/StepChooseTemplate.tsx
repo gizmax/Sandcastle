@@ -33,9 +33,9 @@ interface FeaturedTemplate {
 // The 4 popular built-in templates to feature
 const FEATURED_TEMPLATES: FeaturedTemplate[] = [
   {
-    name: "ugc-product-shoot",
-    displayName: "UGC Product Shoot",
-    description: "Generate social-ready product photos with AI-powered creative direction and styling.",
+    name: "ugc-studio",
+    displayName: "UGC Studio",
+    description: "Drop a product photo, pick a mode - get faithful, social-ready UGC shots, scored and auto-fixed by a vision judge.",
     category: "Creative",
     icon: Camera,
     color: "text-[#F472B6] bg-[#F472B6]/10",

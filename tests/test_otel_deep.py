@@ -434,9 +434,12 @@ class TestConfigValidation:
 
     def test_init_otel_with_special_service_name(self):
         """init_otel handles service names with special characters."""
-        # Should not raise even if otel is not installed
-        otel_module.init_otel("my-service/v2.0 (test)", "http://localhost:4318")
-        # Still None because otel not installed
+        # Force the otel import to fail so the no-op path is exercised whether
+        # or not opentelemetry is installed (CI installs the [otel] extra).
+        with patch.dict(sys.modules, {"opentelemetry": None}):
+            # Should not raise
+            otel_module.init_otel("my-service/v2.0 (test)", "http://localhost:4318")
+        # No-op without deps, so tracer stays None
         assert otel_module._tracer is None
 
     def test_reset_clears_tracer(self):
