@@ -1,0 +1,272 @@
+# name: Map-Reduce Over List
+# description: Generic map-reduce skeleton - load any list, fan a reusable sub-workflow over every item (the map), then reduce deterministically with a quality gate and write-back
+# tags: [map-reduce, sub-workflow, batch, fan-out, orchestration]
+# category: general_ai
+
+name: map-reduce-over-list
+description: >-
+  A reusable map-reduce skeleton. Load and normalize a list from any source
+  (Postgres, a REST API, a Google Sheet, or an S3 listing), shape it into work
+  items, fan a reusable sub-workflow over every item in parallel (the MAP - swap
+  which inner workflow runs per item), then REDUCE the per-item results
+  deterministically in sandboxed code: aggregate, dedupe, and compute roll-up
+  stats. An LLM+human quality gate guards the consolidated output before a
+  conditional write-back to the source store with a Slack notification; failed
+  rollups route to a human approval review instead.
+
+default_model: sonnet
+default_timeout: 600
+
+input_schema:
+  required: ["source_endpoint", "writeback_endpoint"]
+  properties:
+    source_endpoint:
+      type: string
+      description: >-
+        REST/Postgres-REST endpoint that returns the list to process as a JSON
+        array (each element becomes one map item). Examples: a PostgREST table
+        URL, a Google Sheets values API URL, or an S3 list-objects gateway.
+      default: "https://data.internal.example.com/postgrest/articles?select=id,title,body,url&status=eq.pending"
+    writeback_endpoint:
+      type: string
+      description: >-
+        Endpoint that accepts the consolidated rollup via POST (PostgREST upsert,
+        a Google Sheets append, or an S3 put-object gateway).
+      default: "https://data.internal.example.com/postgrest/rollups"
+    item_field:
+      type: string
+      description: "Field on each source item whose text is mapped through the sub-workflow."
+      default: "body"
+    max_items:
+      type: string
+      description: "Safety cap on how many items to map in one run."
+      default: "200"
+
+steps:
+  # ---------------------------------------------------------------------------
+  # 1. LOAD - pull the raw list from the source system (Postgres/REST/Sheet/S3).
+  # ---------------------------------------------------------------------------
+  - id: load-list
+    type: http
+    http_config:
+      url: "{input.source_endpoint}"
+      method: GET
+      headers:
+        Accept: "application/json"
+        Prefer: "count=exact"
+      auth: "bearer:{env.SOURCE_API_TOKEN}"
+
+  # ---------------------------------------------------------------------------
+  # 2. NORMALIZE - coerce the raw response into a clean list[dict] of records,
+  #    deterministically (handles array vs {data:[...]} vs {values:[...]} shapes).
+  # ---------------------------------------------------------------------------
+  - id: normalize
+    type: code
+    depends_on: [load-list]
+    code_config:
+      language: python
+      code: |
+        raw = _steps['load-list']
+        # Source responses come in several shapes depending on the backend:
+        # PostgREST -> a bare list; REST APIs -> {"data": [...]}; Sheets -> {"values": [[...]]}.
+        records = []
+        if isinstance(raw, list):
+            records = raw
+        elif isinstance(raw, dict):
+            if isinstance(raw.get('data'), list):
+                records = raw['data']
+            elif isinstance(raw.get('values'), list):
+                rows = raw['values']
+                if rows and isinstance(rows[0], list):
+                    header = [str(h) for h in rows[0]]
+                    records = [dict(zip(header, r)) for r in rows[1:]]
+                else:
+                    records = rows
+            elif isinstance(raw.get('Contents'), list):
+                # S3 list-objects style listing.
+                records = raw['Contents']
+        try:
+            cap = int(str(_input.get('max_items', '200')))
+        except (ValueError, TypeError):
+            cap = 200
+        clean = []
+        for i, rec in enumerate(records[:cap]):
+            if not isinstance(rec, dict):
+                rec = {'value': rec}
+            rec = dict(rec)
+            rec.setdefault('id', rec.get('Key', f'item-{i}'))
+            clean.append(rec)
+        result = clean
+
+  # ---------------------------------------------------------------------------
+  # 3. SHAPE - turn normalized records into uniform work items the sub-workflow
+  #    can consume (one {id, text} per item). transform emits a JSON array.
+  # ---------------------------------------------------------------------------
+  - id: shape
+    type: transform
+    depends_on: [normalize]
+    transform_config:
+      template: |
+        {%- set field = input.item_field | default('body') -%}
+        [
+        {%- for rec in steps.normalize.output -%}
+          {"id": {{ rec.id | tojson }}, "text": {{ (rec[field] if rec[field] is defined else (rec.value | default(''))) | tojson }}}{{ "," if not loop.last else "" }}
+        {%- endfor -%}
+        ]
+
+  # ---------------------------------------------------------------------------
+  # 4. MAP - fan the reusable "summarize" sub-workflow over every work item in
+  #    parallel. Swap `workflow:` to run a different per-item pipeline. Each item's
+  #    `text` field maps onto the sub-workflow's required `text` input.
+  # ---------------------------------------------------------------------------
+  - id: map-items
+    type: sub_workflow
+    depends_on: [shape]
+    sub_workflow:
+      workflow: "summarize"
+      parallel_over: "steps.shape.output"
+      input_mapping:
+        text: "_item.text"
+        format: "bullet-points"
+      max_concurrent: 5
+
+  # ---------------------------------------------------------------------------
+  # 5. REDUCE - deterministic aggregation of all per-item sub-workflow outputs:
+  #    flatten, dedupe, and compute roll-up stats. No LLM in the load-bearing math.
+  # ---------------------------------------------------------------------------
+  - id: reduce
+    type: code
+    depends_on: [map-items]
+    code_config:
+      language: python
+      code: |
+        items = _steps['shape']
+        results = _steps['map-items']
+        # `map-items` returns the per-item sub-workflow outputs as a list aligned
+        # with `shape`. Normalize to a list defensively.
+        if isinstance(results, dict):
+            results = list(results.values())
+        if not isinstance(results, list):
+            results = [results]
+        consolidated = []
+        seen = set()
+        ok = 0
+        empty = 0
+        for idx, out in enumerate(results):
+            item_id = items[idx]['id'] if idx < len(items) and isinstance(items[idx], dict) else f'item-{idx}'
+            text = '' if out is None else (out.get('output') if isinstance(out, dict) else str(out))
+            text = (text or '').strip()
+            if not text:
+                empty += 1
+                continue
+            key = (item_id, text[:120].lower())
+            if key in seen:
+                continue
+            seen.add(key)
+            consolidated.append({'id': item_id, 'summary': text})
+            ok += 1
+        total = len(results)
+        coverage = round(ok / total, 4) if total else 0.0
+        result = {
+            'rollup': consolidated,
+            'stats': {
+                'total_items': total,
+                'summarized': ok,
+                'empty': empty,
+                'deduped': total - empty - ok,
+                'coverage': coverage,
+            },
+        }
+
+  # ---------------------------------------------------------------------------
+  # 6. GATE - quality check on the consolidated rollup. BOTH strategies must
+  #    pass: an LLM eval of consolidation quality, plus a human sign-off that
+  #    auto-aborts on timeout (so a stalled review never silently writes back).
+  # ---------------------------------------------------------------------------
+  - id: quality-gate
+    type: gate
+    depends_on: [reduce]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are a release reviewer for an automated map-reduce job. Below is
+              the consolidated rollup plus roll-up statistics. PASS only if the
+              summaries are coherent, on-topic, free of obvious duplication, and
+              coverage is acceptable (>= 0.8). Otherwise FAIL with a one-line reason.
+            input: "{steps.reduce.output}"
+            model: sonnet
+        - type: human
+          config:
+            message: "Approve the consolidated rollup for write-back to the source store?"
+            timeout_hours: 24
+            on_timeout: abort
+
+  # ---------------------------------------------------------------------------
+  # 7. DECISION - deterministic branch on the measured coverage statistic.
+  #    Pass -> write-back + notify. Fail -> human approval review.
+  # ---------------------------------------------------------------------------
+  - id: route
+    type: condition
+    depends_on: [quality-gate]
+    condition_config:
+      expression: "{steps.reduce.output.stats.coverage} >= 0.8"
+      then: [writeback, notify-success]
+      else: [review-failed]
+
+  # --- PASS branch ----------------------------------------------------------
+  # 7a. Write the consolidated rollup back to the store (PostgREST upsert /
+  #     Sheets append / S3 put-object gateway).
+  - id: writeback
+    type: http
+    depends_on: [route]
+    http_config:
+      url: "{input.writeback_endpoint}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Prefer: "resolution=merge-duplicates"
+      body: "{steps.reduce.output}"
+      auth: "bearer:{env.WRITEBACK_API_TOKEN}"
+
+  # 7b. Tell the team the job landed, with roll-up stats.
+  - id: notify-success
+    type: notify
+    depends_on: [writeback]
+    notify_config:
+      service: slack
+      channel: "#data-pipelines"
+      message: >-
+        Map-reduce rollup written back. Items={steps.reduce.output.stats.total_items},
+        summarized={steps.reduce.output.stats.summarized},
+        coverage={steps.reduce.output.stats.coverage}. Source: {input.source_endpoint}
+
+  # --- FAIL branch ----------------------------------------------------------
+  # 7c. Low-coverage rollup goes to a human for review instead of write-back.
+  - id: review-failed
+    type: approval
+    depends_on: [route]
+    approval_config:
+      message: >-
+        Map-reduce rollup did NOT meet the coverage threshold and was held back.
+        Review the consolidated output and stats, then decide whether to write it
+        back manually or rerun the job.
+      show_data: "steps.reduce.output"
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: true
+
+  # 7d. Notify the team a rollup is parked for manual review.
+  - id: notify-review
+    type: notify
+    depends_on: [review-failed]
+    notify_config:
+      service: slack
+      channel: "#data-pipelines"
+      message: >-
+        Map-reduce rollup held for manual review (coverage below threshold).
+        Stats: summarized={steps.reduce.output.stats.summarized}/{steps.reduce.output.stats.total_items}.
+
+on_complete:
+  storage_path: "rollups/map-reduce/{workflow_id}/{run_id}.json"

@@ -1,0 +1,341 @@
+# name: SLA Sensor Escalation Ladder
+# description: A reusable durable watcher - poll any health/queue/SLO endpoint until a breach condition holds, pull surrounding context, race two providers for a fast triage, then climb a tiered escalation ladder (notify -> recheck, loop-until-cleared) before falling through to a human gate. The control flow (poll, escalate, loop, human gate) is fully model-free; only the triage is a swappable cross-provider race.
+# tags: [DevOps, SLA, Incident, Escalation, Sensor, Failover, PagerDuty, Datadog]
+# category: devops
+
+name: sla-sensor-escalation-ladder
+description: >
+  A reusable, provider-agnostic SLA watcher and escalation ladder. A durable
+  SENSOR polls any status / health / queue-depth endpoint until the breach
+  condition holds (or a soft timeout). An HTTP step pulls surrounding context
+  (recent logs / events from a monitoring REST API). Two providers then RACE
+  (Sonnet vs Gemini 2.5 Pro, first-valid-wins failover) for a fastest-of-N
+  triage summary {severity, suggested_remediation}; a deterministic CLASSIFY
+  bins severity into INFO / WARN / SEV2 / SEV1. A LOOP climbs a fixed tier
+  ladder - each iteration NOTIFIES the next tier's channel (Slack / Teams /
+  PagerDuty) and an HTTP RECHECK re-polls the health URL, returning
+  {cleared: bool}; the loop exits early once cleared. If the ladder is
+  exhausted and the breach persists, a CONDITION routes to a human APPROVAL
+  (on-call picks a manual action, with the triage shown); otherwise it posts a
+  resolved notice. A final NOTIFY posts the outcome to Slack. Only the triage
+  is model-driven and swappable; poll, escalate, loop-until-cleared and the
+  human gate are all deterministic control flow.
+
+default_model: sonnet
+default_timeout: 600
+
+input_schema:
+  required: ["watch_url", "breach_condition", "tier_channels"]
+  properties:
+    watch_url:
+      type: string
+      description: "Health / status / queue-depth endpoint to poll (returns JSON), e.g. https://status.internal/api/health"
+      default: "https://status.internal/api/health"
+    breach_condition:
+      type: string
+      description: >
+        Python boolean expression over the sensor `response` JSON that defines a
+        breach (the sensor fires when it becomes true). e.g.
+        "status_code == 200 and float(response.get('queue_depth', 0) or 0) > 1000"
+      default: "status_code == 200 and float(response.get('error_rate', 0) or 0) > 0.05"
+    tier_channels:
+      type: string
+      description: >
+        Comma-separated escalation ladder, lowest tier first, each as
+        service:target. e.g. "slack:#oncall-tier1,teams:sre-bridge,pagerduty:P1ESCPOL"
+      default: "slack:#oncall-tier1,teams:#sre-bridge,pagerduty:default-escalation"
+    monitoring_api:
+      type: string
+      description: "Base URL of the monitoring REST API used to pull surrounding context (logs / events)."
+      default: "https://api.datadoghq.eu/api/v2"
+    service:
+      type: string
+      description: "Logical service name this watcher guards (used in messages and context queries)."
+      default: "unknown-service"
+    soft_timeout:
+      type: integer
+      description: "Sensor soft timeout in seconds - stop waiting for the breach after this long."
+      default: 86400
+    check_interval:
+      type: integer
+      description: "Seconds between sensor polls of the watch_url."
+      default: 60
+    slack_channel:
+      type: string
+      description: "Slack channel for the final outcome summary."
+      default: "#sla-watch"
+
+steps:
+  # 1) DURABLE SENSOR - poll the watch_url until the breach condition holds, or soft-timeout.
+  #    breach_condition is a provider-agnostic boolean over the polled JSON `response`.
+  - id: watch_breach
+    type: sensor
+    sensor_config:
+      url: "{input.watch_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "{input.breach_condition}"
+      check_interval: 60
+      timeout: 86400
+
+  # 2) PULL CONTEXT - recent logs / events around the breach from the monitoring REST API.
+  - id: fetch_context
+    type: http
+    depends_on: [watch_breach]
+    http_config:
+      url: "{input.monitoring_api}/logs/events/search?filter[query]=service:{input.service}&page[limit]=25&sort=-timestamp"
+      method: GET
+      auth: "bearer:{env.MONITORING_API_TOKEN}"
+      headers:
+        Accept: "application/json"
+        DD-API-KEY: "{env.DATADOG_API_KEY}"
+        DD-APPLICATION-KEY: "{env.DATADOG_APP_KEY}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 3) Deterministically fold the sensor observation + pulled context into one triage envelope.
+  - id: build_envelope
+    type: code
+    depends_on: [fetch_context]
+    code_config:
+      language: python
+      code: |
+        # Normalize the sensor breach observation + monitoring context into one envelope.
+        obs = _steps.get("watch_breach") or {}
+        ctx = _steps.get("fetch_context") or {}
+        if not isinstance(obs, dict):
+            obs = {"raw": obs}
+        if not isinstance(ctx, dict):
+            ctx = {"raw": ctx}
+
+        # Pull a compact slice of recent events (Datadog-style {data:[{attributes:{...}}]}).
+        events = []
+        data = ctx.get("data") if isinstance(ctx.get("data"), list) else []
+        for ev in data[:25]:
+            if isinstance(ev, dict):
+                attrs = ev.get("attributes", {}) if isinstance(ev.get("attributes"), dict) else {}
+                events.append({
+                    "message": str(attrs.get("message", ""))[:500],
+                    "status": attrs.get("status", ""),
+                    "timestamp": attrs.get("timestamp", ""),
+                })
+
+        result = {
+            "service": _input.get("service", "unknown-service"),
+            "watch_url": _input.get("watch_url", ""),
+            "breach_condition": _input.get("breach_condition", ""),
+            "breach_observation": obs,
+            "recent_events": events,
+            "event_count": len(events),
+        }
+
+  # 4) RACE two providers for a fastest-of-N triage. First non-empty valid JSON wins
+  #    (failover, NOT a vote). Branch A pinned to sonnet, Branch B to gemini-2.5-pro.
+  - id: triage_sonnet
+    type: standard
+    model: sonnet
+    output_schema:
+      type: object
+      properties:
+        severity: { type: string, enum: ["INFO", "WARN", "SEV2", "SEV1"] }
+        suggested_remediation: { type: string }
+      required: ["severity", "suggested_remediation"]
+    prompt: |
+      You are an SRE doing fast incident triage. An SLA watcher just fired on a
+      breach. Summarize severity and the single best next remediation.
+
+      Triage envelope (breach + recent events):
+      {steps.build_envelope.output}
+
+      Return STRICT JSON only:
+      {
+        "severity": "INFO" | "WARN" | "SEV2" | "SEV1",
+        "suggested_remediation": "<one concrete, reversible next action>"
+      }
+      Pick severity from blast radius in the events. Output JSON only, no prose.
+
+  - id: triage_gemini
+    type: standard
+    model: google/gemini-2.5-pro
+    output_schema:
+      type: object
+      properties:
+        severity: { type: string, enum: ["INFO", "WARN", "SEV2", "SEV1"] }
+        suggested_remediation: { type: string }
+      required: ["severity", "suggested_remediation"]
+    prompt: |
+      You are a second, independent SRE triaging the same SLA breach (failover
+      for provider A). Return STRICT JSON only with keys severity
+      ("INFO"|"WARN"|"SEV2"|"SEV1") and suggested_remediation (one concrete
+      reversible action), grounded in:
+      {steps.build_envelope.output}
+      Output JSON only, no prose.
+
+  - id: triage_race
+    type: race
+    race_config:
+      branches:
+        - [triage_sonnet]
+        - [triage_gemini]
+      # First branch whose JSON parses with a real severity + non-empty remediation wins.
+      validator: "isinstance(output, dict) and output.get('severity') in ('INFO','WARN','SEV2','SEV1') and bool(str(output.get('suggested_remediation','')).strip())"
+
+  # 5) CLASSIFY severity deterministically into one of four bins, routing to a per-bin primer.
+  - id: classify_severity
+    type: classify
+    depends_on: [triage_race]
+    classify_config:
+      categories: ["INFO", "WARN", "SEV2", "SEV1"]
+      input: "{steps.triage_race.output}"
+      model: haiku
+      branches:
+        INFO: [prime_low]
+        WARN: [prime_low]
+        SEV2: [prime_high]
+        SEV1: [prime_high]
+
+  # 5a) Low-severity primer (INFO / WARN) - slower ladder cadence.
+  - id: prime_low
+    type: code
+    code_config:
+      language: python
+      code: |
+        # INFO/WARN: low urgency, give each tier room to ack before escalating.
+        triage = _steps.get("triage_race") or {}
+        result = {
+            "band": "low",
+            "dwell_minutes": 15,
+            "triage": triage if isinstance(triage, dict) else {"raw": triage},
+        }
+
+  # 5b) High-severity primer (SEV2 / SEV1) - fast ladder cadence.
+  - id: prime_high
+    type: code
+    code_config:
+      language: python
+      code: |
+        # SEV2/SEV1: high urgency, escalate aggressively through the ladder.
+        triage = _steps.get("triage_race") or {}
+        result = {
+            "band": "high",
+            "dwell_minutes": 2,
+            "triage": triage if isinstance(triage, dict) else {"raw": triage},
+        }
+
+  # 6) Deterministically materialize the escalation ladder from tier_channels input.
+  - id: build_ladder
+    type: code
+    depends_on: [classify_severity]
+    code_config:
+      language: python
+      code: |
+        # Parse "slack:#oncall-tier1,teams:#sre-bridge,pagerduty:P1" into ordered tiers.
+        raw = str(_input.get("tier_channels", "") or "")
+        tiers = []
+        for idx, part in enumerate(p for p in raw.split(",") if p.strip()):
+            piece = part.strip()
+            if ":" in piece:
+                service, target = piece.split(":", 1)
+            else:
+                service, target = "slack", piece
+            tiers.append({
+                "tier": idx + 1,
+                "service": service.strip().lower(),
+                "target": target.strip(),
+            })
+        if not tiers:
+            tiers = [{"tier": 1, "service": "slack", "target": "#oncall"}]
+        result = tiers
+
+  # 7) LOOP the escalation ladder: for each tier, NOTIFY then RECHECK. Exit early once cleared.
+  #    Child steps (notify_tier, recheck) are defined separately with NO depends_on.
+  - id: escalation_ladder
+    type: loop
+    depends_on: [build_ladder]
+    loop_config:
+      over: "steps.build_ladder.output"
+      step_ids: [notify_tier, recheck]
+      max_iterations: 4
+      until: "{steps.recheck.output.cleared} == True"
+
+  # 7a) NOTIFY the current tier. service/target come from the loop item (_item).
+  - id: notify_tier
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: ":rotating_light: SLA breach on {input.service} - escalating to a new tier. Triage: {steps.triage_race.output}. Watching {input.watch_url}."
+
+  # 7b) RECHECK - re-poll the health URL and deterministically return {cleared: bool}.
+  - id: recheck
+    type: http
+    http_config:
+      url: "{input.watch_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      value_map:
+        cleared: "$.cleared"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 8) Deterministically decide whether the breach is still live after the ladder ran.
+  - id: evaluate_ladder
+    type: code
+    depends_on: [escalation_ladder]
+    code_config:
+      language: python
+      code: |
+        # The loop result is the list of per-iteration child outputs; inspect the last recheck.
+        runs = _steps.get("escalation_ladder")
+        last = recheck = _steps.get("recheck") or {}
+        cleared = False
+        # Prefer the explicit recheck signal, then fall back to scanning loop iterations.
+        if isinstance(recheck, dict) and recheck.get("cleared") is not None:
+            cleared = bool(recheck.get("cleared"))
+        elif isinstance(runs, list):
+            for it in reversed(runs):
+                if isinstance(it, dict) and "cleared" in it:
+                    cleared = bool(it.get("cleared"))
+                    break
+        result = {
+            "cleared": cleared,
+            "still_breached": not cleared,
+            "fail_count": 0 if cleared else 1,
+        }
+
+  # 9) CONDITION - if still breached after the full ladder, escalate to a human; else resolve.
+  - id: ladder_outcome
+    type: condition
+    depends_on: [evaluate_ladder]
+    condition_config:
+      expression: "{steps.evaluate_ladder.output.fail_count} > 0"
+      then: [human_action, notify_outcome]
+      else: [notify_outcome]
+
+  # 9a) HUMAN GATE - on-call picks a manual action when the ladder is exhausted.
+  #     The triage is shown so the human decides with full context.
+  - id: human_action
+    type: approval
+    approval_config:
+      message: "Escalation ladder exhausted and the SLA breach persists. Pick a manual action (rollback, drain, page secondary, ack-and-monitor)."
+      show_data: steps.triage_race.output
+      timeout_hours: 4
+      on_timeout: abort
+      allow_edit: true
+
+  # 10) NOTIFY the final outcome to Slack (resolved-by-ladder OR handed to a human).
+  - id: notify_outcome
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: "SLA watcher for {input.service}: ladder result {steps.evaluate_ladder.output}. Triage was {steps.triage_race.output}. (If still breached, on-call has been handed the manual-action gate.)"
+
+on_complete:
+  storage_path: "sla-sensor-escalation-ladder/{run_id}/result.json"

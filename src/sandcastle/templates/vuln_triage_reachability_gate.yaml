@@ -1,0 +1,434 @@
+# name: Vuln Triage Reachability Gate
+# description: AppSec finding triage with a two-judge cross-provider gate. Pull scanner findings + EPSS + CISA KEV, score deterministically, classify, test reachability via GitHub code-search, then require TWO judges on TWO different providers (plus a human) to agree before a patch-now decision becomes a Jira ticket. Risk acceptances go to a security lead for sign-off.
+# tags: [AppSec, SCA, EPSS, CISA-KEV, Reachability, GitHub, Jira, Slack, Two-Judge-Gate, Security]
+# category: engineering
+
+name: vuln-triage-reachability-gate
+description: >-
+  AppSec vulnerability triage that no single model can green-light. A DETERMINISTIC Python
+  step pulls scanner findings, EPSS exploit-probability scores, and the CISA KEV catalog,
+  then merges them, drops duplicate CVEs, and computes base_risk = CVSS x EPSS x KEV x
+  asset_exposure so the ranking is reproducible and model-independent. A swappable classify
+  splits each finding into third_party_dep / first_party_code / infra_misconfig, and a GitHub
+  code-search HTTP call tests whether the vulnerable symbol is actually imported/called
+  (reachability). The load-bearing decision is a TWO-JUDGE cross-provider gate: judge 1 on
+  sonnet and judge 2 on google/gemini-2.5-pro must BOTH answer the same exploitable-AND-reachable
+  rubric, and a human must accept the risk - all strategies must pass to mark patch-now, so no
+  single provider can authorize a patch decision. A condition routes a passing gate to a real
+  Jira ticket POST (with SLA + owner); a failing gate routes to a security-lead risk-acceptance
+  approval. The outcome is posted to Slack. Connectors: GitHub + Jira via http, Slack via notify.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 900
+
+input_schema:
+  required: ["scanner_endpoint", "github_repo"]
+  properties:
+    scanner_endpoint:
+      type: string
+      description: "REST base URL of the vulnerability scanner findings API (e.g. Snyk, Trivy server, Dependency-Track, or a Defect Dojo /findings endpoint)."
+      default: "https://scanner.internal/api/v2"
+      example: "https://dependencytrack.acme.internal/api/v1"
+    github_repo:
+      type: string
+      description: "owner/repo of the first-party codebase used for the GitHub code-search reachability test."
+      default: "acme/payments-service"
+      example: "acme/payments-service"
+    epss_base_url:
+      type: string
+      description: "FIRST.org EPSS REST API base URL (exploit-prediction scores per CVE)."
+      default: "https://api.first.org/data/v1"
+      example: "https://api.first.org/data/v1"
+    kev_catalog_url:
+      type: string
+      description: "CISA Known Exploited Vulnerabilities catalog JSON URL."
+      default: "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
+      example: "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
+    asset_exposure:
+      type: number
+      description: "Exposure multiplier for the affected asset: 1.0 internal-only, 1.5 partner-facing, 2.0 internet-facing crown-jewel. Folds business context into base_risk."
+      default: 1.5
+      example: "2.0"
+    jira_base_url:
+      type: string
+      description: "Jira REST base URL used to open the remediation ticket."
+      default: "https://acme.atlassian.net/rest/api/3"
+      example: "https://acme.atlassian.net/rest/api/3"
+    jira_project_key:
+      type: string
+      description: "Jira project key the remediation ticket is filed under."
+      default: "SEC"
+      example: "SEC"
+    sla_days:
+      type: number
+      description: "Remediation SLA in days written onto the patch-now Jira ticket."
+      default: 14
+      example: "7"
+    remediation_owner:
+      type: string
+      description: "Default assignee / owning team for the remediation ticket."
+      default: "appsec-team"
+      example: "platform-security"
+    slack_channel:
+      type: string
+      description: "Slack channel for the triage decision summary."
+      default: "#appsec-triage"
+      example: "#appsec-triage"
+
+steps:
+  # 1) PULL raw findings from the scanner REST API (Snyk / Trivy / Dependency-Track / DefectDojo).
+  - id: pull_scanner_findings
+    type: http
+    http_config:
+      url: "{input.scanner_endpoint}/findings?status=open&severity=high,critical&limit=200"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.SCANNER_API_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2) PULL EPSS exploit-prediction scores (FIRST.org) for the high/critical CVE set.
+  - id: pull_epss_scores
+    type: http
+    http_config:
+      url: "{input.epss_base_url}/epss?scope=public&limit=2000&order=!epss"
+      method: GET
+      headers:
+        Accept: "application/json"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 3) PULL the CISA Known Exploited Vulnerabilities catalog (authoritative "actively exploited" list).
+  - id: pull_kev_catalog
+    type: http
+    http_config:
+      url: "{input.kev_catalog_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 4) DETERMINISTIC merge + dedupe + risk scoring. The audit-load-bearing math, no model:
+  #    base_risk = CVSS x EPSS x KEV_multiplier x asset_exposure; ties broken by CVSS then EPSS.
+  - id: score_and_rank
+    type: code
+    depends_on: [pull_scanner_findings, pull_epss_scores, pull_kev_catalog]
+    code_config:
+      language: python
+      code: |
+        scan = _steps['pull_scanner_findings'] or {}
+        epss = _steps['pull_epss_scores'] or {}
+        kev = _steps['pull_kev_catalog'] or {}
+        asset_exposure = float(_input.get('asset_exposure', 1.5) or 1.5)
+
+        # --- Normalize scanner findings (DefectDojo {"results":[...]}, Snyk {"issues":[...]},
+        #     Dependency-Track returns a bare list, Trivy {"findings":[...]}). ---------------
+        if isinstance(scan, list):
+            raw_findings = scan
+        else:
+            raw_findings = (scan.get('results') or scan.get('issues')
+                            or scan.get('findings') or scan.get('data') or [])
+
+        # --- EPSS lookup: cve -> probability (0..1). FIRST.org returns {"data":[{cve,epss}]}. -
+        epss_by_cve = {}
+        epss_rows = epss.get('data', []) if isinstance(epss, dict) else (epss if isinstance(epss, list) else [])
+        for row in epss_rows:
+            if isinstance(row, dict) and row.get('cve'):
+                try:
+                    epss_by_cve[str(row['cve']).upper()] = float(row.get('epss') or 0.0)
+                except (ValueError, TypeError):
+                    epss_by_cve[str(row['cve']).upper()] = 0.0
+
+        # --- KEV set: catalog has {"vulnerabilities":[{"cveID":...}]}. -----------------------
+        kev_set = set()
+        kev_rows = kev.get('vulnerabilities', []) if isinstance(kev, dict) else (kev if isinstance(kev, list) else [])
+        for row in kev_rows:
+            if isinstance(row, dict) and row.get('cveID'):
+                kev_set.add(str(row['cveID']).upper())
+
+        def _extract_cve(rec):
+            for k in ('cve', 'cveId', 'cve_id', 'vulnerability_id', 'vulnId'):
+                v = rec.get(k)
+                if v:
+                    return str(v).upper()
+            # Some scanners nest the CVE under a vulnerability object.
+            vuln = rec.get('vulnerability') or rec.get('vuln') or {}
+            if isinstance(vuln, dict):
+                v = vuln.get('cve') or vuln.get('id') or vuln.get('vulnId')
+                if v:
+                    return str(v).upper()
+            return ''
+
+        def _extract_cvss(rec):
+            for k in ('cvssScore', 'cvss_score', 'cvss', 'severityScore', 'score'):
+                v = rec.get(k)
+                if v is not None:
+                    try:
+                        return max(0.0, min(10.0, float(v)))
+                    except (ValueError, TypeError):
+                        pass
+            sev = str(rec.get('severity') or rec.get('severityLevel') or '').lower()
+            return {'critical': 9.5, 'high': 7.5, 'medium': 5.0, 'low': 2.5}.get(sev, 5.0)
+
+        # --- Merge, dedupe by CVE (keep the highest-CVSS instance), score. ------------------
+        best_by_cve = {}
+        for rec in raw_findings:
+            if not isinstance(rec, dict):
+                continue
+            cve = _extract_cve(rec)
+            cvss = _extract_cvss(rec)
+            # Findings without a CVE still get triaged; key them by component+title.
+            comp = str(rec.get('component') or rec.get('componentName')
+                       or rec.get('package') or rec.get('purl') or '')
+            symbol = str(rec.get('symbol') or rec.get('functionName')
+                         or rec.get('affected_function') or comp.split('@')[0].split('/')[-1] or '')
+            key = cve or f"NOCVE::{comp}::{str(rec.get('title') or rec.get('name') or '')}"
+            existing = best_by_cve.get(key)
+            if existing is None or cvss > existing['cvss']:
+                epss_p = epss_by_cve.get(cve, 0.0) if cve else 0.0
+                in_kev = cve in kev_set if cve else False
+                kev_mult = 2.0 if in_kev else 1.0
+                # EPSS contributes a floor of 0.1 so a high-CVSS no-EPSS bug still ranks.
+                epss_factor = max(epss_p, 0.1)
+                base_risk = round(cvss * epss_factor * kev_mult * asset_exposure, 4)
+                best_by_cve[key] = {
+                    'key': key,
+                    'cve': cve,
+                    'title': str(rec.get('title') or rec.get('name') or rec.get('issue') or cve or 'finding'),
+                    'component': comp,
+                    'symbol': symbol,
+                    'cvss': cvss,
+                    'epss': round(epss_p, 6),
+                    'in_kev': in_kev,
+                    'asset_exposure': asset_exposure,
+                    'base_risk': base_risk,
+                }
+
+        findings = list(best_by_cve.values())
+        # Deterministic rank: base_risk desc, then CVSS desc, then EPSS desc, then CVE for stability.
+        findings.sort(key=lambda f: (-f['base_risk'], -f['cvss'], -f['epss'], f['cve']))
+        for i, f in enumerate(findings):
+            f['rank'] = i + 1
+
+        result = {
+            'repo': _input.get('github_repo'),
+            'total_open': len(raw_findings),
+            'deduped_count': len(findings),
+            'kev_hits': sum(1 for f in findings if f['in_kev']),
+            'top_finding': findings[0] if findings else {},
+            'findings': findings,
+        }
+
+  # 5) CLASSIFY the top finding's origin. The ONLY model in the scoring path, and it is swappable.
+  #    Every category routes into the reachability test - origin shapes the rubric, not the gate.
+  - id: classify_origin
+    type: classify
+    depends_on: [score_and_rank]
+    classify_config:
+      model: haiku
+      input: "Classify the ORIGIN of this AppSec finding. third_party_dep = a vulnerable library/package we depend on (has a component/purl, e.g. log4j, openssl). first_party_code = a bug in our own source (SAST/secret/logic flaw, no external package). infra_misconfig = a cloud/container/IaC misconfiguration (exposed bucket, open port, weak TLS, IAM). Finding: {steps.score_and_rank.output.top_finding}"
+      categories:
+        - third_party_dep
+        - first_party_code
+        - infra_misconfig
+      branches:
+        third_party_dep: [reachability_probe]
+        first_party_code: [reachability_probe]
+        infra_misconfig: [reachability_probe]
+
+  # 6) REACHABILITY: GitHub code-search REST to test whether the vulnerable symbol is actually
+  #    imported / called anywhere in the first-party repo. A hit count > 0 means reachable.
+  - id: reachability_probe
+    type: http
+    depends_on: [score_and_rank, classify_origin]
+    http_config:
+      url: "https://api.github.com/search/code?q={steps.score_and_rank.output.top_finding.symbol}+repo:{input.github_repo}&per_page=20"
+      method: GET
+      headers:
+        Accept: "application/vnd.github.text-match+json"
+        X-GitHub-Api-Version: "2022-11-28"
+      auth: "bearer:{env.GITHUB_TOKEN}"
+      value_map:
+        reachable_hits: "total_count"
+        matched_files: "items"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 7) DETERMINISTIC reachability verdict + judge brief. Folds the code-search hit count into the
+  #    finding so the judges and the gate see one consistent, machine-built exploitability dossier.
+  - id: build_judge_brief
+    type: code
+    depends_on: [score_and_rank, classify_origin, reachability_probe]
+    code_config:
+      language: python
+      code: |
+        ranked = _steps['score_and_rank'] or {}
+        origin = str(_steps['classify_origin'] or '').strip().lower() or 'third_party_dep'
+        probe = _steps['reachability_probe'] or {}
+
+        top = ranked.get('top_finding', {}) or {}
+
+        # GitHub code-search total_count (via value_map -> reachable_hits) or raw payload.
+        hits = probe.get('reachable_hits', probe.get('total_count'))
+        try:
+            hit_count = int(hits) if hits is not None else 0
+        except (ValueError, TypeError):
+            hit_count = 0
+        matched = probe.get('matched_files') or probe.get('items') or []
+        sample_paths = []
+        for m in matched[:5]:
+            if isinstance(m, dict):
+                sample_paths.append(m.get('path') or m.get('name') or '')
+
+        # Infra misconfigs are not "imported", so a symbol code-search is not the right signal:
+        # treat them as reachable-by-default (the misconfiguration IS the exposure).
+        if origin == 'infra_misconfig':
+            reachable = True
+            reach_reason = 'infra_misconfig_exposure_is_the_reachability'
+        else:
+            reachable = hit_count > 0
+            reach_reason = f'github_code_search_hits={hit_count}'
+
+        brief = {
+            'cve': top.get('cve'),
+            'title': top.get('title'),
+            'component': top.get('component'),
+            'symbol': top.get('symbol'),
+            'origin': origin,
+            'cvss': top.get('cvss'),
+            'epss': top.get('epss'),
+            'in_kev': top.get('in_kev'),
+            'asset_exposure': top.get('asset_exposure'),
+            'base_risk': top.get('base_risk'),
+            'reachable': reachable,
+            'reachability_signal': reach_reason,
+            'code_search_hits': hit_count,
+            'sample_paths': sample_paths,
+        }
+
+        result = {
+            'repo': ranked.get('repo'),
+            'reachable': reachable,
+            'in_kev': bool(top.get('in_kev')),
+            'brief': brief,
+            # One human-readable line both judges and the gate will reason over.
+            'summary': (f"{brief['cve'] or brief['title']} | origin={origin} | cvss={brief['cvss']} "
+                        f"| epss={brief['epss']} | kev={brief['in_kev']} | reachable={reachable} "
+                        f"({reach_reason}) | base_risk={brief['base_risk']}"),
+        }
+
+  # 8) TWO-JUDGE CROSS-PROVIDER GATE. The load-bearing patch decision. Judge 1 (sonnet) and
+  #    Judge 2 (google/gemini-2.5-pro) apply the SAME exploitable-AND-reachable rubric on DIFFERENT
+  #    providers, and a human must accept the risk. gate = ALL strategies must pass, so no single
+  #    provider can green-light a patch-now decision.
+  - id: exploitability_gate
+    type: gate
+    depends_on: [build_judge_brief]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              JUDGE 1. You are an AppSec exploitability reviewer. Apply this exact rubric:
+              answer 'approved' ONLY IF the finding is BOTH (a) exploitable in our context -
+              high CVSS, non-trivial EPSS or listed in CISA KEV, internet/partner-facing
+              asset exposure - AND (b) reachable - the vulnerable symbol is actually
+              imported/called in our code (reachable=true), or it is an infra_misconfig whose
+              very presence is the exposure. If it is unreachable dead code or purely
+              theoretical, answer 'rejected' and state why. Do not approve on severity alone.
+            input: "{steps.build_judge_brief.output.summary}"
+            model: sonnet
+        - type: llm_eval
+          config:
+            prompt: >-
+              JUDGE 2 (independent, different provider). You are an AppSec exploitability
+              reviewer. Apply this exact rubric: answer 'approved' ONLY IF the finding is BOTH
+              (a) exploitable in our context - high CVSS, non-trivial EPSS or listed in CISA
+              KEV, internet/partner-facing asset exposure - AND (b) reachable - the vulnerable
+              symbol is actually imported/called in our code (reachable=true), or it is an
+              infra_misconfig whose presence is the exposure. If unreachable dead code or
+              purely theoretical, answer 'rejected' and state why. Do not approve on severity
+              alone. You must reach your verdict independently of any other reviewer.
+            input: "{steps.build_judge_brief.output.summary}"
+            model: google/gemini-2.5-pro
+        - type: human
+          config:
+            message: "Security engineer: both model judges flagged this as exploitable AND reachable. Confirm patch-now (approve) or send to risk-acceptance (reject). Review the reachability evidence and KEV status before deciding."
+            timeout_hours: 24
+            on_timeout: abort
+
+  # 9) BRANCH on the gate outcome. Passing gate -> open a Jira remediation ticket with SLA + owner.
+  #    Failing gate -> route to a security-lead risk-acceptance sign-off. Deterministic, no model.
+  - id: decision_branch
+    type: condition
+    depends_on: [exploitability_gate]
+    condition_config:
+      expression: "{steps.exploitability_gate.output.passed} == true"
+      then: [open_jira_ticket, notify_decision]
+      else: [risk_acceptance_signoff, notify_decision]
+
+  # 9a) PATCH-NOW: POST a remediation ticket to Jira with the SLA, owner, and the full dossier.
+  - id: open_jira_ticket
+    type: http
+    http_config:
+      url: "{input.jira_base_url}/issue"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.JIRA_TOKEN}"
+      body: |
+        {
+          "fields": {
+            "project": { "key": "{input.jira_project_key}" },
+            "issuetype": { "name": "Vulnerability" },
+            "summary": "Patch-now: {steps.build_judge_brief.output.brief.cve} in {input.github_repo}",
+            "labels": ["appsec", "patch-now", "reachable", "two-judge-gate"],
+            "description": "Two-judge cross-provider gate PASSED (exploitable AND reachable). Dossier: {steps.build_judge_brief.output.summary}. SLA: {input.sla_days} days. Owner: {input.remediation_owner}. KEV: {steps.build_judge_brief.output.in_kev}.",
+            "duedate_days": "{input.sla_days}",
+            "assignee_team": "{input.remediation_owner}"
+          }
+        }
+      value_map:
+        jira_key: "key"
+        jira_id: "id"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 9b) RISK ACCEPTANCE: the security lead signs off any decision NOT to patch now.
+  - id: risk_acceptance_signoff
+    type: approval
+    approval_config:
+      message: >-
+        Risk acceptance sign-off required. The two-judge gate did NOT clear this finding for
+        immediate patching (unreachable, low exploitability, or a judge/human rejected it).
+        Security lead: approve to formally ACCEPT this risk for now, or reject to escalate back
+        to patch-now. Your sign-off is the audit record of the accept-risk decision.
+      show_data: steps.build_judge_brief.output
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: true
+
+  # 10) NOTIFY the team in Slack with the final triage decision and the reachability evidence.
+  - id: notify_decision
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: "Vuln triage for {input.github_repo}: {steps.build_judge_brief.output.summary}. Two-judge gate passed={steps.exploitability_gate.output.passed}. Deduped findings: {steps.score_and_rank.output.deduped_count} (KEV hits: {steps.score_and_rank.output.kev_hits})."
+
+on_complete:
+  storage_path: "vuln-triage-reachability-gate/{run_id}/result.json"
