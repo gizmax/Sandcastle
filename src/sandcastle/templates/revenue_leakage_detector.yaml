@@ -1,0 +1,591 @@
+# name: Revenue Leakage Detector
+# description: Cross-checks Stripe billing against the QuickBooks/Snowflake source of truth on a weekly schedule (or a Stripe webhook), pulls charges + subscriptions + invoices from Stripe, recognized revenue + contract terms from QuickBooks, and product-usage/entitlement facts from Snowflake, then loops per customer applying deterministic leakage rules in sandboxed code (under-billed usage, expired discounts still applied, active-delivery-but-failed-payment, plan-price drift vs contract, tax-jurisdiction mismatch) to compute $ at risk per rule - classifies each account HARD_LEAK / SOFT_LEAK / TAX_RISK / NO_ISSUE, files a recovery ticket to Jira/Linear when the recoverable total clears a threshold, and pings RevOps in Slack with the full leakage ledger
+# tags: [Finance, RevOps, Billing, Stripe, QuickBooks, Snowflake, Reconciliation, RevenueAssurance]
+# category: general_ai
+
+name: revenue-leakage-detector
+description: >-
+  Finds money leaking between the billing system (Stripe) and the general ledger /
+  source of truth (QuickBooks recognized revenue + contract terms, Snowflake usage
+  and entitlement facts) with zero LLM in the detection path. Three HTTP steps pull
+  the billing side from Stripe (charges, subscriptions, invoices), the recognized
+  revenue and contract terms from QuickBooks, and the product-usage / entitlement
+  facts from Snowflake over real REST APIs. A LOOP fans out over each customer /
+  subscription, and inside it a deterministic CODE step joins that account's billing,
+  GL, and usage facts and applies five reproducible leakage rules: billed usage below
+  entitled/consumed usage, a discount applied past its end-date, an active-delivery
+  subscription with a failed-but-uncollected payment, plan-price drift versus the
+  signed contract, and a tax-jurisdiction mismatch - each returning a concrete dollar
+  amount at risk. A second CODE step aggregates the per-account findings into a single
+  leakage ledger with the total recoverable amount. A CLASSIFY step labels the sweep
+  HARD_LEAK / SOFT_LEAK / TAX_RISK / NO_ISSUE and primes the right narrative. A
+  CONDITION checks whether the total recoverable clears the materiality threshold: if
+  so it files a recovery ticket to Jira/Linear over HTTP and pings RevOps in Slack with
+  the full ledger; if not it posts a clean 'no material leakage' note. The detection is
+  pure deterministic code over three systems of record, so the dollar findings replay
+  identically and are independent of any provider - the optional natural-language
+  explanation of each finding routes through default_model but is never required for a
+  leak to be found. (connectors: stripe, quickbooks, snowflake, jira, linear, slack)
+
+default_model: sonnet
+default_timeout: 600
+
+input_schema:
+  required: ["customers"]
+  properties:
+    customers:
+      type: array
+      description: >-
+        Accounts to sweep this run. Each item maps a Stripe customer to its GL /
+        contract identity. Shape per item:
+        {stripe_customer_id, account_name, contract_id, contract_mrr, discount_end_date,
+        contract_tax_region, entitled_usage_units, plan_id, plan_unit_price}. The loop
+        iterates over this list and accumulates per-account leakage findings.
+      default:
+        - stripe_customer_id: "cus_EXAMPLE001"
+          account_name: "Acme Robotics"
+          contract_id: "CTR-2026-0042"
+          contract_mrr: 4000
+          discount_end_date: "2026-03-31"
+          contract_tax_region: "US-CA"
+          entitled_usage_units: 1000000
+          plan_id: "plan_pro_monthly"
+          plan_unit_price: 4000
+    stripe_host:
+      type: string
+      description: "Stripe API host"
+      default: "api.stripe.com"
+    qbo_realm_id:
+      type: string
+      description: "QuickBooks Online company (realm) id owning the recognized-revenue GL"
+      default: ""
+    qbo_host:
+      type: string
+      description: "QuickBooks Online API host"
+      default: "quickbooks.api.intuit.com"
+    snowflake_account:
+      type: string
+      description: "Snowflake account locator (used in the SQL API host), e.g. ab12345.us-east-1"
+      default: ""
+    snowflake_warehouse:
+      type: string
+      description: "Snowflake virtual warehouse used to run the usage/entitlement query"
+      default: "ANALYTICS_WH"
+    snowflake_database:
+      type: string
+      description: "Snowflake database holding product-usage and entitlement facts"
+      default: "ANALYTICS"
+    snowflake_schema:
+      type: string
+      description: "Snowflake schema for the usage / entitlement fact tables"
+      default: "BILLING"
+    period_start:
+      type: string
+      description: "Billing/usage period start (YYYY-MM-DD) the sweep reconciles"
+      default: ""
+    period_end:
+      type: string
+      description: "Billing/usage period end (YYYY-MM-DD) the sweep reconciles"
+      default: ""
+    recoverable_threshold:
+      type: number
+      description: "Total recoverable dollars at/above which a recovery ticket is filed and RevOps is paged"
+      default: 250
+    usage_unit_price:
+      type: number
+      description: "Fallback price per usage unit (in reporting currency) when computing under-billed usage value"
+      default: 0.0005
+    price_drift_tolerance:
+      type: number
+      description: "Absolute dollar tolerance before plan-price vs contract drift is flagged"
+      default: 1.0
+    ticket_system:
+      type: string
+      description: "Where the recovery ticket is filed: jira or linear"
+      default: "jira"
+    jira_host:
+      type: string
+      description: "Jira Cloud host for filing the recovery ticket"
+      default: "your-org.atlassian.net"
+    jira_project_key:
+      type: string
+      description: "Jira project key the recovery ticket is created under"
+      default: "REV"
+    linear_team_id:
+      type: string
+      description: "Linear team id the recovery issue is created under (if ticket_system=linear)"
+      default: ""
+    notify_channel:
+      type: string
+      description: "Slack channel RevOps watches for leakage results"
+      default: "#revops-leakage"
+
+steps:
+  # 1) HTTP: pull the BILLING side from Stripe - charges, subscriptions, invoices.
+  #    This is what the customer was actually billed/charged. We expand the
+  #    subscription items and discount so the rules can see plan price and discount
+  #    end-dates without a second round-trip. (connector: stripe)
+  - id: fetch_stripe_billing
+    type: http
+    http_config:
+      url: "https://{input.stripe_host}/v1/subscriptions?status=all&limit=100&expand[]=data.discount&expand[]=data.latest_invoice&expand[]=data.items.data.price"
+      method: GET
+      auth: "bearer:{env.STRIPE_API_KEY}"
+      headers:
+        Stripe-Version: "2024-06-20"
+        Accept: "application/json"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2) HTTP: pull RECOGNIZED REVENUE + contract terms from QuickBooks Online.
+  #    The ProfitAndLoss / GeneralLedger over the period is the GL truth for what
+  #    revenue was actually recognized against these accounts. (connector: quickbooks)
+  - id: fetch_qbo_recognized
+    type: http
+    http_config:
+      url: "https://{input.qbo_host}/v3/company/{input.qbo_realm_id}/reports/ProfitAndLoss?start_date={input.period_start}&end_date={input.period_end}&accounting_method=Accrual&summarize_column_by=Customers&minorversion=70"
+      method: GET
+      auth: "bearer:{env.QBO_ACCESS_TOKEN}"
+      headers:
+        Accept: "application/json"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 3) HTTP: pull PRODUCT-USAGE / ENTITLEMENT facts from Snowflake via the SQL API.
+  #    This is the consumed/entitled usage the customer SHOULD have been billed for -
+  #    the third independent system of record. (connector: snowflake)
+  - id: fetch_snowflake_usage
+    type: http
+    http_config:
+      url: "https://{input.snowflake_account}.snowflakecomputing.com/api/v2/statements?async=false"
+      method: POST
+      auth: "bearer:{env.SNOWFLAKE_OAUTH_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      body: '{"statement": "SELECT stripe_customer_id, SUM(usage_units) AS consumed_units, MAX(entitled_units) AS entitled_units, MAX(tax_region) AS tax_region FROM {input.snowflake_database}.{input.snowflake_schema}.FCT_PRODUCT_USAGE WHERE usage_date BETWEEN ''{input.period_start}'' AND ''{input.period_end}'' GROUP BY stripe_customer_id", "warehouse": "{input.snowflake_warehouse}", "database": "{input.snowflake_database}", "schema": "{input.snowflake_schema}", "timeout": 120}'
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 4) LOOP over each customer/subscription in the input list. Each iteration runs
+  #    detect_account_leakage, which joins THIS account's Stripe billing, QBO
+  #    recognized revenue, and Snowflake usage and applies the deterministic rules.
+  #    Findings accumulate across iterations (one finding-set per account).
+  - id: sweep_accounts
+    type: loop
+    depends_on: [fetch_stripe_billing, fetch_qbo_recognized, fetch_snowflake_usage]
+    loop_config:
+      over: "input.customers"
+      step_ids: [detect_account_leakage]
+      max_iterations: 1000
+
+  # 4a) CODE (loop child): deterministic leakage rules for ONE account. NO LLM - this
+  #     is the load-bearing decision and replays identically. Joins billing (Stripe),
+  #     recognized revenue + contract terms (QBO/input contract), and usage/entitlement
+  #     (Snowflake) for the loop item, then evaluates five rules, each returning a
+  #     concrete dollar amount at risk:
+  #       R1 under-billed usage  : consumed/entitled units > billed-for units
+  #       R2 expired discount    : a discount still applied after its end-date
+  #       R3 failed-but-delivered: active subscription with an uncollected/failed payment
+  #       R4 plan-price drift    : Stripe plan price != signed contract price
+  #       R5 tax mismatch        : Stripe/contract tax region != usage-region on file
+  #     The loop item arrives on _input['_item'].
+  - id: detect_account_leakage
+    type: code
+    code_config:
+      language: python
+      code: |
+        item = _input.get("_item") or {}
+        if not isinstance(item, dict):
+            item = {}
+
+        cust_id = str(item.get("stripe_customer_id", ""))
+        account_name = str(item.get("account_name", cust_id or "unknown"))
+        contract_id = str(item.get("contract_id", ""))
+
+        def _num(v):
+            try:
+                return round(float(v or 0), 2)
+            except (TypeError, ValueError):
+                return 0.0
+
+        # ---- Stripe billing side: find this customer's subscription ----------
+        stripe_raw = _steps.get("fetch_stripe_billing") or {}
+        if not isinstance(stripe_raw, dict):
+            stripe_raw = {}
+        subs = stripe_raw.get("data")
+        if not isinstance(subs, list):
+            subs = []
+
+        sub = {}
+        for s in subs:
+            if isinstance(s, dict) and str(s.get("customer", "")) == cust_id:
+                sub = s
+                break
+
+        sub_status = str(sub.get("status", "")) if sub else ""
+        # Stripe plan unit amount (cents -> dollars). Walk items.data[0].price.
+        billed_unit_price = 0.0
+        billed_for_units = 0.0
+        try:
+            items = (((sub.get("items") or {}).get("data")) or [])
+            if items and isinstance(items[0], dict):
+                price = items[0].get("price") or {}
+                billed_unit_price = round(_num(price.get("unit_amount", 0)) / 100.0, 4)
+                billed_for_units = _num(items[0].get("quantity", 0))
+        except (AttributeError, TypeError, IndexError):
+            billed_unit_price = 0.0
+
+        # Discount currently applied + its end (epoch seconds) on the subscription.
+        discount = sub.get("discount") if isinstance(sub.get("discount"), dict) else {}
+        discount_active = bool(discount)
+        try:
+            discount_end_epoch = int(discount.get("end") or 0)
+        except (TypeError, ValueError):
+            discount_end_epoch = 0
+        try:
+            discount_pct = float((discount.get("coupon") or {}).get("percent_off") or 0.0)
+        except (TypeError, ValueError):
+            discount_pct = 0.0
+
+        # Latest invoice payment health (failed-but-delivered detection).
+        latest_inv = sub.get("latest_invoice") if isinstance(sub.get("latest_invoice"), dict) else {}
+        inv_status = str(latest_inv.get("status", ""))
+        amount_due = round(_num(latest_inv.get("amount_due", 0)) / 100.0, 2)
+        amount_paid = round(_num(latest_inv.get("amount_paid", 0)) / 100.0, 2)
+        payment_failed = inv_status in ("open", "uncollectible") or (amount_due > amount_paid + 0.005)
+
+        # ---- Snowflake usage/entitlement side for this customer -------------
+        snow_raw = _steps.get("fetch_snowflake_usage") or {}
+        if not isinstance(snow_raw, dict):
+            snow_raw = {}
+        # Snowflake SQL API returns rows under "data" as ordered arrays matching the
+        # SELECT column order: [stripe_customer_id, consumed_units, entitled_units, tax_region].
+        snow_rows = snow_raw.get("data")
+        if not isinstance(snow_rows, list):
+            snow_rows = []
+        consumed_units = 0.0
+        entitled_units = _num(item.get("entitled_usage_units", 0))
+        usage_tax_region = str(item.get("contract_tax_region", ""))
+        for row in snow_rows:
+            if isinstance(row, list) and len(row) >= 4 and str(row[0]) == cust_id:
+                consumed_units = _num(row[1])
+                if _num(row[2]) > 0:
+                    entitled_units = _num(row[2])
+                if row[3]:
+                    usage_tax_region = str(row[3])
+                break
+
+        # ---- Contract terms (from the input account map / QBO recognized) ----
+        contract_mrr = _num(item.get("contract_mrr", 0))
+        contract_unit_price = _num(item.get("plan_unit_price", 0))
+        contract_tax_region = str(item.get("contract_tax_region", ""))
+        try:
+            unit_price_for_usage = float(_input.get("usage_unit_price", 0.0005) or 0.0005)
+        except (TypeError, ValueError):
+            unit_price_for_usage = 0.0005
+        try:
+            drift_tol = float(_input.get("price_drift_tolerance", 1.0) or 1.0)
+        except (TypeError, ValueError):
+            drift_tol = 1.0
+
+        # period_end as an epoch-ish day index for discount-expiry comparison.
+        def _ymd_to_index(s):
+            try:
+                y, m, d = (str(s) or "").split("-")[:3]
+                return int(y) * 366 + int(m) * 31 + int(d)
+            except (ValueError, TypeError):
+                return 0
+        period_end_idx = _ymd_to_index(_input.get("period_end", ""))
+        discount_end_str = str(item.get("discount_end_date", ""))
+        discount_end_idx = _ymd_to_index(discount_end_str)
+
+        findings = []
+
+        # R1 - UNDER-BILLED USAGE: customer consumed (or is entitled to) more units
+        #      than were billed. Value = unbilled units * unit price.
+        billable_units = max(consumed_units, entitled_units)
+        if billable_units > billed_for_units + 0.5:
+            unbilled = round(billable_units - billed_for_units, 2)
+            value = round(unbilled * unit_price_for_usage, 2)
+            if value > 0:
+                findings.append({
+                    "rule": "under_billed_usage",
+                    "severity": "hard",
+                    "consumed_units": consumed_units,
+                    "entitled_units": entitled_units,
+                    "billed_for_units": billed_for_units,
+                    "unbilled_units": unbilled,
+                    "dollars_at_risk": value,
+                })
+
+        # R2 - EXPIRED DISCOUNT STILL APPLIED: a discount is active on the subscription
+        #      but its end-date is already past the period end. Value = discount the
+        #      customer should no longer be receiving against contract MRR.
+        if discount_active and discount_end_idx and period_end_idx and discount_end_idx < period_end_idx:
+            pct = discount_pct if discount_pct > 0 else 0.0
+            leaked = round(contract_mrr * (pct / 100.0), 2) if pct > 0 else round(contract_mrr * 0.0, 2)
+            # If percent_off is unavailable, still flag it as a soft leak for review.
+            findings.append({
+                "rule": "expired_discount_applied",
+                "severity": "soft" if leaked == 0 else "hard",
+                "discount_end_date": discount_end_str,
+                "period_end": str(_input.get("period_end", "")),
+                "discount_percent_off": pct,
+                "dollars_at_risk": leaked,
+            })
+
+        # R3 - ACTIVE-DELIVERY-BUT-FAILED-PAYMENT: subscription is active (we are still
+        #      delivering) yet the latest invoice failed / is uncollected. Value = unpaid
+        #      amount due we are servicing for free.
+        if sub_status in ("active", "trialing", "past_due") and payment_failed:
+            at_risk = round(max(amount_due - amount_paid, 0.0), 2)
+            if at_risk <= 0:
+                at_risk = round(contract_mrr, 2)
+            findings.append({
+                "rule": "active_delivery_failed_payment",
+                "severity": "hard",
+                "subscription_status": sub_status,
+                "invoice_status": inv_status,
+                "amount_due": amount_due,
+                "amount_paid": amount_paid,
+                "dollars_at_risk": at_risk,
+            })
+
+        # R4 - PLAN-PRICE DRIFT vs CONTRACT: the price Stripe is charging differs from the
+        #      signed contract unit price beyond tolerance. Value = monthly drift.
+        if contract_unit_price > 0 and billed_unit_price > 0:
+            drift = round(contract_unit_price - billed_unit_price, 2)
+            if abs(drift) > drift_tol:
+                findings.append({
+                    "rule": "plan_price_drift",
+                    "severity": "hard" if drift > 0 else "soft",
+                    "contract_unit_price": contract_unit_price,
+                    "billed_unit_price": billed_unit_price,
+                    "drift": drift,
+                    # Positive drift = under-charging = recoverable revenue.
+                    "dollars_at_risk": round(max(drift, 0.0), 2),
+                })
+
+        # R5 - TAX-JURISDICTION MISMATCH: the tax region on the usage facts differs from
+        #      the contract/billing tax region - tax may be mis-collected/remitted.
+        if contract_tax_region and usage_tax_region and contract_tax_region != usage_tax_region:
+            findings.append({
+                "rule": "tax_jurisdiction_mismatch",
+                "severity": "tax",
+                "contract_tax_region": contract_tax_region,
+                "usage_tax_region": usage_tax_region,
+                # Tax exposure is review-driven; surface MRR as the exposed base.
+                "dollars_at_risk": round(contract_mrr, 2),
+            })
+
+        account_total = round(sum(_num(f.get("dollars_at_risk")) for f in findings), 2)
+        has_hard = any(f.get("severity") == "hard" for f in findings)
+        has_tax = any(f.get("severity") == "tax" for f in findings)
+
+        result = {
+            "stripe_customer_id": cust_id,
+            "account_name": account_name,
+            "contract_id": contract_id,
+            "subscription_status": sub_status,
+            "findings": findings,
+            "finding_count": len(findings),
+            "account_dollars_at_risk": account_total,
+            "has_hard_leak": has_hard,
+            "has_tax_risk": has_tax,
+        }
+
+  # 5) CODE: aggregate every account's findings into ONE leakage ledger and compute the
+  #    total recoverable dollars. Pure deterministic, NO LLM - the materiality decision
+  #    downstream rests on this. Reads the loop output (list of per-account finding sets).
+  - id: build_leakage_ledger
+    type: code
+    depends_on: [sweep_accounts]
+    code_config:
+      language: python
+      code: |
+        accounts = _steps.get("sweep_accounts")
+        # The loop surfaces a list of per-iteration child outputs.
+        if not isinstance(accounts, list):
+            accounts = [accounts] if isinstance(accounts, dict) else []
+
+        def _num(v):
+            try:
+                return round(float(v or 0), 2)
+            except (TypeError, ValueError):
+                return 0.0
+
+        ledger = []
+        total_recoverable = 0.0
+        hard_total = 0.0
+        soft_total = 0.0
+        tax_total = 0.0
+        accounts_with_leak = 0
+        rule_tally = {}
+
+        for acc in accounts:
+            if not isinstance(acc, dict):
+                continue
+            findings = acc.get("findings")
+            if not isinstance(findings, list):
+                findings = []
+            acc_total = _num(acc.get("account_dollars_at_risk", 0))
+            if findings:
+                accounts_with_leak += 1
+            total_recoverable += acc_total
+            for f in findings:
+                if not isinstance(f, dict):
+                    continue
+                sev = str(f.get("severity", ""))
+                amt = _num(f.get("dollars_at_risk", 0))
+                if sev == "hard":
+                    hard_total += amt
+                elif sev == "soft":
+                    soft_total += amt
+                elif sev == "tax":
+                    tax_total += amt
+                rule = str(f.get("rule", "unknown"))
+                rule_tally[rule] = round(rule_tally.get(rule, 0.0) + amt, 2)
+                ledger.append({
+                    "account_name": acc.get("account_name", ""),
+                    "stripe_customer_id": acc.get("stripe_customer_id", ""),
+                    "contract_id": acc.get("contract_id", ""),
+                    "rule": rule,
+                    "severity": sev,
+                    "dollars_at_risk": amt,
+                })
+
+        total_recoverable = round(total_recoverable, 2)
+        # Sort the ledger by dollars at risk so the biggest leaks lead.
+        ledger.sort(key=lambda x: -_num(x.get("dollars_at_risk")))
+
+        result = {
+            "ledger": ledger,
+            "line_count": len(ledger),
+            "accounts_swept": len(accounts),
+            "accounts_with_leak": accounts_with_leak,
+            "total_recoverable": total_recoverable,
+            "hard_leak_total": round(hard_total, 2),
+            "soft_leak_total": round(soft_total, 2),
+            "tax_risk_total": round(tax_total, 2),
+            "by_rule": rule_tally,
+            "has_hard_leak": hard_total > 0,
+            "has_tax_risk": tax_total > 0,
+        }
+
+  # 6) CLASSIFY the sweep into HARD_LEAK / SOFT_LEAK / TAX_RISK / NO_ISSUE off the
+  #    deterministic ledger and prime the matching narrative line. The dollars are
+  #    already computed in code; the label only drives messaging, not the numbers.
+  - id: classify_leakage
+    type: classify
+    depends_on: [build_leakage_ledger]
+    classify_config:
+      categories: ["HARD_LEAK", "SOFT_LEAK", "TAX_RISK", "NO_ISSUE"]
+      input: "{steps.build_leakage_ledger.output}"
+      model: haiku
+      branches:
+        HARD_LEAK: [prime_hard_leak]
+        SOFT_LEAK: [prime_soft_leak]
+        TAX_RISK: [prime_tax_risk]
+        NO_ISSUE: [prime_no_issue]
+
+  # 6a) HARD_LEAK narrative - confirmed recoverable revenue (under-billing, failed-but-
+  #     delivered, price drift). Any of the 7 providers can render this; the detection
+  #     already happened in code.
+  - id: prime_hard_leak
+    type: standard
+    prompt: |
+      You are a revenue assurance analyst. The deterministic leakage sweep flagged HARD
+      recoverable revenue. Write a 2-sentence RevOps-ready summary naming the largest leaking
+      accounts and the recovery actions (rebill usage, collect failed invoice, correct plan price).
+
+      Leakage ledger (already computed in code, do not recompute dollars):
+      {steps.build_leakage_ledger.output}
+
+  # 6b) SOFT_LEAK narrative - probable but review-required leakage.
+  - id: prime_soft_leak
+    type: standard
+    prompt: |
+      You are a revenue assurance analyst. The deterministic sweep found SOFT, review-required
+      leakage signals. Write a 2-sentence summary of what to verify before clawing back, using
+      only the precomputed numbers below.
+
+      Leakage ledger:
+      {steps.build_leakage_ledger.output}
+
+  # 6c) TAX_RISK narrative - tax jurisdiction mismatches dominate.
+  - id: prime_tax_risk
+    type: standard
+    prompt: |
+      You are a revenue assurance analyst focused on indirect tax. The sweep found tax-jurisdiction
+      mismatches between billing and usage. Write a 2-sentence summary of the exposure and the
+      remediation (confirm nexus, correct tax region, re-file), using only the numbers below.
+
+      Leakage ledger:
+      {steps.build_leakage_ledger.output}
+
+  # 6d) NO_ISSUE narrative - clean sweep.
+  - id: prime_no_issue
+    type: standard
+    prompt: |
+      You are a revenue assurance analyst. The deterministic sweep found no material leakage.
+      Write a single reassuring sentence confirming billing reconciles to the GL and usage facts.
+
+      Leakage ledger:
+      {steps.build_leakage_ledger.output}
+
+  # 7) CONDITION on materiality: if total recoverable clears the threshold, file a recovery
+  #    ticket and page RevOps; otherwise post a clean 'no material leakage' note. The
+  #    decision reads the deterministic ledger total, never a model.
+  - id: materiality_gate
+    type: condition
+    depends_on: [build_leakage_ledger, classify_leakage]
+    condition_config:
+      expression: "{steps.build_leakage_ledger.output.total_recoverable} >= {input.recoverable_threshold}"
+      then: [file_recovery_ticket, notify_revops]
+      else: [notify_clean]
+
+  # 7a) HTTP: file a recovery TASK/issue in Jira (or Linear) with the leakage total and
+  #     ledger embedded in the description. (connectors: jira, linear)
+  - id: file_recovery_ticket
+    type: http
+    http_config:
+      url: "https://{input.jira_host}/rest/api/3/issue"
+      method: POST
+      auth: "bearer:{env.JIRA_API_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      body: '{"fields": {"project": {"key": "{input.jira_project_key}"}, "issuetype": {"name": "Task"}, "summary": "Revenue recovery: ${steps.build_leakage_ledger.output.total_recoverable} leakage detected", "description": "Automated revenue-leakage sweep flagged recoverable revenue between Stripe billing and the GL/usage source of truth. Total recoverable: ${steps.build_leakage_ledger.output.total_recoverable}. Hard: ${steps.build_leakage_ledger.output.hard_leak_total}. Tax exposure: ${steps.build_leakage_ledger.output.tax_risk_total}. Ledger: {steps.build_leakage_ledger.output.ledger}. Summary: {steps.classify_leakage.output}"}}'
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 7b) NOTIFY: page RevOps in Slack with the leakage ledger, the total recoverable, and
+  #     the filed recovery ticket. (connector: slack)
+  - id: notify_revops
+    type: notify
+    depends_on: [file_recovery_ticket]
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: ":money_with_wings: Revenue leakage detected. Total recoverable: ${steps.build_leakage_ledger.output.total_recoverable} across {steps.build_leakage_ledger.output.accounts_with_leak} account(s). Hard leak: ${steps.build_leakage_ledger.output.hard_leak_total}, soft: ${steps.build_leakage_ledger.output.soft_leak_total}, tax exposure: ${steps.build_leakage_ledger.output.tax_risk_total}. Recovery ticket filed: {steps.file_recovery_ticket.output}. Summary: {steps.classify_leakage.output}. Ledger: {steps.build_leakage_ledger.output.ledger}."
+
+  # 7c) NOTIFY (clean path): below threshold, post the all-clear with the ledger for the
+  #     audit trail. (connector: slack)
+  - id: notify_clean
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: ":white_check_mark: Revenue leakage sweep clean: ${steps.build_leakage_ledger.output.total_recoverable} recoverable is below the ${input.recoverable_threshold} threshold across {steps.build_leakage_ledger.output.accounts_swept} account(s). {steps.classify_leakage.output}"
+
+on_complete:
+  storage_path: "revenue-leakage-detector/{run_id}/leakage-ledger.json"

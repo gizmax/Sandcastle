@@ -1,0 +1,461 @@
+# name: PR Review Polyglot Router
+# description: On every opened/synced PR, classify changed files by language/domain, route each chunk to the best-suited model, run a regex+SAST secrets gate plus an LLM judge, then auto-block or approve the PR and post inline review comments.
+# tags: [engineering, code-review, github, routing, security, ci-cd]
+# category: engineering
+# connectors: github (via http), slack (via notify)
+name: pr-review-polyglot-router
+description: >-
+  Language-aware first-pass PR review for a polyglot team (Go + Python + TypeScript +
+  Terraform + SQL + docs). A GitHub webhook (pull_request opened/synchronized) fires this
+  workflow, which fetches the PR file list and unified diff over the GitHub API, splits the
+  diff into per-file hunks in sandboxed Python, detects language by extension/path, groups
+  hunks into review chunks, and flags generated/vendored files to skip. A cheap classifier
+  buckets the first chunk's domain, then a loop reviews every chunk with a model chosen per
+  language from a configurable pool (a strong code model for infra/migrations, a cheap model
+  for docs). A multi-strategy gate runs a PURE regex/SAST secrets scan AND an LLM judge - if
+  either flags a hardcoded credential or critical issue the gate fails. A deterministic
+  condition then posts either a BLOCKING review plus a 'needs-changes' label or an APPROVE
+  review over the GitHub API, and Slack notifies the PR author with the routed-review summary
+  (which model reviewed which language). The hard security verdict is regex/code with zero
+  model dependency, and swapping which model handles a language is a one-line config change.
+default_model: sonnet
+default_timeout: 900
+input_schema:
+  required: ["github_repo", "pr_number"]
+  properties:
+    github_repo:
+      type: string
+      description: "owner/repo of the pull request, e.g. acme/payments-platform"
+      default: "acme/payments-platform"
+    pr_number:
+      type: integer
+      description: "Pull request number from the webhook payload (pull_request.number)."
+      default: 1234
+    model_pool:
+      type: object
+      description: >-
+        Provider-agnostic routing table mapping a detected language/domain to a model alias.
+        Swapping which model handles 'backend_go' is a one-line change here; routing is generic.
+      default:
+        backend_python: "sonnet"
+        backend_go: "google/gemini-2.5-pro"
+        frontend_ts: "sonnet"
+        infra_terraform: "opus"
+        sql_migration: "opus"
+        docs: "haiku"
+    skip_globs:
+      type: string
+      description: "Comma-separated path fragments marking generated/vendored files to skip from review."
+      default: "vendor/,node_modules/,dist/,build/,.min.,generated/,_pb2.py,.pb.go,package-lock.json,yarn.lock,go.sum"
+    max_chunks:
+      type: integer
+      description: "Safety cap on how many review chunks the loop will process per run."
+      default: 40
+    slack_channel:
+      type: string
+      description: "Slack channel for the routed-review summary posted to the PR author."
+      default: "#code-review"
+
+steps:
+  # 1) GITHUB API: fetch the PR file list (status, additions, patch per file).
+  #    Connector: github. The webhook gives us number; we pull the authoritative file set.
+  - id: fetch_pr_files
+    type: http
+    http_config:
+      url: "https://api.github.com/repos/{input.github_repo}/pulls/{input.pr_number}/files?per_page=100"
+      method: GET
+      auth: "bearer:{env.GITHUB_TOKEN}"
+      headers:
+        Accept: "application/vnd.github+json"
+        X-GitHub-Api-Version: "2022-11-28"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2) GITHUB API: fetch PR metadata so we have head SHA + author for the review/label/notify steps.
+  - id: fetch_pr_meta
+    type: http
+    http_config:
+      url: "https://api.github.com/repos/{input.github_repo}/pulls/{input.pr_number}"
+      method: GET
+      auth: "bearer:{env.GITHUB_TOKEN}"
+      headers:
+        Accept: "application/vnd.github+json"
+        X-GitHub-Api-Version: "2022-11-28"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 3) SANDBOXED PYTHON: split the diff into per-file hunks, detect language by extension/path,
+  #    group into review chunks, and flag generated/vendored files to skip. Deterministic, no LLM.
+  - id: chunk_diff
+    type: code
+    depends_on: ["fetch_pr_files", "fetch_pr_meta"]
+    code_config:
+      language: python
+      code: |
+        # GitHub /files returns a list of {filename, status, additions, deletions, patch, ...}.
+        files = _steps.get('fetch_pr_files') or []
+        if isinstance(files, dict):
+            files = files.get('files') or files.get('data') or list(files.values())
+        if not isinstance(files, list):
+            files = [files]
+
+        skip_frags = [s.strip() for s in str(_input.get('skip_globs', '')).split(',') if s.strip()]
+        max_chunks = int(_input.get('max_chunks', 40))
+
+        # Extension/path -> domain bucket. Pure config, provider-agnostic.
+        EXT_MAP = {
+            '.py': 'backend_python',
+            '.go': 'backend_go',
+            '.ts': 'frontend_ts', '.tsx': 'frontend_ts', '.js': 'frontend_ts', '.jsx': 'frontend_ts',
+            '.tf': 'infra_terraform', '.tfvars': 'infra_terraform', '.hcl': 'infra_terraform',
+            '.sql': 'sql_migration',
+            '.md': 'docs', '.mdx': 'docs', '.rst': 'docs', '.txt': 'docs',
+        }
+
+        def detect(path):
+            p = (path or '').lower()
+            # Path-based overrides first (migrations dirs are SQL even if .py wrapped).
+            if '/migrations/' in p or p.endswith('.sql') or 'migrate' in p and p.endswith('.go'):
+                return 'sql_migration'
+            for ext, dom in EXT_MAP.items():
+                if p.endswith(ext):
+                    return dom
+            return 'docs'  # unknown text -> cheapest reviewer
+
+        chunks = []
+        skipped = []
+        for f in files:
+            if not isinstance(f, dict):
+                continue
+            name = f.get('filename') or f.get('path') or ''
+            patch = f.get('patch') or ''
+            status = f.get('status') or 'modified'
+            low = name.lower()
+            is_skipped = any(frag in low for frag in skip_frags) or status == 'removed'
+            if is_skipped:
+                skipped.append(name)
+                continue
+            chunks.append({
+                'file': name,
+                'status': status,
+                'domain': detect(name),
+                'additions': int(f.get('additions', 0) or 0),
+                'deletions': int(f.get('deletions', 0) or 0),
+                'hunk': patch[:6000],  # cap hunk size sent to the model
+            })
+
+        chunks = chunks[:max_chunks]
+        # Domain mix used by the summary + as the classify input seed.
+        mix = {}
+        for c in chunks:
+            mix[c['domain']] = mix.get(c['domain'], 0) + 1
+
+        meta = _steps.get('fetch_pr_meta') or {}
+        head_sha = ''
+        author = ''
+        try:
+            head_sha = (meta.get('head') or {}).get('sha', '') if isinstance(meta, dict) else ''
+            author = (meta.get('user') or {}).get('login', '') if isinstance(meta, dict) else ''
+        except Exception:
+            head_sha, author = '', ''
+
+        result = {
+            'chunks': chunks,
+            'chunk_count': len(chunks),
+            'skipped_files': skipped,
+            'domain_mix': mix,
+            'head_sha': head_sha,
+            'author': author,
+            'primary_domain': max(mix, key=mix.get) if mix else 'docs',
+        }
+
+  # 4) CLASSIFY: cheap router confirms the PR's primary domain bucket. One chunk-set -> one branch.
+  #    Both branches converge on the review loop; this just records the dominant domain cheaply.
+  - id: route_primary
+    type: classify
+    depends_on: ["chunk_diff"]
+    classify_config:
+      categories: ["backend_python", "backend_go", "frontend_ts", "infra_terraform", "sql_migration", "docs"]
+      input: "{steps.chunk_diff.output.primary_domain}"
+      model: haiku
+      branches:
+        backend_python: ["review_chunks"]
+        backend_go: ["review_chunks"]
+        frontend_ts: ["review_chunks"]
+        infra_terraform: ["review_chunks"]
+        sql_migration: ["review_chunks"]
+        docs: ["review_chunks"]
+
+  # 5) LOOP over chunks: each chunk gets a language-aware review whose model is chosen from the
+  #    configurable pool inside the review step. Strong model for infra/migrations, cheap for docs.
+  - id: review_chunks
+    type: loop
+    depends_on: ["route_primary"]
+    loop_config:
+      over: "steps.chunk_diff.output.chunks"
+      step_ids: ["review_one"]
+      max_iterations: 50
+
+  # 5a) REVIEW ONE CHUNK. The model alias is read from input.model_pool[domain] so swapping which
+  #     model handles a language is a one-line config change (see input_schema.model_pool).
+  - id: review_one
+    type: standard
+    prompt: |
+      You are a senior reviewer doing a first-pass review of ONE file's diff in a pull request.
+      Route context: this chunk was classified to a language/domain and assigned a model from a
+      configurable pool, so review it with the rigor appropriate to that domain.
+
+      File           : {{ _input.get('_item', {}).get('file') }}
+      Domain          : {{ _input.get('_item', {}).get('domain') }}
+      Change status   : {{ _input.get('_item', {}).get('status') }}
+      Assigned model  : {{ _input.get('model_pool', {}).get(_input.get('_item', {}).get('domain', 'docs'), 'sonnet') }}
+
+      Unified diff hunk:
+      {{ _input.get('_item', {}).get('hunk') }}
+
+      Review for: correctness, security, language idioms, error handling, tests, and (for
+      infra_terraform / sql_migration) destructive or irreversible operations. Keep it actionable.
+
+      Return STRICT JSON only:
+      {
+        "file": "<path>",
+        "domain": "<domain>",
+        "severity": "<none|low|medium|high|critical>",
+        "summary": "<one-line verdict>",
+        "inline_comments": [ {"line_hint": "<context line or @@hunk header>", "body": "<comment>"} ],
+        "suggested_decision": "<approve|comment|request_changes>"
+      }
+    output_schema:
+      type: object
+      properties:
+        file: { type: string }
+        domain: { type: string }
+        severity: { type: string }
+        summary: { type: string }
+        inline_comments: { type: array }
+        suggested_decision: { type: string }
+
+  # 6) DETERMINISTIC SECRETS/SAST SCAN. Pure regex over every hunk - ZERO model dependency. This is
+  #    the load-bearing half of the security verdict and the input to the gate's code strategy below.
+  - id: secrets_scan
+    type: code
+    depends_on: ["review_chunks"]
+    code_config:
+      language: python
+      code: |
+        import re
+        chunked = _steps.get('chunk_diff') or {}
+        chunks = chunked.get('chunks', []) if isinstance(chunked, dict) else []
+
+        # Regex SAST signatures for hardcoded credentials / dangerous patterns. Provider-free.
+        PATTERNS = [
+            ('aws_access_key', r'AKIA[0-9A-Z]{16}'),
+            ('aws_secret', r'(?i)aws_secret_access_key\s*[:=]\s*["\']?[A-Za-z0-9/+=]{40}'),
+            ('private_key', r'-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----'),
+            ('generic_api_key', r'(?i)(api[_-]?key|secret|token|passwd|password)\s*[:=]\s*["\'][^"\']{12,}["\']'),
+            ('slack_token', r'xox[baprs]-[0-9A-Za-z-]{10,}'),
+            ('github_pat', r'gh[pousr]_[0-9A-Za-z]{36,}'),
+            ('jwt', r'eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}'),
+            ('sql_drop', r'(?i)\bDROP\s+(TABLE|DATABASE|SCHEMA)\b'),
+            ('tf_force_destroy', r'(?i)force_destroy\s*=\s*true'),
+        ]
+        findings = []
+        for c in chunks:
+            hunk = c.get('hunk', '') if isinstance(c, dict) else ''
+            # Only scan added lines (diff lines starting with '+', excluding the +++ header).
+            for raw in hunk.splitlines():
+                if not raw.startswith('+') or raw.startswith('+++'):
+                    continue
+                line = raw[1:]
+                for name, rx in PATTERNS:
+                    if re.search(rx, line):
+                        findings.append({
+                            'file': c.get('file'),
+                            'rule': name,
+                            'snippet': line.strip()[:160],
+                            # Hardcoded credentials are blocking; destructive SQL/TF is high.
+                            'severity': 'critical' if name not in ('sql_drop', 'tf_force_destroy') else 'high',
+                        })
+
+        blocking = [f for f in findings if f['severity'] == 'critical']
+        result = {
+            'findings': findings,
+            'finding_count': len(findings),
+            'blocking_count': len(blocking),
+            'has_secrets': len(blocking) > 0,
+            'rules_triggered': sorted({f['rule'] for f in findings}),
+        }
+
+  # 7) MULTI-STRATEGY GATE: (a) a code/regex secrets+SAST strategy via llm_eval reading the
+  #    deterministic scan output, AND (b) an independent llm_eval reviewing the routed findings.
+  #    ALL strategies must pass; if either flags a hardcoded credential or critical issue, the gate
+  #    fails. The secrets verdict is anchored to deterministic code (secrets_scan), not a single model.
+  - id: security_gate
+    type: gate
+    depends_on: ["secrets_scan", "review_chunks"]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: |
+              This is the DETERMINISTIC secrets/SAST scan result (pure regex, no model judgment).
+              If has_secrets is true OR blocking_count > 0, the PR contains a hardcoded credential
+              and MUST be blocked. Answer exactly "rejected" if has_secrets is true or blocking_count
+              is greater than 0; otherwise answer "approved".
+            input: "{steps.secrets_scan.output}"
+            model: haiku
+        - type: llm_eval
+          config:
+            prompt: |
+              Below are the per-file routed reviews for this PR. Answer "rejected" if ANY review has
+              severity "critical" or suggested_decision "request_changes" tied to a security or
+              data-loss issue; otherwise answer "approved".
+            input: "{steps.review_chunks.output}"
+            model: sonnet
+
+  # 8) AGGREGATE the gate verdict + reviews into one deterministic decision object for the condition.
+  - id: build_verdict
+    type: code
+    depends_on: ["security_gate", "secrets_scan", "review_chunks", "chunk_diff"]
+    code_config:
+      language: python
+      code: |
+        scan = _steps.get('secrets_scan') or {}
+        reviews = _steps.get('review_chunks') or []
+        if isinstance(reviews, dict):
+            reviews = reviews.get('results') or reviews.get('items') or list(reviews.values())
+        if not isinstance(reviews, list):
+            reviews = [reviews]
+        reviews = [r for r in reviews if isinstance(r, dict)]
+
+        chunked = _steps.get('chunk_diff') or {}
+        pool = _input.get('model_pool', {}) or {}
+
+        crit = [r for r in reviews if str(r.get('severity', '')).lower() == 'critical']
+        req_changes = [r for r in reviews if str(r.get('suggested_decision', '')).lower() == 'request_changes']
+        has_secrets = bool(scan.get('has_secrets'))
+
+        fail = has_secrets or bool(crit) or bool(req_changes)
+
+        # Which model reviewed which language (for the Slack summary).
+        routing = {}
+        for r in reviews:
+            dom = r.get('domain', 'docs')
+            routing[dom] = pool.get(dom, 'sonnet')
+
+        # Flatten inline comments for the GitHub review payload.
+        inline = []
+        for r in reviews:
+            for c in (r.get('inline_comments') or []):
+                if isinstance(c, dict) and c.get('body'):
+                    inline.append({'file': r.get('file'), 'hint': c.get('line_hint'), 'body': c.get('body')})
+
+        lines = [f"- {r.get('file')} [{r.get('domain')}] {r.get('severity')}: {r.get('summary')}" for r in reviews]
+        decision = 'REQUEST_CHANGES' if fail else 'APPROVE'
+        body = (
+            f"## Polyglot Router review - {decision}\n\n"
+            f"Reviewed {len(reviews)} chunk(s). Secrets/SAST blocking: {scan.get('blocking_count', 0)} "
+            f"({', '.join(scan.get('rules_triggered', [])) or 'none'}).\n\n"
+            + "\n".join(lines)
+        )
+
+        result = {
+            'fail': fail,
+            'gate_failed': fail,
+            'decision': decision,
+            'has_secrets': has_secrets,
+            'critical_count': len(crit),
+            'request_changes_count': len(req_changes),
+            'routing': routing,
+            'review_body': body,
+            'inline_comments': inline,
+            'domain_mix': chunked.get('domain_mix', {}) if isinstance(chunked, dict) else {},
+            'author': chunked.get('author', '') if isinstance(chunked, dict) else '',
+            'head_sha': chunked.get('head_sha', '') if isinstance(chunked, dict) else '',
+        }
+
+  # 9) CONDITION: gate failed -> post a BLOCKING review and apply the 'needs-changes' label.
+  #    gate passed -> post an APPROVE review. Deterministic branch on the code-built verdict.
+  - id: decide_action
+    type: condition
+    depends_on: ["build_verdict"]
+    condition_config:
+      expression: "{steps.build_verdict.output.fail} == true"
+      then: ["post_blocking_review", "label_needs_changes"]
+      else: ["post_approve_review"]
+
+  # 9a) BLOCKING review (REQUEST_CHANGES) via GitHub Reviews API. Connector: github.
+  - id: post_blocking_review
+    type: http
+    http_config:
+      url: "https://api.github.com/repos/{input.github_repo}/pulls/{input.pr_number}/reviews"
+      method: POST
+      auth: "bearer:{env.GITHUB_TOKEN}"
+      headers:
+        Accept: "application/vnd.github+json"
+        X-GitHub-Api-Version: "2022-11-28"
+        Content-Type: "application/json"
+      body: '{"commit_id": "{steps.build_verdict.output.head_sha}", "event": "REQUEST_CHANGES", "body": "{steps.build_verdict.output.review_body}"}'
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 9b) Apply the 'needs-changes' label via GitHub Issues API (PRs are issues for labels).
+  - id: label_needs_changes
+    type: http
+    http_config:
+      url: "https://api.github.com/repos/{input.github_repo}/issues/{input.pr_number}/labels"
+      method: POST
+      auth: "bearer:{env.GITHUB_TOKEN}"
+      headers:
+        Accept: "application/vnd.github+json"
+        X-GitHub-Api-Version: "2022-11-28"
+        Content-Type: "application/json"
+      body: '{"labels": ["needs-changes"]}'
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 9c) APPROVE review via GitHub Reviews API. Connector: github.
+  - id: post_approve_review
+    type: http
+    http_config:
+      url: "https://api.github.com/repos/{input.github_repo}/pulls/{input.pr_number}/reviews"
+      method: POST
+      auth: "bearer:{env.GITHUB_TOKEN}"
+      headers:
+        Accept: "application/vnd.github+json"
+        X-GitHub-Api-Version: "2022-11-28"
+        Content-Type: "application/json"
+      body: '{"commit_id": "{steps.build_verdict.output.head_sha}", "event": "APPROVE", "body": "{steps.build_verdict.output.review_body}"}'
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 10) NOTIFY: Slack thread to the PR author with the routed-review summary and the
+  #     model-per-language routing map. Connector: slack.
+  - id: notify_author
+    type: notify
+    depends_on: ["decide_action"]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        PR review routed for {input.github_repo} #{input.pr_number}
+        Author   : @{steps.build_verdict.output.author}
+        Decision : {steps.build_verdict.output.decision}
+        Secrets  : {steps.build_verdict.output.has_secrets} | critical reviews: {steps.build_verdict.output.critical_count}
+        Domain mix: {steps.build_verdict.output.domain_mix}
+        Model-per-language: {steps.build_verdict.output.routing}
+
+        {steps.build_verdict.output.review_body}
+
+on_complete:
+  storage_path: "pr-review-polyglot-router/{run_id}/result.json"

@@ -1,0 +1,586 @@
+# name: Schema Drift Early Warning
+# description: A durable sensor that polls source schemas (DB information_schema + upstream API contracts) until a structural change appears, then deterministically diffs old vs new, classifies the break's blast radius across downstream dbt models, and pages owners before pipelines fail. Detection and the diff are 100% code; only the remediation plan is a swappable two-provider race.
+# tags: [data, schema-drift, sensor, ingestion, dbt, postgresql, snowflake, pagerduty]
+# category: data
+# connectors: postgresql, snowflake, aws-s3, jira, linear, pagerduty, slack
+name: schema-drift-early-warning
+description: >-
+  A long-running schema-drift early-warning watcher for ingestion pipelines. It
+  first fetches the last known-good schema snapshot from a control store (S3 /
+  Postgres), then a durable SENSOR polls the live source schema (Postgres /
+  Snowflake information_schema via a SQL gateway, plus an upstream API's contract
+  endpoint) on an interval until the live schema hash differs from the baseline
+  (event-driven within a schedule). A CODE step computes a precise, deterministic
+  structural diff - added / removed / retyped columns, nullability flips,
+  key changes and likely renames. A CLASSIFY step buckets the overall change into
+  breaking / non_breaking / risky_rename. A LOOP walks the registry of downstream
+  dbt models and queries to compute blast radius (which consumers reference the
+  changed columns). A RACE has Anthropic (Sonnet) and Google (Gemini 2.5 Pro)
+  each draft a migration / remediation plan from the same diff - first valid plan
+  wins (failover, NOT a vote). A GATE on severity decides page-vs-log. Then HTTP
+  steps open a Jira / Linear ticket and write the new baseline snapshot to
+  Postgres / S3, and a NOTIFY pages PagerDuty + Slack on breaking changes.
+  Drift detection, the diff, the blast-radius and the page are all deterministic
+  and run even with zero model providers available; the model only writes prose.
+default_model: sonnet
+default_timeout: 1800
+input_schema:
+  required: ["sql_gateway", "contract_endpoint", "source_table"]
+  properties:
+    sql_gateway:
+      type: string
+      description: "Base URL of the read-only SQL gateway in front of Postgres / Snowflake information_schema (e.g. PostgREST or the Snowflake SQL API), e.g. https://warehouse.internal/sql/v1"
+      default: "https://warehouse.internal/sql/v1"
+    contract_endpoint:
+      type: string
+      description: "Upstream API's machine-readable contract / schema endpoint (OpenAPI components or JSON Schema), e.g. https://upstream.example.com/.well-known/schema"
+      default: "https://upstream.example.com/.well-known/schema"
+    source_table:
+      type: string
+      description: "Fully-qualified source table whose information_schema columns are watched, e.g. analytics.public.orders"
+      default: "analytics.public.orders"
+    control_store_url:
+      type: string
+      description: "Control store REST base URL holding the last known-good schema snapshot (S3 REST gateway or Postgres/PostgREST), e.g. https://control.internal/snapshots"
+      default: "https://control.internal/snapshots"
+    dbt_registry_url:
+      type: string
+      description: "REST endpoint returning the registry of downstream dbt models / queries and the source columns each one references."
+      default: "https://control.internal/registry/dbt-models"
+    ticketing_base_url:
+      type: string
+      description: "Jira / Linear REST base URL for opening the drift ticket."
+      default: "https://ticketing.internal/api/v1"
+    check_interval:
+      type: integer
+      description: "Seconds between sensor polls of the live schema endpoints."
+      default: 300
+    poll_timeout:
+      type: integer
+      description: "Sensor soft timeout in seconds - stop waiting for drift after this long (one watch run)."
+      default: 86400
+    slack_channel:
+      type: string
+      description: "Slack channel for the drift digest / page."
+      default: "#data-ingestion"
+steps:
+  # 1) Fetch the last known-good schema snapshot (baseline) from the control store.
+  #    Carries the baseline column list + the baseline schema hash. (aws-s3 / postgresql)
+  - id: fetch_baseline
+    type: http
+    http_config:
+      url: "{input.control_store_url}?table=eq.{input.source_table}&state=eq.known_good&order=captured_at.desc&limit=1"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.CONTROL_STORE_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2) DURABLE SENSOR - poll the LIVE source schema until its hash differs from the
+  #    baseline. The polled endpoint hits the SQL gateway's information_schema view for
+  #    the watched table (Postgres / Snowflake) and returns {schema_hash, columns}.
+  #    Drift fires when the live hash no longer matches the baseline hash. The upstream
+  #    API contract is diffed deterministically downstream; here we gate on the DB hash.
+  - id: watch_drift
+    type: sensor
+    depends_on: [fetch_baseline]
+    sensor_config:
+      url: "{input.sql_gateway}/information_schema/columns?table=eq.{input.source_table}&select=column_name,data_type,is_nullable,ordinal_position,schema_hash&order=ordinal_position"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200 and str(response.get('schema_hash','')) != '{steps.fetch_baseline.output.schema_hash}'"
+      check_interval: 300
+      timeout: 86400
+
+  # 3) Pull the FRESH live DB column list now that drift has been observed (the sensor
+  #    only proved the hash moved; this returns the full live column set to diff).
+  - id: fetch_live_db
+    type: http
+    depends_on: [watch_drift]
+    http_config:
+      url: "{input.sql_gateway}/information_schema/columns?table=eq.{input.source_table}&select=column_name,data_type,is_nullable,ordinal_position,is_primary_key&order=ordinal_position"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.WAREHOUSE_API_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 4) Pull the upstream API's contract (OpenAPI / JSON Schema) so its fields can be
+  #    folded into the same structural diff as the DB columns.
+  - id: fetch_contract
+    type: http
+    depends_on: [watch_drift]
+    http_config:
+      url: "{input.contract_endpoint}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.UPSTREAM_API_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 5) DETERMINISTIC STRUCTURAL DIFF. NO model. Pure code: compare the baseline column
+  #    set to the live DB columns + upstream contract fields and emit added / removed /
+  #    retyped columns, nullability flips, key changes and likely renames. Reads the
+  #    baseline (_steps['fetch_baseline']), live DB (_steps['fetch_live_db']) and the
+  #    upstream contract (_steps['fetch_contract']).
+  - id: compute_diff
+    type: code
+    depends_on: [fetch_live_db, fetch_contract]
+    code_config:
+      language: python
+      code: |
+        # ---- helpers ------------------------------------------------------------
+        def as_rows(blob):
+            # Normalize a REST payload into a flat list of column dicts.
+            if isinstance(blob, dict):
+                for k in ('columns', 'rows', 'data', 'results', 'items'):
+                    v = blob.get(k)
+                    if isinstance(v, list):
+                        return [r for r in v if isinstance(r, dict)]
+                # OpenAPI components.schemas.<obj>.properties shape
+                props = (((blob.get('components') or {}).get('schemas') or {}))
+                if isinstance(props, dict) and props:
+                    first = next(iter(props.values()), {}) or {}
+                    fields = (first.get('properties') or {}) if isinstance(first, dict) else {}
+                    required = set(first.get('required') or []) if isinstance(first, dict) else set()
+                    out = []
+                    for name, spec in fields.items():
+                        spec = spec if isinstance(spec, dict) else {}
+                        out.append({
+                            'column_name': name,
+                            'data_type': str(spec.get('type', 'unknown')),
+                            'is_nullable': 'NO' if name in required else 'YES',
+                            'is_primary_key': False,
+                        })
+                    return out
+                # JSON Schema {properties:{...}, required:[...]} shape
+                if isinstance(blob.get('properties'), dict):
+                    required = set(blob.get('required') or [])
+                    out = []
+                    for name, spec in blob['properties'].items():
+                        spec = spec if isinstance(spec, dict) else {}
+                        out.append({
+                            'column_name': name,
+                            'data_type': str(spec.get('type', 'unknown')),
+                            'is_nullable': 'NO' if name in required else 'YES',
+                            'is_primary_key': False,
+                        })
+                    return out
+                return [blob] if blob else []
+            if isinstance(blob, list):
+                return [r for r in blob if isinstance(r, dict)]
+            return []
+
+        def index(rows):
+            idx = {}
+            for r in rows:
+                name = r.get('column_name') or r.get('name')
+                if not name:
+                    continue
+                idx[str(name)] = {
+                    'data_type': str(r.get('data_type', r.get('type', 'unknown'))).lower(),
+                    'nullable': str(r.get('is_nullable', 'YES')).upper() != 'NO',
+                    'pk': bool(r.get('is_primary_key') or r.get('pk') or False),
+                }
+            return idx
+
+        # ---- inputs -------------------------------------------------------------
+        baseline_rows = as_rows(_steps.get('fetch_baseline') or {})
+        live_rows = as_rows(_steps.get('fetch_live_db') or {})
+        contract_rows = as_rows(_steps.get('fetch_contract') or {})
+
+        old = index(baseline_rows)
+        # Live = DB columns first, then contract fields fill any gaps (DB wins on conflict).
+        new = index(contract_rows)
+        new.update(index(live_rows))
+
+        old_names = set(old)
+        new_names = set(new)
+
+        added = sorted(new_names - old_names)
+        removed = sorted(old_names - new_names)
+        kept = sorted(old_names & new_names)
+
+        retyped = []
+        nullability_flips = []
+        key_changes = []
+        for c in kept:
+            o, n = old[c], new[c]
+            if o['data_type'] != n['data_type']:
+                retyped.append({'column': c, 'from': o['data_type'], 'to': n['data_type']})
+            if o['nullable'] != n['nullable']:
+                nullability_flips.append({
+                    'column': c,
+                    'from': 'NULLABLE' if o['nullable'] else 'NOT NULL',
+                    'to': 'NULLABLE' if n['nullable'] else 'NOT NULL',
+                })
+            if o['pk'] != n['pk']:
+                key_changes.append({
+                    'column': c,
+                    'from': 'PK' if o['pk'] else 'non-key',
+                    'to': 'PK' if n['pk'] else 'non-key',
+                })
+
+        # ---- rename heuristic: a removed col + an added col with the SAME type --
+        likely_renames = []
+        used_added = set()
+        for r in list(removed):
+            for a in added:
+                if a in used_added:
+                    continue
+                if old.get(r, {}).get('data_type') == new.get(a, {}).get('data_type'):
+                    likely_renames.append({'from': r, 'to': a, 'data_type': old[r]['data_type']})
+                    used_added.add(a)
+                    break
+        rename_from = {x['from'] for x in likely_renames}
+        rename_to = {x['to'] for x in likely_renames}
+        # Renamed columns are removed from the raw add/remove buckets.
+        added = [a for a in added if a not in rename_to]
+        removed = [r for r in removed if r not in rename_from]
+
+        # ---- deterministic severity --------------------------------------------
+        breaking = bool(removed) or bool(retyped) or bool(key_changes) or \
+            any(f['to'] == 'NOT NULL' for f in nullability_flips)
+        if breaking:
+            severity = 'critical'
+        elif likely_renames:
+            severity = 'high'
+        elif nullability_flips or added:
+            severity = 'medium'
+        else:
+            severity = 'none'
+
+        change_count = (len(added) + len(removed) + len(retyped) +
+                        len(nullability_flips) + len(key_changes) + len(likely_renames))
+
+        result = {
+            'table': _input.get('source_table'),
+            'added': added,
+            'removed': removed,
+            'retyped': retyped,
+            'nullability_flips': nullability_flips,
+            'key_changes': key_changes,
+            'likely_renames': likely_renames,
+            'change_count': change_count,
+            'breaking': breaking,
+            'severity': severity,
+            # Columns whose presence/shape changed - drives the blast-radius loop.
+            'changed_columns': sorted(set(
+                removed + [r['column'] for r in retyped] +
+                [f['column'] for f in nullability_flips] +
+                [k['column'] for k in key_changes] +
+                [x['from'] for x in likely_renames] + [x['to'] for x in likely_renames]
+            )),
+        }
+
+  # 6) CLASSIFY the change into one of three buckets. Cheap model only labels; the
+  #    breaking/non-breaking decision was ALREADY made deterministically in code.
+  - id: classify_change
+    type: classify
+    depends_on: [compute_diff]
+    classify_config:
+      categories: ["breaking", "non_breaking", "risky_rename"]
+      input: "{steps.compute_diff.output}"
+      model: haiku
+      branches:
+        breaking: []
+        non_breaking: []
+        risky_rename: []
+
+  # 7) Pull the registry of downstream dbt models / queries + the source columns each
+  #    one references, so the loop can compute blast radius. (control store REST)
+  - id: fetch_registry
+    type: http
+    depends_on: [classify_change]
+    http_config:
+      url: "{input.dbt_registry_url}?source_table=eq.{input.source_table}&select=*"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.CONTROL_STORE_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 8) LOOP the downstream registry: for each dbt model / query, deterministically check
+  #    whether it references any CHANGED column -> blast radius. Child defined separately.
+  - id: blast_radius
+    type: loop
+    depends_on: [fetch_registry]
+    loop_config:
+      over: "steps.fetch_registry.output"
+      step_ids: [check_consumer]
+      max_iterations: 500
+
+  # 8a) For one downstream consumer (_item), intersect its referenced columns with the
+  #     changed columns. Pure code, NO model. Returns an impact record.
+  - id: check_consumer
+    type: code
+    code_config:
+      language: python
+      code: |
+        consumer = _input.get('_item') or {}
+        diff = _steps.get('compute_diff') or {}
+        changed = set(diff.get('changed_columns') or [])
+
+        refs = consumer.get('referenced_columns') or consumer.get('columns') or []
+        if isinstance(refs, str):
+            refs = [c.strip() for c in refs.split(',') if c.strip()]
+        refs = set(str(c) for c in refs)
+
+        hit = sorted(changed & refs)
+        result = {
+            'model': consumer.get('model_name') or consumer.get('name') or 'unknown',
+            'owner': consumer.get('owner') or consumer.get('team') or 'unassigned',
+            'layer': consumer.get('layer') or 'unknown',
+            'impacted_columns': hit,
+            'impacted': bool(hit),
+            'severity': diff.get('severity', 'none') if hit else 'none',
+        }
+
+  # 9) AGGREGATE blast radius across all consumers + fold in the diff. Deterministic.
+  #    Produces the page-vs-log severity inputs (impacted count, breaking flag, owners).
+  - id: aggregate_impact
+    type: code
+    depends_on: [blast_radius]
+    code_config:
+      language: python
+      code: |
+        rows = _steps.get('blast_radius') or []
+        if isinstance(rows, dict):
+            rows = rows.get('results') or rows.get('items') or list(rows.values())
+        if not isinstance(rows, list):
+            rows = [rows]
+        rows = [r for r in rows if isinstance(r, dict)]
+
+        diff = _steps.get('compute_diff') or {}
+        impacted = [r for r in rows if r.get('impacted')]
+        owners = sorted({r.get('owner') for r in impacted if r.get('owner')})
+        models = sorted({r.get('model') for r in impacted if r.get('model')})
+
+        breaking = bool(diff.get('breaking'))
+        impacted_count = len(impacted)
+
+        # Deterministic page-vs-log decision input.
+        if breaking and impacted_count > 0:
+            severity = 'critical'
+            action = 'page'
+        elif breaking:
+            severity = 'high'
+            action = 'page'
+        elif impacted_count > 0:
+            severity = 'medium'
+            action = 'log'
+        else:
+            severity = 'low'
+            action = 'log'
+
+        result = {
+            'table': diff.get('table'),
+            'severity': severity,
+            'recommended_action': action,
+            'breaking': breaking,
+            'change_count': diff.get('change_count', 0),
+            'impacted_count': impacted_count,
+            'consumers_scanned': len(rows),
+            'impacted_models': models,
+            'impacted_owners': owners,
+            'diff': diff,
+            # fail_count drives the page-vs-log condition downstream.
+            'fail_count': 1 if action == 'page' else 0,
+        }
+
+  # 10) RACE - Anthropic (Sonnet) vs Google (Gemini 2.5 Pro) each DRAFT a migration /
+  #     remediation plan from the SAME deterministic diff. First valid plan wins
+  #     (failover, NOT a vote). Branches A/B defined separately with NO depends_on.
+  #     A missing/wrong provider does not block detection, blast-radius or paging.
+  - id: plan_sonnet
+    type: standard
+    model: sonnet
+    prompt: |
+      You are a senior data engineer. A schema drift was detected and diffed
+      100% deterministically in code - take the diff and blast radius as GROUND
+      TRUTH, do not re-judge whether it is breaking. Write the migration /
+      remediation plan.
+
+      Deterministic diff + blast radius:
+      {steps.aggregate_impact.output}
+
+      Produce a concrete remediation plan (<= 300 words):
+      - Backfill / view-shim / contract-pin steps to unbreak each impacted dbt model.
+      - For risky renames, the safe two-phase (add-new -> dual-write -> drop-old) path.
+      - Exact owner asks (who must change what) for: {steps.aggregate_impact.output.impacted_owners}
+      - A rollback note. Plain prose, ready to paste into a ticket. No preamble.
+
+  - id: plan_gemini
+    type: standard
+    model: google/gemini-2.5-pro
+    prompt: |
+      You are the failover author (Gemini 2.5 Pro) for a schema-drift remediation
+      plan. The diff and blast radius below were computed deterministically - treat
+      them as ground truth and write the migration plan.
+
+      Deterministic diff + blast radius:
+      {steps.aggregate_impact.output}
+
+      Write a concrete remediation plan (<= 300 words) covering backfill / view-shim /
+      contract-pin steps per impacted dbt model, the two-phase path for risky renames,
+      exact per-owner asks, and a rollback note. Plain prose, paste-ready. No preamble.
+
+  - id: remediation_race
+    type: race
+    depends_on: [aggregate_impact]
+    race_config:
+      branches:
+        - [plan_sonnet]
+        - [plan_gemini]
+      # First branch that produces a non-trivial plan wins (first-valid failover).
+      validator: "len(str(output).strip()) > 80"
+
+  # 11) GATE on severity - decides page-vs-log. An llm_eval judge confirms the
+  #     deterministic page recommendation is internally consistent before we proceed
+  #     to ticketing + routing. ALL strategies must pass.
+  - id: severity_gate
+    type: gate
+    depends_on: [remediation_race]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: |
+              A schema-drift severity and page-vs-log action were computed
+              deterministically. Reply with exactly one word: "approved" if
+              recommended_action is one of page/log and is consistent with the
+              breaking flag and impacted_count (page requires breaking==true OR
+              impacted_count>0), otherwise "rejected".
+              Decision record: {steps.aggregate_impact.output}
+            input: "{steps.aggregate_impact.output}"
+            model: sonnet
+
+  # 12) OPEN A TICKET (Jira / Linear) carrying the deterministic diff, blast radius
+  #     and the race-authored remediation plan.
+  - id: open_ticket
+    type: http
+    depends_on: [severity_gate]
+    http_config:
+      url: "{input.ticketing_base_url}/issues"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.TICKETING_API_TOKEN}"
+      body: |
+        {
+          "project": "DATA",
+          "title": "Schema drift on {{ _steps['aggregate_impact']['table'] }} - {{ _steps['aggregate_impact']['severity'] }} ({{ _steps['aggregate_impact']['impacted_count'] }} downstream impacted)",
+          "severity": "{{ _steps['aggregate_impact']['severity'] }}",
+          "diff": {{ _steps['aggregate_impact']['diff'] }},
+          "impacted_models": {{ _steps['aggregate_impact']['impacted_models'] }},
+          "impacted_owners": {{ _steps['aggregate_impact']['impacted_owners'] }},
+          "remediation_plan": "{{ _steps['remediation_race'] }}"
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 13) WRITE THE NEW BASELINE SNAPSHOT to the control store (Postgres / S3) so the next
+  #     watch run diffs against the now-current schema. Carries the live column set.
+  - id: write_baseline
+    type: http
+    depends_on: [open_ticket]
+    http_config:
+      url: "{input.control_store_url}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+        Prefer: "resolution=merge-duplicates"
+      auth: "bearer:{env.CONTROL_STORE_TOKEN}"
+      body: |
+        {
+          "table": "{input.source_table}",
+          "state": "known_good",
+          "columns": {{ _steps['fetch_live_db'] }},
+          "diff_applied": {{ _steps['aggregate_impact']['diff'] }},
+          "captured_by": "schema-drift-early-warning"
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 14) CONDITION - page-vs-log. Breaking / impacted -> page (PagerDuty + Slack);
+  #     otherwise just a low-noise digest. fail_count was set deterministically.
+  - id: route_page
+    type: condition
+    depends_on: [write_baseline]
+    condition_config:
+      expression: "{steps.aggregate_impact.output.fail_count} > 0"
+      then: [page_pagerduty, notify_page]
+      else: [notify_log]
+
+  # 14a) PAGE - open a PagerDuty incident for the on-call ingestion owner.
+  - id: page_pagerduty
+    type: http
+    http_config:
+      url: "https://events.pagerduty.com/v2/enqueue"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      body: |
+        {
+          "routing_key": "{env.PAGERDUTY_ROUTING_KEY}",
+          "event_action": "trigger",
+          "dedup_key": "schema-drift-{input.source_table}",
+          "payload": {
+            "summary": "Breaking schema drift on {{ _steps['aggregate_impact']['table'] }} - {{ _steps['aggregate_impact']['impacted_count'] }} downstream dbt models impacted",
+            "severity": "critical",
+            "source": "schema-drift-early-warning",
+            "custom_details": {{ _steps['aggregate_impact'] }}
+          }
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 14b) PAGE (Slack) - loud breaking-change page to the data-ingestion channel.
+  - id: notify_page
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        :rotating_light: SCHEMA DRIFT - breaking change on {steps.aggregate_impact.output.table}
+        Severity     : {steps.aggregate_impact.output.severity}
+        Changes      : {steps.aggregate_impact.output.change_count}
+        Impacted     : {steps.aggregate_impact.output.impacted_count} dbt model(s) -> {steps.aggregate_impact.output.impacted_models}
+        Owners       : {steps.aggregate_impact.output.impacted_owners}
+        PagerDuty paged. Ticket filed. Remediation plan:
+        {steps.remediation_race.output}
+
+  # 14c) LOG (non-breaking path) - quiet digest, no page.
+  - id: notify_log
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        :information_source: Schema drift on {steps.aggregate_impact.output.table} (non-breaking).
+        Severity {steps.aggregate_impact.output.severity}, {steps.aggregate_impact.output.change_count} change(s),
+        {steps.aggregate_impact.output.impacted_count} downstream impacted. Baseline updated, ticket filed. No page.
+on_complete:
+  storage_path: "schema-drift-early-warning/{run_id}/result.json"

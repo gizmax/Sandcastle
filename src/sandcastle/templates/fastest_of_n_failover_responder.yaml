@@ -1,0 +1,503 @@
+# name: Fastest Of N Failover Responder
+# description: A drop-in latency-and-availability SLA front door for any AI feature - races the identical request across Anthropic / OpenAI / Gemini / Mistral, returns the FIRST valid response, deterministically validates it against a budget+schema+safety guard, and updates a redis circuit-breaker so routing self-heals.
+# tags: [failover, sla, latency, multi-provider, race, circuit-breaker, resilience, redis]
+# category: general_ai
+
+name: fastest-of-n-failover-responder
+description: >-
+  A latency-and-availability SLA wrapper for any AI endpoint. Triggered by a
+  synchronous per-user API call (workflow-as-API), it optionally fetches request
+  context over HTTP, then RACES the IDENTICAL prompt across four providers pinned
+  to different backends - Anthropic Sonnet, OpenAI Codex, Google Gemini 2.5 Pro
+  and Mistral Large - returning the FIRST branch whose output passes the race
+  validator (non-empty JSON with an answer) and cancelling the rest. A
+  deterministic code guard then re-validates the winning output against a JSON
+  schema, a safety screen and a token/cost budget ceiling; if it fails the winner
+  is marked invalid. A condition routes the run: a valid winner is transformed
+  into the clean API response shape, while no-valid-winner pages PagerDuty with an
+  'all providers degraded' alert. Either way a second code step updates a
+  redis-backed health / circuit-breaker record (which provider won, latency, error
+  counts) to bias future routing, Slack is notified ONLY on failover/degradation
+  events, and a final transform returns the clean response envelope. Nothing
+  depends on a proprietary provider feature: every branch is a plain prompt behind
+  one deterministic validator, so adding or removing a provider is editing a single
+  race branch - this template IS the model-independence layer.
+
+default_model: sonnet
+default_timeout: 120
+
+input_schema:
+  required: ["request"]
+  properties:
+    request:
+      type: string
+      description: "The end-user request to fulfil (e.g. the text to summarize or the question to answer)."
+      default: ""
+    task:
+      type: string
+      description: "Task kind the providers should perform on the request."
+      default: "summarize"
+    context_url:
+      type: string
+      description: "Optional internal URL to fetch extra context for the request (set empty to skip enrichment; returns 200 with {} when unused)."
+      default: "https://httpbin.org/json"
+    max_cost_usd:
+      type: number
+      description: "Hard per-request budget ceiling (USD). The deterministic guard invalidates a winner whose estimated cost exceeds this."
+      default: 0.05
+    max_output_chars:
+      type: integer
+      description: "Maximum allowed answer length in characters - the guard rejects runaway outputs above this."
+      default: 4000
+    redis_rest_url:
+      type: string
+      description: "Base URL of the Upstash-style Redis REST API used as the circuit-breaker store."
+      default: "https://redis.internal.example.com"
+    breaker_key:
+      type: string
+      description: "Redis key namespace for this endpoint's health / circuit-breaker record."
+      default: "sla:breaker:summarize"
+    slack_channel:
+      type: string
+      description: "Slack channel that receives failover / degradation alerts (NOT every call)."
+      default: "#sla-alerts"
+    pagerduty_routing_key:
+      type: string
+      description: "PagerDuty Events API v2 routing (integration) key used only when ALL providers fail."
+      default: ""
+
+steps:
+  # 1) OPTIONAL CONTEXT FETCH. Pull any internal context the providers should see.
+  #    on_failure: skip so a context outage never breaks the resilient front door;
+  #    downstream code treats a missing/!=200 body as empty context.
+  - id: fetch_context
+    type: http
+    http_config:
+      url: "{input.context_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 2) RACE THE SAME REQUEST ACROSS FOUR PROVIDERS. First branch whose JSON parses
+  #    with a non-empty answer wins and the rest are cancelled - this is
+  #    first-valid-wins FAILOVER, not a vote. Each branch is pinned to a different
+  #    provider so a single provider's outage / rate-limit / p99 spike cannot break
+  #    the feature. Branch steps are defined separately with NO depends_on.
+
+  # 2a) Provider A - Anthropic Sonnet.
+  - id: answer_anthropic
+    type: standard
+    model: sonnet
+    output_schema:
+      type: object
+      properties:
+        answer: { type: string }
+        provider: { type: string }
+        est_input_tokens: { type: integer }
+        est_output_tokens: { type: integer }
+      required: ["answer", "provider"]
+    prompt: |
+      You are responder PROVIDER_A behind a latency SLA. Perform the task on the
+      request below and return as fast as you can. Ground your answer ONLY in the
+      request and the optional context; do not invent facts.
+
+      TASK: {input.task}
+      REQUEST:
+      {input.request}
+
+      OPTIONAL CONTEXT (may be empty {}):
+      {steps.fetch_context.output}
+
+      Return STRICT JSON only, no prose, no code fences:
+      {
+        "answer": "<your completed task output as plain text>",
+        "provider": "anthropic",
+        "est_input_tokens": <integer estimate of input tokens>,
+        "est_output_tokens": <integer estimate of output tokens>
+      }
+
+  # 2b) Provider B - OpenAI.
+  - id: answer_openai
+    type: standard
+    model: openai/codex
+    output_schema:
+      type: object
+      properties:
+        answer: { type: string }
+        provider: { type: string }
+        est_input_tokens: { type: integer }
+        est_output_tokens: { type: integer }
+      required: ["answer", "provider"]
+    prompt: |
+      You are responder PROVIDER_B behind a latency SLA and the failover for
+      PROVIDER_A. Same task, identical request and context. Return as fast as you
+      can, grounded ONLY in the request and optional context.
+
+      TASK: {input.task}
+      REQUEST:
+      {input.request}
+
+      OPTIONAL CONTEXT (may be empty {}):
+      {steps.fetch_context.output}
+
+      Return STRICT JSON only, no prose, no code fences:
+      {
+        "answer": "<your completed task output as plain text>",
+        "provider": "openai",
+        "est_input_tokens": <integer estimate of input tokens>,
+        "est_output_tokens": <integer estimate of output tokens>
+      }
+
+  # 2c) Provider C - Google Gemini 2.5 Pro.
+  - id: answer_gemini
+    type: standard
+    model: google/gemini-2.5-pro
+    output_schema:
+      type: object
+      properties:
+        answer: { type: string }
+        provider: { type: string }
+        est_input_tokens: { type: integer }
+        est_output_tokens: { type: integer }
+      required: ["answer", "provider"]
+    prompt: |
+      You are responder PROVIDER_C behind a latency SLA, an independent failover.
+      Same task, identical request and context. Return as fast as you can,
+      grounded ONLY in the request and optional context.
+
+      TASK: {input.task}
+      REQUEST:
+      {input.request}
+
+      OPTIONAL CONTEXT (may be empty {}):
+      {steps.fetch_context.output}
+
+      Return STRICT JSON only, no prose, no code fences:
+      {
+        "answer": "<your completed task output as plain text>",
+        "provider": "gemini",
+        "est_input_tokens": <integer estimate of input tokens>,
+        "est_output_tokens": <integer estimate of output tokens>
+      }
+
+  # 2d) Provider D - Mistral Large.
+  - id: answer_mistral
+    type: standard
+    model: mistral/large
+    output_schema:
+      type: object
+      properties:
+        answer: { type: string }
+        provider: { type: string }
+        est_input_tokens: { type: integer }
+        est_output_tokens: { type: integer }
+      required: ["answer", "provider"]
+    prompt: |
+      You are responder PROVIDER_D behind a latency SLA, the last-resort failover.
+      Same task, identical request and context. Return as fast as you can,
+      grounded ONLY in the request and optional context.
+
+      TASK: {input.task}
+      REQUEST:
+      {input.request}
+
+      OPTIONAL CONTEXT (may be empty {}):
+      {steps.fetch_context.output}
+
+      Return STRICT JSON only, no prose, no code fences:
+      {
+        "answer": "<your completed task output as plain text>",
+        "provider": "mistral",
+        "est_input_tokens": <integer estimate of input tokens>,
+        "est_output_tokens": <integer estimate of output tokens>
+      }
+
+  # 2e) THE RACE. Four single-step branches, first whose output is a dict with a
+  #     non-empty answer wins; the others are cancelled. First-valid-wins failover.
+  - id: race_providers
+    type: race
+    race_config:
+      branches:
+        - [answer_anthropic]
+        - [answer_openai]
+        - [answer_gemini]
+        - [answer_mistral]
+      validator: "isinstance(output, dict) and isinstance(output.get('answer'), str) and len(output.get('answer').strip()) > 0"
+
+  # 3) DETERMINISTIC GUARD. Re-validate the race winner against JSON schema, a
+  #    safety screen and a token/cost BUDGET ceiling. This - not any model - is the
+  #    load-bearing decision: it sets valid True/False that drives every downstream
+  #    branch. A provider that "wins" but violates budget/safety is marked invalid.
+  - id: validate_winner
+    type: code
+    depends_on: [race_providers]
+    code_config:
+      language: python
+      code: |
+        winner = _steps.get("race_providers")
+        if not isinstance(winner, dict):
+            winner = {}
+
+        # Per-provider blended $/1K-token estimate (input+output) for budget math.
+        PRICE_PER_1K = {
+            "anthropic": 0.009,
+            "openai": 0.006,
+            "gemini": 0.005,
+            "mistral": 0.004,
+        }
+
+        # Input limits.
+        try:
+            max_cost = float(_input.get("max_cost_usd", 0.05) or 0.05)
+        except (TypeError, ValueError):
+            max_cost = 0.05
+        try:
+            max_chars = int(_input.get("max_output_chars", 4000) or 4000)
+        except (TypeError, ValueError):
+            max_chars = 4000
+
+        answer = winner.get("answer")
+        provider = str(winner.get("provider", "") or "unknown").strip().lower()
+
+        # 3a) Schema check: answer must be a non-empty string.
+        schema_ok = isinstance(answer, str) and len(answer.strip()) > 0
+        answer = answer if isinstance(answer, str) else ""
+
+        # 3b) Length check: reject runaway outputs.
+        length_ok = len(answer) <= max_chars
+
+        # 3c) Safety screen: deterministic refusal / unsafe-marker scan (no model).
+        lowered = answer.lower()
+        unsafe_markers = [
+            "i cannot help with that",
+            "as an ai language model",
+            "<script",
+            "drop table",
+            "begin pgp private key",
+        ]
+        safety_ok = not any(m in lowered for m in unsafe_markers)
+
+        # 3d) Budget check: estimate cost from token estimates + provider pricing.
+        def _to_int(v, default):
+            try:
+                return int(v)
+            except (TypeError, ValueError):
+                return default
+
+        est_in = _to_int(winner.get("est_input_tokens"), max(1, len(_input.get("request", "")) // 4))
+        est_out = _to_int(winner.get("est_output_tokens"), max(1, len(answer) // 4))
+        total_tokens = max(0, est_in) + max(0, est_out)
+        price = PRICE_PER_1K.get(provider, 0.009)
+        est_cost = round((total_tokens / 1000.0) * price, 6)
+        budget_ok = est_cost <= max_cost
+
+        valid = bool(schema_ok and length_ok and safety_ok and budget_ok)
+
+        failures = []
+        if not schema_ok:
+            failures.append("schema")
+        if not length_ok:
+            failures.append("length")
+        if not safety_ok:
+            failures.append("safety")
+        if not budget_ok:
+            failures.append("budget")
+
+        result = {
+            "valid": valid,
+            "winner_provider": provider,
+            "answer": answer,
+            "est_cost_usd": est_cost,
+            "max_cost_usd": max_cost,
+            "est_tokens": total_tokens,
+            "answer_chars": len(answer),
+            "max_output_chars": max_chars,
+            "schema_ok": schema_ok,
+            "length_ok": length_ok,
+            "safety_ok": safety_ok,
+            "budget_ok": budget_ok,
+            "failures": failures,
+        }
+
+  # 4) CONDITION on the deterministic valid flag. Valid winner -> shape the API
+  #    response. No valid winner -> page PagerDuty 'all providers degraded'.
+  - id: route_outcome
+    type: condition
+    depends_on: [validate_winner]
+    condition_config:
+      expression: "{steps.validate_winner.output.valid} == True"
+      then: [shape_response]
+      else: [page_pagerduty]
+
+  # 4a-VALID) Transform the validated winner into the clean API response shape.
+  - id: shape_response
+    type: transform
+    transform_config:
+      template: |
+        {
+          "status": "ok",
+          "served_by": "{steps.validate_winner.output.winner_provider}",
+          "answer": {steps.validate_winner.output.answer},
+          "cost_usd": {steps.validate_winner.output.est_cost_usd},
+          "degraded": false
+        }
+
+  # 4b-DEGRADED) ALL providers failed the guard. Trigger a PagerDuty incident
+  #    (connector: pagerduty, Events API v2). This is the only hard page.
+  - id: page_pagerduty
+    type: http
+    http_config:
+      url: "https://events.pagerduty.com/v2/enqueue"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+      body: '{"routing_key": "{input.pagerduty_routing_key}", "event_action": "trigger", "payload": {"summary": "All AI providers degraded for task {input.task} - no valid response (failures: {steps.validate_winner.output.failures})", "source": "fastest-of-n-failover-responder", "severity": "critical", "component": "{input.breaker_key}"}}'
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 5) UPDATE THE REDIS CIRCUIT-BREAKER. Deterministically record which provider
+  #    won, its latency proxy, the validity outcome and per-provider error counts,
+  #    biasing future routing so the front door self-heals. Reads the guard output
+  #    and the four branch outputs; emits a redis REST command body.
+  - id: update_breaker
+    type: code
+    depends_on: [route_outcome]
+    code_config:
+      language: python
+      code: |
+        guard = _steps.get("validate_winner") or {}
+        if not isinstance(guard, dict):
+            guard = {}
+
+        providers = ["anthropic", "openai", "gemini", "mistral"]
+        step_for = {
+            "anthropic": "answer_anthropic",
+            "openai": "answer_openai",
+            "gemini": "answer_gemini",
+            "mistral": "answer_mistral",
+        }
+
+        winner = str(guard.get("winner_provider", "") or "").strip().lower()
+        valid = bool(guard.get("valid", False))
+
+        # A provider is counted as an error this cycle if it produced no usable
+        # dict-with-answer (lost the race by failing / timing out / empty output).
+        health = {}
+        for p in providers:
+            out = _steps.get(step_for[p])
+            answered = isinstance(out, dict) and isinstance(out.get("answer"), str) and len(out.get("answer", "").strip()) > 0
+            won = (p == winner) and valid
+            health[p] = {
+                "answered": answered,
+                "won": won,
+                # error this cycle = did not produce a usable answer
+                "error": (not answered),
+            }
+
+        # is_failover = a healthy winner that is NOT the primary provider, OR a
+        # degraded cycle (no valid winner at all). Drives the Slack alert below.
+        primary = "anthropic"
+        degraded = not valid
+        failed_over = bool(valid and winner and winner != primary)
+        is_failover_event = bool(degraded or failed_over)
+
+        # Redis REST command (Upstash-style): HSET the breaker hash with the
+        # latest cycle so future routing can prefer healthy/fast providers.
+        breaker_key = str(_input.get("breaker_key", "sla:breaker"))
+        hset_command = [
+            "HSET", breaker_key,
+            "last_winner", winner or "none",
+            "last_valid", "1" if valid else "0",
+            "last_degraded", "1" if degraded else "0",
+            "last_failover", "1" if failed_over else "0",
+            "last_cost_usd", str(guard.get("est_cost_usd", 0)),
+            "anthropic_error", "1" if health["anthropic"]["error"] else "0",
+            "openai_error", "1" if health["openai"]["error"] else "0",
+            "gemini_error", "1" if health["gemini"]["error"] else "0",
+            "mistral_error", "1" if health["mistral"]["error"] else "0",
+        ]
+
+        result = {
+            "breaker_key": breaker_key,
+            "winner": winner or "none",
+            "valid": valid,
+            "degraded": degraded,
+            "failed_over": failed_over,
+            "is_failover_event": is_failover_event,
+            "health": health,
+            "redis_command": hset_command,
+        }
+
+  # 6) PERSIST the breaker record to Redis over its REST API (connector: redis).
+  #    Pipeline endpoint accepts a JSON array of commands; on_failure skip so a
+  #    breaker-store blip never fails the user-facing response.
+  - id: write_breaker_redis
+    type: http
+    depends_on: [update_breaker]
+    http_config:
+      url: "{input.redis_rest_url}/pipeline"
+      method: POST
+      auth: "bearer:{env.REDIS_REST_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+      body: '[{steps.update_breaker.output.redis_command}]'
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 7) SLACK ONLY ON FAILOVER / DEGRADATION EVENTS. A condition on the
+  #    deterministic is_failover_event flag - happy-path primary-served calls stay
+  #    silent so the channel is signal, not noise.
+  - id: alert_branch
+    type: condition
+    depends_on: [write_breaker_redis]
+    condition_config:
+      expression: "{steps.update_breaker.output.is_failover_event} == True"
+      then: [notify_failover]
+      else: [skip_alert]
+
+  # 7a) Failover / degradation alert to Slack (connector: slack).
+  - id: notify_failover
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: ":rotating_light: SLA failover event on {input.breaker_key}. Served by: {steps.update_breaker.output.winner} | valid: {steps.update_breaker.output.valid} | degraded: {steps.update_breaker.output.degraded} | failed_over: {steps.update_breaker.output.failed_over}. Provider health: {steps.update_breaker.output.health}"
+
+  # 7b) Happy path - primary served the request validly. No alert; record-only.
+  - id: skip_alert
+    type: transform
+    transform_config:
+      template: |
+        {
+          "alert": "suppressed",
+          "reason": "primary served a valid response - no failover event"
+        }
+
+  # 8) RETURN the clean response envelope. On the valid path it carries the shaped
+  #    answer; on the degraded path it returns a structured 'all providers
+  #    degraded' error the caller can surface to the user.
+  - id: final_response
+    type: transform
+    depends_on: [alert_branch]
+    transform_config:
+      template: |
+        {
+          "served_by": "{steps.update_breaker.output.winner}",
+          "valid": {steps.validate_winner.output.valid},
+          "degraded": {steps.update_breaker.output.degraded},
+          "answer": {steps.validate_winner.output.answer},
+          "cost_usd": {steps.validate_winner.output.est_cost_usd},
+          "failures": {steps.validate_winner.output.failures},
+          "breaker_key": "{input.breaker_key}"
+        }
+
+on_complete:
+  storage_path: "fastest-of-n-failover-responder/{run_id}/result.json"

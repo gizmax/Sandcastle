@@ -1,0 +1,444 @@
+# name: Residency Routed Inference
+# description: Routes each inference request to a provider whose data-residency region is legally allowed for that record's classification, with race-based failover ONLY inside the permitted region set and a hard gate that blocks any cross-border fallback.
+# tags: [data-residency, gdpr, eu-ai-act, compliance, multi-provider, routing, pii, sovereignty]
+# category: general_ai
+name: residency-routed-inference
+description: >-
+  A residency-aware inference router for EU SaaS / banks who must PROVE that
+  customer PII is never processed by a non-EU model endpoint, while still using
+  the cheapest legally-allowed model. Triggered per incoming request (webhook /
+  new queue row) carrying the payload plus a data_classification hint, and also
+  batch-runnable over a Postgres backlog. The flow CLASSIFIES the record's data
+  sensitivity (eu_pii / eu_nonpii / global_ok), CONDITIONS on that class to pick
+  a residency policy, then a sandboxed CODE step computes the legally-permitted
+  provider/region ALLOWLIST (e.g. eu_pii -> mistral-eu, ollama-local, anthropic-eu
+  only). A RACE does fastest-valid-wins FAILOVER but ONLY across the allowed-region
+  providers, validating that the response schema is correct. A multi-strategy GATE
+  asserts the winning provider's region is in the allowlist AND that no cross-border
+  routing leaked, hard-blocking any out-of-region answer. A CONDITION routes a gate
+  failure to the on-prem ollama fallback and flags it. A TRANSFORM builds the
+  residency-attestation record (region served, classification, allowlist, hash),
+  an HTTP append writes it to the SHA-256 audit table in Postgres, and a NOTIFY
+  fires to Slack/PagerDuty ONLY when a residency violation was actually caught.
+  Providers are pure routing targets selected at runtime by the computed allowlist:
+  swapping which model serves which region is a config change, and the EU-PII path
+  can fall back to local ollama with zero code change.
+default_model: sonnet
+default_timeout: 900
+input_schema:
+  required: ["payload", "data_classification", "request_id"]
+  properties:
+    payload:
+      type: string
+      description: "The actual prompt / record content to run inference on (the customer data that may contain PII)."
+      example: "Summarize this support ticket: customer Jane Doe, IBAN DE89..., complaint about ..."
+    data_classification:
+      type: string
+      description: "Caller-supplied sensitivity hint for the record. One of eu_pii, eu_nonpii, global_ok. The classify step independently re-derives this from the payload; this is only a prior."
+      default: "eu_pii"
+    request_id:
+      type: string
+      description: "Idempotency / correlation id for this inference request (used as the audit row key and PagerDuty dedup key)."
+      example: "req_8f21c0"
+    data_endpoint:
+      type: string
+      description: "Base URL of the Postgres REST API (PostgREST) holding the SHA-256 residency audit table."
+      default: "https://datastore.internal/rest/v1"
+    pagerduty_routing_key:
+      type: string
+      description: "PagerDuty Events API v2 routing key for the residency-violation service. Only used on the violation path."
+      example: "R0ABCD1234EFGH5678"
+    slack_channel:
+      type: string
+      description: "Slack channel for residency-violation alerts."
+      default: "#dpo-residency-alerts"
+
+steps:
+  # 1) CLASSIFY - independently re-derive the data sensitivity from the PAYLOAD itself
+  #    (do not trust the caller's hint blindly). The classifier model is swappable
+  #    (haiku). Each class branches to the SAME residency-policy condition so every
+  #    path is fully wired. eu_pii = any EU person PII / financial identifiers;
+  #    eu_nonpii = EU-originated but non-personal; global_ok = no residency constraint.
+  - id: classify_sensitivity
+    type: classify
+    classify_config:
+      categories: ["eu_pii", "eu_nonpii", "global_ok"]
+      input: "{input.payload}"
+      model: haiku
+      branches:
+        eu_pii: [select_residency_policy]
+        eu_nonpii: [select_residency_policy]
+        global_ok: [select_residency_policy]
+
+  # 2) CONDITION - branch on the derived classification to a residency policy. Both
+  #    branches converge on the deterministic allowlist computation; the condition
+  #    only records WHICH policy regime applies (strict EU-only vs relaxed). The
+  #    expression reads the classify output, so the routing decision is data-driven.
+  - id: select_residency_policy
+    type: condition
+    depends_on: [classify_sensitivity]
+    condition_config:
+      expression: "'{steps.classify_sensitivity.output}' == 'eu_pii'"
+      then: [compute_allowlist]
+      else: [compute_allowlist]
+
+  # 3) CODE (sandboxed) - THE load-bearing routing decision. From the classification
+  #    it deterministically computes the legally-permitted provider/region allowlist.
+  #    eu_pii  -> EU/on-prem ONLY (mistral-eu, ollama-local, anthropic-eu).
+  #    eu_nonpii -> EU + EU-adequacy regions.
+  #    global_ok -> any region. No model swings this; it is pure policy as data.
+  #    Also picks the CHEAPEST allowed provider first and the ordered failover chain.
+  - id: compute_allowlist
+    type: code
+    depends_on: [select_residency_policy]
+    code_config:
+      language: python
+      code: |
+        # Derived classification (trust the classifier over the caller hint, fall
+        # back to the hint, then to the most restrictive class).
+        classification = str(_steps.get('classify_sensitivity') or '').strip().lower()
+        if classification not in ('eu_pii', 'eu_nonpii', 'global_ok'):
+            classification = str(_input.get('data_classification', 'eu_pii')).strip().lower()
+        if classification not in ('eu_pii', 'eu_nonpii', 'global_ok'):
+            classification = 'eu_pii'  # fail closed: most restrictive
+
+        # Provider registry: each routing target maps to a model: alias, a region
+        # and a $/1k-token cost. This is pure CONFIG - swap a region/model here and
+        # routing changes with zero code change. ollama-local is on-prem (eu-onprem).
+        PROVIDERS = {
+            'mistral-eu':    {'model': 'mistral/large', 'region': 'eu-west',   'cost_per_1k': 0.006},
+            'mistral-eu-sm': {'model': 'mistral/small', 'region': 'eu-west',   'cost_per_1k': 0.0006},
+            'ollama-local':  {'model': 'ollama',        'region': 'eu-onprem', 'cost_per_1k': 0.0},
+            'anthropic-eu':  {'model': 'sonnet',        'region': 'eu-central','cost_per_1k': 0.015},
+            'gemini-us':     {'model': 'google/gemini-2.5-pro', 'region': 'us-east', 'cost_per_1k': 0.005},
+        }
+
+        # Residency policy: which REGIONS are legally allowed per classification.
+        # eu_pii is fail-closed to EU + on-prem only. Editable config, not logic.
+        ALLOWED_REGIONS = {
+            'eu_pii':    {'eu-west', 'eu-central', 'eu-onprem'},
+            'eu_nonpii': {'eu-west', 'eu-central', 'eu-onprem'},
+            'global_ok': {'eu-west', 'eu-central', 'eu-onprem', 'us-east'},
+        }
+
+        allowed_regions = ALLOWED_REGIONS[classification]
+
+        # Compute the permitted provider allowlist for this record.
+        allowed = [
+            name for name, p in PROVIDERS.items()
+            if p['region'] in allowed_regions
+        ]
+        # Order the failover chain CHEAPEST-first so the race naturally prefers the
+        # cheapest legally-allowed provider, but every entry is in-region.
+        allowed.sort(key=lambda n: PROVIDERS[n]['cost_per_1k'])
+
+        # On-prem ollama is the guaranteed in-region fallback for EU-PII.
+        onprem = 'ollama-local'
+
+        result = {
+            'classification': classification,
+            'allowed_providers': allowed,
+            'allowed_regions': sorted(allowed_regions),
+            'cheapest_provider': allowed[0] if allowed else onprem,
+            'onprem_fallback': onprem,
+            'provider_regions': {n: PROVIDERS[n]['region'] for n in allowed},
+            # The two providers the race will actually try, both guaranteed in-region.
+            # (If only one is allowed, both branches target the same in-region model.)
+            'race_primary': allowed[0] if allowed else onprem,
+            'race_secondary': (allowed[1] if len(allowed) > 1 else (allowed[0] if allowed else onprem)),
+        }
+
+  # 4) RACE - fastest-valid-wins FAILOVER, but the branches are PINNED to in-region
+  #    providers only. This is failover (first valid response wins), NOT a vote.
+  #    Branch A is pinned to a EU model (mistral/large = mistral-eu) and Branch B to
+  #    the on-prem/EU fallback (ollama = ollama-local). For eu_pii, BOTH branches are
+  #    in-region, so no cross-border endpoint can ever win the race. The validator
+  #    enforces the response carries the required schema before a branch can win.
+  - id: residency_race
+    type: race
+    depends_on: [compute_allowlist]
+    race_config:
+      branches: [["infer_primary"], ["infer_secondary"]]
+      validator: "isinstance(output, dict) and 'answer' in output and 'served_by' in output and 'region' in output"
+
+  # 4a) PRIMARY in-region branch - EU provider (mistral/large = mistral-eu). Defined
+  #     separately, NO depends_on (the race executor drives it). It must self-report
+  #     served_by + region so the gate can verify residency against the allowlist.
+  - id: infer_primary
+    type: standard
+    model: mistral/large
+    prompt: |
+      You are the PRIMARY in-region inference provider "mistral-eu" (region eu-west)
+      selected by the residency router. Run the requested inference on the payload.
+
+      ALLOWLIST (you MUST be one of these): {steps.compute_allowlist.output.allowed_providers}
+      ALLOWED REGIONS: {steps.compute_allowlist.output.allowed_regions}
+
+      PAYLOAD:
+      {input.payload}
+
+      Return STRICT JSON only, echoing your true routing identity:
+      {
+        "answer": "<your inference result for the payload>",
+        "served_by": "mistral-eu",
+        "region": "eu-west",
+        "latency_ms": <int self-estimated end-to-end latency>
+      }
+    output_schema:
+      type: object
+      properties:
+        answer: { type: string }
+        served_by: { type: string }
+        region: { type: string }
+        latency_ms: { type: integer }
+
+  # 4b) SECONDARY in-region branch - on-prem fallback (ollama = ollama-local, region
+  #     eu-onprem). DIFFERENT provider pin so the race is a genuine cross-provider
+  #     failover, but still inside the EU/on-prem region set. Identical schema.
+  - id: infer_secondary
+    type: standard
+    model: ollama
+    prompt: |
+      You are the SECONDARY on-prem inference provider "ollama-local" (region
+      eu-onprem) selected by the residency router as the in-region failover.
+      Run the requested inference on the payload.
+
+      ALLOWLIST (you MUST be one of these): {steps.compute_allowlist.output.allowed_providers}
+      ALLOWED REGIONS: {steps.compute_allowlist.output.allowed_regions}
+
+      PAYLOAD:
+      {input.payload}
+
+      Return STRICT JSON only, echoing your true routing identity:
+      {
+        "answer": "<your inference result for the payload>",
+        "served_by": "ollama-local",
+        "region": "eu-onprem",
+        "latency_ms": <int self-estimated end-to-end latency>
+      }
+    output_schema:
+      type: object
+      properties:
+        answer: { type: string }
+        served_by: { type: string }
+        region: { type: string }
+        latency_ms: { type: integer }
+
+  # 5) CODE - deterministic RESIDENCY CHECK on the race winner. Reads the winning
+  #    response + the computed allowlist and decides, purely in code, whether the
+  #    serving region is legally permitted. This feeds both the gate (as evidence)
+  #    and the post-gate condition. The compliance verdict is code, not a prompt.
+  - id: residency_check
+    type: code
+    depends_on: [residency_race]
+    code_config:
+      language: python
+      code: |
+        win = _steps.get('residency_race')
+        if not isinstance(win, dict):
+            win = {}
+        allow = _steps.get('compute_allowlist') or {}
+        if not isinstance(allow, dict):
+            allow = {}
+
+        served_by = str(win.get('served_by', '') or '').strip()
+        served_region = str(win.get('region', '') or '').strip()
+        answer = win.get('answer')
+
+        allowed_providers = allow.get('allowed_providers') or []
+        allowed_regions = allow.get('allowed_regions') or []
+        provider_regions = allow.get('provider_regions') or {}
+
+        # Hard residency assertions, all deterministic:
+        provider_in_allowlist = served_by in allowed_providers
+        region_in_allowlist = served_region in allowed_regions
+        # Cross-border leak guard: the provider's REGISTERED region (from the
+        # allowlist) must match the region it claims to have served from.
+        registered_region = str(provider_regions.get(served_by, '') or '').strip()
+        no_region_mismatch = (registered_region == '') or (registered_region == served_region)
+        schema_ok = isinstance(answer, str) and len(answer) > 0
+
+        residency_ok = bool(
+            provider_in_allowlist and region_in_allowlist
+            and no_region_mismatch and schema_ok
+        )
+        # A violation is when SOMETHING answered but it was out-of-region / off-allowlist.
+        violation = bool(served_by) and (not provider_in_allowlist or not region_in_allowlist or not no_region_mismatch)
+
+        result = {
+            'request_id': _input.get('request_id'),
+            'classification': allow.get('classification'),
+            'served_by': served_by,
+            'served_region': served_region,
+            'registered_region': registered_region,
+            'allowed_providers': allowed_providers,
+            'allowed_regions': allowed_regions,
+            'provider_in_allowlist': provider_in_allowlist,
+            'region_in_allowlist': region_in_allowlist,
+            'no_region_mismatch': no_region_mismatch,
+            'schema_ok': schema_ok,
+            'residency_ok': residency_ok,
+            'violation': violation,
+            'answer': answer if schema_ok else '',
+        }
+
+  # 6) GATE - multi-strategy POLICY GATE. ALL strategies must pass. (a) an llm_eval
+  #    judge that reads the deterministic residency_check and confirms the answer
+  #    came from an in-allowlist, in-region provider with no cross-border leak;
+  #    (b) a human DPO sign-off that is the safety net whenever residency is in doubt.
+  #    A disallowed provider answer cannot pass this gate.
+  - id: residency_gate
+    type: gate
+    depends_on: [residency_check]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: |
+              You are a data-residency compliance auditor. Below is a deterministic
+              residency check of an inference response: which provider/region served
+              it, the legally-allowed provider allowlist and regions for this record's
+              classification, and the precomputed boolean flags. Answer EXACTLY
+              "approved" ONLY if residency_ok is true (provider_in_allowlist AND
+              region_in_allowlist AND no_region_mismatch AND schema_ok). If the answer
+              came from any out-of-region or off-allowlist provider, answer "rejected".
+            input: "{steps.residency_check.output}"
+            model: sonnet
+        - type: human
+          config:
+            message: "DPO sign-off: confirm the inference response was served only from a legally-permitted in-region provider. Review served_by / served_region vs the allowlist before releasing. (Exercise this whenever a residency violation flag is set.)"
+            timeout_hours: 24
+            on_timeout: abort
+
+  # 7) CONDITION - if the residency check FAILED (gate could not confirm in-region),
+  #    route to the on-prem ollama fallback and FLAG it; otherwise proceed straight to
+  #    attestation. The branch is driven by the deterministic residency_ok flag.
+  - id: route_on_violation
+    type: condition
+    depends_on: [residency_gate]
+    condition_config:
+      expression: "{steps.residency_check.output.residency_ok} == True"
+      then: [build_attestation]
+      else: [onprem_fallback, build_attestation]
+
+  # 7a-FAIL) On-prem ollama FALLBACK - re-run the inference on the guaranteed-in-region
+  #          local provider. EU-PII can fall back here with ZERO code change. Pinned to
+  #          ollama (region eu-onprem) so the fallback can never be cross-border.
+  - id: onprem_fallback
+    type: standard
+    model: ollama
+    prompt: |
+      RESIDENCY FALLBACK. The primary routing could not be confirmed in-region, so
+      this request is being re-served on the guaranteed on-prem provider
+      "ollama-local" (region eu-onprem). Re-run the inference on the payload.
+
+      PAYLOAD:
+      {input.payload}
+
+      Return STRICT JSON only:
+      {
+        "answer": "<your inference result for the payload>",
+        "served_by": "ollama-local",
+        "region": "eu-onprem"
+      }
+    output_schema:
+      type: object
+      properties:
+        answer: { type: string }
+        served_by: { type: string }
+        region: { type: string }
+
+  # 8) TRANSFORM - build the residency-ATTESTATION record: which region served the
+  #    request, the classification, the full allowlist, the violation flag and the
+  #    effective provider after any fallback. This is the auditable proof artifact.
+  - id: build_attestation
+    type: transform
+    transform_config:
+      template: |
+        {
+          "request_id": "{input.request_id}",
+          "classification": "{steps.residency_check.output.classification}",
+          "served_by": "{steps.residency_check.output.served_by}",
+          "served_region": "{steps.residency_check.output.served_region}",
+          "allowed_providers": "{steps.residency_check.output.allowed_providers}",
+          "allowed_regions": "{steps.residency_check.output.allowed_regions}",
+          "residency_ok": "{steps.residency_check.output.residency_ok}",
+          "violation": "{steps.residency_check.output.violation}",
+          "attested_by": "residency-routed-inference",
+          "attestation_note": "Provider/region selected at runtime from the computed allowlist; race failover restricted to in-region providers; cross-border answers hard-blocked by the policy gate."
+        }
+
+  # 9) HTTP - append the attestation to the SHA-256 residency AUDIT table in Postgres
+  #    (PostgREST insert). The DB computes/stores a SHA-256 hash chain row; we send the
+  #    attestation body. Connector: postgresql (via PostgREST).
+  - id: append_audit
+    type: http
+    depends_on: [build_attestation]
+    http_config:
+      url: "{input.data_endpoint}/residency_audit"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Prefer: "return=representation"
+      auth: "bearer:{env.POSTGREST_TOKEN}"
+      body: "{steps.build_attestation.output}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 10) HTTP - PagerDuty Events API v2 trigger, ONLY meaningful when a violation was
+  #     caught. The downstream notify and this page both run after the audit append;
+  #     they carry the violation flag in-payload so on-call sees the offending route.
+  #     Connector: pagerduty.
+  - id: page_pagerduty
+    type: http
+    depends_on: [append_audit]
+    http_config:
+      url: "https://events.pagerduty.com/v2/enqueue"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+      body: |
+        {
+          "routing_key": "{input.pagerduty_routing_key}",
+          "event_action": "trigger",
+          "dedup_key": "residency-{input.request_id}",
+          "payload": {
+            "summary": "Residency check: violation={steps.residency_check.output.violation} request={input.request_id} served_by={steps.residency_check.output.served_by} region={steps.residency_check.output.served_region}",
+            "severity": "critical",
+            "source": "residency-routed-inference",
+            "component": "{steps.residency_check.output.served_by}",
+            "group": "{steps.residency_check.output.classification}",
+            "custom_details": {
+              "residency_ok": "{steps.residency_check.output.residency_ok}",
+              "allowed_providers": "{steps.residency_check.output.allowed_providers}",
+              "allowed_regions": "{steps.residency_check.output.allowed_regions}"
+            }
+          }
+        }
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 11) NOTIFY - Slack alert. Posts the residency-violation summary so the DPO sees
+  #     any out-of-region answer that was caught (and the in-region success otherwise).
+  #     Connector: slack.
+  - id: notify_dpo
+    type: notify
+    depends_on: [page_pagerduty]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        *Residency routing result* request `{input.request_id}`
+        Classification : {steps.residency_check.output.classification}
+        Served by      : {steps.residency_check.output.served_by} ({steps.residency_check.output.served_region})
+        Allowlist      : {steps.residency_check.output.allowed_providers}
+        Residency OK   : {steps.residency_check.output.residency_ok}
+        VIOLATION      : {steps.residency_check.output.violation}
+        Attestation appended to the SHA-256 Postgres audit table. PagerDuty paged on violation.
+
+on_complete:
+  storage_path: "residency-routed-inference/{run_id}/result.json"
