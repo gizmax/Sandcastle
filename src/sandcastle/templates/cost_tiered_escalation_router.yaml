@@ -1,0 +1,318 @@
+# name: Cost-Tiered Escalation Router
+# description: Cheapest model first, escalate only the hard cases - a reusable multi-provider cost ladder for LLMOps.
+# tags: [llmops, cost-optimization, routing, failover, escalation]
+# category: general_ai
+name: cost-tiered-escalation-router
+description: >
+  A reusable, provider-neutral cost ladder. Pull a batch of work items from a
+  queue store (Postgres via PostgREST), try the CHEAPEST model first and let it
+  self-report confidence, then a measured classify decides which items are
+  easy_pass / borderline / hard. Only borderline + hard items pay for a mid-tier
+  RACE across two providers (first-valid-wins failover). A deterministic code
+  step tags the serving tier/provider/cost per item, a second code step
+  aggregates cost-per-item, tier mix and dollars saved versus an all-frontier
+  baseline, a quality gate spot-checks a sample of escalated answers (LLM judge
+  plus a human sign-off), and the savings report is written back to the queue
+  store and posted to Slack as a daily cost-savings digest.
+default_model: sonnet
+default_timeout: 900
+input_schema:
+  required: ["queue_endpoint", "frontier_model"]
+  properties:
+    queue_endpoint:
+      type: string
+      description: "Base URL of the queue store REST API (PostgREST over Postgres), e.g. https://queue.internal/rest/v1"
+      default: "https://queue.internal/rest/v1"
+    min_confidence:
+      type: number
+      description: "Cheap-tier self-reported confidence floor; below this an item is treated as not-easy."
+      default: 0.75
+    frontier_model:
+      type: string
+      description: "Name of the all-frontier baseline model used for the $-saved comparison (cost-modeling only)."
+      default: "opus"
+    batch_limit:
+      type: integer
+      description: "Max number of queued items to pull per run."
+      default: 50
+    frontier_cost_per_item:
+      type: number
+      description: "Assumed USD cost per item if EVERY item ran on the frontier model (baseline)."
+      default: 0.090
+steps:
+  # 1) Pull the batch of pending items from the queue store (Postgres via PostgREST).
+  - id: "fetch_batch"
+    type: http
+    http_config:
+      url: "{input.queue_endpoint}/routing_queue?status=eq.pending&order=priority.desc&limit={input.batch_limit}"
+      method: GET
+      headers:
+        Accept: "application/json"
+        Prefer: "count=exact"
+      auth: "bearer:{env.QUEUE_API_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2) Loop over each queued item: cheap try -> route -> (maybe) race -> record.
+  - id: "process_batch"
+    type: loop
+    depends_on: ["fetch_batch"]
+    loop_config:
+      over: "steps.fetch_batch.output"
+      step_ids: ["cheap_try", "route", "escalate_race", "record"]
+      max_iterations: 200
+
+  # 2a) CHEAP tier - attempt the task on the cheapest model and self-report confidence.
+  - id: "cheap_try"
+    type: standard
+    model: haiku
+    prompt: |
+      You are the CHEAP tier of a cost-tiered router. Solve the task on this work item
+      as well as you can, then HONESTLY self-report your confidence.
+
+      Work item (JSON):
+      {{ _item }}
+
+      Return STRICT JSON only:
+      {
+        "answer": "<your best answer to the item's task>",
+        "confidence": <float 0.0-1.0, calibrated - low if the item is ambiguous or hard>,
+        "reasoning_brief": "<one sentence on why this confidence>"
+      }
+    output_schema:
+      type: object
+      properties:
+        answer: { type: string }
+        confidence: { type: number }
+        reasoning_brief: { type: string }
+
+  # 2b) ROUTE - a cheap classifier decides easy_pass / borderline / hard from the cheap result.
+  - id: "route"
+    type: classify
+    classify_config:
+      categories: ["easy_pass", "borderline", "hard"]
+      input: "{steps.cheap_try.output}"
+      model: haiku
+      branches:
+        easy_pass: ["record"]
+        borderline: ["escalate_race", "record"]
+        hard: ["escalate_race", "record"]
+
+  # 2c) MID tier RACE - two providers, first non-empty answer wins (failover, not a vote).
+  #     Branch A and Branch B are defined separately below with NO depends_on.
+  - id: "escalate_race"
+    type: race
+    race_config:
+      branches: [["mid_provider_a"], ["mid_provider_b"]]
+      validator: "len(str(output)) > 0"
+
+  - id: "mid_provider_a"
+    type: standard
+    model: sonnet
+    prompt: |
+      You are MID-TIER provider A (Anthropic Sonnet). The cheap tier was not confident
+      on this item. Produce a high-quality, final answer.
+
+      Work item (JSON):
+      {{ _item }}
+
+      Cheap-tier attempt (for context, may be wrong):
+      {{ _steps['cheap_try'] }}
+
+      Return STRICT JSON: {"answer": "<final high-quality answer>", "tier": "mid", "provider": "sonnet"}
+
+  - id: "mid_provider_b"
+    type: standard
+    model: google/gemini-2.5-pro
+    prompt: |
+      You are MID-TIER provider B (Gemini 2.5 Pro), the failover for provider A.
+      Produce a high-quality, final answer for this item.
+
+      Work item (JSON):
+      {{ _item }}
+
+      Cheap-tier attempt (for context, may be wrong):
+      {{ _steps['cheap_try'] }}
+
+      Return STRICT JSON: {"answer": "<final high-quality answer>", "tier": "mid", "provider": "gemini-2.5-pro"}
+
+  # 2d) RECORD - deterministic per-item tagging: which tier/provider served it + cost.
+  #     Cheap/mid tier prices are pure config here (USD/item). Decision already happened
+  #     upstream (classify + race); this step just measures and tags it.
+  - id: "record"
+    type: code
+    code_config:
+      language: python
+      code: |
+        # Per-item accounting. Read this iteration's item + the cheap attempt; the
+        # race output is only present for borderline/hard items.
+        item = _input.get('_item') or {}
+        cheap = _steps.get('cheap_try') or {}
+        race = _steps.get('escalate_race')  # None when the item was easy_pass
+
+        # Pure-config tier prices (USD per item). Swap freely without touching logic.
+        CHEAP_PRICE = 0.004
+        MID_PRICE = 0.030
+
+        min_conf = float(_input.get('min_confidence', 0.75))
+        try:
+            conf = float(cheap.get('confidence', 0.0)) if isinstance(cheap, dict) else 0.0
+        except (TypeError, ValueError):
+            conf = 0.0
+
+        escalated = race is not None and bool(str(race).strip())
+        if escalated:
+            tier = 'mid'
+            served_cost = CHEAP_PRICE + MID_PRICE  # cheap attempt was still paid for
+            # Best-effort provider read from the winning race branch.
+            provider = 'sonnet'
+            try:
+                if isinstance(race, dict) and race.get('provider'):
+                    provider = str(race.get('provider'))
+                elif 'gemini' in str(race).lower():
+                    provider = 'gemini-2.5-pro'
+            except Exception:
+                provider = 'sonnet'
+            final_answer = race.get('answer') if isinstance(race, dict) else str(race)
+        else:
+            tier = 'cheap'
+            served_cost = CHEAP_PRICE
+            provider = 'haiku'
+            final_answer = cheap.get('answer') if isinstance(cheap, dict) else str(cheap)
+
+        result = {
+            'item_id': item.get('id'),
+            'tier': tier,
+            'provider': provider,
+            'cheap_confidence': conf,
+            'met_min_confidence': conf >= min_conf,
+            'escalated': escalated,
+            'cost_usd': round(served_cost, 6),
+            'final_answer': final_answer,
+        }
+
+  # 3) AGGREGATE - cost-per-item, tier mix, and $ saved vs an all-frontier baseline.
+  - id: "aggregate"
+    type: code
+    depends_on: ["process_batch"]
+    code_config:
+      language: python
+      code: |
+        # The loop output is the list of per-item `record` results.
+        rows = _steps.get('process_batch') or []
+        if isinstance(rows, dict):
+            rows = rows.get('results') or rows.get('items') or list(rows.values())
+        if not isinstance(rows, list):
+            rows = [rows]
+        rows = [r for r in rows if isinstance(r, dict)]
+
+        n = len(rows) or 1
+        cheap_n = sum(1 for r in rows if r.get('tier') == 'cheap')
+        mid_n = sum(1 for r in rows if r.get('tier') == 'mid')
+        escalated_ids = [r.get('item_id') for r in rows if r.get('escalated')]
+
+        total_cost = round(sum(float(r.get('cost_usd', 0.0) or 0.0) for r in rows), 4)
+        cost_per_item = round(total_cost / n, 5)
+
+        frontier_unit = float(_input.get('frontier_cost_per_item', 0.090))
+        baseline_cost = round(frontier_unit * len(rows), 4)
+        saved = round(baseline_cost - total_cost, 4)
+        saved_pct = round((saved / baseline_cost * 100.0), 1) if baseline_cost > 0 else 0.0
+
+        result = {
+            'items': len(rows),
+            'cheap_count': cheap_n,
+            'mid_count': mid_n,
+            'pct_cheap': round(cheap_n / n * 100.0, 1),
+            'pct_mid': round(mid_n / n * 100.0, 1),
+            'total_cost_usd': total_cost,
+            'cost_per_item_usd': cost_per_item,
+            'baseline_frontier_cost_usd': baseline_cost,
+            'frontier_model': _input.get('frontier_model', 'opus'),
+            'dollars_saved': saved,
+            'savings_pct': saved_pct,
+            'escalated_item_ids': escalated_ids,
+            'per_item': rows,
+        }
+
+  # 4) QUALITY GATE - LLM judge spot-checks escalated answers AND a human signs off.
+  - id: "quality_gate"
+    type: gate
+    depends_on: ["aggregate"]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: |
+              You are auditing a cost-tiered router. Below is the routing/cost
+              aggregate, including a sample of escalated (mid-tier) answers under
+              per_item. Spot-check the escalated answers for quality and confirm
+              the cheap->mid escalations look justified (cheap confidence was low).
+              Answer exactly "approved" if quality holds and the savings are not
+              coming from under-serving hard items; otherwise answer "rejected".
+            input: "{steps.aggregate.output}"
+            model: sonnet
+        - type: human
+          config:
+            message: "Approve today's cost-tier routing run? Review tier mix + escalated-answer sample before the digest goes out."
+            timeout_hours: 12
+            on_timeout: abort
+
+  # 5) APPROVAL - explicit human ack of the dollar figures before they are published/written back.
+  - id: "approve_publish"
+    type: approval
+    depends_on: ["quality_gate"]
+    approval_config:
+      message: "Confirm publishing the cost-savings digest and writing per-item routing/cost back to the queue store."
+      show_data: "steps.aggregate.output"
+      timeout_hours: 24
+      on_timeout: abort
+      allow_edit: true
+
+  # 6) REPORT - build the human-readable savings + routing report.
+  - id: "build_report"
+    type: transform
+    depends_on: ["approve_publish"]
+    transform_config:
+      template: |
+        Cost-Tiered Escalation Router - Daily Digest
+        ============================================
+        Items processed : {steps.aggregate.output.items}
+        Tier mix        : {steps.aggregate.output.pct_cheap}% cheap (haiku) / {steps.aggregate.output.pct_mid}% mid (sonnet|gemini-2.5-pro)
+        Cost / item     : ${steps.aggregate.output.cost_per_item_usd}
+        Total spend     : ${steps.aggregate.output.total_cost_usd}
+        Frontier baseline ({steps.aggregate.output.frontier_model}) : ${steps.aggregate.output.baseline_frontier_cost_usd}
+        Dollars saved   : ${steps.aggregate.output.dollars_saved} ({steps.aggregate.output.savings_pct}% vs all-frontier)
+        Escalated items : {steps.aggregate.output.escalated_item_ids}
+
+  # 7) WRITE-BACK - persist per-item routing + cost to the queue store (Postgres via PostgREST).
+  - id: "write_back"
+    type: http
+    depends_on: ["build_report"]
+    http_config:
+      url: "{input.queue_endpoint}/routing_results"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Prefer: "resolution=merge-duplicates"
+      auth: "bearer:{env.QUEUE_API_TOKEN}"
+      body: "{steps.aggregate.output}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 8) NOTIFY - post the daily cost-savings digest to Slack.
+  - id: "notify_digest"
+    type: notify
+    depends_on: ["write_back"]
+    notify_config:
+      service: slack
+      channel: "#llmops-cost"
+      message: |
+        Daily cost-tier routing digest:
+        {steps.build_report.output}
+on_complete:
+  storage_path: "cost-tiered-escalation-router/{run_id}/result.json"

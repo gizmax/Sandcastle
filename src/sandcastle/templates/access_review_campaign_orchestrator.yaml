@@ -1,0 +1,546 @@
+# name: Access Review Campaign
+# description: Periodic least-privilege access certification with auditor-grade, tamper-evident evidence. Pull, diff, classify risk, route sensitive grants to owners, deprovision, hash, and lock the evidence in S3.
+# tags: [Okta, Entra, GitHub, Salesforce, Snowflake, S3, ServiceNow, Slack, IGA, SoD, Audit, Compliance]
+# category: hr_legal
+
+name: access-review-campaign-orchestrator
+description: >
+  Auditor-grade periodic access certification (user access review / least-privilege
+  attestation). Pulls every user and group membership from the IdP (Okta / Entra REST)
+  and entitlements per app (GitHub / Salesforce / Snowflake REST), then runs a
+  DETERMINISTIC Python step that normalizes all grants into one table, diffs against the
+  prior-cycle baseline supplied in input, and flags orphaned (no matching identity) and
+  dormant (stale last_login) access. A model is used in exactly one place - classifying
+  each grant's risk (low / standard / sensitive / toxic_combination by Segregation-of-Duties
+  rules) - and that classify is swappable. The sensitive + toxic grants are looped to their
+  resource owners for a keep/revoke approval; revoke decisions branch to a real deprovision
+  call against the IdP/app API. Every decision is sealed deterministically into a SHA-256
+  hashed evidence pack, a compliance gate (LLM eval + human attester) must pass, the pack is
+  PUT to an S3 bucket with object-lock (WORM), and a certification summary is posted to Slack.
+  Pull, diff, deprovision, and hashing are all deterministic and model-independent.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 900
+
+input_schema:
+  required: ["campaign_id", "baseline"]
+  properties:
+    campaign_id:
+      type: string
+      description: "Unique id for this access-review cycle (e.g. 'AR-2026-Q2')."
+      example: "AR-2026-Q2"
+    idp_base_url:
+      type: string
+      description: "IdP REST base URL (Okta org URL or Microsoft Graph)."
+      default: "https://your-org.okta.com/api/v1"
+      example: "https://acme.okta.com/api/v1"
+    app_entitlements_url:
+      type: string
+      description: "App entitlements REST endpoint (GitHub org members, Salesforce PermissionSetAssignment, or Snowflake GRANTS view exposed via REST)."
+      default: "https://api.github.com/orgs/your-org/members?per_page=100"
+      example: "https://api.github.com/orgs/acme/members?per_page=100"
+    baseline:
+      type: string
+      description: "Reference to the prior-cycle approved baseline (JSON object or URL/ref) used to diff new vs removed grants."
+      default: "{}"
+      example: '{"grants": [{"user": "jdoe", "app": "github", "entitlement": "admin"}]}'
+    dormant_days:
+      type: number
+      description: "Days since last_login after which an active grant is flagged dormant."
+      default: 90
+      example: "90"
+    s3_base_url:
+      type: string
+      description: "S3 (or S3-compatible) REST base URL for the object-lock evidence bucket."
+      default: "https://s3.eu-central-1.amazonaws.com"
+      example: "https://s3.eu-central-1.amazonaws.com"
+    s3_bucket:
+      type: string
+      description: "Object-lock (WORM) bucket that stores the tamper-evident evidence pack."
+      default: "access-review-evidence"
+      example: "acme-access-review-evidence"
+    servicenow_base_url:
+      type: string
+      description: "ServiceNow REST base URL used to open a GRC attestation record for the cycle."
+      default: "https://your-instance.service-now.com/api/now"
+      example: "https://acme.service-now.com/api/now"
+    slack_channel:
+      type: string
+      description: "Slack channel for the certification summary."
+      default: "#access-reviews"
+      example: "#access-reviews"
+
+steps:
+  # 1) PULL identities + group memberships from the IdP (Okta / Microsoft Entra REST).
+  - id: pull_idp_users
+    type: http
+    http_config:
+      url: "{input.idp_base_url}/users?limit=200&expand=groups"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.IDP_API_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2) PULL entitlements per app (GitHub members / Salesforce PermissionSetAssignment / Snowflake GRANTS).
+  - id: pull_app_entitlements
+    type: http
+    http_config:
+      url: "{input.app_entitlements_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.APP_API_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 3) DETERMINISTIC normalize + diff. The audit-load-bearing logic: build one grants table
+  #    from both sources, diff against the prior-cycle baseline, flag orphaned + dormant. No model.
+  - id: normalize_and_diff
+    type: code
+    depends_on: [pull_idp_users, pull_app_entitlements]
+    code_config:
+      language: python
+      code: |
+        import json
+        from datetime import datetime, timezone
+
+        idp = _steps['pull_idp_users'] or {}
+        apps = _steps['pull_app_entitlements'] or {}
+        dormant_days = float(_input.get('dormant_days', 90) or 90)
+
+        # --- Parse the baseline (may arrive as a JSON string or already-parsed dict) ----
+        raw_baseline = _input.get('baseline') or {}
+        if isinstance(raw_baseline, str):
+            try:
+                raw_baseline = json.loads(raw_baseline) if raw_baseline.strip() else {}
+            except (ValueError, TypeError):
+                raw_baseline = {}
+        baseline_grants = raw_baseline.get('grants', []) if isinstance(raw_baseline, dict) else []
+        baseline_keys = set()
+        for g in baseline_grants:
+            if isinstance(g, dict):
+                baseline_keys.add((str(g.get('user', '')), str(g.get('app', '')), str(g.get('entitlement', ''))))
+
+        # --- Normalize IdP users (Okta returns a list; Graph returns {"value": [...]}) ---
+        idp_list = idp if isinstance(idp, list) else (idp.get('value') or idp.get('users') or [])
+        valid_logins = set()
+        last_login_by_user = {}
+        for u in idp_list:
+            if not isinstance(u, dict):
+                continue
+            profile = u.get('profile', u)
+            login = str(profile.get('login') or profile.get('userPrincipalName') or u.get('id') or '').lower()
+            if not login:
+                continue
+            valid_logins.add(login)
+            last_login_by_user[login] = u.get('lastLogin') or u.get('signInActivity') or profile.get('lastLogin')
+
+        # --- Normalize app entitlements (GitHub members list / Salesforce records / Snowflake rows) ---
+        app_list = apps if isinstance(apps, list) else (apps.get('records') or apps.get('data') or apps.get('value') or [])
+        app_name = str(_input.get('app_entitlements_url', '')).split('//')[-1].split('/')[0] or 'app'
+
+        def _parse_epoch(val):
+            # Tolerate ISO8601 strings or epoch seconds; return age in days or None.
+            if val is None:
+                return None
+            try:
+                if isinstance(val, (int, float)):
+                    dt = datetime.fromtimestamp(float(val), tz=timezone.utc)
+                else:
+                    dt = datetime.fromisoformat(str(val).replace('Z', '+00:00'))
+                return max(0, (datetime.now(timezone.utc) - dt).days)
+            except (ValueError, TypeError, OSError):
+                return None
+
+        grants = []
+        flagged = []
+        for rec in app_list:
+            if not isinstance(rec, dict):
+                continue
+            user = str(rec.get('login') or rec.get('AssigneeId') or rec.get('grantee_name') or rec.get('user') or '').lower()
+            entitlement = str(rec.get('role') or rec.get('PermissionSetId') or rec.get('privilege') or rec.get('entitlement') or 'member')
+            key = (user, app_name, entitlement)
+            age = _parse_epoch(last_login_by_user.get(user))
+            orphaned = user not in valid_logins
+            dormant = age is not None and age > dormant_days
+            grant = {
+                'user': user,
+                'app': app_name,
+                'entitlement': entitlement,
+                'last_login_age_days': age,
+                'orphaned': orphaned,
+                'dormant': dormant,
+                'is_new_since_baseline': key not in baseline_keys,
+            }
+            grants.append(grant)
+            if orphaned or dormant or grant['is_new_since_baseline']:
+                reasons = []
+                if orphaned:
+                    reasons.append('orphaned_no_active_identity')
+                if dormant:
+                    reasons.append(f'dormant_gt_{int(dormant_days)}d')
+                if grant['is_new_since_baseline']:
+                    reasons.append('new_since_baseline')
+                flagged.append({**grant, 'flag_reasons': reasons})
+
+        # Grants present in baseline but no longer observed = removed since last cycle.
+        observed_keys = {(g['user'], g['app'], g['entitlement']) for g in grants}
+        removed = [
+            {'user': u, 'app': a, 'entitlement': e}
+            for (u, a, e) in baseline_keys
+            if (u, a, e) not in observed_keys
+        ]
+
+        result = {
+            'campaign_id': _input.get('campaign_id'),
+            'app': app_name,
+            'total_grants': len(grants),
+            'flagged_count': len(flagged),
+            'grants': grants,
+            'flagged': flagged,
+            'removed_since_baseline': removed,
+            'identity_count': len(valid_logins),
+        }
+
+  # 4) CLASSIFY each grant's risk by Segregation-of-Duties rules. The ONLY model in the path,
+  #    and it is swappable. Every category routes into the deterministic owner-set selector.
+  - id: classify_grant_risk
+    type: classify
+    depends_on: [normalize_and_diff]
+    classify_config:
+      model: haiku
+      input: "Classify the access-grant risk for this access review. Use Segregation-of-Duties rules: toxic_combination = a user holding two conflicting entitlements (e.g. create-vendor + approve-payment, or prod-deploy + audit-log-admin); sensitive = admin/owner/privileged or finance/PII data scope; standard = normal write access; low = read-only or already removed. Grants table: {steps.normalize_and_diff.output}"
+      categories:
+        - low
+        - standard
+        - sensitive
+        - toxic_combination
+      branches:
+        low: [select_review_set]
+        standard: [select_review_set]
+        sensitive: [select_review_set]
+        toxic_combination: [select_review_set]
+
+  # 5) DETERMINISTIC selection of what a human must certify: sensitive + toxic + every flagged grant.
+  - id: select_review_set
+    type: code
+    depends_on: [normalize_and_diff, classify_grant_risk]
+    code_config:
+      language: python
+      code: |
+        diff = _steps['normalize_and_diff'] or {}
+        risk_label = str(_steps['classify_grant_risk'] or '').strip().lower()
+        grants = diff.get('grants', [])
+        flagged = diff.get('flagged', [])
+
+        # Anything flagged (orphaned/dormant/new) always needs owner attention.
+        flagged_keys = {(g.get('user'), g.get('app'), g.get('entitlement')) for g in flagged}
+
+        # When the cohort risk is sensitive/toxic, escalate the whole privileged set;
+        # otherwise only the individually flagged grants require certification.
+        escalate_all = risk_label in ('sensitive', 'toxic_combination')
+
+        review_set = []
+        for g in grants:
+            key = (g.get('user'), g.get('app'), g.get('entitlement'))
+            ent = str(g.get('entitlement', '')).lower()
+            privileged = any(t in ent for t in ('admin', 'owner', 'write', 'accountadmin', 'sysadmin'))
+            if key in flagged_keys or (escalate_all and privileged):
+                g2 = dict(g)
+                g2['cohort_risk'] = risk_label or 'standard'
+                review_set.append(g2)
+
+        result = {
+            'campaign_id': diff.get('campaign_id'),
+            'cohort_risk': risk_label or 'standard',
+            'review_count': len(review_set),
+            'review_set': review_set,
+        }
+
+  # 6) LOOP each sensitive/toxic/flagged grant to its resource owner for a keep/revoke decision.
+  #    The child is an approval step; it reads the current grant via _item.
+  - id: owner_review_loop
+    type: loop
+    depends_on: [select_review_set]
+    loop_config:
+      over: "steps.select_review_set.output.review_set"
+      step_ids: [owner_decision]
+      max_iterations: 500
+
+  # 6a) Per-grant approval routed to the resource owner. keep (approve) or revoke (reject).
+  - id: owner_decision
+    type: approval
+    approval_config:
+      message: >
+        Access certification - decide KEEP or REVOKE for this grant. Approve to KEEP the
+        access; reject to REVOKE it. Resource owner: confirm this person still needs this
+        entitlement for their job function. Grant under review: {{ _item }}
+      show_data: steps.select_review_set.output
+      timeout_hours: 72
+      on_timeout: abort
+      allow_edit: true
+
+  # 7) DETERMINISTIC consolidation of the loop outcome into a revoke list. No model.
+  - id: consolidate_decisions
+    type: code
+    depends_on: [owner_review_loop]
+    code_config:
+      language: python
+      code: |
+        loop_out = _steps['owner_review_loop'] or {}
+        review = _steps['select_review_set'] or {}
+
+        # Loop output may be a list of per-item results or a wrapper dict.
+        items = loop_out if isinstance(loop_out, list) else (loop_out.get('results') or loop_out.get('items') or [])
+        review_set = review.get('review_set', [])
+
+        to_revoke = []
+        kept = []
+        for idx, grant in enumerate(review_set):
+            decision_obj = items[idx] if idx < len(items) and isinstance(items[idx], dict) else {}
+            # An approval that was rejected / not approved means REVOKE.
+            approved = bool(decision_obj.get('approved', decision_obj.get('approve', True)))
+            decision = 'keep' if approved else 'revoke'
+            row = {**grant, 'decision': decision, 'approver': decision_obj.get('approver', 'resource_owner')}
+            if decision == 'revoke':
+                to_revoke.append(row)
+            else:
+                kept.append(row)
+
+        result = {
+            'campaign_id': review.get('campaign_id'),
+            'revoke_count': len(to_revoke),
+            'keep_count': len(kept),
+            'to_revoke': to_revoke,
+            'kept': kept,
+            'has_revocations': len(to_revoke) > 0,
+        }
+
+  # 8) BRANCH on whether any revocation was decided. Deterministic gate, no model.
+  - id: revoke_branch
+    type: condition
+    depends_on: [consolidate_decisions]
+    condition_config:
+      expression: "{steps.consolidate_decisions.output.has_revocations} == true"
+      then: [deprovision_call, assemble_evidence]
+      else: [assemble_evidence]
+
+  # 8a) DEPROVISION: POST the revocation to the IdP/app API (Okta lifecycle deactivate /
+  #     GitHub remove-member / Salesforce delete PermissionSetAssignment). Real money path.
+  - id: deprovision_call
+    type: http
+    http_config:
+      url: "{input.idp_base_url}/access-reviews/{input.campaign_id}/revocations"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.IDP_API_TOKEN}"
+      body: |
+        {
+          "campaign_id": "{input.campaign_id}",
+          "action": "revoke",
+          "revocations": {steps.consolidate_decisions.output.to_revoke}
+        }
+      value_map:
+        revocation_batch_id: "id"
+        revocation_status: "status"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 9) ASSEMBLE the tamper-evident evidence pack. Deterministic SHA-256 over the canonical
+  #    decision record (decision, approver, before/after entitlement state, timestamp). No model.
+  - id: assemble_evidence
+    type: code
+    depends_on: [consolidate_decisions]
+    code_config:
+      language: python
+      code: |
+        import json
+        import hashlib
+        from datetime import datetime, timezone
+
+        decisions = _steps['consolidate_decisions'] or {}
+        diff = _steps['normalize_and_diff'] or {}
+        review = _steps['select_review_set'] or {}
+
+        before_state = diff.get('grants', [])
+        revoked = decisions.get('to_revoke', [])
+        revoked_keys = {(r.get('user'), r.get('app'), r.get('entitlement')) for r in revoked}
+
+        # After-state = before-state minus the revoked grants (what the access posture
+        # becomes once deprovisioning is applied). This is the audit before/after pair.
+        after_state = [
+            g for g in before_state
+            if (g.get('user'), g.get('app'), g.get('entitlement')) not in revoked_keys
+        ]
+
+        evidence = {
+            'campaign_id': _input.get('campaign_id'),
+            'generated_at': datetime.now(timezone.utc).isoformat(),
+            'cohort_risk': review.get('cohort_risk'),
+            'totals': {
+                'grants_reviewed': diff.get('total_grants', 0),
+                'flagged': diff.get('flagged_count', 0),
+                'certified_set': review.get('review_count', 0),
+                'kept': decisions.get('keep_count', 0),
+                'revoked': decisions.get('revoke_count', 0),
+            },
+            'decisions': decisions.get('to_revoke', []) + decisions.get('kept', []),
+            'before_state': before_state,
+            'after_state': after_state,
+            'removed_since_baseline': diff.get('removed_since_baseline', []),
+        }
+
+        # Canonical (sorted-key) serialization so the hash is reproducible byte-for-byte.
+        canonical = json.dumps(evidence, sort_keys=True, separators=(',', ':'))
+        digest = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+
+        result = {
+            'object_key': f"evidence/{_input.get('campaign_id')}/access-review-evidence.json",
+            'sha256': digest,
+            'byte_length': len(canonical),
+            'evidence_pack': evidence,
+            'canonical_json': canonical,
+        }
+
+  # 10) COMPLIANCE GATE: an LLM attestation eval AND a human attester must BOTH pass before
+  #     the evidence is sealed. Gate has only llm_eval + human strategies; all must pass.
+  - id: certification_gate
+    type: gate
+    depends_on: [assemble_evidence]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >
+              You are an access-certification control reviewer. Answer exactly 'approved'
+              if this evidence pack is internally consistent - every revoked grant is absent
+              from after_state, totals add up (kept + revoked == certified_set or less), and a
+              sha256 digest is present - otherwise answer 'rejected' and name the defect.
+            input: "{steps.assemble_evidence.output}"
+            model: sonnet
+        - type: human
+          config:
+            message: "Campaign attester: confirm this access-review evidence pack is complete and accurate before it is sealed to the object-lock bucket."
+            timeout_hours: 48
+            on_timeout: abort
+
+  # 11) WAIT for the S3 object-lock bucket to be reachable / lock-configured before sealing.
+  - id: await_bucket_ready
+    type: sensor
+    depends_on: [certification_gate]
+    sensor_config:
+      url: "{input.s3_base_url}/{input.s3_bucket}?object-lock"
+      method: GET
+      headers:
+        Accept: "application/xml"
+      condition: "status_code == 200"
+      check_interval: 30
+      timeout: 1800
+
+  # 12) SEAL: PUT the evidence pack to S3 with object-lock (WORM) + Compliance retention.
+  #     The SHA-256 travels as object metadata so the pack is tamper-evident at rest.
+  - id: seal_evidence_pack
+    type: http
+    depends_on: [await_bucket_ready]
+    http_config:
+      url: "{input.s3_base_url}/{input.s3_bucket}/{steps.assemble_evidence.output.object_key}"
+      method: PUT
+      headers:
+        Content-Type: "application/json"
+        x-amz-object-lock-mode: "COMPLIANCE"
+        x-amz-object-lock-retain-until-date: "2034-01-01T00:00:00Z"
+        x-amz-meta-sha256: "{steps.assemble_evidence.output.sha256}"
+        x-amz-meta-campaign-id: "{input.campaign_id}"
+      auth: "aws4:{env.AWS_ACCESS_KEY_ID}:{env.AWS_SECRET_ACCESS_KEY}"
+      body: "{steps.assemble_evidence.output.canonical_json}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 13) GRC: open a ServiceNow attestation record linking the sealed evidence (audit trail).
+  - id: servicenow_attestation
+    type: http
+    depends_on: [seal_evidence_pack]
+    http_config:
+      url: "{input.servicenow_base_url}/table/sn_compliance_attestation"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.SERVICENOW_TOKEN}"
+      body: |
+        {
+          "short_description": "Access review {input.campaign_id} certified",
+          "campaign_id": "{input.campaign_id}",
+          "evidence_sha256": "{steps.assemble_evidence.output.sha256}",
+          "evidence_object": "{steps.assemble_evidence.output.object_key}",
+          "revoked_count": "{steps.consolidate_decisions.output.revoke_count}",
+          "state": "certified"
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 14a) Optional NL certification narrative via CROSS-PROVIDER race (first non-empty wins,
+  #      failover not a vote). Branch A=sonnet, B=gemini, C=mistral. No single provider on the path.
+  - id: narrative_sonnet
+    type: standard
+    model: sonnet
+    prompt: |
+      Write a concise (max 4 sentences, no markdown, no emojis) auditor-facing summary of this
+      access-review certification cycle. State grants reviewed, how many were flagged, kept, and
+      revoked, and that the evidence pack is sha256-hashed and sealed to an object-lock bucket.
+      Totals: {steps.assemble_evidence.output.totals}. SHA-256: {steps.assemble_evidence.output.sha256}.
+
+  - id: narrative_gemini
+    type: standard
+    model: google/gemini-2.5-pro
+    prompt: |
+      Write a concise (max 4 sentences, no markdown, no emojis) auditor-facing summary of this
+      access-review certification cycle. State grants reviewed, how many were flagged, kept, and
+      revoked, and that the evidence pack is sha256-hashed and sealed to an object-lock bucket.
+      Totals: {steps.assemble_evidence.output.totals}. SHA-256: {steps.assemble_evidence.output.sha256}.
+
+  - id: narrative_mistral
+    type: standard
+    model: mistral/large
+    prompt: |
+      Write a concise (max 4 sentences, no markdown, no emojis) auditor-facing summary of this
+      access-review certification cycle. State grants reviewed, how many were flagged, kept, and
+      revoked, and that the evidence pack is sha256-hashed and sealed to an object-lock bucket.
+      Totals: {steps.assemble_evidence.output.totals}. SHA-256: {steps.assemble_evidence.output.sha256}.
+
+  - id: certification_narrative
+    type: race
+    depends_on: [seal_evidence_pack]
+    race_config:
+      branches:
+        - [narrative_sonnet]
+        - [narrative_gemini]
+        - [narrative_mistral]
+      validator: "len(str(output).strip()) > 0"
+
+  # 15) NOTIFY the team in Slack with the certification summary + evidence integrity hash.
+  - id: notify_summary
+    type: notify
+    depends_on: [certification_narrative, servicenow_attestation]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: "Access review {input.campaign_id} certified. {steps.certification_narrative.output} | Revoked: {steps.consolidate_decisions.output.revoke_count} | Kept: {steps.consolidate_decisions.output.keep_count} | Evidence sha256 {steps.assemble_evidence.output.sha256} sealed (object-lock) at {steps.assemble_evidence.output.object_key}."
+
+on_complete:
+  storage_path: "access-review-campaign-orchestrator/{run_id}/result.json"

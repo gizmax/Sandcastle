@@ -1,0 +1,538 @@
+# name: Closed-Loop Auto-Remediator
+# description: Turns a Datadog/PagerDuty alert into a verified fix - pulls incident context, races two LLM providers for a remediation hypothesis, gates it behind LLM + human sign-off, applies the change via Vercel/Cloudflare/GitHub APIs, polls the SLO until recovery, and auto-rolls-back on failure
+# tags: [DevOps, Incident, Remediation, Datadog, PagerDuty, Failover]
+# category: devops
+
+name: closed-loop-autoremediator
+description: >
+  Closed-loop incident auto-remediation. Pulls a live alert plus recent deploys from
+  Datadog, PagerDuty and GitHub, classifies severity, then RACES two independent
+  providers (Sonnet vs Gemini 2.5 Pro) for a remediation hypothesis. The winning
+  hypothesis passes an LLM-confidence + human-approval gate and an explicit human
+  sign-off, then a deterministic classifier routes the action to the correct apply
+  path (Vercel rollback, Cloudflare route-shift, or a GitHub revert PR). A sensor
+  polls the Datadog SLO until the error rate recovers; if it does not, the workflow
+  auto-rolls-back via the Vercel API and pages Slack, otherwise it posts success.
+  The model only ever decides the hypothesis - apply, verify and rollback are
+  deterministic control flow.
+
+default_model: sonnet
+default_timeout: 600
+
+input_schema:
+  required: ["incident_id", "service"]
+  properties:
+    incident_id:
+      type: string
+      description: "PagerDuty incident ID driving this remediation (e.g. 'PT4KHLK')"
+      default: ""
+    service:
+      type: string
+      description: "Affected service / Datadog monitor scope (e.g. 'payments-api')"
+      default: ""
+    datadog_site:
+      type: string
+      description: "Datadog API site host"
+      default: "api.datadoghq.eu"
+    datadog_monitor_id:
+      type: string
+      description: "Datadog monitor id backing the alert (numeric)"
+      default: "0"
+    datadog_slo_id:
+      type: string
+      description: "Datadog SLO id polled for recovery after the fix is applied"
+      default: ""
+    github_repo:
+      type: string
+      description: "owner/repo used for deploy correlation and revert PRs (e.g. 'acme/platform')"
+      default: ""
+    bad_sha:
+      type: string
+      description: "Suspect commit SHA to revert when action_kind == revert"
+      default: ""
+    vercel_project_id:
+      type: string
+      description: "Vercel project id used for rollback / auto-rollback"
+      default: ""
+    last_good_deployment_id:
+      type: string
+      description: "Vercel deployment id to roll back to (last known-good)"
+      default: ""
+    cloudflare_account_id:
+      type: string
+      description: "Cloudflare account id owning the Worker route"
+      default: ""
+    cloudflare_dispatch_namespace:
+      type: string
+      description: "Cloudflare Workers-for-Platforms dispatch namespace to shift traffic in"
+      default: "production"
+    failover_worker:
+      type: string
+      description: "Name of the known-good Worker to route traffic to on a route-shift action"
+      default: ""
+    slack_channel:
+      type: string
+      description: "Slack channel for remediation status updates"
+      default: "#incident-bridge"
+    min_confidence:
+      type: number
+      description: "Minimum hypothesis confidence (0-1) required to proceed with an automated change"
+      default: 0.7
+
+steps:
+  # 1) Pull live incident context from PagerDuty + Datadog + GitHub (real REST APIs).
+  - id: fetch_pagerduty
+    type: http
+    http_config:
+      url: "https://api.pagerduty.com/incidents/{input.incident_id}"
+      method: GET
+      auth: "token token={env.PAGERDUTY_TOKEN}"
+      headers:
+        Accept: "application/vnd.pagerduty+json;version=2"
+        Content-Type: "application/json"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  - id: fetch_datadog_monitor
+    type: http
+    http_config:
+      url: "https://{input.datadog_site}/api/v1/monitor/{input.datadog_monitor_id}"
+      method: GET
+      headers:
+        DD-API-KEY: "{env.DATADOG_API_KEY}"
+        DD-APPLICATION-KEY: "{env.DATADOG_APP_KEY}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  - id: fetch_recent_deploys
+    type: http
+    http_config:
+      url: "https://api.github.com/repos/{input.github_repo}/deployments?per_page=10"
+      method: GET
+      auth: "bearer:{env.GITHUB_TOKEN}"
+      headers:
+        Accept: "application/vnd.github+json"
+        X-GitHub-Api-Version: "2022-11-28"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 2) Deterministically normalize the three payloads into one incident envelope.
+  - id: build_envelope
+    type: code
+    depends_on: [fetch_pagerduty, fetch_datadog_monitor, fetch_recent_deploys]
+    code_config:
+      language: python
+      code: |
+        # Normalize PagerDuty + Datadog + GitHub payloads into a single envelope.
+        pd = _steps.get("fetch_pagerduty") or {}
+        dd = _steps.get("fetch_datadog_monitor") or {}
+        gh = _steps.get("fetch_recent_deploys") or {}
+
+        def _dig(obj, *path, default=None):
+            cur = obj
+            for key in path:
+                if isinstance(cur, dict):
+                    cur = cur.get(key)
+                else:
+                    return default
+            return cur if cur is not None else default
+
+        incident = _dig(pd, "incident", default=pd if isinstance(pd, dict) else {})
+        pd_urgency = str(_dig(incident, "urgency", default="low")).lower()
+        pd_title = _dig(incident, "title", default="unknown incident")
+
+        dd_status = str(_dig(dd, "overall_state", default="Alert")).lower()
+        dd_name = _dig(dd, "name", default="")
+
+        deploys = gh if isinstance(gh, list) else _dig(gh, "deployments", default=[]) or []
+        recent = []
+        for d in deploys[:10]:
+            if isinstance(d, dict):
+                recent.append({
+                    "sha": d.get("sha", ""),
+                    "ref": d.get("ref", ""),
+                    "environment": d.get("environment", ""),
+                    "created_at": d.get("created_at", ""),
+                })
+
+        # Deterministic blast-radius hint: production deploy in last window is a prime suspect.
+        prod_deploys = [d for d in recent if str(d.get("environment", "")).startswith("prod")]
+
+        result = {
+            "incident_id": _input.get("incident_id", ""),
+            "service": _input.get("service", ""),
+            "pd_title": pd_title,
+            "pd_urgency": pd_urgency,
+            "dd_monitor": dd_name,
+            "dd_status": dd_status,
+            "recent_deploys": recent,
+            "suspect_deploys": prod_deploys,
+            "has_suspect_deploy": bool(prod_deploys),
+        }
+
+  # 3) Classify severity SEV1/SEV2/SEV3 and route to a per-severity context primer.
+  - id: classify_severity
+    type: classify
+    depends_on: [build_envelope]
+    classify_config:
+      categories: ["SEV1", "SEV2", "SEV3"]
+      input: "{steps.build_envelope.output}"
+      model: haiku
+      branches:
+        SEV1: [prime_sev1]
+        SEV2: [prime_sev2]
+        SEV3: [prime_sev3]
+
+  - id: prime_sev1
+    type: code
+    code_config:
+      language: python
+      code: |
+        # SEV1: customer-facing outage - widest blast radius, fastest action budget.
+        env = _steps.get("build_envelope") or {}
+        result = {
+            "severity": "SEV1",
+            "action_budget_minutes": 10,
+            "require_human": True,
+            "guidance": "Customer-facing outage. Prefer instant rollback / route-shift over code revert.",
+            "envelope": env,
+        }
+
+  - id: prime_sev2
+    type: code
+    code_config:
+      language: python
+      code: |
+        # SEV2: degraded service - moderate action budget.
+        env = _steps.get("build_envelope") or {}
+        result = {
+            "severity": "SEV2",
+            "action_budget_minutes": 30,
+            "require_human": True,
+            "guidance": "Degraded service. Rollback or revert acceptable; verify SLO before closing.",
+            "envelope": env,
+        }
+
+  - id: prime_sev3
+    type: code
+    code_config:
+      language: python
+      code: |
+        # SEV3: minor / internal - longest budget, lowest urgency.
+        env = _steps.get("build_envelope") or {}
+        result = {
+            "severity": "SEV3",
+            "action_budget_minutes": 120,
+            "require_human": True,
+            "guidance": "Minor impact. A scoped revert PR is usually the cleanest fix.",
+            "envelope": env,
+        }
+
+  # 4) RACE two providers for a remediation hypothesis. First valid + confident wins.
+  #    Branch A pinned to sonnet, Branch B pinned to google/gemini-2.5-pro.
+  - id: hypo_sonnet
+    type: standard
+    model: sonnet
+    output_schema:
+      type: object
+      properties:
+        root_cause: { type: string }
+        action_kind: { type: string, enum: ["rollback", "route-shift", "revert"] }
+        change_ref: { type: string }
+        confidence: { type: number }
+      required: ["root_cause", "action_kind", "change_ref", "confidence"]
+    prompt: |
+      You are an SRE generating ONE remediation hypothesis for an active incident.
+
+      Incident envelope: {steps.build_envelope.output}
+      Severity routing (SEV1 primer): {steps.prime_sev1.output}
+      Severity routing (SEV2 primer): {steps.prime_sev2.output}
+      Severity routing (SEV3 primer): {steps.prime_sev3.output}
+
+      Decide the single safest reversible action. Return STRICT JSON only:
+      {
+        "root_cause": "<one-sentence proximate cause grounded in the deploys/monitor>",
+        "action_kind": "rollback" | "route-shift" | "revert",
+        "change_ref": "<deployment id, worker name, or commit SHA the action targets>",
+        "confidence": <number 0..1>
+      }
+
+      Rules:
+      - "rollback": redeploy the last known-good Vercel deployment (fastest, use for SEV1 deploy-correlated outages).
+      - "route-shift": shift Cloudflare Worker traffic to a known-good worker (use when the bad path is edge-routable).
+      - "revert": open a GitHub revert PR for the suspect SHA (use when a specific commit is the cause).
+      - confidence must reflect how strongly the recent deploys explain the alert.
+      Output JSON only, no prose.
+
+  - id: hypo_gemini
+    type: standard
+    model: google/gemini-2.5-pro
+    output_schema:
+      type: object
+      properties:
+        root_cause: { type: string }
+        action_kind: { type: string, enum: ["rollback", "route-shift", "revert"] }
+        change_ref: { type: string }
+        confidence: { type: number }
+      required: ["root_cause", "action_kind", "change_ref", "confidence"]
+    prompt: |
+      You are a second, independent SRE generating ONE remediation hypothesis.
+
+      Incident envelope: {steps.build_envelope.output}
+      Severity primers: {steps.prime_sev1.output} {steps.prime_sev2.output} {steps.prime_sev3.output}
+
+      Return STRICT JSON only with keys root_cause, action_kind
+      ("rollback"|"route-shift"|"revert"), change_ref, confidence (0..1).
+      Pick the safest reversible action that the recent deploys best explain.
+      Output JSON only, no prose.
+
+  - id: race_hypothesis
+    type: race
+    race_config:
+      branches:
+        - [hypo_sonnet]
+        - [hypo_gemini]
+      # First branch whose JSON parses with a non-empty action_kind and a real
+      # confidence number wins. Deterministic - not a vote tally.
+      validator: "isinstance(output, dict) and bool(output.get('action_kind')) and isinstance(output.get('confidence'), (int, float))"
+
+  # 5) Deterministically score the winning hypothesis against min_confidence.
+  - id: score_hypothesis
+    type: code
+    depends_on: [race_hypothesis]
+    code_config:
+      language: python
+      code: |
+        # Read the race winner and decide if it clears the automated-change bar.
+        hyp = _steps.get("race_hypothesis") or {}
+        if not isinstance(hyp, dict):
+            hyp = {}
+        action_kind = str(hyp.get("action_kind", "")).strip().lower()
+        try:
+            confidence = float(hyp.get("confidence", 0) or 0)
+        except (TypeError, ValueError):
+            confidence = 0.0
+        try:
+            min_conf = float(_input.get("min_confidence", 0.7) or 0.7)
+        except (TypeError, ValueError):
+            min_conf = 0.7
+
+        valid_actions = {"rollback", "route-shift", "revert"}
+        confident = confidence >= min_conf
+        actionable = action_kind in valid_actions
+
+        result = {
+            "action_kind": action_kind if actionable else "rollback",
+            "raw_action_kind": action_kind,
+            "change_ref": str(hyp.get("change_ref", "")),
+            "root_cause": str(hyp.get("root_cause", "")),
+            "confidence": confidence,
+            "min_confidence": min_conf,
+            "confident": confident,
+            "actionable": actionable,
+            "proceed": confident and actionable,
+        }
+
+  # 6) GATE: an LLM confidence judge AND a human must both approve before any change.
+  - id: remediation_gate
+    type: gate
+    depends_on: [score_hypothesis]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: |
+              A remediation hypothesis was scored. Reply with exactly one word:
+              "approved" if proceed is true and the action_kind is a reversible
+              action (rollback/route-shift/revert), otherwise "rejected".
+              Scored hypothesis: {steps.score_hypothesis.output}
+            input: "{steps.score_hypothesis.output}"
+            model: sonnet
+        - type: human
+          config:
+            message: "Remediation hypothesis cleared automated scoring. Approve applying the proposed change to production?"
+            timeout_hours: 4
+            on_timeout: abort
+
+  # 7) Explicit human sign-off on the exact change about to be applied.
+  - id: change_approval
+    type: approval
+    depends_on: [remediation_gate]
+    approval_config:
+      message: "Final sign-off: apply this remediation to production. Review action_kind, change_ref and confidence before approving."
+      show_data: steps.score_hypothesis.output
+      timeout_hours: 4
+      on_timeout: abort
+      allow_edit: true
+
+  # 8) Route by action_kind to exactly one apply path (deterministic control flow).
+  - id: route_action
+    type: classify
+    depends_on: [change_approval]
+    classify_config:
+      categories: ["rollback", "route-shift", "revert"]
+      input: "{steps.score_hypothesis.output}"
+      model: haiku
+      branches:
+        rollback: [apply_vercel_rollback]
+        route-shift: [apply_cloudflare_route]
+        revert: [apply_github_revert]
+
+  # 8a) Vercel rollback - redeploy the last known-good deployment.
+  - id: apply_vercel_rollback
+    type: http
+    http_config:
+      url: "https://api.vercel.com/v9/projects/{input.vercel_project_id}/rollback/{input.last_good_deployment_id}"
+      method: POST
+      auth: "bearer:{env.VERCEL_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+      body: '{"reason": "closed-loop-autoremediator: {steps.score_hypothesis.output}"}'
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
+
+  # 8b) Cloudflare route-shift - point the dispatch namespace at the known-good worker.
+  - id: apply_cloudflare_route
+    type: http
+    http_config:
+      url: "https://api.cloudflare.com/client/v4/accounts/{input.cloudflare_account_id}/workers/dispatch/namespaces/{input.cloudflare_dispatch_namespace}/scripts/{input.failover_worker}"
+      method: PUT
+      auth: "bearer:{env.CLOUDFLARE_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+      body: '{"enabled": true, "tags": ["autoremediator", "route-shift"]}'
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
+
+  # 8c) GitHub revert - open a revert PR-equivalent (create a revert ref) for the bad SHA.
+  - id: apply_github_revert
+    type: http
+    http_config:
+      url: "https://api.github.com/repos/{input.github_repo}/merges"
+      method: POST
+      auth: "bearer:{env.GITHUB_TOKEN}"
+      headers:
+        Accept: "application/vnd.github+json"
+        X-GitHub-Api-Version: "2022-11-28"
+      body: '{"base": "main", "head": "{input.bad_sha}", "commit_message": "Revert suspect change for incident {input.incident_id} (autoremediator)"}'
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
+
+  # 9) Join the three apply paths back into one deterministic outcome record.
+  - id: apply_result
+    type: code
+    depends_on: [route_action]
+    code_config:
+      language: python
+      code: |
+        # Exactly one apply branch ran (classify routed it). Collect whichever responded.
+        scored = _steps.get("score_hypothesis") or {}
+        vercel = _steps.get("apply_vercel_rollback")
+        cloudflare = _steps.get("apply_cloudflare_route")
+        github = _steps.get("apply_github_revert")
+
+        applied = None
+        provider = None
+        if vercel is not None:
+            applied, provider = vercel, "vercel"
+        elif cloudflare is not None:
+            applied, provider = cloudflare, "cloudflare-workers"
+        elif github is not None:
+            applied, provider = github, "github"
+
+        result = {
+            "action_kind": scored.get("action_kind", ""),
+            "change_ref": scored.get("change_ref", ""),
+            "applied_via": provider,
+            "apply_response": applied,
+            "applied": applied is not None,
+        }
+
+  # 10) SENSOR: poll the Datadog SLO until the error budget recovers, or time out.
+  - id: verify_slo_recovery
+    type: sensor
+    depends_on: [apply_result]
+    sensor_config:
+      url: "https://{input.datadog_site}/api/v1/slo/{input.datadog_slo_id}/history?from_ts=0&to_ts=0"
+      method: GET
+      headers:
+        DD-API-KEY: "{env.DATADOG_API_KEY}"
+        DD-APPLICATION-KEY: "{env.DATADOG_APP_KEY}"
+      # Recovered when the rolling SLI is back above its threshold.
+      condition: "status_code == 200 and float(response.get('data', {}).get('overall', {}).get('sli_value', 0) or 0) >= float(response.get('data', {}).get('thresholds', {}).get('7d', {}).get('target', 100) or 100)"
+      check_interval: 30
+      timeout: 1800
+
+  # 11) Did it recover? Determine recovery deterministically from the sensor result.
+  - id: evaluate_recovery
+    type: code
+    depends_on: [verify_slo_recovery]
+    code_config:
+      language: python
+      code: |
+        # The sensor returns its final observation (and whether the condition was met).
+        obs = _steps.get("verify_slo_recovery") or {}
+        if not isinstance(obs, dict):
+            obs = {}
+        # Sensors surface a boolean-ish recovery signal; fall back to inspecting the payload.
+        recovered = bool(obs.get("condition_met", obs.get("met", obs.get("recovered", False))))
+        result = {
+            "recovered": recovered,
+            "observation": obs,
+            "fail_count": 0 if recovered else 1,
+        }
+
+  # 12) Branch on recovery: success path vs auto-rollback path.
+  - id: recovery_branch
+    type: condition
+    depends_on: [evaluate_recovery]
+    condition_config:
+      expression: "{steps.evaluate_recovery.output.fail_count} > 0"
+      then_steps: [auto_rollback, notify_failure]
+      else_steps: [notify_success]
+
+  # 12a) Not recovered -> auto-rollback to last known-good Vercel deployment.
+  - id: auto_rollback
+    type: http
+    http_config:
+      url: "https://api.vercel.com/v9/projects/{input.vercel_project_id}/rollback/{input.last_good_deployment_id}"
+      method: POST
+      auth: "bearer:{env.VERCEL_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+      body: '{"reason": "closed-loop-autoremediator AUTO-ROLLBACK: SLO did not recover after {steps.apply_result.output}"}'
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 12b) Page the bridge: the automated fix failed and we auto-rolled-back.
+  - id: notify_failure
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: ":rotating_light: AUTO-REMEDIATION FAILED for {input.service} (incident {input.incident_id}). Applied {steps.apply_result.output} but SLO did not recover - auto-rollback triggered. Human takeover required."
+
+  # 12c) Recovered: post the success summary with the full closed-loop record.
+  - id: notify_success
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: ":white_check_mark: AUTO-REMEDIATION VERIFIED for {input.service} (incident {input.incident_id}). Applied {steps.apply_result.output}; Datadog SLO recovered: {steps.evaluate_recovery.output}."
+
+on_complete:
+  storage_path: "closed-loop-autoremediator/{run_id}/result.json"
