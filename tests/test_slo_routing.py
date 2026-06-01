@@ -95,8 +95,8 @@ class TestAdvisorModelTiers:
     def test_mistral_low_is_small(self):
         assert "small" in ADVISOR_MODEL_TIERS["mistral"]["low"]
 
-    def test_openai_high_is_gpt4o(self):
-        assert "gpt-4o" in ADVISOR_MODEL_TIERS["openai"]["high"]
+    def test_openai_high_is_gpt5(self):
+        assert "gpt-5.2" in ADVISOR_MODEL_TIERS["openai"]["high"]
 
     def test_openai_low_is_mini(self):
         assert "mini" in ADVISOR_MODEL_TIERS["openai"]["low"]

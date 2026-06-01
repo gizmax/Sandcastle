@@ -1,5 +1,5 @@
 # name: UGC Studio
-# description: Drop a product photo, pick a mode, get N platform-ready UGC shots. Reference-image generation keeps the product faithful; a vision judge scores every shot and failed ones are regenerated. Switchable nano-banana / gpt-image-1 backend.
+# description: Drop a product photo, pick a mode, get N platform-ready UGC shots. Reference-image generation keeps the product faithful; a vision judge scores every shot and failed ones are regenerated. Switchable nano-banana / gpt-image-2 backend.
 # tags: [Marketing, UGC, Product-Photography, Social-Media, E-Commerce, AI-Studio]
 # category: creative
 
@@ -7,7 +7,7 @@ name: ugc-studio
 description: >
   Fast, high-quality UGC. One product photo in -> N platform-ready shots out.
   The real product photo is passed as a reference image to the generator
-  (nano-banana Gemini or OpenAI gpt-image-1), so the product stays faithful while
+  (nano-banana Gemini or OpenAI gpt-image-2), so the product stays faithful while
   the prompt drives authentic, mode-specific styling. A Gemini vision judge scores
   every shot against the original; anything that fails is regenerated with an
   improved prompt. Pick a mode and a count - everything else is derived.
@@ -42,7 +42,7 @@ input_schema:
     image_backend:
       type: string
       enum: ["nano-banana", "openai"]
-      description: "Image generator: nano-banana (Gemini 3 Pro Image) or openai (gpt-image-1). Both use the product photo as a reference."
+      description: "Image generator: nano-banana (Gemini 3 Pro Image) or openai (gpt-image-2). Both use the product photo as a reference."
       default: "nano-banana"
     min_score:
       type: number
@@ -154,7 +154,7 @@ steps:
         aspect: { type: string }
 
   # ============================================================
-  # 3. BACKEND ROUTER - nano-banana (default) vs openai gpt-image-1
+  # 3. BACKEND ROUTER - nano-banana (default) vs openai gpt-image-2
   # ============================================================
   - id: "backend-router"
     depends_on: ["compose-prompts"]
@@ -193,7 +193,7 @@ steps:
       function: "generate_image"
       arguments:
         - "{input._item.prompt}"
-        - model: "gpt-image-1"
+        - model: "gpt-image-2"
           aspect: "{input._item.aspect}"
           quality: "high"
           reference_images: ["{input.product_photo}"]

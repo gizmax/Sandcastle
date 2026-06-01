@@ -46,7 +46,7 @@ async function imagePart(ref, signal) {
  * Vision analysis / judging. Sends image(s) + a text prompt to a Gemini vision
  * model and returns the answer. Returns parsed JSON when the model replies JSON.
  *
- * options: model (default gemini-2.5-flash), images (string[] paths or URLs),
+ * options: model (default gemini-3.5-flash), images (string[] paths or URLs),
  *   max_output_tokens.
  */
 export async function analyze_image(prompt, options = "{}") {
@@ -58,7 +58,7 @@ export async function analyze_image(prompt, options = "{}") {
   if (images.length === 0) throw new Error("analyze_image requires options.images (>=1)");
   if (!API_KEY) throw new Error("Gemini API key not set (TOOL_GEMINI_API_KEY / GEMINI_API_KEY)");
 
-  const model = opts.model || "gemini-2.5-flash";
+  const model = opts.model || "gemini-3.5-flash";
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT);
   try {

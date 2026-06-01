@@ -673,7 +673,7 @@ ADVISOR_MODEL_TIERS: dict[str, dict[str, str]] = {
         "low": "mistral-small-latest",
     },
     "openai": {
-        "high": "gpt-4o",
+        "high": "gpt-5.2",
         "medium": "gpt-4o-mini",
         "low": "gpt-4o-mini",
     },
@@ -731,7 +731,7 @@ _PROVIDER_CONFIGS = {
     },
     "openai": {
         "api_url": "https://api.openai.com/v1/chat/completions",
-        "model": "gpt-4o",
+        "model": "gpt-5.2",
         "api_key_env": "OPENAI_API_KEY",
         "region": "us",
         "headers_fn": lambda key: {
