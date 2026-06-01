@@ -1,0 +1,360 @@
+# name: Provider Consensus Decision Engine
+# description: Ask the SAME high-stakes question to 3 different providers in parallel and act on their AGREEMENT - consensus quorum, not race failover.
+# tags: [consensus, multi-provider, decision, governance, quorum]
+# category: general_ai
+name: provider-consensus-decision-engine
+description: >-
+  A reusable high-stakes decision pattern built on PROVIDER CONSENSUS (not race
+  failover). The same case record is fetched from a system of record (Postgres
+  via PostgREST), then the IDENTICAL structured-decision prompt is rendered in
+  parallel across three different providers - Anthropic Sonnet, Google Gemini
+  2.5 Pro and Mistral Large - each returning {verdict, confidence, rationale}.
+  A deterministic code step tallies the three votes into an agreement ratio,
+  majority verdict and a disagreement flag. A classify routes the run by
+  agreement strength (UNANIMOUS / MAJORITY / SPLIT). When the providers agree
+  (unanimous or majority) the decision is transformed with cited rationales,
+  written back to the system of record and announced on Slack. When they SPLIT,
+  a human reviewer adjudicates with all three votes shown, the human verdict is
+  posted back to the record and announced. No single provider is load-bearing:
+  drop any one and you change exactly one vote, never the mechanism.
+default_model: sonnet
+default_timeout: 900
+input_schema:
+  required: ["case_id", "record_endpoint", "decision_question"]
+  properties:
+    case_id:
+      type: string
+      description: "Primary key of the case record to decide on (row id in the system of record)."
+      example: "case_84217"
+    record_endpoint:
+      type: string
+      description: "Base URL of the system-of-record REST API (PostgREST over Postgres), e.g. https://records.internal/rest/v1"
+      default: "https://records.internal/rest/v1"
+    decision_question:
+      type: string
+      description: "The exact high-stakes yes/no (or approve/reject) question every provider must answer about the case."
+      example: "Should this insurance claim be APPROVED for payout based on the evidence on file?"
+    slack_channel:
+      type: string
+      description: "Slack channel for the decision announcement."
+      default: "#decisions"
+
+steps:
+  # 1) Fetch + enrich the case record from the system of record (Postgres via PostgREST).
+  #    embed=* pulls related rows so every provider sees the same enriched evidence.
+  - id: fetch
+    type: http
+    http_config:
+      url: "{input.record_endpoint}/cases?id=eq.{input.case_id}&select=*,evidence(*),history(*)"
+      method: GET
+      headers:
+        Accept: "application/json"
+        Prefer: "count=exact"
+      auth: "bearer:{env.RECORDS_API_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2) THREE provider votes, all depends_on [fetch], all rendering the IDENTICAL
+  #    structured-decision prompt over the same enriched record. This is CONSENSUS:
+  #    three independent opinions that we tally, NOT a first-valid-wins race.
+
+  # 2a) Vote A - Anthropic Sonnet.
+  - id: vote_anthropic
+    type: standard
+    model: sonnet
+    depends_on: [fetch]
+    prompt: |
+      You are an INDEPENDENT decision reviewer (Provider A). Answer the following
+      high-stakes question about the case record below. Decide ONLY from the
+      evidence shown. Do not hedge - commit to a verdict and calibrate confidence.
+
+      DECISION QUESTION:
+      {input.decision_question}
+
+      CASE RECORD (enriched JSON from the system of record):
+      {steps.fetch.output}
+
+      Return STRICT JSON only:
+      {
+        "verdict": "<APPROVE | REJECT>",
+        "confidence": <float 0.0-1.0, calibrated - lower it when evidence is thin or conflicting>,
+        "rationale": "<2-3 sentences citing the specific evidence fields that drove your verdict>"
+      }
+    output_schema:
+      type: object
+      properties:
+        verdict:
+          type: string
+          description: "APPROVE or REJECT"
+        confidence:
+          type: number
+          description: "calibrated confidence 0.0-1.0"
+        rationale:
+          type: string
+          description: "evidence-cited justification"
+
+  # 2b) Vote B - Google Gemini 2.5 Pro (DIFFERENT provider, identical prompt).
+  - id: vote_gemini
+    type: standard
+    model: google/gemini-2.5-pro
+    depends_on: [fetch]
+    prompt: |
+      You are an INDEPENDENT decision reviewer (Provider B). Answer the following
+      high-stakes question about the case record below. Decide ONLY from the
+      evidence shown. Do not hedge - commit to a verdict and calibrate confidence.
+
+      DECISION QUESTION:
+      {input.decision_question}
+
+      CASE RECORD (enriched JSON from the system of record):
+      {steps.fetch.output}
+
+      Return STRICT JSON only:
+      {
+        "verdict": "<APPROVE | REJECT>",
+        "confidence": <float 0.0-1.0, calibrated - lower it when evidence is thin or conflicting>,
+        "rationale": "<2-3 sentences citing the specific evidence fields that drove your verdict>"
+      }
+    output_schema:
+      type: object
+      properties:
+        verdict:
+          type: string
+          description: "APPROVE or REJECT"
+        confidence:
+          type: number
+          description: "calibrated confidence 0.0-1.0"
+        rationale:
+          type: string
+          description: "evidence-cited justification"
+
+  # 2c) Vote C - Mistral Large (DIFFERENT provider, identical prompt).
+  - id: vote_mistral
+    type: standard
+    model: mistral/large
+    depends_on: [fetch]
+    prompt: |
+      You are an INDEPENDENT decision reviewer (Provider C). Answer the following
+      high-stakes question about the case record below. Decide ONLY from the
+      evidence shown. Do not hedge - commit to a verdict and calibrate confidence.
+
+      DECISION QUESTION:
+      {input.decision_question}
+
+      CASE RECORD (enriched JSON from the system of record):
+      {steps.fetch.output}
+
+      Return STRICT JSON only:
+      {
+        "verdict": "<APPROVE | REJECT>",
+        "confidence": <float 0.0-1.0, calibrated - lower it when evidence is thin or conflicting>,
+        "rationale": "<2-3 sentences citing the specific evidence fields that drove your verdict>"
+      }
+    output_schema:
+      type: object
+      properties:
+        verdict:
+          type: string
+          description: "APPROVE or REJECT"
+        confidence:
+          type: number
+          description: "calibrated confidence 0.0-1.0"
+        rationale:
+          type: string
+          description: "evidence-cited justification"
+
+  # 3) TALLY - deterministic, provider-neutral consensus math. Reads the three
+  #    independent votes from _steps, normalizes verdicts, computes the majority
+  #    verdict, agreement ratio, unanimity and a disagreement flag. THIS is the
+  #    load-bearing decision: pure code, no single model can swing it.
+  - id: tally
+    type: code
+    depends_on: [vote_anthropic, vote_gemini, vote_mistral]
+    code_config:
+      language: python
+      code: |
+        # Pull the three independent provider votes.
+        raw = {
+            'anthropic': _steps.get('vote_anthropic'),
+            'gemini': _steps.get('vote_gemini'),
+            'mistral': _steps.get('vote_mistral'),
+        }
+
+        def norm_verdict(v):
+            s = str(v or '').strip().upper()
+            if s.startswith('APPROV') or s in ('YES', 'TRUE', 'PASS'):
+                return 'APPROVE'
+            if s.startswith('REJECT') or s in ('NO', 'FALSE', 'FAIL', 'DENY'):
+                return 'REJECT'
+            return 'ABSTAIN'
+
+        votes = []
+        for provider, out in raw.items():
+            verdict = None
+            confidence = 0.0
+            rationale = ''
+            if isinstance(out, dict):
+                verdict = norm_verdict(out.get('verdict'))
+                try:
+                    confidence = float(out.get('confidence', 0.0) or 0.0)
+                except (TypeError, ValueError):
+                    confidence = 0.0
+                rationale = str(out.get('rationale', '') or '')
+            else:
+                # Fallback: best-effort verdict read from a stringified output.
+                verdict = norm_verdict(out)
+                rationale = str(out or '')
+            votes.append({
+                'provider': provider,
+                'verdict': verdict,
+                'confidence': round(confidence, 4),
+                'rationale': rationale,
+            })
+
+        # Tally only decisive (non-abstain) verdicts.
+        decisive = [v for v in votes if v['verdict'] in ('APPROVE', 'REJECT')]
+        total = len(decisive)
+        approve = sum(1 for v in decisive if v['verdict'] == 'APPROVE')
+        reject = sum(1 for v in decisive if v['verdict'] == 'REJECT')
+
+        if approve > reject:
+            decision = 'APPROVE'
+            winning = approve
+        elif reject > approve:
+            decision = 'REJECT'
+            winning = reject
+        else:
+            decision = 'TIE'
+            winning = max(approve, reject)
+
+        agreement = round(winning / total, 4) if total else 0.0
+        unanimous = total == 3 and winning == 3
+        # Disagreement = no clear majority (tie / split, or fewer than 2 agree).
+        disagreement = decision == 'TIE' or winning < 2
+
+        result = {
+            'case_id': _input.get('case_id'),
+            'decision': decision,
+            'agreement': agreement,
+            'unanimous': unanimous,
+            'disagreement': disagreement,
+            'approve_count': approve,
+            'reject_count': reject,
+            'decisive_votes': total,
+            'votes': votes,
+        }
+
+  # 4) CLASSIFY by agreement strength. Drives which downstream branch runs.
+  #    UNANIMOUS/MAJORITY -> route_decision (the agree path). SPLIT -> adjudicate.
+  - id: classify_agreement
+    type: classify
+    depends_on: [tally]
+    classify_config:
+      categories: ["UNANIMOUS", "MAJORITY", "SPLIT"]
+      input: "{steps.tally.output}"
+      model: haiku
+      branches:
+        UNANIMOUS: ["route_decision"]
+        MAJORITY: ["route_decision"]
+        SPLIT: ["adjudicate"]
+
+  # 5) CONDITION on the deterministic disagreement flag. The code tally - not a
+  #    model - decides the path. agree path: transform -> write-back -> notify.
+  #    split path: human adjudication.
+  - id: route_decision
+    type: condition
+    depends_on: [classify_agreement]
+    condition_config:
+      expression: "{steps.tally.output.disagreement} == False"
+      then: [compose_decision, write_back, notify_decision]
+      else: [adjudicate, write_back_split, notify_split]
+
+  # 5a-AGREE) Compose the final decision document with all three cited rationales.
+  - id: compose_decision
+    type: transform
+    transform_config:
+      template: |
+        {
+          "case_id": "{steps.tally.output.case_id}",
+          "final_decision": "{steps.tally.output.decision}",
+          "decided_by": "provider-consensus",
+          "agreement_ratio": {steps.tally.output.agreement},
+          "unanimous": {steps.tally.output.unanimous},
+          "approve_votes": {steps.tally.output.approve_count},
+          "reject_votes": {steps.tally.output.reject_count},
+          "provider_votes": {steps.tally.output.votes},
+          "question": "{input.decision_question}"
+        }
+
+  # 5b-AGREE) Write the consensus decision + per-provider votes back to the record.
+  - id: write_back
+    type: http
+    http_config:
+      url: "{input.record_endpoint}/case_decisions"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Prefer: "resolution=merge-duplicates,return=representation"
+      auth: "bearer:{env.RECORDS_API_TOKEN}"
+      body: "{steps.compose_decision.output}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 5c-AGREE) Announce the consensus decision on Slack.
+  - id: notify_decision
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        Consensus decision on case {steps.tally.output.case_id}: *{steps.tally.output.decision}*
+        Agreement {steps.tally.output.agreement} (unanimous: {steps.tally.output.unanimous})
+        Approve {steps.tally.output.approve_count} / Reject {steps.tally.output.reject_count}
+        Written back to the system of record.
+
+  # 5d-SPLIT) Human breaks the tie. All three votes shown for adjudication.
+  - id: adjudicate
+    type: approval
+    approval_config:
+      message: |
+        Providers SPLIT on case {input.case_id}. No majority verdict. A human must
+        adjudicate this high-stakes decision. Review all three provider votes and
+        choose APPROVE or REJECT.
+      show_data: "steps.tally.output"
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: true
+
+  # 5e-SPLIT) Write the human-adjudicated decision + the original split votes back.
+  - id: write_back_split
+    type: http
+    http_config:
+      url: "{input.record_endpoint}/case_decisions"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Prefer: "resolution=merge-duplicates,return=representation"
+      auth: "bearer:{env.RECORDS_API_TOKEN}"
+      body: "{steps.adjudicate.output}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 5f-SPLIT) Announce that a human adjudicated the split decision.
+  - id: notify_split
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        Case {input.case_id} was SPLIT across providers and adjudicated by a human reviewer.
+        Original votes: {steps.tally.output.votes}
+        Human decision written back to the system of record.
+
+on_complete:
+  storage_path: "provider-consensus-decision-engine/{run_id}/result.json"

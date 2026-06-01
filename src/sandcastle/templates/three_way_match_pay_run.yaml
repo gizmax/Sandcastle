@@ -1,0 +1,392 @@
+# name: Three-Way Match Pay Run
+# description: Scheduled accounts-payable pay-run with a deterministic 3-way match (PO vs goods-receipt vs invoice). The money decision is model-free code; the only model touch is invoice parse + a policy gate summary.
+# tags: [finance, accounts-payable, three-way-match, quickbooks, sap, slack, deterministic]
+# category: general_ai
+name: three-way-match-pay-run
+description: >-
+  Scheduled accounts-payable pay-run that settles a vendor invoice ONLY after a
+  deterministic 3-way match passes. A model parses the invoice PDF, then the
+  purchase order and the goods-receipt are pulled from the ERP REST API
+  (QuickBooks / SAP). The reconciliation is pure Python: quantity, unit-price and
+  total tolerance math, a duplicate-invoice hash, currency normalization and a
+  debit==credit balance check. No model ever decides whether to pay. The
+  match_status drives a classifier and a deterministic condition that blocks
+  duplicates and over-PO billing, requires controller approval on variance, and
+  auto-posts on a full match. A gate produces a plain-English policy summary
+  (LLM) and requires a human sign-off for exceptions, the controller approves
+  variances seeing the exact variance, and only then is the approved bill /
+  journal entry POSTed back to the ERP and the AP channel notified in Slack.
+default_model: sonnet
+default_timeout: 900
+input_schema:
+  required: ["invoice_file", "erp_base", "po_number"]
+  properties:
+    invoice_file:
+      type: string
+      description: "Path or upload reference to the vendor invoice PDF to be matched and paid."
+      default: ""
+    erp_base:
+      type: string
+      description: "Base URL of the ERP REST API (QuickBooks Online or SAP), e.g. https://quickbooks.api.intuit.com/v3/company/123456789"
+      default: "https://quickbooks.api.intuit.com/v3/company/123456789"
+    po_number:
+      type: string
+      description: "Purchase order number referenced by the invoice, looked up in the ERP."
+      default: ""
+    tolerance_pct:
+      type: number
+      description: "Allowed percentage variance on unit price and line/invoice totals before a variance is flagged."
+      default: 2.0
+    ap_channel:
+      type: string
+      description: "Slack channel for the accounts-payable pay-run notifications."
+      default: "#accounts-payable"
+
+steps:
+  # 1) Parse the invoice PDF: extract header + line items as structured markdown/JSON.
+  #    The ONLY model touch on the data path besides the gate summary.
+  - id: parse_invoice
+    type: parse
+    responsibility: "Extract invoice header (number, vendor, currency, totals) and line items from the PDF."
+    source_hint: "The vendor invoice is the bill we are about to pay; it must be read before matching."
+    owner: "ap-ops"
+    prompt: "{input.invoice_file}"
+    parse_config:
+      output: markdown
+      pages: null
+      ocr: true
+      ocr_engine: auto
+
+  # 2) GET the referenced purchase order from the ERP REST (what was ORDERED).
+  - id: fetch_po
+    type: http
+    depends_on: [parse_invoice]
+    responsibility: "Pull the authoritative purchase order (ordered qty/price/total) from the ERP."
+    source_hint: "Matching against the vendor's own numbers is meaningless; the PO is the system of record."
+    owner: "ap-ops"
+    http_config:
+      url: "{input.erp_base}/purchaseorder/{input.po_number}"
+      method: GET
+      auth: "bearer:{env.ERP_ACCESS_TOKEN}"
+      headers:
+        Accept: "application/json"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 3) GET the goods-receipt / delivery record from the ERP REST (what was RECEIVED).
+  - id: fetch_receipt
+    type: http
+    depends_on: [parse_invoice]
+    responsibility: "Pull the goods-receipt / delivery record (received qty) tied to this PO from the ERP."
+    source_hint: "Three-way match requires proof of receipt, not just an order and a bill."
+    owner: "ap-ops"
+    http_config:
+      url: "{input.erp_base}/itemreceipt?po={input.po_number}"
+      method: GET
+      auth: "bearer:{env.ERP_ACCESS_TOKEN}"
+      headers:
+        Accept: "application/json"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 4) DETERMINISTIC 3-way reconcile - the money decision. Pure Python, NO model.
+  #    Reads parsed invoice + PO + receipt; does tolerance math, duplicate hash,
+  #    currency normalize and debit==credit balance; emits match_status + variance.
+  - id: reconcile
+    type: code
+    depends_on: [parse_invoice, fetch_po, fetch_receipt]
+    responsibility: "Reconcile invoice vs PO vs goods-receipt deterministically and set the match_status."
+    source_hint: "Finance requires the pay/no-pay outcome to be reproducible and fully model-independent."
+    owner: "finance-eng"
+    code_config:
+      language: python
+      code: |
+        # ------------------------------------------------------------------
+        # Deterministic 3-way match. Identical output regardless of any model.
+        # _steps: upstream outputs; _input: workflow inputs.
+        # ------------------------------------------------------------------
+        import hashlib
+
+        invoice = _steps.get('parse_invoice') or {}
+        po = _steps.get('fetch_po') or {}
+        receipt = _steps.get('fetch_receipt') or {}
+        tol = float(_input.get('tolerance_pct', 2.0) or 2.0) / 100.0
+
+        def _num(v):
+            # Robust numeric coercion: strip currency symbols / commas.
+            if isinstance(v, (int, float)):
+                return float(v)
+            if v is None:
+                return 0.0
+            s = str(v).strip().replace(',', '')
+            for sym in ('$', '€', '£', 'USD', 'EUR', 'GBP'):
+                s = s.replace(sym, '')
+            s = s.strip()
+            try:
+                return float(s)
+            except (TypeError, ValueError):
+                return 0.0
+
+        def _lines(doc):
+            # Normalize a doc's line items to a list of dicts no matter the shape.
+            if isinstance(doc, dict):
+                for key in ('line_items', 'lines', 'Line', 'items'):
+                    v = doc.get(key)
+                    if isinstance(v, list):
+                        return [x for x in v if isinstance(x, dict)]
+            if isinstance(doc, list):
+                return [x for x in doc if isinstance(x, dict)]
+            return []
+
+        def _get(d, *keys, default=None):
+            for k in keys:
+                if isinstance(d, dict) and k in d and d.get(k) not in (None, ''):
+                    return d.get(k)
+            return default
+
+        # --- Currency normalization (warn-only; we match in the PO currency) ----
+        inv_ccy = str(_get(invoice, 'currency', 'CurrencyRef', default='USD')).upper()[:3] or 'USD'
+        po_ccy = str(_get(po, 'currency', 'CurrencyRef', default=inv_ccy)).upper()[:3] or inv_ccy
+        currency_mismatch = bool(inv_ccy and po_ccy and inv_ccy != po_ccy)
+
+        # --- Duplicate-invoice hash (vendor + invoice number + total) -----------
+        inv_no = str(_get(invoice, 'invoice_number', 'DocNumber', 'number', default='') or '')
+        vendor = str(_get(invoice, 'vendor', 'VendorRef', 'supplier', default='') or '')
+        inv_total = _num(_get(invoice, 'total', 'TotalAmt', 'total_amount', 'balance_due', default=0))
+        dup_hash = hashlib.sha256(f'{vendor}|{inv_no}|{inv_total:.2f}'.encode()).hexdigest()
+        # Already-paid hashes the ERP returned alongside the PO (if any).
+        paid_hashes = set()
+        if isinstance(po, dict):
+            for h in (po.get('paid_invoice_hashes') or []):
+                paid_hashes.add(str(h))
+        duplicate = dup_hash in paid_hashes
+
+        # --- Build qty / unit-price maps keyed by SKU for line matching ---------
+        def _index(doc):
+            idx = {}
+            for ln in _lines(doc):
+                sku = str(_get(ln, 'sku', 'item', 'ItemRef', 'code', 'description', default='') or '').strip().lower()
+                if not sku:
+                    continue
+                idx[sku] = {
+                    'qty': _num(_get(ln, 'qty', 'quantity', 'Qty', default=0)),
+                    'unit_price': _num(_get(ln, 'unit_price', 'UnitPrice', 'price', 'Rate', default=0)),
+                    'amount': _num(_get(ln, 'amount', 'Amount', 'line_total', 'subtotal', default=0)),
+                }
+            return idx
+
+        inv_idx, po_idx, rcpt_idx = _index(invoice), _index(po), _index(receipt)
+
+        lines = []
+        any_price_var = any_qty_var = no_po_line = over_receipt = False
+        for sku, iv in inv_idx.items():
+            pv = po_idx.get(sku)
+            rv = rcpt_idx.get(sku)
+            if pv is None:
+                no_po_line = True
+                lines.append({'sku': sku, 'status': 'NO_PO_LINE',
+                              'invoice_qty': iv['qty'], 'invoice_price': iv['unit_price']})
+                continue
+            # Price tolerance.
+            price_var = abs(iv['unit_price'] - pv['unit_price'])
+            price_tol = pv['unit_price'] * tol
+            price_ok = price_var <= max(price_tol, 0.005)
+            # Qty: invoiced must not exceed ordered (allow tolerance) ...
+            qty_ok = iv['qty'] <= pv['qty'] * (1 + tol) + 1e-9
+            # ... and must not exceed what was actually received.
+            recv_qty = rv['qty'] if rv else 0.0
+            recv_ok = iv['qty'] <= recv_qty + 1e-9
+            if not price_ok:
+                any_price_var = True
+            if not qty_ok:
+                any_qty_var = True
+            if not recv_ok:
+                over_receipt = True
+            lines.append({
+                'sku': sku,
+                'invoice_qty': iv['qty'], 'po_qty': pv['qty'], 'received_qty': recv_qty,
+                'invoice_price': iv['unit_price'], 'po_price': pv['unit_price'],
+                'price_ok': price_ok, 'qty_ok': qty_ok, 'received_ok': recv_ok,
+                'status': 'OK' if (price_ok and qty_ok and recv_ok) else 'VARIANCE',
+            })
+
+        # --- Total-level tolerance + debit==credit balance ----------------------
+        po_total = _num(_get(po, 'total', 'TotalAmt', 'total_amount', default=0))
+        total_var = abs(inv_total - po_total)
+        total_tol = po_total * tol
+        total_ok = total_var <= max(total_tol, 0.01)
+        over_po = inv_total > po_total * (1 + tol) + 0.01
+        # Books balance: sum of debited line amounts must equal the credited total.
+        debit = round(sum(_num(_get(ln, 'amount', 'Amount', 'line_total', default=0))
+                          for ln in _lines(invoice)), 2)
+        credit = round(inv_total, 2)
+        balanced = abs(debit - credit) <= 0.01 or debit == 0.0
+
+        # --- Deterministic match_status (priority order) ------------------------
+        if duplicate:
+            match_status = 'DUPLICATE'
+        elif not po or po_total <= 0:
+            match_status = 'NO_PO'
+        elif no_po_line or over_po:
+            match_status = 'PRICE_VARIANCE' if any_price_var else 'QTY_VARIANCE'
+        elif any_price_var or not total_ok or currency_mismatch:
+            match_status = 'PRICE_VARIANCE'
+        elif any_qty_var or over_receipt:
+            match_status = 'QTY_VARIANCE'
+        else:
+            match_status = 'FULL_MATCH'
+
+        result = {
+            'match_status': match_status,
+            'duplicate': duplicate,
+            'duplicate_hash': dup_hash,
+            'variance': {
+                'price_variance': any_price_var,
+                'qty_variance': any_qty_var,
+                'over_po': over_po,
+                'over_receipt': over_receipt,
+                'currency_mismatch': currency_mismatch,
+                'total_variance_amount': round(total_var, 2),
+                'total_ok': total_ok,
+            },
+            'balanced': balanced,
+            'debit': debit,
+            'credit': credit,
+            'invoice_total': round(inv_total, 2),
+            'po_total': round(po_total, 2),
+            'currency': po_ccy,
+            'invoice_number': inv_no,
+            'vendor': vendor,
+            'lines': lines,
+            'tolerance_pct': float(_input.get('tolerance_pct', 2.0) or 2.0),
+        }
+
+  # 5) CLASSIFY the deterministic match_status into a routing bucket.
+  #    Routing only - the code above already decided; this just dispatches.
+  - id: classify_match
+    type: classify
+    depends_on: [reconcile]
+    responsibility: "Dispatch the deterministic match_status to the right downstream handling."
+    source_hint: "Each match outcome needs a different control path (block / approve / auto-post)."
+    owner: "ap-ops"
+    classify_config:
+      model: haiku
+      input: "Deterministic match result: {steps.reconcile.output}"
+      categories:
+        - FULL_MATCH
+        - PRICE_VARIANCE
+        - QTY_VARIANCE
+        - NO_PO
+        - DUPLICATE
+      branches:
+        FULL_MATCH: [decide_route]
+        PRICE_VARIANCE: [decide_route]
+        QTY_VARIANCE: [decide_route]
+        NO_PO: [decide_route]
+        DUPLICATE: [decide_route]
+
+  # 6) DETERMINISTIC route gate: block duplicates / over-PO, require approval on
+  #    variance, auto-post on full match. Reads the code result, not a model.
+  - id: decide_route
+    type: condition
+    depends_on: [reconcile, classify_match]
+    responsibility: "Block duplicates/over-PO, route variance to approval, auto-post full matches."
+    source_hint: "Pay/no-pay branching must be a deterministic function of the reconcile output."
+    owner: "finance-eng"
+    condition_config:
+      expression: "'{steps.reconcile.output.match_status}' == 'FULL_MATCH' and {steps.reconcile.output.balanced}"
+      then: [policy_gate]
+      else: [exception_approval]
+
+  # --- Exception path: gate summary + human, then controller sign-off ----------
+  # 7) GATE - LLM writes a plain-English policy summary AND a human must sign off.
+  #    The only other model touch besides parse. The gate cannot change numbers.
+  - id: policy_gate
+    type: gate
+    depends_on: [decide_route]
+    responsibility: "Summarize the match against AP policy and require human oversight before posting."
+    source_hint: "EU AI Act + finance controls require human oversight on automated payment posting."
+    owner: "finance-controls"
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              Summarize whether this 3-way match result satisfies AP pay-run policy
+              (no duplicate, within tolerance, debit==credit balanced). Answer
+              'approved' only if match_status is FULL_MATCH and balanced is true;
+              otherwise 'rejected'. Do NOT change any amount.
+            input: "{steps.reconcile.output}"
+            model: sonnet
+        - type: human
+          config:
+            message: "Confirm the AP pay-run posting for this full-match invoice."
+            timeout_hours: 24
+            on_timeout: abort
+
+  # 8) Controller approval for exceptions (variance / no-PO). show_data = variance.
+  - id: exception_approval
+    type: approval
+    depends_on: [decide_route]
+    responsibility: "Controller signs off variance / no-PO invoices, seeing the exact computed variance."
+    source_hint: "Anything off full-match needs an accountable human owner before any money moves."
+    owner: "ap-controller"
+    approval_config:
+      message: >-
+        Three-way match exception for invoice {steps.reconcile.output.invoice_number}
+        (PO {input.po_number}). Review the deterministic variance below and approve
+        or reject posting. The match outcome and amounts are set by policy, not by you.
+      show_data: steps.reconcile.output.variance
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: true
+
+  # 9) POST the approved bill / journal entry back to the ERP (QuickBooks / SAP).
+  #    Depends on BOTH branch heads so it runs whichever path approved the invoice.
+  - id: post_bill
+    type: http
+    depends_on: [policy_gate, exception_approval]
+    responsibility: "Create the approved AP bill / journal entry in the ERP for the matched amount."
+    source_hint: "This is the money-moving call; the amount comes only from the deterministic reconcile."
+    owner: "finance-eng"
+    http_config:
+      url: "{input.erp_base}/bill"
+      method: POST
+      auth: "bearer:{env.ERP_ACCESS_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      body:
+        VendorRef:
+          value: "{steps.reconcile.output.vendor}"
+        DocNumber: "{steps.reconcile.output.invoice_number}"
+        TotalAmt: "{steps.reconcile.output.invoice_total}"
+        CurrencyRef:
+          value: "{steps.reconcile.output.currency}"
+        LinkedTxn:
+          - TxnId: "{input.po_number}"
+            TxnType: "PurchaseOrder"
+        PrivateNote: "3-way match {steps.reconcile.output.match_status}; debit {steps.reconcile.output.debit} == credit {steps.reconcile.output.credit}."
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
+
+  # 10) Notify the AP channel in Slack with the posted result.
+  - id: notify_ap
+    type: notify
+    depends_on: [post_bill]
+    responsibility: "Announce the settled pay-run outcome to the accounts-payable team."
+    source_hint: "AP needs a visible audit trail of every posted bill in the team channel."
+    owner: "ap-ops"
+    notify_config:
+      service: slack
+      channel: "{input.ap_channel}"
+      message: "Pay-run posted: invoice {steps.reconcile.output.invoice_number} (PO {input.po_number}) status {steps.reconcile.output.match_status}, amount {steps.reconcile.output.invoice_total} {steps.reconcile.output.currency}. ERP bill: {steps.post_bill.output}."
+
+on_complete:
+  storage_path: "three-way-match-pay-run/{run_id}/result.json"

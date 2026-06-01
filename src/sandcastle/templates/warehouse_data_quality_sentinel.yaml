@@ -1,0 +1,367 @@
+# name: Warehouse Data-Quality Sentinel
+# description: Scheduled, deterministic data-quality sentinel over a warehouse - drift, freshness, null-spike and volume anomalies caught by code, narrated by a cross-provider race, ticketed and digested.
+# tags: [data-quality, warehouse, snowflake, postgres, observability, monitoring]
+# category: data
+name: warehouse-data-quality-sentinel
+description: >-
+  A scheduled data-quality sentinel for a warehouse. It pulls a table registry and
+  the expected thresholds from a control table (Snowflake / Postgres via REST), then
+  loops every registered table: query its vital stats (row count, null %, freshness,
+  key cardinality), run 100% DETERMINISTIC checks in code (z-score drift versus a
+  trailing baseline, freshness-SLA breach, null-spike ratio, volume anomaly), and
+  classify the failure mode. A code step aggregates per-table results and counts
+  failures by type. A condition routes: any non-healthy table triggers ticketing +
+  escalation, otherwise an all-clear notice. The ONLY model work is a cross-provider
+  RACE (Sonnet vs Gemini 2.5 Pro, first-valid-wins failover) that writes a
+  human-readable root-cause narrative on the failing tables. Tickets are POSTed to
+  Jira / Linear per failure class, and a data-quality digest is posted to Slack.
+  Detection is deterministic; the model only writes prose.
+default_model: sonnet
+default_timeout: 1200
+input_schema:
+  required: ["warehouse_endpoint", "registry_table"]
+  properties:
+    warehouse_endpoint:
+      type: string
+      description: "Base URL of the warehouse REST gateway (Snowflake SQL API or PostgREST over Postgres), e.g. https://warehouse.internal/api/v2"
+      default: "https://warehouse.internal/api/v2"
+    registry_table:
+      type: string
+      description: "Name of the control table holding the table registry + expected thresholds (baseline mean/std, null ceiling, freshness SLA, expected row volume, FK column)."
+      default: "dq_control.table_registry"
+    baseline_window:
+      type: integer
+      description: "Trailing window (in prior runs/days) used as the drift baseline for the z-score test."
+      default: 30
+    z_threshold:
+      type: number
+      description: "Absolute z-score above which a metric is flagged as drifted / volume-anomalous."
+      default: 3.0
+steps:
+  # 1) Pull the table registry + expected thresholds from the control table.
+  #    Snowflake SQL API / PostgREST over Postgres. Returns a list of table specs.
+  - id: "registry"
+    type: http
+    http_config:
+      url: "{input.warehouse_endpoint}/tables?select=*&control_table=eq.{input.registry_table}&active=eq.true"
+      method: GET
+      headers:
+        Accept: "application/json"
+        Prefer: "count=exact"
+      auth: "bearer:{env.WAREHOUSE_API_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2) Loop over every registered table: query its stats -> deterministic checks -> classify.
+  - id: "scan_tables"
+    type: loop
+    depends_on: ["registry"]
+    loop_config:
+      over: "steps.registry.output"
+      step_ids: ["query_table", "run_checks", "classify_failure"]
+      max_iterations: 200
+
+  # 2a) QUERY this table's vital stats from the warehouse (row count, null %, freshness,
+  #     key cardinality). The {{ _item }} carries this table's registry spec.
+  - id: "query_table"
+    type: http
+    http_config:
+      url: "{input.warehouse_endpoint}/query"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.WAREHOUSE_API_TOKEN}"
+      body: |
+        {
+          "statement": "SELECT COUNT(*) AS row_count, AVG(CASE WHEN {{ _item.null_check_column }} IS NULL THEN 1.0 ELSE 0.0 END) AS null_ratio, MAX({{ _item.updated_at_column }}) AS max_updated_at, COUNT(DISTINCT {{ _item.key_column }}) AS key_cardinality FROM {{ _item.fully_qualified_name }}",
+          "table": "{{ _item.fully_qualified_name }}",
+          "timeout": 120
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 2b) DETERMINISTIC checks. NO model. Pure code: z-score drift vs trailing baseline,
+  #     freshness-SLA breach, null-spike ratio, volume anomaly. Reads this table's
+  #     registry spec (_item) + the freshly queried stats (_steps['query_table']).
+  - id: "run_checks"
+    type: code
+    code_config:
+      language: python
+      code: |
+        # ---- inputs -------------------------------------------------------------
+        spec = _input.get('_item') or {}          # registry row: thresholds + baseline
+        stats = _steps.get('query_table') or {}   # freshly queried vital stats
+        if isinstance(stats, dict) and isinstance(stats.get('rows'), list) and stats['rows']:
+            # Some warehouse REST gateways wrap results in {"rows": [ {...} ]}
+            stats = stats['rows'][0] if isinstance(stats['rows'][0], dict) else stats
+
+        z_threshold = float(_input.get('z_threshold', 3.0) or 3.0)
+
+        def num(d, *keys, default=0.0):
+            for k in keys:
+                if isinstance(d, dict) and d.get(k) is not None:
+                    try:
+                        return float(d.get(k))
+                    except (TypeError, ValueError):
+                        continue
+            return float(default)
+
+        # ---- observed metrics ---------------------------------------------------
+        row_count = num(stats, 'row_count', 'count')
+        null_ratio = num(stats, 'null_ratio', 'null_pct')
+        key_cardinality = num(stats, 'key_cardinality', 'distinct_keys')
+        max_updated_at = stats.get('max_updated_at') if isinstance(stats, dict) else None
+
+        # ---- expected baseline (from the control table spec) --------------------
+        baseline_mean = num(spec, 'baseline_row_mean', 'expected_rows')
+        baseline_std = num(spec, 'baseline_row_std', default=0.0)
+        null_ceiling = num(spec, 'null_ceiling', default=0.05)
+        freshness_sla_hours = num(spec, 'freshness_sla_hours', default=24.0)
+        observed_freshness_hours = num(stats, 'freshness_lag_hours', default=-1.0)
+        expected_min_cardinality = num(spec, 'min_key_cardinality', default=1.0)
+
+        issues = []
+
+        # (1) VOLUME ANOMALY / z-score drift vs trailing baseline
+        if baseline_std > 0:
+            z = (row_count - baseline_mean) / baseline_std
+        else:
+            # no usable std -> fall back to a +/-50% band around the mean
+            z = 0.0 if baseline_mean == 0 else (row_count - baseline_mean) / (0.5 * baseline_mean)
+        if abs(z) >= z_threshold:
+            issues.append({
+                'check': 'volume_anomaly',
+                'z_score': round(z, 3),
+                'observed_rows': row_count,
+                'expected_rows': baseline_mean,
+            })
+
+        # (2) FRESHNESS-SLA breach
+        if observed_freshness_hours >= 0 and observed_freshness_hours > freshness_sla_hours:
+            issues.append({
+                'check': 'freshness_breach',
+                'observed_lag_hours': observed_freshness_hours,
+                'sla_hours': freshness_sla_hours,
+            })
+
+        # (3) NULL-SPIKE ratio
+        if null_ratio > null_ceiling:
+            issues.append({
+                'check': 'null_spike',
+                'null_ratio': round(null_ratio, 4),
+                'null_ceiling': null_ceiling,
+                'spike_x': round(null_ratio / null_ceiling, 2) if null_ceiling > 0 else None,
+            })
+
+        # (4) REFERENTIAL break - key cardinality collapsed below expected floor
+        if key_cardinality < expected_min_cardinality:
+            issues.append({
+                'check': 'referential_break',
+                'observed_cardinality': key_cardinality,
+                'expected_min_cardinality': expected_min_cardinality,
+            })
+
+        # ---- severity (deterministic) ------------------------------------------
+        if not issues:
+            severity = 'none'
+        elif any(i['check'] in ('referential_break', 'freshness_breach') for i in issues):
+            severity = 'critical'
+        elif len(issues) >= 2:
+            severity = 'high'
+        else:
+            severity = 'medium'
+
+        result = {
+            'table': spec.get('fully_qualified_name') or spec.get('name') or 'unknown',
+            'issues': issues,
+            'issue_count': len(issues),
+            'severity': severity,
+            'metrics': {
+                'row_count': row_count,
+                'null_ratio': round(null_ratio, 4),
+                'key_cardinality': key_cardinality,
+                'max_updated_at': max_updated_at,
+            },
+        }
+
+  # 2c) CLASSIFY the dominant failure mode for this table from the deterministic findings.
+  #     Cheap model only labels; the decision (whether it failed) was already made in code.
+  - id: "classify_failure"
+    type: classify
+    classify_config:
+      categories: ["schema_drift", "freshness_breach", "null_spike", "volume_anomaly", "referential_break", "healthy"]
+      input: "{steps.run_checks.output}"
+      model: haiku
+      branches:
+        schema_drift: []
+        freshness_breach: []
+        null_spike: []
+        volume_anomaly: []
+        referential_break: []
+        healthy: []
+
+  # 3) AGGREGATE all per-table results: count failures by type. Deterministic.
+  - id: "aggregate"
+    type: code
+    depends_on: ["scan_tables"]
+    code_config:
+      language: python
+      code: |
+        # The loop output is the list of per-table `run_checks` results.
+        rows = _steps.get('scan_tables') or []
+        if isinstance(rows, dict):
+            rows = rows.get('results') or rows.get('items') or list(rows.values())
+        if not isinstance(rows, list):
+            rows = [rows]
+        rows = [r for r in rows if isinstance(r, dict)]
+
+        total = len(rows)
+        by_type = {
+            'schema_drift': 0,
+            'freshness_breach': 0,
+            'null_spike': 0,
+            'volume_anomaly': 0,
+            'referential_break': 0,
+        }
+        failing = []
+        for r in rows:
+            tbl_issues = r.get('issues') or []
+            if not tbl_issues:
+                continue
+            failing.append({
+                'table': r.get('table'),
+                'severity': r.get('severity'),
+                'checks': [i.get('check') for i in tbl_issues],
+                'issue_count': r.get('issue_count', len(tbl_issues)),
+            })
+            for i in tbl_issues:
+                chk = i.get('check')
+                if chk in by_type:
+                    by_type[chk] += 1
+                elif chk == 'schema_drift':
+                    by_type['schema_drift'] += 1
+
+        fail_count = len(failing)
+        critical = [f for f in failing if f.get('severity') == 'critical']
+
+        result = {
+            'tables_scanned': total,
+            'fail_count': fail_count,
+            'healthy_count': total - fail_count,
+            'critical_count': len(critical),
+            'failures_by_type': by_type,
+            'failing_tables': failing,
+            'all_clear': fail_count == 0,
+        }
+
+  # 4) CONDITION: any non-healthy table -> ticket + escalate root cause; else all-clear.
+  - id: "route_outcome"
+    type: condition
+    depends_on: ["aggregate"]
+    condition_config:
+      expression: "{steps.aggregate.output.fail_count} > 0"
+      then: ["root_cause_race", "open_tickets", "notify_digest"]
+      else: ["notify_all_clear"]
+
+  # 5) ROOT-CAUSE RACE - cross-provider failover (Sonnet vs Gemini 2.5 Pro), first
+  #    non-empty narrative wins. THE ONLY model work in the whole sentinel.
+  #    Branches A/B are defined separately with NO depends_on.
+  - id: "root_cause_race"
+    type: race
+    race_config:
+      branches: [["narrative_sonnet"], ["narrative_gemini"]]
+      validator: "len(str(output)) > 20"
+
+  - id: "narrative_sonnet"
+    type: standard
+    model: sonnet
+    prompt: |
+      You are a senior data engineer writing the root-cause narrative for a
+      data-quality incident. The detection below is already DETERMINED by code -
+      do NOT re-judge whether tables failed; explain the likely root cause and the
+      operator next-steps.
+
+      Aggregate (failing tables, failure-type counts, severities):
+      {{ _steps['aggregate'] }}
+
+      Write a tight root-cause narrative (<= 250 words):
+      - The most probable upstream cause per failing table class
+        (schema_drift / freshness_breach / null_spike / volume_anomaly / referential_break).
+      - Which failures are correlated (likely one shared cause).
+      - Concrete next step for the on-call data engineer.
+      Plain prose. No preamble.
+
+  - id: "narrative_gemini"
+    type: standard
+    model: google/gemini-2.5-pro
+    prompt: |
+      You are the failover author (Gemini 2.5 Pro) for a data-quality root-cause
+      narrative. The failures below were detected deterministically in code - take
+      them as ground truth and explain root cause + remediation.
+
+      Aggregate (failing tables, failure-type counts, severities):
+      {{ _steps['aggregate'] }}
+
+      Write a tight root-cause narrative (<= 250 words) covering probable upstream
+      cause per failing class, correlated failures, and the on-call next step.
+      Plain prose. No preamble.
+
+  # 6) OPEN TICKETS - POST one ticket per failure class to Jira / Linear REST.
+  #    Body carries the deterministic aggregate + the race-authored narrative.
+  - id: "open_tickets"
+    type: http
+    depends_on: ["root_cause_race"]
+    http_config:
+      url: "{env.TICKETING_BASE_URL}/issues"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.TICKETING_API_TOKEN}"
+      body: |
+        {
+          "project": "DQ",
+          "title": "Data-Quality Sentinel: {{ _steps['aggregate']['fail_count'] }} table(s) failing",
+          "failures_by_type": {{ _steps['aggregate']['failures_by_type'] }},
+          "failing_tables": {{ _steps['aggregate']['failing_tables'] }},
+          "root_cause_narrative": "{{ _steps['root_cause_race'] }}",
+          "severity": "{{ 'critical' if _steps['aggregate']['critical_count'] > 0 else 'high' }}"
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 7a) DIGEST (failures path) - post the data-quality digest to Slack.
+  - id: "notify_digest"
+    type: notify
+    depends_on: ["open_tickets"]
+    notify_config:
+      service: slack
+      channel: "#data-quality"
+      message: |
+        :rotating_light: Warehouse Data-Quality Sentinel
+        Tables scanned : {steps.aggregate.output.tables_scanned}
+        Failing        : {steps.aggregate.output.fail_count} ({steps.aggregate.output.critical_count} critical)
+        By type        : {steps.aggregate.output.failures_by_type}
+        Tickets filed to Jira/Linear. Root cause:
+        {steps.root_cause_race.output}
+
+  # 7b) ALL-CLEAR (healthy path) - reassuring green notice, no tickets.
+  - id: "notify_all_clear"
+    type: notify
+    depends_on: ["route_outcome"]
+    notify_config:
+      service: slack
+      channel: "#data-quality"
+      message: |
+        :white_check_mark: Warehouse Data-Quality Sentinel - all clear.
+        Tables scanned : {steps.aggregate.output.tables_scanned}
+        No drift, freshness, null-spike, volume or referential issues detected.
+on_complete:
+  storage_path: "warehouse-data-quality-sentinel/{run_id}/result.json"
