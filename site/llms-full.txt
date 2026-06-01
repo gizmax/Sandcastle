@@ -1,0 +1,161 @@
+# Sandcastle workflow reference (for code-generating assistants)
+
+This file is enough to author a valid Sandcastle workflow. Sandcastle runs a YAML DAG
+of typed steps. Provider-neutral by design: a step runs on `default_model` unless it
+pins a `model:`, and the load-bearing decision should live in deterministic `code` or
+in a cross-provider pattern (race / consensus / two-judge gate), never in a single
+free-form prompt.
+
+Install: `pip install sandcastle-ai`. Run: `sandcastle serve` then `sandcastle run wf.yaml`.
+
+## File shape
+
+```yaml
+# name: Human Readable Name
+# description: one line
+# tags: [A, B, C]
+# category: general_ai            # one of: general_ai, engineering, sales_crm, hr_legal, support, devops, data, marketing, creative
+name: my-workflow                 # kebab-case
+description: >
+  Multi-line description.
+default_model: sonnet             # swappable default for every step
+default_timeout: 600
+input_schema:
+  required: ["foo"]
+  properties:
+    foo: { type: string, description: "...", default: "" }
+steps:
+  - id: "..."                     # see step types below
+    type: "..."
+on_complete:
+  storage_path: "my-workflow/{run_id}/result.json"
+```
+
+Templates may reference `{input.x}`, `{steps.<id>.output}`, `{run_id}`, and `{env.VAR}`
+inside strings.
+
+## Valid model aliases
+
+`sonnet`, `opus`, `haiku` (anthropic); `openai/codex`, `openai/codex-mini`;
+`google/gemini-2.5-pro`; `mistral/large`, `mistral/small`, `mistral/codestral`;
+`minimax/m2.5`; `ollama`; `omlx/qwen-3`, `omlx/gemma-3`, `omlx/llama-4-scout`,
+`omlx/mistral-small`. Keep `model:` pins to race branches / consensus votes / judges;
+leave everything else on `default_model`.
+
+## Step types
+
+Every step has `id`, `type`, optional `depends_on: [...]`, optional `model:`, optional
+`retry: { max_attempts, backoff: exponential|fixed, on_failure: skip|abort|fallback }`.
+
+- standard / llm: `prompt: |` (+ optional `output_schema`, `parallel_over: "steps.X.output"`).
+- http: `http_config: { url, method, headers: {}, body, auth, value_map }`. `auth` e.g.
+  `"bearer:{env.STRIPE_KEY}"`. Use for reads/writes to any REST system of record.
+- code: `code_config: { code: "result = ...", language: python }`. Sandboxed Python.
+  Read inputs via `_input['k']`, upstream outputs via `_steps['step_id']`, a loop item
+  via `_input.get('_item')`. Assign `result`. BLOCKED anywhere in the code (including
+  comments): `re.compile(`, `eval(`, `exec(`, `open(`, `getattr(`, `setattr(`, `chr(`,
+  `ord(`, `subprocess`, `import os`, `importlib`, `pickle`, dunder attribute access.
+  Use `re.search/match/sub/findall(pattern_string, text)` directly instead of compiling.
+- parse: `type: parse`, `prompt: "{input.file}"`, `parse_config: { output: markdown,
+  pages: null, ocr: false, ocr_engine: auto }`. Extracts text/tables from a document.
+- sensor: `sensor_config: { url, condition: "status_code == 200", check_interval: 60,
+  timeout: 86400, method, headers }`. Polls until the condition holds (durable wait).
+- race: `race_config: { branches: [[stepA], [stepB]], validator: "len(str(output)) > 0" }`.
+  Branch steps are DEFINED SEPARATELY (no `depends_on`). FIRST-VALID-WINS failover, not
+  a vote. For cross-provider failover, pin each branch step a different `model:`.
+  Downstream steps `depends_on` the race step, not the branches.
+- loop: `loop_config: { over: "steps.X.output", step_ids: [child], max_iterations: 50,
+  until: "<opt expr>" }`. Child steps are defined separately and read the current item
+  via `_input.get('_item')`. Downstream `depends_on` the loop step.
+- classify: `classify_config: { categories: [a, b, c], input: "{steps.X.output}",
+  model: haiku, branches: { a: [ids], b: [ids] } }`.
+- gate: `gate_config: { strategies: [ { type: llm_eval, config: { prompt, input:
+  "{steps.X.output}", model } }, { type: human, config: { message, timeout_hours,
+  on_timeout: abort } } ] }`. ALL strategies must pass. Only `llm_eval` / `human` /
+  `timeout` exist (no quorum). A two-judge gate = two `llm_eval` strategies on different
+  `model:`.
+- condition: `condition_config: { expression: "{steps.X.output.fail_count} > 0",
+  then: [ids], else: [ids] }`.
+- transform: `transform_config: { template: '<JSON/Jinja with {steps.X.output}>' }`.
+- approval: `approval_config: { message, show_data: steps.X.output, timeout_hours: 48,
+  on_timeout: abort, allow_edit: true }`. Human-in-the-loop.
+- notify: `notify_config: { service: slack, channel: "#ch", message: "... {steps.X.output}" }`.
+  `service` is a connector name (slack, teams, gmail, ...).
+- report: `report_config: { template: research-report, format: pdf, theme: professional,
+  title, author }`. Renders a branded PDF.
+- sub_workflow: `sub_workflow: { workflow: "summarize", input_mapping: { text: "_item.text" },
+  parallel_over: "steps.Y.output", max_concurrent: 5 }`. `workflow` must be an existing
+  template name. Composes/fan-outs another workflow.
+- tool: `tool_config: { tool: <connector>, function: "...", arguments: [...] }`. Calls a
+  built-in connector (e.g. nano-banana, openai, gemini for image-gen/vision).
+
+## Model-independence patterns
+
+- Cross-provider race (failover): two branch steps on different providers, a `race` with
+  a `validator`. First valid response wins; an outage on one provider fails over.
+- Multi-provider consensus (quorum): N parallel `standard` steps each on a different
+  `model:` (all `depends_on` the same upstream), then a `code` step that reads
+  `_steps['voteA'...]`, tallies agreement, and routes a SPLIT to `approval`. Not a race.
+- Two-judge gate: a `gate` with two `llm_eval` strategies on different providers; both
+  must agree.
+- Deterministic code: the decision math (reconciliation, scoring, eligibility, diffs) in
+  a sandboxed `code` step, so the outcome is identical on any model; a `gate`/`approval`
+  adds human oversight.
+
+## Minimal example
+
+```yaml
+# name: Refund Decision
+# category: support
+name: refund-decision
+description: Compute a refund deterministically, draft the reply via a cross-provider race, gate it, then act.
+default_model: sonnet
+input_schema:
+  required: ["ticket_id"]
+  properties:
+    ticket_id: { type: string }
+    auto_cap: { type: number, default: 50 }
+steps:
+  - id: fetch
+    type: http
+    http_config: { url: "https://api.billing.example/customer?ticket={input.ticket_id}", auth: "bearer:{env.BILLING_TOKEN}" }
+  - id: policy
+    type: code
+    code_config:
+      code: |
+        billing = _steps['fetch'] or {}
+        cap = float(_input.get('auto_cap', 50))
+        amount = float(billing.get('charge', 0))
+        result = {"eligible": amount <= cap, "amount": amount}
+  - id: draft_a
+    type: standard
+    model: sonnet
+    prompt: "Draft a refund decision message for {steps.policy.output}."
+  - id: draft_b
+    type: standard
+    model: google/gemini-2.5-pro
+    prompt: "Draft a refund decision message for {steps.policy.output}."
+  - id: draft
+    type: race
+    depends_on: [policy]
+    race_config: { branches: [[draft_a], [draft_b]], validator: "len(str(output)) > 0" }
+  - id: gate
+    type: gate
+    depends_on: [draft]
+    gate_config:
+      strategies:
+        - { type: llm_eval, config: { prompt: "Is this message policy-compliant? Answer approved or rejected.", input: "{steps.draft.output}", model: sonnet } }
+        - { type: human, config: { message: "Approve refund reply", timeout_hours: 24, on_timeout: abort } }
+  - id: send
+    type: http
+    depends_on: [gate]
+    http_config: { url: "https://api.helpdesk.example/reply", method: POST, auth: "bearer:{env.HELPDESK_TOKEN}", body: "{steps.draft.output}" }
+  - id: notify
+    type: notify
+    depends_on: [send]
+    notify_config: { service: slack, channel: "#support", message: "Refund handled for {input.ticket_id}" }
+```
+
+The dollar decision is deterministic `code`; the message drafting is a cross-provider
+`race` (failover); a two-strategy `gate` (model judge + human) guards the send. Change or
+lose a provider and the refund amount does not move.
