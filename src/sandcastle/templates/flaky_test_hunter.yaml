@@ -1,0 +1,622 @@
+# name: Flaky Test Hunter
+# description: Weekly cron job that mines recent CI history for tests that pass AND fail on the same commit, ranks them by flakiness and wasted-retry minutes, cost-routes the root-cause analysis, opens quarantine PRs + Linear tickets, and posts a flake-budget scorecard to Slack.
+# tags: [github, linear, slack, ci, flaky-tests, build-reliability, qa, slo-routing, devex]
+# category: engineering
+
+name: flaky-test-hunter
+description: >
+  A build-reliability hunter for distrusted CI suites. On a weekly cron it lists the prior
+  7 days of GitHub Actions workflow runs (one http call), loops each run to pull its jobs +
+  test results, then a DETERMINISTIC Python step builds a per-test pass/fail matrix keyed by
+  commit SHA: any test that BOTH passed and failed on the SAME SHA is flaky. The same code
+  step computes flake_rate, the retry minutes wasted, and a blast-ranked offender list - this
+  detection is fully model-free, so the core signal never depends on a vendor. A cheap classify
+  buckets each flaky test (timing_race / order_dependence / external_dependency / resource_leak /
+  unknown) and SLO cost-routing picks the model for the per-bucket root-cause hypothesis (cheap
+  model for low-blast/unknown, stronger model for high-blast offenders) from the pool rather than
+  a fixed provider. An llm_eval gate checks the quarantine recommendation is backed by >= N
+  independent flake observations before any write; only then does http open a quarantine PR on
+  GitHub and a tracking issue per test in Linear. Finally a transform renders the weekly flake
+  budget scorecard and notify posts it to Slack #ci-health with the top offenders.
+
+default_model: sonnet
+default_timeout: 1200
+
+input_schema:
+  required: ["repo", "github_api_base"]
+  properties:
+    repo:
+      type: string
+      description: "owner/name of the GitHub repository whose CI history is mined."
+      default: "your-org/your-repo"
+      example: "acme/monorepo"
+    github_api_base:
+      type: string
+      description: "GitHub REST API base URL (github.com or GitHub Enterprise)."
+      default: "https://api.github.com"
+      example: "https://api.github.com"
+    window_days:
+      type: integer
+      description: "How many days of CI history to mine (cron runs weekly over the prior 7 days)."
+      default: 7
+    max_runs:
+      type: integer
+      description: "Upper bound on workflow runs fetched/looped per execution (keeps the loop bounded)."
+      default: 60
+    min_observations:
+      type: integer
+      description: "Minimum independent same-SHA flake observations required before a test is eligible for quarantine (the gate enforces this)."
+      default: 3
+    retry_minutes_each:
+      type: number
+      description: "Assumed CI minutes burned by one retry of a job containing a flaky test (used to cost the wasted-retry blast budget)."
+      default: 6.0
+    high_blast_threshold:
+      type: number
+      description: "Wasted-retry minutes at/above which a flaky test is treated as high-blast and routed to the stronger model in the SLO ladder."
+      default: 30.0
+    linear_team_id:
+      type: string
+      description: "Linear team id that receives one tracking issue per quarantined test."
+      default: "TEAM-CI"
+      example: "a1b2c3d4-team"
+    slack_channel:
+      type: string
+      description: "Slack channel for the weekly flake-budget scorecard."
+      default: "#ci-health"
+
+steps:
+  # 1) LIST recent workflow runs in the window (GitHub Actions API). One deterministic http pull.
+  - id: list_workflow_runs
+    type: http
+    http_config:
+      url: "{input.github_api_base}/repos/{input.repo}/actions/runs?per_page={input.max_runs}&status=completed"
+      method: GET
+      headers:
+        Accept: "application/vnd.github+json"
+        X-GitHub-Api-Version: "2022-11-28"
+      auth: "bearer:{env.GITHUB_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2) DETERMINISTIC selection of the run ids inside the window - normalizes the GitHub payload
+  #    into a flat list of {run_id, head_sha} the loop can iterate. No model.
+  - id: select_runs
+    type: code
+    depends_on: [list_workflow_runs]
+    code_config:
+      language: python
+      code: |
+        from datetime import datetime, timezone, timedelta
+
+        payload = _steps.get('list_workflow_runs') or {}
+        runs = payload.get('workflow_runs') if isinstance(payload, dict) else payload
+        if not isinstance(runs, list):
+            runs = []
+
+        window_days = float(_input.get('window_days', 7) or 7)
+        max_runs = int(_input.get('max_runs', 60) or 60)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=window_days)
+
+        def _in_window(run):
+            ts = run.get('created_at') or run.get('updated_at')
+            if not ts:
+                return True  # keep undated runs rather than silently dropping them
+            try:
+                dt = datetime.fromisoformat(str(ts).replace('Z', '+00:00'))
+                return dt >= cutoff
+            except (ValueError, TypeError):
+                return True
+
+        selected = []
+        for run in runs:
+            if not isinstance(run, dict):
+                continue
+            if not _in_window(run):
+                continue
+            rid = run.get('id')
+            sha = str(run.get('head_sha') or run.get('head_commit', {}).get('id') or '')
+            if rid is None or not sha:
+                continue
+            selected.append({
+                'run_id': rid,
+                'head_sha': sha,
+                'name': run.get('name') or run.get('display_title') or '',
+                'conclusion': run.get('conclusion'),
+            })
+            if len(selected) >= max_runs:
+                break
+
+        result = {
+            'repo': _input.get('repo'),
+            'window_days': window_days,
+            'run_count': len(selected),
+            'runs': selected,
+        }
+
+  # 3) LOOP each selected run: pull its jobs (with test/check results) for the matrix builder.
+  #    Bounded by max_iterations; child step reads the current run via _item.
+  - id: fetch_run_jobs_loop
+    type: loop
+    depends_on: [select_runs]
+    loop_config:
+      over: "steps.select_runs.output.runs"
+      step_ids: [fetch_run_jobs]
+      max_iterations: 200
+
+  # 3a) Per-run http pull of jobs + their step/check conclusions (GitHub Actions jobs API).
+  #     The head_sha is carried forward by the matrix builder via the same selected list.
+  - id: fetch_run_jobs
+    type: http
+    http_config:
+      url: "{input.github_api_base}/repos/{input.repo}/actions/runs/{_item.run_id}/jobs?per_page=100"
+      method: GET
+      headers:
+        Accept: "application/vnd.github+json"
+        X-GitHub-Api-Version: "2022-11-28"
+      auth: "bearer:{env.GITHUB_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 4) DETERMINISTIC FLAKE DETECTION - the load-bearing, fully model-free signal.
+  #    Build a per-test pass/fail matrix keyed by commit SHA. A (test, sha) pair that has BOTH a
+  #    pass and a fail is flaky on that commit. Compute flake_rate, wasted-retry minutes, rank.
+  - id: build_flake_matrix
+    type: code
+    depends_on: [select_runs, fetch_run_jobs_loop]
+    code_config:
+      language: python
+      code: |
+        sel = _steps.get('select_runs') or {}
+        selected_runs = sel.get('runs', []) if isinstance(sel, dict) else []
+
+        # Loop output: one fetch_run_jobs payload per selected run, same order as selected_runs.
+        loop_out = _steps.get('fetch_run_jobs_loop') or []
+        if isinstance(loop_out, dict):
+            loop_out = loop_out.get('results') or loop_out.get('items') or list(loop_out.values())
+        if not isinstance(loop_out, list):
+            loop_out = [loop_out]
+
+        retry_minutes_each = float(_input.get('retry_minutes_each', 6.0) or 6.0)
+
+        # matrix[test_name][sha] = {'pass': int, 'fail': int, 'runs': set()}
+        matrix = {}
+
+        def _norm_conclusion(c):
+            c = str(c or '').lower()
+            if c in ('success', 'passed', 'pass', 'neutral', 'skipped'):
+                return 'pass'
+            if c in ('failure', 'failed', 'fail', 'timed_out', 'cancelled', 'action_required'):
+                return 'fail'
+            return None
+
+        for idx, run in enumerate(selected_runs):
+            sha = str(run.get('head_sha') or '')
+            run_id = run.get('run_id')
+            if not sha:
+                continue
+            payload = loop_out[idx] if idx < len(loop_out) else None
+            if not isinstance(payload, dict):
+                continue
+            jobs = payload.get('jobs') if isinstance(payload.get('jobs'), list) else []
+            for job in jobs:
+                if not isinstance(job, dict):
+                    continue
+                job_name = str(job.get('name') or 'job')
+                # Each job step approximates a test/check; key the matrix by step name.
+                steps_list = job.get('steps') if isinstance(job.get('steps'), list) else []
+                if not steps_list:
+                    # No granular steps -> treat the whole job as one test unit.
+                    steps_list = [{'name': job_name, 'conclusion': job.get('conclusion')}]
+                for st in steps_list:
+                    if not isinstance(st, dict):
+                        continue
+                    test_name = f"{job_name}::{st.get('name') or 'step'}"
+                    outcome = _norm_conclusion(st.get('conclusion'))
+                    if outcome is None:
+                        continue
+                    cell = matrix.setdefault(test_name, {}).setdefault(
+                        sha, {'pass': 0, 'fail': 0, 'runs': set()}
+                    )
+                    cell[outcome] += 1
+                    if run_id is not None:
+                        cell['runs'].add(run_id)
+
+        # A test is FLAKY when, on the SAME sha, it has at least one pass AND one fail.
+        flaky = []
+        for test_name, by_sha in matrix.items():
+            total_pass = total_fail = 0
+            flaky_shas = []
+            observations = 0  # independent same-sha flake observations (min(pass,fail) per sha)
+            wasted_retry_runs = 0
+            for sha, cell in by_sha.items():
+                total_pass += cell['pass']
+                total_fail += cell['fail']
+                if cell['pass'] > 0 and cell['fail'] > 0:
+                    obs = min(cell['pass'], cell['fail'])
+                    observations += obs
+                    wasted_retry_runs += obs
+                    flaky_shas.append({
+                        'sha': sha,
+                        'pass': cell['pass'],
+                        'fail': cell['fail'],
+                        'run_count': len(cell['runs']),
+                    })
+            if not flaky_shas:
+                continue  # deterministic or always-failing -> not flaky
+            total_runs = total_pass + total_fail
+            flake_rate = round(total_fail / total_runs, 4) if total_runs else 0.0
+            wasted_minutes = round(wasted_retry_runs * retry_minutes_each, 2)
+            # Blast = wasted retry minutes weighted by how many distinct commits flaked on it.
+            blast_score = round(wasted_minutes * (1 + len(flaky_shas) * 0.25), 2)
+            flaky.append({
+                'test': test_name,
+                'flake_rate': flake_rate,
+                'observations': observations,
+                'distinct_flaky_shas': len(flaky_shas),
+                'wasted_retry_minutes': wasted_minutes,
+                'blast_score': blast_score,
+                'total_runs': total_runs,
+                'flaky_shas': flaky_shas[:10],
+            })
+
+        flaky.sort(key=lambda x: x['blast_score'], reverse=True)
+        for rank, f in enumerate(flaky, start=1):
+            f['rank'] = rank
+
+        result = {
+            'repo': _input.get('repo'),
+            'runs_analyzed': len([r for r in selected_runs if r.get('head_sha')]),
+            'flaky_count': len(flaky),
+            'total_wasted_minutes': round(sum(f['wasted_retry_minutes'] for f in flaky), 2),
+            'top_offender': flaky[0] if flaky else None,
+            'flaky_tests': flaky,
+        }
+
+  # 5) CLASSIFY the offender cohort into a root-cause bucket. Cheap + measured, swappable model.
+  #    Each category routes into the same SLO-routing selector (no per-branch fan-out needed).
+  - id: classify_root_cause
+    type: classify
+    depends_on: [build_flake_matrix]
+    classify_config:
+      model: haiku
+      input: >
+        Classify the dominant root-cause family for these flaky CI tests (a test that passed and
+        failed on the SAME commit). timing_race = sleeps / async ordering / wall-clock assertions;
+        order_dependence = passes alone but flakes by suite order / shared global state;
+        external_dependency = network / 3rd-party API / DNS / rate-limit flakiness;
+        resource_leak = file handles / ports / memory / DB connections exhausting under load;
+        unknown = signal too weak to attribute. Flaky offenders: {steps.build_flake_matrix.output.flaky_tests}
+      categories:
+        - timing_race
+        - order_dependence
+        - external_dependency
+        - resource_leak
+        - unknown
+      branches:
+        timing_race: [slo_route]
+        order_dependence: [slo_route]
+        external_dependency: [slo_route]
+        resource_leak: [slo_route]
+        unknown: [slo_route]
+
+  # 6) SLO COST-ROUTING (deterministic) - split offenders into a cheap tier and a strong tier by
+  #    blast budget, and attach the model alias each tier should use. The model is chosen by the
+  #    SLO ladder (cheap for low-blast/unknown, stronger for high-blast) from the pool, not a vendor.
+  - id: slo_route
+    type: code
+    depends_on: [build_flake_matrix, classify_root_cause]
+    code_config:
+      language: python
+      code: |
+        matrix = _steps.get('build_flake_matrix') or {}
+        bucket = str(_steps.get('classify_root_cause') or 'unknown').strip().lower()
+        flaky = matrix.get('flaky_tests', []) if isinstance(matrix, dict) else []
+
+        high_blast = float(_input.get('high_blast_threshold', 30.0) or 30.0)
+
+        # SLOConfig-style routing: high-blast offenders earn the stronger model; the long tail of
+        # low-blast / unknown ones get the cheap model. Vendor names are aliases from the pool.
+        STRONG_MODEL = 'sonnet'
+        CHEAP_MODEL = 'haiku'
+
+        strong_tier = []
+        cheap_tier = []
+        for f in flaky:
+            blast = float(f.get('blast_score', 0.0) or 0.0)
+            is_high = blast >= high_blast and bucket != 'unknown'
+            row = {
+                'test': f.get('test'),
+                'rank': f.get('rank'),
+                'blast_score': blast,
+                'flake_rate': f.get('flake_rate'),
+                'observations': f.get('observations'),
+                'root_cause_bucket': bucket,
+                'tier': 'strong' if is_high else 'cheap',
+                'model': STRONG_MODEL if is_high else CHEAP_MODEL,
+            }
+            (strong_tier if is_high else cheap_tier).append(row)
+
+        result = {
+            'repo': matrix.get('repo'),
+            'root_cause_bucket': bucket,
+            'high_blast_threshold': high_blast,
+            'strong_tier_count': len(strong_tier),
+            'cheap_tier_count': len(cheap_tier),
+            'strong_tier': strong_tier,
+            'cheap_tier': cheap_tier,
+            'routing': strong_tier + cheap_tier,
+        }
+
+  # 7a) STRONG-tier root-cause hypothesis for high-blast offenders. SLO ladder picks this model.
+  - id: hypothesis_strong
+    type: standard
+    model: sonnet
+    depends_on: [slo_route]
+    prompt: |
+      You are the STRONG tier of an SLO-routed root-cause analyzer for flaky CI tests. These are
+      the HIGH-BLAST offenders (most wasted retry minutes). For each, give a precise, actionable
+      root-cause hypothesis and a concrete quarantine + fix recommendation. Be specific to the
+      bucket: {steps.slo_route.output.root_cause_bucket}.
+
+      High-blast offenders (JSON):
+      {steps.slo_route.output.strong_tier}
+
+      Return STRICT JSON only:
+      {
+        "tier": "strong",
+        "analyses": [
+          {"test": "<name>", "hypothesis": "<root cause>", "fix": "<concrete fix>", "quarantine": "<pytest mark or skip rationale>"}
+        ]
+      }
+
+  # 7b) CHEAP-tier root-cause hypothesis for the low-blast / unknown long tail. Same SLO ladder,
+  #     cheaper model. Both tiers run, then a code step merges them.
+  - id: hypothesis_cheap
+    type: standard
+    model: haiku
+    depends_on: [slo_route]
+    prompt: |
+      You are the CHEAP tier of an SLO-routed root-cause analyzer for flaky CI tests. These are
+      LOW-BLAST / lower-confidence offenders. Give a short root-cause guess and a quarantine note
+      for each - keep it terse, this tier is cost-optimized.
+
+      Low-blast offenders (JSON):
+      {steps.slo_route.output.cheap_tier}
+
+      Return STRICT JSON only:
+      {
+        "tier": "cheap",
+        "analyses": [
+          {"test": "<name>", "hypothesis": "<short guess>", "fix": "<short note>", "quarantine": "<mark/skip note>"}
+        ]
+      }
+
+  # 8) DETERMINISTIC merge of both SLO tiers into a single quarantine candidate list. No model.
+  - id: assemble_quarantine
+    type: code
+    depends_on: [slo_route, hypothesis_strong, hypothesis_cheap]
+    code_config:
+      language: python
+      code: |
+        import json
+
+        routing = _steps.get('slo_route') or {}
+        strong = _steps.get('hypothesis_strong')
+        cheap = _steps.get('hypothesis_cheap')
+        matrix = _steps.get('build_flake_matrix') or {}
+
+        min_obs = int(_input.get('min_observations', 3) or 3)
+
+        def _analyses(blob):
+            if isinstance(blob, dict):
+                a = blob.get('analyses')
+                return a if isinstance(a, list) else []
+            if isinstance(blob, str):
+                try:
+                    parsed = json.loads(blob)
+                    a = parsed.get('analyses') if isinstance(parsed, dict) else None
+                    return a if isinstance(a, list) else []
+                except (ValueError, TypeError):
+                    return []
+            return []
+
+        # Map test -> hypothesis text from whichever tier covered it.
+        hyp_by_test = {}
+        for a in _analyses(strong) + _analyses(cheap):
+            if isinstance(a, dict) and a.get('test'):
+                hyp_by_test[str(a['test'])] = a
+
+        # Observation counts come from the deterministic matrix, NOT the model.
+        obs_by_test = {
+            f.get('test'): int(f.get('observations', 0) or 0)
+            for f in matrix.get('flaky_tests', [])
+        }
+
+        candidates = []
+        for row in routing.get('routing', []):
+            test = row.get('test')
+            obs = obs_by_test.get(test, 0)
+            hyp = hyp_by_test.get(test, {})
+            candidates.append({
+                'test': test,
+                'rank': row.get('rank'),
+                'tier': row.get('tier'),
+                'model': row.get('model'),
+                'root_cause_bucket': row.get('root_cause_bucket'),
+                'blast_score': row.get('blast_score'),
+                'observations': obs,
+                'meets_min_observations': obs >= min_obs,
+                'hypothesis': hyp.get('hypothesis', ''),
+                'fix': hyp.get('fix', ''),
+                'quarantine': hyp.get('quarantine', ''),
+            })
+
+        eligible = [c for c in candidates if c['meets_min_observations']]
+        eligible.sort(key=lambda c: c.get('blast_score', 0.0), reverse=True)
+
+        result = {
+            'repo': matrix.get('repo'),
+            'min_observations': min_obs,
+            'candidate_count': len(candidates),
+            'eligible_count': len(eligible),
+            'all_meet_threshold': len(eligible) == len(candidates) and len(candidates) > 0,
+            'eligible': eligible,
+            'candidates': candidates,
+        }
+
+  # 9) GATE - an LLM eval must confirm the quarantine set is justified by >= N independent
+  #    same-SHA flake observations before any GitHub/Linear write happens. All strategies must pass.
+  - id: quarantine_gate
+    type: gate
+    depends_on: [assemble_quarantine]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >
+              You are a build-reliability control reviewer. Below is the quarantine candidate set.
+              Answer exactly 'approved' ONLY if every test listed under 'eligible' has
+              observations >= min_observations (i.e. is backed by enough independent same-commit
+              flake observations to justify quarantining rather than blanket-retrying), and the
+              eligible list is non-empty. Otherwise answer 'rejected' and name the under-evidenced test.
+            input: "{steps.assemble_quarantine.output}"
+            model: sonnet
+
+  # 10) OPEN a single quarantine PR on GitHub adding pytest flaky-marks/skips for the eligible set.
+  #     (github connector) - branch + PR body carry the per-test marks and rationale.
+  - id: open_quarantine_pr
+    type: http
+    depends_on: [quarantine_gate]
+    http_config:
+      url: "{input.github_api_base}/repos/{input.repo}/pulls"
+      method: POST
+      headers:
+        Accept: "application/vnd.github+json"
+        X-GitHub-Api-Version: "2022-11-28"
+        Content-Type: "application/json"
+      auth: "bearer:{env.GITHUB_TOKEN}"
+      body: |
+        {
+          "title": "Quarantine {steps.assemble_quarantine.output.eligible_count} flaky test(s) - flake hunter",
+          "head": "flaky-hunter/quarantine",
+          "base": "main",
+          "body": "Automated quarantine PR from Flaky Test Hunter. Each eligible test passed AND failed on the same commit >= {steps.assemble_quarantine.output.min_observations} times. Apply @pytest.mark.flaky / skip per the table.\n\nEligible tests: {steps.assemble_quarantine.output.eligible}",
+          "draft": true
+        }
+      value_map:
+        pr_number: "number"
+        pr_url: "html_url"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 11) LOOP each eligible test -> create a tracking issue in Linear (linear connector).
+  - id: file_linear_issues
+    type: loop
+    depends_on: [open_quarantine_pr]
+    loop_config:
+      over: "steps.assemble_quarantine.output.eligible"
+      step_ids: [create_linear_issue]
+      max_iterations: 100
+
+  # 11a) Per-test Linear issue create via the Linear GraphQL API (one tracking ticket each).
+  - id: create_linear_issue
+    type: http
+    http_config:
+      url: "https://api.linear.app/graphql"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+      auth: "bearer:{env.LINEAR_API_KEY}"
+      body: |
+        {
+          "query": "mutation IssueCreate($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier url } } }",
+          "variables": {
+            "input": {
+              "teamId": "{input.linear_team_id}",
+              "title": "Flaky: {_item.test} ({_item.root_cause_bucket})",
+              "description": "Quarantined by Flaky Test Hunter. Blast score {_item.blast_score}, {_item.observations} same-SHA flake observations, flake_rate {_item.flake_rate}. Hypothesis: {_item.hypothesis}. Suggested fix: {_item.fix}."
+            }
+          }
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 12) DETERMINISTIC weekly flake-budget aggregation - the scorecard numbers. No model.
+  - id: flake_budget
+    type: code
+    depends_on: [build_flake_matrix, assemble_quarantine, file_linear_issues]
+    code_config:
+      language: python
+      code: |
+        matrix = _steps.get('build_flake_matrix') or {}
+        quarantine = _steps.get('assemble_quarantine') or {}
+
+        flaky = matrix.get('flaky_tests', []) if isinstance(matrix, dict) else []
+        eligible = quarantine.get('eligible', []) if isinstance(quarantine, dict) else []
+
+        total_wasted = round(sum(float(f.get('wasted_retry_minutes', 0.0) or 0.0) for f in flaky), 2)
+        quarantined_wasted = round(
+            sum(float(c.get('blast_score', 0.0) or 0.0) for c in eligible), 2
+        )
+
+        top = sorted(flaky, key=lambda f: f.get('blast_score', 0.0), reverse=True)[:5]
+        top_offenders = [
+            {
+                'rank': f.get('rank'),
+                'test': f.get('test'),
+                'flake_rate': f.get('flake_rate'),
+                'wasted_retry_minutes': f.get('wasted_retry_minutes'),
+                'blast_score': f.get('blast_score'),
+            }
+            for f in top
+        ]
+
+        result = {
+            'repo': matrix.get('repo'),
+            'runs_analyzed': matrix.get('runs_analyzed', 0),
+            'flaky_count': matrix.get('flaky_count', 0),
+            'eligible_quarantined': len(eligible),
+            'weekly_wasted_retry_minutes': total_wasted,
+            'weekly_wasted_retry_hours': round(total_wasted / 60.0, 2),
+            'budget_recovered_minutes': quarantined_wasted,
+            'top_offenders': top_offenders,
+        }
+
+  # 13) RENDER the human-readable weekly flake-budget scorecard.
+  - id: render_scorecard
+    type: transform
+    depends_on: [flake_budget]
+    transform_config:
+      template: |
+        Weekly Flake Budget - {steps.flake_budget.output.repo}
+        ======================================================
+        CI runs analyzed         : {steps.flake_budget.output.runs_analyzed}
+        Flaky tests detected     : {steps.flake_budget.output.flaky_count}
+        Quarantined this week    : {steps.flake_budget.output.eligible_quarantined}
+        Wasted retry time        : {steps.flake_budget.output.weekly_wasted_retry_minutes} min ({steps.flake_budget.output.weekly_wasted_retry_hours} h)
+        Budget recovered         : {steps.flake_budget.output.budget_recovered_minutes} min of blast quarantined
+        Top offenders            : {steps.flake_budget.output.top_offenders}
+
+  # 14) NOTIFY #ci-health in Slack with the scorecard + the quarantine PR link (slack connector).
+  - id: post_scorecard
+    type: notify
+    depends_on: [render_scorecard, open_quarantine_pr]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        Weekly flake budget is in.
+        {steps.render_scorecard.output}
+        Quarantine PR: {steps.open_quarantine_pr.output.pr_url}
+
+on_complete:
+  storage_path: "flaky-test-hunter/{run_id}/result.json"

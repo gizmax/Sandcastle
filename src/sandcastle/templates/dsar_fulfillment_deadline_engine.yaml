@@ -1,0 +1,603 @@
+# name: DSAR Fulfillment Deadline Engine
+# description: End-to-end GDPR/CCPA Data Subject Access Request orchestrator - intake a request from a privacy portal webhook, classify the right-being-exercised, verify the subject's identity, fan out to every source system (PostgreSQL, Salesforce, HubSpot, S3) to collect their personal data, machine-redact third-party PII, draft a human-readable disclosure letter, gate it through a completeness check + DPO approval, log the lawful basis, deliver the package via DocuSign/secure link, and run a statutory-deadline sensor that escalates before the 30-day clock runs out. The legally binding path (fan-out, redaction, deadline math) is deterministic http/loop/code with no model; only the disclosure-letter draft and the gate's completeness judge are swappable LLMs pinned to different providers so the same model never both writes and grades.
+# tags: [GDPR, CCPA, DSAR, Privacy, DataProtection, DPO, Compliance, IdentityVerification, Redaction, DocuSign]
+# category: hr_legal
+
+name: dsar-fulfillment-deadline-engine
+description: >-
+  A statutory-deadline-aware Data Subject Access Request (DSAR) fulfillment engine for
+  Data Protection Officers and privacy operations at any EU- or California-facing company.
+  Triggered by a webhook from a privacy intake portal (or a watched privacy@ inbox) that
+  creates a new DSAR carrying the subject's email and request type, the workflow first
+  CLASSIFIES the right being exercised - access, deletion, rectification, or portability -
+  to branch the downstream handling. It then calls an identity-verification provider over
+  HTTP (returns verified true/false) and a deterministic CONDITION aborts-and-notifies if
+  the subject cannot be verified, so unverified data is never disclosed. Once verified, a
+  LOOP fans out over a configurable list of source systems (PostgreSQL, Salesforce, HubSpot,
+  S3), each iteration an HTTP/connector callout that pulls records keyed on the subject. A
+  sandboxed-Python CODE step merges and normalizes the collected records and machine-redacts
+  other people's PII via regex/policy - this redaction runs with no model so correctness is
+  reproducible and auditable. A single, swappable LLM drafts the human-readable disclosure
+  letter; a GATE then enforces an llm_eval completeness check (a DIFFERENT provider from the
+  drafter, so the writer never grades its own work), a human DPO approval, and a timeout. A
+  sub_workflow logs the lawful basis for retention, an HTTP step delivers the package via
+  DocuSign or a secure link, and a durable SENSOR polls a statutory-deadline countdown URL
+  every 6 hours until the package is confirmed delivered or fewer than five days remain,
+  tripping an escalation. Final NOTIFY steps post a delivery confirmation and audit record to
+  Slack and email. Every legally binding decision is deterministic code or a human gate; the
+  only model on the path (letter draft + completeness judge) is declared as swappable plumbing
+  that can cost/quality-route across anthropic/openai/mistral/ollama, and all tool I/O flows
+  through the engine's connector dispatch - no provider-proprietary function-calling is used.
+
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 900
+
+input_schema:
+  required: ["subject_email", "request_type"]
+  properties:
+    subject_email:
+      type: string
+      description: "Email address of the data subject who filed the DSAR (the identity to verify and key all source-system lookups on)."
+      example: "jane.doe@example.com"
+    request_type:
+      type: string
+      description: "The right being exercised, from the intake portal: access | deletion | rectification | portability."
+      default: "access"
+      example: "access"
+    dsar_id:
+      type: string
+      description: "Identifier the intake portal assigned to this DSAR (used in audit trail and deadline lookups)."
+      default: "DSAR-PENDING"
+      example: "DSAR-2026-000812"
+    request_received_at:
+      type: string
+      description: "ISO-8601 timestamp the DSAR was received; the statutory clock (default 30 days) starts here."
+      default: "2026-06-01T00:00:00Z"
+      example: "2026-06-01T09:14:00Z"
+    statutory_deadline_days:
+      type: integer
+      description: "Statutory fulfillment window in calendar days (GDPR Art. 12: 30; CCPA: 45). The deadline = received_at + this."
+      default: 30
+      example: "30"
+    source_systems:
+      type: string
+      description: "Comma-separated source systems to fan out over for record collection (drives the loop)."
+      default: "postgresql,salesforce,hubspot,s3"
+      example: "postgresql,salesforce,hubspot,s3"
+    identity_provider_url:
+      type: string
+      description: "Identity-verification provider REST endpoint; receives the subject email and returns a verified boolean + confidence."
+      default: "https://api.verify-idp.example/v1/identity/verify"
+      example: "https://api.verify-idp.example/v1/identity/verify"
+    connector_base_url:
+      type: string
+      description: "Base URL of the internal connector-dispatch gateway that proxies record pulls to each source system."
+      default: "https://connectors.internal/api/v1"
+      example: "https://connectors.internal/api/v1"
+    deadline_countdown_url:
+      type: string
+      description: "URL the sensor polls for statutory countdown; returns JSON {delivered: bool, days_remaining: int}."
+      default: "https://privacy-ops.internal/api/dsar/{dsar_id}/countdown"
+      example: "https://privacy-ops.internal/api/dsar/DSAR-2026-000812/countdown"
+    delivery_provider_url:
+      type: string
+      description: "DocuSign / secure-link delivery endpoint that sends the packaged disclosure to the verified subject."
+      default: "https://api.docusign.example/v1/envelopes"
+      example: "https://api.docusign.example/v1/envelopes"
+    dpo_approval_timeout_hours:
+      type: integer
+      description: "Hours the DPO human approval waits before the gate's timeout strategy fires."
+      default: 48
+      example: "48"
+    slack_channel:
+      type: string
+      description: "Slack channel for the privacy-ops delivery confirmation and audit notice."
+      default: "#privacy-ops"
+      example: "#privacy-ops"
+    dpo_email:
+      type: string
+      description: "DPO / privacy mailbox that receives the audit-trail email on completion."
+      default: "dpo@example.com"
+      example: "dpo@example.com"
+
+steps:
+  # 1) CLASSIFY the right being exercised so downstream handling branches correctly.
+  #    Deterministic small-model bin (haiku); the value never gates legal correctness,
+  #    it only selects which preparation primer runs.
+  - id: classify_request_type
+    type: classify
+    classify_config:
+      categories: ["access", "deletion", "rectification", "portability"]
+      input: "Request type for DSAR {input.dsar_id}: {input.request_type} (subject {input.subject_email})"
+      model: haiku
+      branches:
+        access: [prime_access]
+        deletion: [prime_erasure]
+        rectification: [prime_rectification]
+        portability: [prime_access]
+
+  # 1a) ACCESS / PORTABILITY primer - we will collect and disclose the data.
+  - id: prime_access
+    type: code
+    code_config:
+      language: python
+      code: |
+        # Access & portability both require collecting and returning the subject's data.
+        result = {
+            "mode": "disclose",
+            "request_type": str(_input.get("request_type", "access")),
+            "must_collect": True,
+            "must_erase": False,
+            "letter_kind": "disclosure",
+        }
+
+  # 1b) DELETION / ERASURE primer - collect to confirm scope, then erase + attest.
+  - id: prime_erasure
+    type: code
+    code_config:
+      language: python
+      code: |
+        # Erasure (RTBF) still collects to scope what exists, then attests deletion.
+        result = {
+            "mode": "erase",
+            "request_type": "deletion",
+            "must_collect": True,
+            "must_erase": True,
+            "letter_kind": "erasure_confirmation",
+        }
+
+  # 1c) RECTIFICATION primer - collect current values so corrections can be applied.
+  - id: prime_rectification
+    type: code
+    code_config:
+      language: python
+      code: |
+        # Rectification collects current records so the subject's corrections can be applied.
+        result = {
+            "mode": "rectify",
+            "request_type": "rectification",
+            "must_collect": True,
+            "must_erase": False,
+            "letter_kind": "rectification_summary",
+        }
+
+  # 2) IDENTITY VERIFICATION - call the IdP provider over HTTP (connector dispatch, no
+  #    model). Returns verified true/false + confidence. We NEVER disclose to an
+  #    unverified subject.
+  - id: verify_identity
+    type: http
+    depends_on: [classify_request_type]
+    http_config:
+      url: "{input.identity_provider_url}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.IDENTITY_PROVIDER_TOKEN}"
+      body: |
+        {
+          "email": "{input.subject_email}",
+          "dsar_id": "{input.dsar_id}",
+          "request_type": "{input.request_type}",
+          "purpose": "dsar_identity_verification"
+        }
+      value_map:
+        verified: "$.verified"
+        confidence: "$.confidence"
+        verification_id: "$.verification_id"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 3) Deterministically normalize the IdP response into a clean boolean decision. No model.
+  - id: evaluate_identity
+    type: code
+    depends_on: [verify_identity]
+    code_config:
+      language: python
+      code: |
+        idp = _steps.get("verify_identity") or {}
+        if not isinstance(idp, dict):
+            idp = {"raw": idp}
+
+        def _truthy(v):
+            if isinstance(v, bool):
+                return v
+            return str(v).strip().lower() in ("true", "1", "yes", "verified", "pass")
+
+        verified = _truthy(idp.get("verified"))
+        try:
+            confidence = float(idp.get("confidence") or 0.0)
+        except (TypeError, ValueError):
+            confidence = 0.0
+
+        # A confident-enough signal is required; low confidence is treated as unverified.
+        is_verified = bool(verified and confidence >= 0.80)
+
+        result = {
+            "is_verified": is_verified,
+            "verified_flag": verified,
+            "confidence": round(confidence, 4),
+            "verification_id": idp.get("verification_id") or "",
+            "subject_email": _input.get("subject_email", ""),
+            "fail_count": 0 if is_verified else 1,
+        }
+
+  # 4) CONDITION - if the subject is not verified, abort + notify and do NOT collect data.
+  #    If verified, proceed to build the source-system fan-out list.
+  - id: identity_gate
+    type: condition
+    depends_on: [evaluate_identity]
+    condition_config:
+      expression: "{steps.evaluate_identity.output.fail_count} > 0"
+      then: [notify_unverified]
+      else: [build_source_list]
+
+  # 4a) UNVERIFIED PATH - tell privacy-ops the request could not be authenticated, then stop.
+  - id: notify_unverified
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: >-
+        DSAR {input.dsar_id} for {input.subject_email} could NOT be identity-verified
+        (confidence {steps.evaluate_identity.output.confidence}). No personal data was
+        collected or disclosed. Privacy-ops should request additional proof of identity
+        before the statutory clock expires.
+
+  # 5) Deterministically materialize the source-system fan-out list from input. No model.
+  - id: build_source_list
+    type: code
+    code_config:
+      language: python
+      code: |
+        # Parse "postgresql,salesforce,hubspot,s3" into ordered, de-duplicated source entries.
+        raw = str(_input.get("source_systems", "") or "")
+        known = {
+            "postgresql": "postgres",
+            "postgres": "postgres",
+            "salesforce": "salesforce",
+            "hubspot": "hubspot",
+            "s3": "aws-s3",
+            "aws-s3": "aws-s3",
+        }
+        seen = set()
+        systems = []
+        for idx, part in enumerate(p.strip().lower() for p in raw.split(",") if p.strip()):
+            connector = known.get(part, part)
+            if connector in seen:
+                continue
+            seen.add(connector)
+            systems.append({
+                "ordinal": len(systems) + 1,
+                "system": part,
+                "connector": connector,
+            })
+        if not systems:
+            systems = [{"ordinal": 1, "system": "postgresql", "connector": "postgres"}]
+        result = systems
+
+  # 6) LOOP the fan-out: for EACH source system, HTTP-pull the subject's records via the
+  #    connector-dispatch gateway. Child step (pull_records) defined separately, NO depends_on;
+  #    it reads the loop item via _input['_item'] through the templated URL.
+  - id: collect_records
+    type: loop
+    depends_on: [build_source_list]
+    loop_config:
+      over: "steps.build_source_list.output"
+      step_ids: [pull_records]
+      max_iterations: 16
+
+  # 6a) PULL the subject's records from one source system. The connector + system come from
+  #     the loop item. Connector dispatch proxies to PostgreSQL / Salesforce / HubSpot / S3.
+  - id: pull_records
+    type: http
+    http_config:
+      url: "{input.connector_base_url}/{_item.connector}/records?subject_email={input.subject_email}&dsar_id={input.dsar_id}&request_type={input.request_type}"
+      method: GET
+      headers:
+        Accept: "application/json"
+        X-Connector-System: "{_item.system}"
+      auth: "bearer:{env.CONNECTOR_DISPATCH_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 7) MERGE + NORMALIZE collected records and machine-redact THIRD-PARTY PII via regex/policy.
+  #    Fully deterministic (no model) so the redaction is reproducible and auditable - this is
+  #    the legally load-bearing step and must not depend on any provider.
+  - id: merge_and_redact
+    type: code
+    depends_on: [collect_records]
+    code_config:
+      language: python
+      code: |
+        import re
+
+        subject_email = str(_input.get("subject_email", "")).strip().lower()
+        subject_local = subject_email.split("@", 1)[0] if "@" in subject_email else subject_email
+
+        # The loop result is the list of per-iteration child outputs (one per source system).
+        raw_runs = _steps.get("collect_records")
+        if isinstance(raw_runs, dict):
+            raw_runs = raw_runs.get("results") or raw_runs.get("items") or [raw_runs]
+        if not isinstance(raw_runs, list):
+            raw_runs = [raw_runs] if raw_runs else []
+
+        # Redaction policy: other people's emails, phones, SSNs, and credit-card-like numbers.
+        EMAIL_RE = r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b"
+        PHONE_RE = r"\b(?:\+?\d{1,3}[\s.\-]?)?(?:\(?\d{2,4}\)?[\s.\-]?)?\d{3}[\s.\-]?\d{3,4}\b"
+        SSN_RE = r"\b\d{3}-\d{2}-\d{4}\b"
+        CC_RE = r"\b(?:\d[ \-]?){13,16}\b"
+
+        # Mutable single-element counter so nested sub-callbacks can increment without
+        # relying on nonlocal binding into the top-level code scope.
+        counter = [0]
+
+        def redact_text(value):
+            s = value
+            # Preserve the subject's OWN email; redact everyone else's.
+            def _email_sub(m):
+                hit = m.group(0)
+                if hit.strip().lower() == subject_email:
+                    return hit
+                counter[0] += 1
+                return "[REDACTED-EMAIL]"
+            s = re.sub(EMAIL_RE, _email_sub, s)
+            for pat, tag in ((SSN_RE, "[REDACTED-SSN]"), (CC_RE, "[REDACTED-CARD]"), (PHONE_RE, "[REDACTED-PHONE]")):
+                def _sub(m, tag=tag):
+                    counter[0] += 1
+                    return tag
+                s = re.sub(pat, _sub, s)
+            return s
+
+        def scrub(obj):
+            if isinstance(obj, str):
+                return redact_text(obj)
+            if isinstance(obj, dict):
+                return {k: scrub(v) for k, v in obj.items()}
+            if isinstance(obj, list):
+                return [scrub(v) for v in obj]
+            return obj
+
+        normalized = []
+        systems_seen = []
+        total_records = 0
+        for run in raw_runs:
+            if not isinstance(run, dict):
+                run = {"records": run}
+            system = run.get("system") or run.get("source") or "unknown"
+            records = run.get("records") or run.get("data") or run.get("items") or []
+            if isinstance(records, dict):
+                records = records.get("records") or records.get("items") or [records]
+            if not isinstance(records, list):
+                records = [records] if records else []
+            systems_seen.append(str(system))
+            clean_records = scrub(records)
+            total_records += len(clean_records)
+            normalized.append({
+                "system": str(system),
+                "record_count": len(clean_records),
+                "records": clean_records,
+            })
+
+        result = {
+            "subject_email": _input.get("subject_email", ""),
+            "dsar_id": _input.get("dsar_id", ""),
+            "request_type": _input.get("request_type", "access"),
+            "systems_collected": systems_seen,
+            "system_count": len(normalized),
+            "total_records": total_records,
+            "third_party_pii_redactions": counter[0],
+            "package": normalized,
+        }
+
+  # 8) DRAFT the human-readable disclosure letter. This is the ONLY content-generating LLM on
+  #    the path and is declared as swappable plumbing - it runs on default_model (sonnet) but
+  #    can cost/quality-route across providers without changing the legal outcome, because the
+  #    authoritative data + redaction already happened deterministically upstream.
+  - id: draft_disclosure_letter
+    type: standard
+    depends_on: [merge_and_redact]
+    prompt: |
+      You are drafting a formal data-subject response letter for a Data Protection Officer to
+      review. Use ONLY the structured, already-redacted package below - do NOT invent, infer,
+      or add any personal data, and do NOT remove any [REDACTED-*] markers (they protect third
+      parties). No emojis, no markdown headers.
+
+      Write a clear, plain-language letter that:
+        1. States this responds to a {input.request_type} request under GDPR/CCPA.
+        2. Summarizes which source systems were searched and how many records were found.
+        3. Presents the subject's personal data grouped by source system in readable prose/tables.
+        4. Notes that third-party personal data has been redacted to protect others' rights.
+        5. Explains the subject's onward rights (rectification, erasure, complaint to a DPA).
+
+      Redacted disclosure package (authoritative - do not alter the data):
+      {steps.merge_and_redact.output}
+
+  # 9) GATE - ALL strategies must pass. (a) llm_eval COMPLETENESS check on a DIFFERENT provider
+  #    (mistral/large) than the drafter so the writer never grades its own work; it validates
+  #    the letter is grounded in the package and leaks no third-party PII. (b) human DPO
+  #    approval - the authoritative sign-off. (c) timeout fallback.
+  - id: dpo_release_gate
+    type: gate
+    depends_on: [draft_disclosure_letter]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are a privacy QA reviewer (NOT the letter's author). Answer exactly 'approved'
+              only if the disclosure letter is fully grounded in the provided redacted package,
+              adds NO personal data that is absent from the package, and contains NO un-redacted
+              third-party emails, phone numbers, SSNs, or card numbers. Otherwise answer
+              'rejected' and name the specific defect. You validate completeness and leakage
+              only; you do NOT authorize release - the DPO does.
+            input: "{steps.draft_disclosure_letter.output}"
+            model: mistral/large
+        - type: human
+          config:
+            message: >-
+              DSAR {input.dsar_id} ({input.request_type}) for {input.subject_email}: review the
+              drafted disclosure letter and the redacted package before release. Systems searched:
+              {steps.merge_and_redact.output.systems_collected}; records:
+              {steps.merge_and_redact.output.total_records}; third-party redactions:
+              {steps.merge_and_redact.output.third_party_pii_redactions}. Approve to release the
+              package to the subject; reject to send back for correction.
+            timeout_hours: 48
+            on_timeout: abort
+
+  # 10) sub_workflow - log the lawful basis for retention. We reuse the existing 'summarize'
+  #     template to produce a concise, durable retention-log narrative from the DSAR facts,
+  #     keyed for the records-retention register. workflow names an EXISTING template.
+  - id: log_lawful_basis
+    type: sub_workflow
+    depends_on: [dpo_release_gate]
+    sub_workflow:
+      workflow: "summarize"
+      input_mapping:
+        text: "steps.merge_and_redact.output"
+        format: "executive"
+        max_length: "300 words"
+
+  # 11) DELIVER the approved, redacted package to the verified subject via DocuSign / secure
+  #     link (connector dispatch over HTTP, no model).
+  - id: deliver_package
+    type: http
+    depends_on: [log_lawful_basis]
+    http_config:
+      url: "{input.delivery_provider_url}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.DOCUSIGN_TOKEN}"
+      body: |
+        {
+          "recipient_email": "{input.subject_email}",
+          "dsar_id": "{input.dsar_id}",
+          "request_type": "{input.request_type}",
+          "subject": "Your data subject request response ({input.dsar_id})",
+          "delivery_method": "secure_link",
+          "disclosure_letter": "{steps.draft_disclosure_letter.output}",
+          "verification_id": "{steps.evaluate_identity.output.verification_id}",
+          "retention_log": "{steps.log_lawful_basis.output}"
+        }
+      value_map:
+        delivery_id: "$.envelopeId"
+        delivery_status: "$.status"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 12) STATUTORY-DEADLINE SENSOR - durably poll the countdown URL every 6h until the package
+  #     is confirmed delivered OR fewer than 5 days remain (escalation trip). Provider-agnostic
+  #     boolean over the polled JSON; pure control flow, no model.
+  - id: deadline_watch
+    type: sensor
+    depends_on: [deliver_package]
+    sensor_config:
+      url: "{input.deadline_countdown_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200 and (bool(response.get('delivered')) == True or int(response.get('days_remaining', 99) or 99) <= 5)"
+      check_interval: 21600
+      timeout: 2678400
+
+  # 13) Deterministically decide whether we delivered in time or tripped the escalation. No model.
+  - id: evaluate_deadline
+    type: code
+    depends_on: [deadline_watch]
+    code_config:
+      language: python
+      code: |
+        watch = _steps.get("deadline_watch") or {}
+        if not isinstance(watch, dict):
+            watch = {"raw": watch}
+        # The sensor surfaces the last polled `response` payload.
+        resp = watch.get("response") if isinstance(watch.get("response"), dict) else watch
+
+        def _truthy(v):
+            if isinstance(v, bool):
+                return v
+            return str(v).strip().lower() in ("true", "1", "yes", "delivered")
+
+        delivered = _truthy(resp.get("delivered"))
+        try:
+            days_remaining = int(resp.get("days_remaining", 99) or 99)
+        except (TypeError, ValueError):
+            days_remaining = 99
+
+        # Escalate if we have NOT confirmed delivery and the clock is inside the 5-day buffer.
+        escalate = (not delivered) and days_remaining <= 5
+
+        result = {
+            "delivered": delivered,
+            "days_remaining": days_remaining,
+            "escalate": escalate,
+            "on_time": delivered,
+            "fail_count": 1 if escalate else 0,
+            "dsar_id": _input.get("dsar_id", ""),
+        }
+
+  # 14) CONDITION - if escalating (deadline at risk, not yet confirmed delivered), page the DPO
+  #     for a manual action; otherwise go straight to the delivery-confirmation notices.
+  - id: deadline_outcome
+    type: condition
+    depends_on: [evaluate_deadline]
+    condition_config:
+      expression: "{steps.evaluate_deadline.output.fail_count} > 0"
+      then: [escalate_deadline, notify_delivery_slack, notify_audit_email]
+      else: [notify_delivery_slack, notify_audit_email]
+
+  # 14a) DEADLINE ESCALATION - hand the DPO a manual action when the statutory clock is at risk.
+  - id: escalate_deadline
+    type: approval
+    approval_config:
+      message: >-
+        STATUTORY DEADLINE AT RISK for DSAR {input.dsar_id} ({input.subject_email}). Only
+        {steps.evaluate_deadline.output.days_remaining} day(s) remain and delivery is not yet
+        confirmed. Pick a manual action: expedite delivery, request a lawful extension, or
+        escalate to legal. Acting now prevents a missed GDPR/CCPA deadline.
+      show_data: steps.evaluate_deadline.output
+      timeout_hours: 24
+      on_timeout: abort
+      allow_edit: true
+
+  # 15) NOTIFY Slack - delivery confirmation + audit record to privacy-ops.
+  - id: notify_delivery_slack
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: >-
+        DSAR {input.dsar_id} ({input.request_type}) for {input.subject_email}: package
+        delivered via {steps.deliver_package.output}. Systems searched
+        {steps.merge_and_redact.output.systems_collected}, {steps.merge_and_redact.output.total_records}
+        records, {steps.merge_and_redact.output.third_party_pii_redactions} third-party PII
+        redactions. Deadline status: {steps.evaluate_deadline.output}. DPO approval and lawful-basis
+        log are on file.
+
+  # 16) NOTIFY Gmail - audit-trail email to the DPO mailbox closing the loop with proof.
+  - id: notify_audit_email
+    type: notify
+    notify_config:
+      service: gmail
+      channel: "{input.dpo_email}"
+      message: >-
+        DSAR audit record - request {input.dsar_id} ({input.request_type}) for
+        {input.subject_email}. Identity verified ({steps.evaluate_identity.output.verification_id},
+        confidence {steps.evaluate_identity.output.confidence}). Records collected from
+        {steps.merge_and_redact.output.systems_collected} ({steps.merge_and_redact.output.total_records}
+        records; {steps.merge_and_redact.output.third_party_pii_redactions} third-party
+        redactions). DPO release approved; lawful basis logged. Delivered via
+        {steps.deliver_package.output}. Final deadline status:
+        {steps.evaluate_deadline.output}. This email is the closing audit-trail entry.
+
+on_complete:
+  storage_path: "dsar-fulfillment-deadline-engine/{run_id}/result.json"

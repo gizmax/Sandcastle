@@ -1,0 +1,465 @@
+# name: NDA Autopilot - Intake to Countersign
+# description: Inbound NDAs land via a sales/intake webhook or watched Gmail/Slack channel, get parsed into clauses + party metadata, classified (mutual / one-way / counterparty-paper) onto the matching playbook, then a DETERMINISTIC Python playbook-diff computes off_standard=true/false against your allowed-standard clause set. Off-standard NDAs route to an LLM redline + a two-judge-style quality-and-human gate; standard NDAs fast-path with zero lawyer touch. Either way the NDA is sent for e-signature via DocuSign, watched by a durable sensor until both parties countersign, then filed to Google Drive + a Notion CLM register with a full audit-trail JSON, and the outcome is posted to Slack. The keep/escalate decision is sandboxed code, never one model's output.
+# tags: [Legal, NDA, CLM, DocuSign, Notion, GoogleDrive, Slack, Gmail, Playbook, Self-Serve, E-Signature]
+# category: hr_legal
+
+name: nda-autopilot-intake-to-countersign
+description: >-
+  Self-serve NDA autopilot for in-house legal ops. An inbound NDA (from a sales/intake form
+  webhook or a watched Gmail / Slack channel) is PARSED into its clause set + party metadata,
+  CLASSIFIED into mutual / one-way / counterparty-paper to pick the right playbook, then a
+  DETERMINISTIC Python step diffs the extracted clauses against your allowed-standard playbook
+  and computes off_standard=true/false - the load-bearing keep-or-escalate decision is reproducible
+  code, not a model's prose. A CONDITION fast-paths standard NDAs (no lawyer, no approval) and routes
+  off-standard ones to an LLM REDLINE plus a GATE (an llm_eval redline-quality judge AND a human
+  counsel approval, with a timeout->abort escalation - all strategies must pass). Both paths converge
+  on an HTTP POST to the DocuSign connector to create + send the envelope, a durable SENSOR that polls
+  the envelope-status URL every 60s until status=='completed' (both parties countersigned, 168h cap),
+  then TOOL steps upload the signed PDF to Google Drive and write a Notion CLM register row, a TRANSFORM
+  builds the audit JSON, and a NOTIFY posts the outcome + link to Slack. Routing and gating are model
+  independent: classify/gate declare model: only as plumbing, the gate's llm_eval can target ANY
+  provider, the redline is provider-agnostic (sonnet / gpt / mistral interchangeable), and the
+  off_standard diff has zero LLM dependence. Connectors: Gmail/DocuSign via http, Google Drive + Notion +
+  Slack via tool/notify.
+
+default_model: sonnet
+default_timeout: 900
+
+input_schema:
+  required: ["nda_document"]
+  properties:
+    nda_document:
+      type: file
+      accept: ".pdf,.docx"
+      description: "The inbound counterparty NDA PDF/DOCX that landed via the intake webhook or watched Gmail/Slack channel."
+    counterparty_name:
+      type: string
+      description: "Counterparty legal entity name as captured by the intake form / email metadata (used in the envelope + register)."
+      default: "Acme Counterparty Inc."
+    counterparty_email:
+      type: string
+      description: "Signer email for the counterparty's authorized signatory (DocuSign recipient)."
+      default: "legal@counterparty.example"
+    our_signer_email:
+      type: string
+      description: "Email of your authorized internal signatory who countersigns the NDA."
+      default: "gc@ourcompany.example"
+    intake_source:
+      type: string
+      description: "Where the NDA originated: 'webhook' (intake form), 'gmail' (watched inbox), or 'slack' (watched channel). Recorded in the audit trail."
+      default: "webhook"
+    allowed_standard_clauses:
+      type: string
+      description: >-
+        Comma-separated allow-list of your playbook-standard clause keys. An NDA is on-standard ONLY if
+        every extracted material clause maps into this set with acceptable terms. e.g.
+        "mutual_confidentiality,term_2yr,governing_law_de,no_non_solicit,carveouts_standard,return_or_destroy"
+      default: "mutual_confidentiality,term_2yr,governing_law_de,no_non_solicit,carveouts_standard,return_or_destroy,no_residuals,no_assignment"
+    max_term_years:
+      type: number
+      description: "Maximum confidentiality term (years) the playbook auto-accepts; anything longer is off-standard."
+      default: 3
+    docusign_base_url:
+      type: string
+      description: "DocuSign eSignature REST base URL including the account path (envelopes are created here)."
+      default: "https://eu.docusign.net/restapi/v2.1/accounts/{env.DOCUSIGN_ACCOUNT_ID}"
+    gmail_api_base:
+      type: string
+      description: "Gmail REST base URL used to fetch the message attachment when the NDA arrives by watched inbox."
+      default: "https://gmail.googleapis.com/gmail/v1/users/me"
+    gdrive_folder_id:
+      type: string
+      description: "Google Drive folder ID of the executed-NDA vault the signed PDF is filed into."
+      default: "0ABCDExecutedNDAvault"
+    notion_clm_database_id:
+      type: string
+      description: "Notion database ID of the CLM register a row is written to per executed NDA."
+      default: "11111111-2222-3333-4444-555555555555"
+    slack_channel:
+      type: string
+      description: "Slack channel where the NDA outcome + executed-document link is posted."
+      default: "#legal-ops"
+
+steps:
+  # 1) PARSE the inbound NDA into clean markdown text so clauses + party metadata can be extracted.
+  #    {input.nda_document} is the file dropped by the intake webhook / watched Gmail / Slack channel.
+  - id: parse_nda
+    type: parse
+    prompt: "{input.nda_document}"
+    parse_config:
+      output: markdown
+      pages: null
+      ocr: false
+      ocr_engine: auto
+
+  # 2) EXTRACT the structured clause set + party metadata from the parsed text. Provider-agnostic;
+  #    runs on the cheap default model. Output is the machine-readable dossier the deterministic
+  #    playbook diff will score - the EXTRACTION is a model, the DECISION downstream is code.
+  - id: extract_clauses
+    type: standard
+    depends_on: [parse_nda]
+    output_schema:
+      type: object
+      properties:
+        nda_type:
+          type: string
+          enum: ["mutual", "one_way", "counterparty_paper"]
+        disclosing_party: { type: string }
+        receiving_party: { type: string }
+        governing_law: { type: string }
+        term_years: { type: number }
+        clauses:
+          type: array
+          items:
+            type: object
+            properties:
+              key: { type: string }
+              text: { type: string }
+        on_counterparty_paper: { type: boolean }
+      required: ["nda_type", "term_years", "clauses"]
+    prompt: |
+      You are a legal-ops paralegal extracting structured metadata from an inbound NDA.
+      From the NDA text below, extract the party metadata and the material clause set.
+
+      NDA text:
+      {steps.parse_nda.output.text}
+
+      For each material clause, emit a normalized "key" from this controlled vocabulary where it
+      applies (else a short snake_case key you invent): mutual_confidentiality, unilateral_confidentiality,
+      term_2yr, term_3yr, term_5yr, governing_law_de, governing_law_us, governing_law_other,
+      no_non_solicit, non_solicit_present, carveouts_standard, carveouts_narrow, return_or_destroy,
+      no_residuals, residuals_clause, no_assignment, assignment_allowed, injunctive_relief, indemnification.
+
+      Return STRICT JSON only:
+      {
+        "nda_type": "mutual" | "one_way" | "counterparty_paper",
+        "disclosing_party": "<entity>",
+        "receiving_party": "<entity>",
+        "governing_law": "<jurisdiction>",
+        "term_years": <number>,
+        "clauses": [ { "key": "<clause_key>", "text": "<verbatim or tight paraphrase>" } ],
+        "on_counterparty_paper": <true if drafted on the counterparty's template>
+      }
+      Output JSON only, no prose.
+
+  # 3) CLASSIFY the NDA onto the matching playbook lane. Swappable cheap model, declared as plumbing.
+  #    Every lane routes into the same deterministic diff - the lane only selects which playbook keys
+  #    are "standard", it does NOT make the keep/escalate call.
+  - id: classify_playbook
+    type: classify
+    depends_on: [extract_clauses]
+    classify_config:
+      model: haiku
+      input: "Pick the NDA playbook lane. mutual = both sides disclose & receive (symmetric obligations). one_way = only one party discloses (unilateral confidentiality). counterparty_paper = drafted on the counterparty's own template/letterhead rather than our standard form (treat as higher-scrutiny even if otherwise mutual). Extracted NDA: {steps.extract_clauses.output}"
+      categories:
+        - mutual
+        - one_way
+        - counterparty_paper
+      branches:
+        mutual: [playbook_diff]
+        one_way: [playbook_diff]
+        counterparty_paper: [playbook_diff]
+
+  # 4) DETERMINISTIC PLAYBOOK DIFF - the audit-load-bearing decision, zero LLM. Compare the extracted
+  #    clause set against the allowed-standard set, apply the lane + max-term rules, and compute
+  #    off_standard=true/false with an explicit, reproducible reason list.
+  - id: playbook_diff
+    type: code
+    depends_on: [extract_clauses, classify_playbook]
+    code_config:
+      language: python
+      code: |
+        extracted = _steps.get('extract_clauses') or {}
+        lane = str(_steps.get('classify_playbook') or '').strip().lower() or 'mutual'
+        if not isinstance(extracted, dict):
+            extracted = {}
+
+        # --- Allowed-standard playbook set (case-insensitive clause keys). ------------------
+        allow_raw = str(_input.get('allowed_standard_clauses', '') or '')
+        allowed = {c.strip().lower() for c in allow_raw.split(',') if c.strip()}
+
+        max_term = float(_input.get('max_term_years', 3) or 3)
+
+        # --- Extracted material clauses. ---------------------------------------------------
+        clauses = extracted.get('clauses') if isinstance(extracted.get('clauses'), list) else []
+        extracted_keys = []
+        for c in clauses:
+            if isinstance(c, dict) and c.get('key'):
+                extracted_keys.append(str(c['key']).strip().lower())
+            elif isinstance(c, str) and c.strip():
+                extracted_keys.append(c.strip().lower())
+
+        # --- Reasons that force an off-standard escalation. --------------------------------
+        reasons = []
+
+        # (a) Any extracted clause not on the allow-list is a deviation.
+        deviating = sorted({k for k in extracted_keys if k and k not in allowed})
+        if deviating:
+            reasons.append("non_standard_clauses:" + ",".join(deviating))
+
+        # (b) Term longer than the auto-accept cap.
+        try:
+            term_years = float(extracted.get('term_years') or 0)
+        except (ValueError, TypeError):
+            term_years = 0.0
+        if term_years > max_term:
+            reasons.append(f"term_exceeds_cap:{term_years}>{max_term}")
+
+        # (c) Counterparty-paper always gets a lawyer's eyes, even if clauses look clean.
+        if lane == 'counterparty_paper' or bool(extracted.get('on_counterparty_paper')):
+            reasons.append("counterparty_paper_requires_review")
+
+        # (d) High-risk clause keys are never auto-accepted regardless of allow-list.
+        red_flags = {'residuals_clause', 'assignment_allowed', 'indemnification',
+                     'non_solicit_present', 'governing_law_other', 'carveouts_narrow'}
+        present_red = sorted(red_flags.intersection(extracted_keys))
+        if present_red:
+            reasons.append("red_flag_clauses:" + ",".join(present_red))
+
+        # (e) Sanity: an NDA with no extracted clauses can't be auto-cleared.
+        if not extracted_keys:
+            reasons.append("no_clauses_extracted")
+
+        off_standard = len(reasons) > 0
+
+        result = {
+            'lane': lane,
+            'off_standard': off_standard,
+            'fail_count': len(reasons),
+            'reasons': reasons,
+            'extracted_keys': extracted_keys,
+            'deviating_clauses': deviating,
+            'red_flag_clauses': present_red,
+            'term_years': term_years,
+            'max_term_years': max_term,
+            'counterparty_name': _input.get('counterparty_name', ''),
+            'summary': (
+                f"lane={lane} | off_standard={off_standard} | term={term_years}y(cap {max_term}y) | "
+                f"deviations={deviating or 'none'} | red_flags={present_red or 'none'}"
+            ),
+        }
+
+  # 5) CONDITION - the deterministic fork. off_standard -> redline + gate (human counsel in the loop);
+  #    on-standard -> fast-path straight to envelope creation with NO lawyer, NO approval.
+  - id: standard_fork
+    type: condition
+    depends_on: [playbook_diff]
+    condition_config:
+      expression: "{steps.playbook_diff.output.fail_count} > 0"
+      then: [redline_nda, redline_gate, prepare_envelope]
+      else: [prepare_envelope]
+
+  # 5a) OFF-STANDARD ONLY: LLM REDLINE. Provider-agnostic (sonnet / gpt / mistral interchangeable),
+  #     cost-routes to the cheapest qualifying provider on the default model. Produces tracked-change
+  #     style redline language to pull the NDA back toward the playbook.
+  - id: redline_nda
+    type: standard
+    prompt: |
+      You are senior in-house counsel redlining an off-standard inbound NDA back toward our playbook.
+      The deterministic playbook diff flagged these deviations:
+
+      {steps.playbook_diff.output.summary}
+      Full reason list: {steps.playbook_diff.output.reasons}
+
+      Extracted NDA dossier:
+      {steps.extract_clauses.output}
+
+      For EACH flagged deviation, produce a concrete redline: the offending language, our proposed
+      replacement language (playbook-aligned), and a one-line fallback position. Cover the term cap,
+      any non-standard or red-flag clauses, and (if counterparty paper) a note that we prefer our form.
+      Output a clean markdown redline memo a paralegal can paste into the negotiation thread.
+
+  # 5b) OFF-STANDARD ONLY: GATE - ALL strategies must pass before the redlined NDA proceeds.
+  #     Strategy 1: an llm_eval judge scores REDLINE QUALITY (provider-agnostic, can target ANY
+  #     provider). Strategy 2: a HUMAN counsel approval. timeout -> abort escalation. No single model
+  #     can self-approve its own redline.
+  - id: redline_gate
+    type: gate
+    depends_on: [redline_nda]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are a redline quality reviewer (NOT the drafter). Approve ONLY IF the redline
+              concretely addresses EVERY deviation the deterministic diff flagged: it must replace
+              the offending language with playbook-aligned language, hold the term at or under our
+              cap, neutralize each red-flag clause, and give a usable fallback per item. Reject if it
+              is vague, misses a flagged deviation, or weakens our position. Diff reasons:
+              {steps.playbook_diff.output.reasons}
+            input: "{steps.redline_nda.output}"
+            model: google/gemini-2.5-pro
+        - type: human
+          config:
+            message: "Counsel: this NDA is off-standard. Review the machine redline and the flagged deviations, then approve to send for signature or reject to renegotiate. Your approval is the audit record of the off-standard sign-off."
+            timeout_hours: 48
+            on_timeout: abort
+
+  # 6) CONVERGENCE: deterministically assemble the DocuSign envelope payload. Both the fast-path and
+  #    the redlined path land here. No model - just folds the diff + party metadata into the request.
+  - id: prepare_envelope
+    type: code
+    depends_on: [playbook_diff]
+    code_config:
+      language: python
+      code: |
+        diff = _steps.get('playbook_diff') or {}
+        extracted = _steps.get('extract_clauses') or {}
+        if not isinstance(diff, dict):
+            diff = {}
+        if not isinstance(extracted, dict):
+            extracted = {}
+
+        off_standard = bool(diff.get('off_standard'))
+        # The redline memo only exists on the off-standard branch.
+        redline = _steps.get('redline_nda')
+        redline_text = redline if isinstance(redline, str) else ''
+
+        subject = ("NDA for countersignature - " + str(_input.get('counterparty_name', 'Counterparty')))
+        if off_standard:
+            subject += " (redlined, counsel-approved)"
+        else:
+            subject += " (standard, auto-cleared)"
+
+        result = {
+            'email_subject': subject,
+            'off_standard': off_standard,
+            'lane': diff.get('lane', 'mutual'),
+            'counterparty_name': _input.get('counterparty_name', ''),
+            'counterparty_email': _input.get('counterparty_email', ''),
+            'our_signer_email': _input.get('our_signer_email', ''),
+            'has_redline': bool(redline_text),
+            'audit_path': 'fast_path' if not off_standard else 'redline_then_gate',
+            'diff_summary': diff.get('summary', ''),
+        }
+
+  # 7) HTTP POST to the DocuSign connector to CREATE + SEND the envelope (status=sent). The signed
+  #    document is the parsed NDA; both the counterparty and our signer are routed as recipients.
+  - id: create_envelope
+    type: http
+    depends_on: [prepare_envelope]
+    http_config:
+      url: "{input.docusign_base_url}/envelopes"
+      method: POST
+      auth: "bearer:{env.DOCUSIGN_ACCESS_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      body: |
+        {
+          "emailSubject": "{steps.prepare_envelope.output.email_subject}",
+          "status": "sent",
+          "documents": [
+            {
+              "documentId": "1",
+              "name": "NDA-{input.counterparty_name}.pdf",
+              "fileExtension": "pdf",
+              "documentBase64": "{steps.parse_nda.output.text}"
+            }
+          ],
+          "recipients": {
+            "signers": [
+              { "email": "{input.counterparty_email}", "name": "{input.counterparty_name}", "recipientId": "1", "routingOrder": "1" },
+              { "email": "{input.our_signer_email}", "name": "Our Authorized Signatory", "recipientId": "2", "routingOrder": "2" }
+            ]
+          }
+        }
+      value_map:
+        envelope_id: "envelopeId"
+        envelope_status: "status"
+        status_url: "uri"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 8) DURABLE SENSOR - poll the DocuSign envelope-status URL every 60s until BOTH parties have
+  #    countersigned (status=='completed'), with a 168h (7-day) hard cap. Fully model-free wait.
+  - id: await_countersign
+    type: sensor
+    depends_on: [create_envelope]
+    sensor_config:
+      url: "{input.docusign_base_url}/envelopes/{steps.create_envelope.output.envelope_id}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200 and str(response.get('status', '')).lower() == 'completed'"
+      check_interval: 60
+      timeout: 604800
+
+  # 9) TOOL (Google Drive) - upload the fully executed NDA PDF into the executed-NDA vault folder.
+  - id: file_to_gdrive
+    type: tool
+    depends_on: [await_countersign]
+    tool_config:
+      tool: "gdrive"
+      function: "create_file"
+      arguments:
+        - name: "NDA-{input.counterparty_name}-EXECUTED.pdf"
+          mime_type: "application/pdf"
+          parent_folder_id: "{input.gdrive_folder_id}"
+          content_ref: "{steps.create_envelope.output.envelope_id}"
+          description: "Fully countersigned NDA for {input.counterparty_name}. Path: {steps.prepare_envelope.output.audit_path}. {steps.playbook_diff.output.summary}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 10) TOOL (Notion) - write the CLM register row so the executed NDA is searchable in the contract
+  #     lifecycle database (counterparty, lane, off-standard flag, Drive link, envelope id).
+  - id: write_notion_register
+    type: tool
+    depends_on: [file_to_gdrive]
+    tool_config:
+      tool: "notion"
+      function: "create_page"
+      arguments:
+        - parent_database_id: "{input.notion_clm_database_id}"
+          title: "NDA - {input.counterparty_name}"
+          properties:
+            Counterparty: "{input.counterparty_name}"
+            Lane: "{steps.playbook_diff.output.lane}"
+            OffStandard: "{steps.playbook_diff.output.off_standard}"
+            Status: "Executed"
+            EnvelopeId: "{steps.create_envelope.output.envelope_id}"
+            DriveFile: "{steps.file_to_gdrive.output}"
+            IntakeSource: "{input.intake_source}"
+            DiffSummary: "{steps.playbook_diff.output.summary}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 11) TRANSFORM - build the full audit-trail JSON: intake -> classify -> diff -> path -> envelope ->
+  #     countersign -> filing. This is the immutable record legal ops keeps for every executed NDA.
+  - id: build_audit
+    type: transform
+    depends_on: [write_notion_register]
+    transform_config:
+      template: |
+        {
+          "counterparty": "{input.counterparty_name}",
+          "intake_source": "{input.intake_source}",
+          "nda_lane": "{steps.playbook_diff.output.lane}",
+          "off_standard": "{steps.playbook_diff.output.off_standard}",
+          "decision_path": "{steps.prepare_envelope.output.audit_path}",
+          "diff_reasons": "{steps.playbook_diff.output.reasons}",
+          "diff_summary": "{steps.playbook_diff.output.summary}",
+          "docusign_envelope_id": "{steps.create_envelope.output.envelope_id}",
+          "countersigned": true,
+          "gdrive_file": "{steps.file_to_gdrive.output}",
+          "notion_register_page": "{steps.write_notion_register.output}",
+          "filed_at_run": "{run_id}"
+        }
+
+  # 12) NOTIFY - post the outcome + executed-document context to the legal-ops Slack channel.
+  - id: notify_legal_ops
+    type: notify
+    depends_on: [build_audit]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: "NDA countersigned for {input.counterparty_name} via {input.intake_source}. Path: {steps.prepare_envelope.output.audit_path}. {steps.playbook_diff.output.summary}. DocuSign envelope {steps.create_envelope.output.envelope_id}. Filed to Drive + Notion CLM. Audit: {steps.build_audit.output}"
+
+on_complete:
+  storage_path: "nda-autopilot-intake-to-countersign/{run_id}/result.json"

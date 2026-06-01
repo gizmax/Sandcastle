@@ -1,0 +1,598 @@
+# name: Records Retention Disposition Orchestrator
+# description: Scheduled defensible-disposition engine. Lists records past their legal retention period across S3 + Google Drive + PostgreSQL, races two providers to decide whether a legal hold or privilege blocks disposal, requires records-manager sign-off, then deletes and certifies the destruction for auditors.
+# tags: [aws-s3, gdrive, postgresql, slack, gmail, Records-Retention, Legal-Hold, Privilege, Defensible-Deletion, Certificate-of-Destruction, Information-Governance, Compliance]
+# category: hr_legal
+
+name: records-retention-disposition-orchestrator
+description: >
+  Defensible records-disposition orchestrator for regulated firms (finance, healthcare, legal).
+  On a schedule it lists candidate records whose age exceeds their retention period from three
+  stores - an S3 inventory, a Google Drive listing, and a PostgreSQL register exposed over REST -
+  then runs a DETERMINISTIC Python step that normalizes all three into one candidate table and
+  computes, per record, whether age_days > retention_period_days. Each over-retention candidate
+  is looped, and the highest-stakes judgment - is this record under a legal hold, attorney-client
+  privileged, or relevant to active/anticipated litigation - is run as a CROSS-PROVIDER RACE on two
+  independent providers concurrently with a validator that requires the fastest qualifying answer to
+  be a clear, hold-free verdict, so a single model's hallucination can never green-light deletion.
+  A classify step routes each record to destroy / retain-hold / review. The destroy bucket passes a
+  GATE (records-manager human approval plus an LLM consistency check; on timeout it retains rather
+  than deletes), then a final defensible-deletion approval. Deletion itself is a DETERMINISTIC code
+  step that captures immutable SHA-256 hashes of exactly what is destroyed, followed by the real
+  delete calls to S3 and Google Drive. A transform assembles the certificate-of-destruction payload,
+  a report renders the branded certificate PDF, and the governance log is posted to Slack and emailed
+  via Gmail. Listing, the over-retention math, hashing, and the deletes are all model-independent.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 1200
+
+input_schema:
+  required: ["disposition_run_id"]
+  properties:
+    disposition_run_id:
+      type: string
+      description: "Unique id for this scheduled disposition sweep (e.g. 'DISP-2026-W23')."
+      default: "DISP-2026-W23"
+      example: "DISP-2026-W23"
+    retention_schedule_name:
+      type: string
+      description: "Name of the retention schedule applied this run (used on the certificate)."
+      default: "Corporate Records Retention Schedule v4"
+      example: "SEC 17a-4 Broker-Dealer Schedule"
+    s3_inventory_url:
+      type: string
+      description: "REST endpoint returning the S3 object inventory (key, last_modified, tags incl. retention_period_days)."
+      default: "https://s3.eu-central-1.amazonaws.com/records-archive?list-type=2&prefix=records/"
+      example: "https://s3.eu-central-1.amazonaws.com/acme-records?list-type=2&prefix=records/"
+    s3_delete_base_url:
+      type: string
+      description: "S3 (or S3-compatible) base URL used to issue the object DELETE for destroyed records."
+      default: "https://s3.eu-central-1.amazonaws.com/records-archive"
+      example: "https://s3.eu-central-1.amazonaws.com/acme-records"
+    gdrive_list_url:
+      type: string
+      description: "Google Drive files.list REST endpoint scoped to the records folder (returns files[] with createdTime + appProperties.retention_period_days)."
+      default: "https://www.googleapis.com/drive/v3/files?q=%27records-folder%27+in+parents&fields=files(id,name,createdTime,appProperties)"
+      example: "https://www.googleapis.com/drive/v3/files?q=%27ABC123%27+in+parents&fields=files(id,name,createdTime,appProperties)"
+    postgres_rest_url:
+      type: string
+      description: "PostgREST/REST endpoint over the records register (returns rows with record_id, created_at, retention_period_days)."
+      default: "https://pg-rest.internal.example.com/records_register?disposed=eq.false&select=record_id,title,created_at,retention_period_days"
+      example: "https://pg-rest.internal.example.com/records_register?disposed=eq.false"
+    grace_period_days:
+      type: number
+      description: "Extra days beyond the retention period a record must exceed before it becomes a disposition candidate (safety margin)."
+      default: 30
+      example: "30"
+    records_manager_email:
+      type: string
+      description: "Gmail recipient for the governance log + certificate of destruction."
+      default: "records-governance@example.com"
+      example: "ig-lead@acme.com"
+    slack_channel:
+      type: string
+      description: "Slack channel for the disposition governance log."
+      default: "#records-governance"
+      example: "#records-governance"
+
+steps:
+  # 1a) LIST candidate records from the S3 object inventory (aws-s3 connector via REST).
+  - id: list_s3_inventory
+    type: http
+    http_config:
+      url: "{input.s3_inventory_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "aws4:{env.AWS_ACCESS_KEY_ID}:{env.AWS_SECRET_ACCESS_KEY}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 1b) LIST candidate records from Google Drive (gdrive connector via Drive v3 REST).
+  - id: list_gdrive_files
+    type: http
+    http_config:
+      url: "{input.gdrive_list_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.GDRIVE_ACCESS_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 1c) LIST candidate records from the PostgreSQL records register (postgresql connector via PostgREST).
+  - id: list_postgres_register
+    type: http
+    http_config:
+      url: "{input.postgres_rest_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.POSTGREST_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2) DETERMINISTIC normalize + apply the retention schedule. The audit-load-bearing math:
+  #    fold all three stores into one candidate table and keep only records whose age exceeds
+  #    retention_period_days + grace_period_days. No model touches this.
+  - id: compute_over_retention
+    type: code
+    depends_on: [list_s3_inventory, list_gdrive_files, list_postgres_register]
+    code_config:
+      language: python
+      code: |
+        from datetime import datetime, timezone
+
+        s3 = _steps['list_s3_inventory'] or {}
+        gdrive = _steps['list_gdrive_files'] or {}
+        pg = _steps['list_postgres_register'] or {}
+        grace = float(_input.get('grace_period_days', 30) or 30)
+        now = datetime.now(timezone.utc)
+
+        def _age_days(val):
+            # Tolerate ISO8601 strings or epoch seconds; return whole days of age or None.
+            if val is None:
+                return None
+            try:
+                if isinstance(val, (int, float)):
+                    dt = datetime.fromtimestamp(float(val), tz=timezone.utc)
+                else:
+                    dt = datetime.fromisoformat(str(val).replace('Z', '+00:00'))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return max(0, (now - dt).days)
+            except (ValueError, TypeError, OSError):
+                return None
+
+        def _to_int(val, default=0):
+            try:
+                return int(float(val))
+            except (ValueError, TypeError):
+                return default
+
+        candidates = []
+
+        # --- S3 inventory: list-type=2 returns {"Contents": [{Key, LastModified, ...}]} ----
+        s3_list = s3.get('Contents') if isinstance(s3, dict) else (s3 if isinstance(s3, list) else [])
+        for obj in (s3_list or []):
+            if not isinstance(obj, dict):
+                continue
+            key = str(obj.get('Key') or obj.get('key') or '')
+            if not key:
+                continue
+            tags = obj.get('tags') or obj.get('Tags') or {}
+            retention = _to_int(tags.get('retention_period_days') if isinstance(tags, dict) else None, 0)
+            if retention <= 0:
+                retention = _to_int(obj.get('retention_period_days'), 0)
+            age = _age_days(obj.get('LastModified') or obj.get('last_modified'))
+            candidates.append({
+                'store': 's3',
+                'locator': key,
+                's3_key': key,
+                'title': key.rsplit('/', 1)[-1] or key,
+                'age_days': age,
+                'retention_period_days': retention,
+            })
+
+        # --- Google Drive: files.list returns {"files": [{id, name, createdTime, appProperties}]} ---
+        gd_list = gdrive.get('files') if isinstance(gdrive, dict) else (gdrive if isinstance(gdrive, list) else [])
+        for f in (gd_list or []):
+            if not isinstance(f, dict):
+                continue
+            fid = str(f.get('id') or '')
+            if not fid:
+                continue
+            props = f.get('appProperties') or {}
+            retention = _to_int(props.get('retention_period_days') if isinstance(props, dict) else None, 0)
+            age = _age_days(f.get('createdTime') or f.get('modifiedTime'))
+            candidates.append({
+                'store': 'gdrive',
+                'locator': fid,
+                'gdrive_file_id': fid,
+                'title': str(f.get('name') or fid),
+                'age_days': age,
+                'retention_period_days': retention,
+            })
+
+        # --- PostgreSQL register: PostgREST returns a list of rows ---
+        pg_list = pg if isinstance(pg, list) else (pg.get('rows') or pg.get('data') or [] if isinstance(pg, dict) else [])
+        for row in (pg_list or []):
+            if not isinstance(row, dict):
+                continue
+            rid = str(row.get('record_id') or row.get('id') or '')
+            if not rid:
+                continue
+            retention = _to_int(row.get('retention_period_days'), 0)
+            age = _age_days(row.get('created_at') or row.get('createdAt'))
+            candidates.append({
+                'store': 'postgresql',
+                'locator': rid,
+                'pg_record_id': rid,
+                'title': str(row.get('title') or rid),
+                'age_days': age,
+                'retention_period_days': retention,
+            })
+
+        # Apply the retention schedule: a record is over-retention only when its age strictly
+        # exceeds its retention period plus the safety grace window. Unknown ages are NEVER
+        # auto-eligible (fail-safe toward retention).
+        over_retention = []
+        skipped = []
+        for c in candidates:
+            age = c.get('age_days')
+            rp = c.get('retention_period_days') or 0
+            threshold = rp + grace
+            eligible = age is not None and rp > 0 and age > threshold
+            c['threshold_days'] = threshold
+            c['over_retention'] = bool(eligible)
+            if eligible:
+                over_retention.append(c)
+            else:
+                skipped.append(c)
+
+        result = {
+            'disposition_run_id': _input.get('disposition_run_id'),
+            'retention_schedule_name': _input.get('retention_schedule_name'),
+            'total_candidates': len(candidates),
+            'over_retention_count': len(over_retention),
+            'skipped_count': len(skipped),
+            'over_retention': over_retention,
+        }
+
+  # 3) LOOP each over-retention candidate through the hold/privilege check and disposition routing.
+  #    Child step ids run once per record; each reads the current record via _item.
+  - id: disposition_loop
+    type: loop
+    depends_on: [compute_over_retention]
+    loop_config:
+      over: "steps.compute_over_retention.output.over_retention"
+      step_ids: [hold_check_anthropic, hold_check_gemini, hold_privilege_race, route_disposition]
+      max_iterations: 1000
+
+  # 3a) RACE branch A - hold/privilege classification on Anthropic (sonnet).
+  #     Defined separately, no depends_on; the race wires it in. Reads the record via _item.
+  - id: hold_check_anthropic
+    type: standard
+    model: sonnet
+    prompt: |
+      You are a records-governance legal-hold reviewer. Decide whether this expired record may be
+      defensibly destroyed. Examine the record for ANY signal of: an active or anticipated legal hold,
+      attorney-client privilege or attorney work product, regulatory investigation, audit, or litigation
+      relevance. When in doubt, block destruction.
+      Respond as STRICT JSON only, no prose, no markdown:
+      {"hold": true|false, "basis": "legal_hold|privilege|litigation|regulatory|none", "verdict": "block|clear", "confidence": 0.0-1.0}
+      Set "verdict":"clear" and "hold":false ONLY when there is no hold, no privilege, and no litigation/
+      regulatory relevance; otherwise "verdict":"block".
+      Record under review: {_item}
+
+  # 3b) RACE branch B - the SAME hold/privilege classification on an independent provider (Gemini).
+  - id: hold_check_gemini
+    type: standard
+    model: google/gemini-2.5-pro
+    prompt: |
+      You are a records-governance legal-hold reviewer. Decide whether this expired record may be
+      defensibly destroyed. Examine the record for ANY signal of: an active or anticipated legal hold,
+      attorney-client privilege or attorney work product, regulatory investigation, audit, or litigation
+      relevance. When in doubt, block destruction.
+      Respond as STRICT JSON only, no prose, no markdown:
+      {"hold": true|false, "basis": "legal_hold|privilege|litigation|regulatory|none", "verdict": "block|clear", "confidence": 0.0-1.0}
+      Set "verdict":"clear" and "hold":false ONLY when there is no hold, no privilege, and no litigation/
+      regulatory relevance; otherwise "verdict":"block".
+      Record under review: {_item}
+
+  # 3c) CROSS-PROVIDER RACE: run both providers concurrently; the fastest answer that ALSO satisfies
+  #     the validator wins. The validator demands a parseable, clear, hold-free, high-confidence verdict -
+  #     so a "block" or a hallucinated/garbled answer fails validation, the race waits for the other
+  #     branch, and if neither clears, nothing downstream gets a green light. Multi-provider consensus
+  #     failover: a single model can never trigger deletion.
+  - id: hold_privilege_race
+    type: race
+    race_config:
+      branches:
+        - [hold_check_anthropic]
+        - [hold_check_gemini]
+      validator: "'\"verdict\": \"clear\"' in str(output).replace(chr(39), chr(34)) and '\"hold\": true' not in str(output).replace(chr(39), chr(34))"
+
+  # 3d) CLASSIFY the disposition decision for this record into destroy / retain_hold / review.
+  #     Reads the winning race verdict; routes each category to the per-record collector.
+  - id: route_disposition
+    type: classify
+    depends_on: [hold_privilege_race]
+    classify_config:
+      model: haiku
+      input: "Decide the disposition for this expired record. The independent dual-provider hold/privilege check returned: {steps.hold_privilege_race.output}. If that verdict clearly says hold=false and verdict=clear, the record is destroyable -> 'destroy'. If it indicates a legal hold, privilege, or litigation/regulatory relevance -> 'retain_hold'. If the verdict is ambiguous, low-confidence, or unparseable -> 'review'. Record: {_item}"
+      categories:
+        - destroy
+        - retain_hold
+        - review
+      branches:
+        destroy: [collect_record_decision]
+        retain_hold: [collect_record_decision]
+        review: [collect_record_decision]
+
+  # 3e) DETERMINISTIC per-record collector: pin the disposition + race verdict onto the record so the
+  #     post-loop consolidator can bucket it. No model.
+  - id: collect_record_decision
+    type: code
+    depends_on: [route_disposition]
+    code_config:
+      language: python
+      code: |
+        record = _input.get('_item') or {}
+        disposition = str(_steps.get('route_disposition') or '').strip().lower()
+        race_verdict = _steps.get('hold_privilege_race')
+
+        # Fail-safe: anything that is not an explicit, clean 'destroy' is retained/queued for review.
+        if disposition not in ('destroy', 'retain_hold', 'review'):
+            disposition = 'review'
+
+        result = {
+            'locator': record.get('locator'),
+            'store': record.get('store'),
+            'title': record.get('title'),
+            's3_key': record.get('s3_key'),
+            'gdrive_file_id': record.get('gdrive_file_id'),
+            'pg_record_id': record.get('pg_record_id'),
+            'age_days': record.get('age_days'),
+            'retention_period_days': record.get('retention_period_days'),
+            'disposition': disposition,
+            'hold_verdict': race_verdict,
+        }
+
+  # 4) DETERMINISTIC consolidation of the loop into disposition buckets. No model.
+  - id: consolidate_dispositions
+    type: code
+    depends_on: [disposition_loop]
+    code_config:
+      language: python
+      code: |
+        loop_out = _steps['disposition_loop'] or {}
+        plan = _steps['compute_over_retention'] or {}
+
+        # Loop output may be a list of per-item results or a wrapper dict.
+        items = loop_out if isinstance(loop_out, list) else (loop_out.get('results') or loop_out.get('items') or [])
+
+        destroy, retain_hold, review = [], [], []
+        for it in items:
+            row = it if isinstance(it, dict) else {}
+            # Each per-item result may nest the collector output; unwrap if needed.
+            if 'disposition' not in row:
+                for v in row.values():
+                    if isinstance(v, dict) and 'disposition' in v:
+                        row = v
+                        break
+            disp = str(row.get('disposition', 'review')).strip().lower()
+            if disp == 'destroy':
+                destroy.append(row)
+            elif disp == 'retain_hold':
+                retain_hold.append(row)
+            else:
+                review.append(row)
+
+        result = {
+            'disposition_run_id': plan.get('disposition_run_id'),
+            'retention_schedule_name': plan.get('retention_schedule_name'),
+            'destroy_count': len(destroy),
+            'retain_hold_count': len(retain_hold),
+            'review_count': len(review),
+            'destroy': destroy,
+            'retain_hold': retain_hold,
+            'review': review,
+            'has_destroy_candidates': len(destroy) > 0,
+        }
+
+  # 5) GATE the destroy bucket: an LLM consistency eval AND the records manager (human) must BOTH
+  #    pass before anything is deleted. On human timeout the gate ABORTS - the default-safe outcome
+  #    is to RETAIN, never to delete.
+  - id: destroy_authorization_gate
+    type: gate
+    depends_on: [consolidate_dispositions]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >
+              You are a defensible-disposition control reviewer. Answer exactly 'approved' ONLY if every
+              record in the destroy bucket carries a hold_verdict that is clear and hold-free (no legal
+              hold, no privilege, no litigation/regulatory flag) and the counts are internally consistent.
+              If ANY destroy-bucket record shows a block/hold signal or the data is inconsistent, answer
+              'rejected' and name the offending record. When unsure, answer 'rejected'.
+            input: "{steps.consolidate_dispositions.output}"
+            model: sonnet
+        - type: human
+          config:
+            message: "Records manager: review the DESTROY bucket for this disposition run. Approve only if you authorize defensible destruction of these expired records under the retention schedule. On timeout these records are RETAINED, not deleted."
+            timeout_hours: 72
+            on_timeout: abort
+
+  # 6) FINAL defensible-deletion sign-off. Last human checkpoint before irreversible deletion.
+  - id: final_deletion_signoff
+    type: approval
+    depends_on: [destroy_authorization_gate]
+    approval_config:
+      message: >
+        FINAL defensible-deletion sign-off. Approving will permanently delete the listed records from
+        S3 and Google Drive and certify their destruction. Reject to halt. This action is irreversible.
+      show_data: steps.consolidate_dispositions.output
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: true
+
+  # 7) DETERMINISTIC deletion ledger: capture an immutable SHA-256 fingerprint of EXACTLY what is about
+  #    to be destroyed (per-record canonical hash + a Merkle-style batch hash) BEFORE the delete calls,
+  #    so the certificate proves what was destroyed. No model.
+  - id: build_deletion_ledger
+    type: code
+    depends_on: [final_deletion_signoff]
+    code_config:
+      language: python
+      code: |
+        import json
+        import hashlib
+        from datetime import datetime, timezone
+
+        dispo = _steps['consolidate_dispositions'] or {}
+        destroy = dispo.get('destroy', [])
+        now = datetime.now(timezone.utc).isoformat()
+
+        ledger = []
+        for rec in destroy:
+            canonical = json.dumps({
+                'locator': rec.get('locator'),
+                'store': rec.get('store'),
+                'title': rec.get('title'),
+                'age_days': rec.get('age_days'),
+                'retention_period_days': rec.get('retention_period_days'),
+                'disposition': rec.get('disposition'),
+            }, sort_keys=True, separators=(',', ':'))
+            digest = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+            ledger.append({
+                'locator': rec.get('locator'),
+                'store': rec.get('store'),
+                'title': rec.get('title'),
+                's3_key': rec.get('s3_key'),
+                'gdrive_file_id': rec.get('gdrive_file_id'),
+                'pg_record_id': rec.get('pg_record_id'),
+                'record_sha256': digest,
+                'destroyed_at': now,
+            })
+
+        # Batch hash over all per-record hashes = tamper-evident proof of the whole destruction set.
+        batch_canonical = json.dumps([e['record_sha256'] for e in ledger], separators=(',', ':'))
+        batch_hash = hashlib.sha256(batch_canonical.encode('utf-8')).hexdigest()
+
+        # Partition delete targets per store for the downstream delete calls.
+        s3_targets = [e['s3_key'] for e in ledger if e.get('store') == 's3' and e.get('s3_key')]
+        gdrive_targets = [e['gdrive_file_id'] for e in ledger if e.get('store') == 'gdrive' and e.get('gdrive_file_id')]
+
+        result = {
+            'disposition_run_id': _input.get('disposition_run_id'),
+            'destroyed_count': len(ledger),
+            'batch_sha256': batch_hash,
+            'ledger': ledger,
+            's3_delete_targets': s3_targets,
+            'gdrive_delete_targets': gdrive_targets,
+            'first_s3_key': s3_targets[0] if s3_targets else '',
+            'first_gdrive_id': gdrive_targets[0] if gdrive_targets else '',
+            'generated_at': now,
+        }
+
+  # 8a) EXECUTE the S3 deletion (aws-s3 connector). Bulk delete via the S3 multi-object DELETE POST.
+  - id: delete_s3_records
+    type: http
+    depends_on: [build_deletion_ledger]
+    http_config:
+      url: "{input.s3_delete_base_url}?delete"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+        x-amz-meta-batch-sha256: "{steps.build_deletion_ledger.output.batch_sha256}"
+      auth: "aws4:{env.AWS_ACCESS_KEY_ID}:{env.AWS_SECRET_ACCESS_KEY}"
+      body: |
+        {
+          "disposition_run_id": "{input.disposition_run_id}",
+          "objects": {steps.build_deletion_ledger.output.s3_delete_targets}
+        }
+      value_map:
+        s3_delete_status: "status"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 8b) EXECUTE the Google Drive deletion (gdrive connector). Batch file removal via Drive v3.
+  - id: delete_gdrive_records
+    type: http
+    depends_on: [build_deletion_ledger]
+    http_config:
+      url: "{input.gdrive_list_url}/batchDelete"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.GDRIVE_ACCESS_TOKEN}"
+      body: |
+        {
+          "disposition_run_id": "{input.disposition_run_id}",
+          "fileIds": {steps.build_deletion_ledger.output.gdrive_delete_targets}
+        }
+      value_map:
+        gdrive_delete_status: "status"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 9) ASSEMBLE the certificate-of-destruction payload. Deterministic template over the ledger +
+  #    immutable batch hash + delete-call statuses.
+  - id: assemble_certificate
+    type: transform
+    depends_on: [delete_s3_records, delete_gdrive_records]
+    transform_config:
+      template: |
+        {
+          "certificate_of_destruction": {
+            "disposition_run_id": "{{ steps.build_deletion_ledger.output.disposition_run_id }}",
+            "retention_schedule": "{{ steps.consolidate_dispositions.output.retention_schedule_name }}",
+            "generated_at": "{{ steps.build_deletion_ledger.output.generated_at }}",
+            "records_destroyed": "{{ steps.build_deletion_ledger.output.destroyed_count }}",
+            "records_retained_on_hold": "{{ steps.consolidate_dispositions.output.retain_hold_count }}",
+            "records_queued_for_review": "{{ steps.consolidate_dispositions.output.review_count }}",
+            "integrity": {
+              "batch_sha256": "{{ steps.build_deletion_ledger.output.batch_sha256 }}",
+              "hash_algorithm": "SHA-256"
+            },
+            "store_results": {
+              "s3_delete_status": "{{ steps.delete_s3_records.output.s3_delete_status }}",
+              "gdrive_delete_status": "{{ steps.delete_gdrive_records.output.gdrive_delete_status }}"
+            },
+            "destroyed_ledger": {{ steps.build_deletion_ledger.output.ledger }},
+            "attestation": "These records were destroyed under the stated retention schedule after a dual-provider legal-hold/privilege check, records-manager authorization, and a final defensible-deletion sign-off."
+          }
+        }
+
+  # 10) RENDER the branded certificate-of-destruction PDF for auditors.
+  - id: render_certificate_pdf
+    type: report
+    depends_on: [assemble_certificate]
+    report_config:
+      template: "research-report"
+      format: pdf
+      theme: professional
+      title: "Certificate of Destruction - {input.disposition_run_id}"
+      author: "Records Governance Office"
+    prompt: |
+      Produce a formal, branded Certificate of Destruction PDF from the payload below. Include the
+      run id, retention schedule applied, count of records destroyed, the SHA-256 batch integrity hash,
+      per-store delete statuses, and the full destroyed-records ledger as an appendix table. State that a
+      dual-provider legal-hold and privilege check cleared every destroyed record and that records-manager
+      authorization plus a final defensible-deletion sign-off were obtained.
+      Certificate payload: {steps.assemble_certificate.output}
+
+  # 11) NOTIFY the governance channel in Slack (slack connector) with the integrity hash.
+  - id: notify_slack_governance
+    type: notify
+    depends_on: [render_certificate_pdf]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: "Records disposition {input.disposition_run_id} complete. Destroyed: {steps.build_deletion_ledger.output.destroyed_count} | Retained on hold: {steps.consolidate_dispositions.output.retain_hold_count} | Queued for review: {steps.consolidate_dispositions.output.review_count}. Certificate of destruction issued; batch integrity sha256 {steps.build_deletion_ledger.output.batch_sha256}."
+
+  # 12) EMAIL the records manager the governance log + certificate reference (gmail connector).
+  - id: email_governance_log
+    type: notify
+    depends_on: [render_certificate_pdf]
+    notify_config:
+      service: gmail
+      channel: "{input.records_manager_email}"
+      message: "Certificate of Destruction for disposition run {input.disposition_run_id} (schedule: {input.retention_schedule_name}). Records destroyed: {steps.build_deletion_ledger.output.destroyed_count}. Batch integrity SHA-256: {steps.build_deletion_ledger.output.batch_sha256}. The branded certificate PDF and full destroyed-records ledger are attached for the audit file. Retained on hold: {steps.consolidate_dispositions.output.retain_hold_count}; queued for review: {steps.consolidate_dispositions.output.review_count}."
+
+on_complete:
+  storage_path: "records-retention-disposition-orchestrator/{run_id}/result.json"

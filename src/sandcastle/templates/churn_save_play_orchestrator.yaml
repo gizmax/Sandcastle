@@ -1,0 +1,769 @@
+# name: Churn Save Play Orchestrator
+# description: A usage-drop sensor that watches product telemetry and, when an account's weekly engagement collapses below its trailing baseline, auto-assembles a 360 account view from HubSpot/Salesforce + Zendesk + NPS, computes a deterministic churn-risk score and severity tier in sandboxed Python, classifies the right save-play archetype, races multiple providers to draft the personalized save email + talk track, gates discount/credit offers against a policy cap, and either fires the outreach (SendGrid + Twilio + CRM task) or routes risky concessions to a human for approval - then Slacks the account's CSM. The save/credit decision is model-independent: the risk math is pure code and the offer cap is a code/gate policy check, so swapping LLM providers can never change who can grant a credit.
+# tags: [HubSpot, Salesforce, Zendesk, Postgres, Datadog, SendGrid, Twilio, Slack, ChurnSave, NetRevenueRetention, CustomerSuccess, RevOps]
+# category: sales_crm
+
+name: churn-save-play-orchestrator
+description: >
+  A churn-save play orchestrator for B2B SaaS customer success. A scheduled SENSOR polls a
+  usage/metrics endpoint (a Postgres warehouse view or a Datadog/product-analytics query) and
+  fires only when an account's week-over-week weekly-active usage drops below a threshold versus
+  its trailing baseline. It then pulls a 360 account view over real REST APIs - the CRM account
+  + open deals + renewal date (HubSpot or Salesforce), recent Zendesk tickets, and the latest NPS -
+  and runs a DETERMINISTIC sandboxed-Python step that computes a churn-risk score (0-100) and a
+  severity tier from the raw signals, with NO model on the math path. A classify step assigns the
+  save-play archetype (onboarding_gap / champion_left / value_realization / pricing_objection /
+  support_frustration), and a RACE across three providers drafts the personalized save email +
+  talk track and proposes an optional retention offer - fastest valid draft wins, pure failover,
+  never a vote. A deterministic code step clamps any proposed discount/credit against the policy
+  cap, and an offer-policy GATE (LLM consistency check + human reviewer) blocks any concession over
+  cap or any contractual promise. A condition then branches: offers within policy on a non-enterprise
+  tier auto-fire; over-cap or enterprise-tier concessions route to a human APPROVAL. On the cleared
+  path the workflow creates a CS task + logs activity in the CRM, sends the save email via SendGrid,
+  optionally nudges via Twilio SMS, and notifies the account's CSM in Slack with the play and risk
+  score. Swapping the drafting provider can never change who can grant a credit - the risk math and
+  the offer cap are deterministic code, and the human approval is authoritative.
+
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 600
+
+input_schema:
+  required: ["account_id"]
+  properties:
+    account_id:
+      type: string
+      description: "CRM id of the account to watch and (on a usage drop) run the save play for."
+      default: ""
+      example: "0015g00000AbCdEAAW"
+    metrics_url:
+      type: string
+      description: "Usage/metrics endpoint the sensor polls. A Postgres warehouse REST view (PostgREST) or a Datadog/product-analytics query that returns this account's current WoW weekly-active usage and its trailing baseline."
+      default: "https://warehouse.internal/rest/v1/account_usage?account_id=eq.0015g00000AbCdEAAW&select=account_id,wau_this_week,wau_trailing_4w_avg"
+      example: "https://warehouse.internal/rest/v1/account_usage?account_id=eq.0015g00000AbCdEAAW&select=account_id,wau_this_week,wau_trailing_4w_avg"
+    drop_threshold_pct:
+      type: number
+      description: "Minimum week-over-week weekly-active-usage drop (percent vs trailing baseline) that fires the save play. e.g. 30 = engagement fell 30%+ below baseline."
+      default: 30
+      example: "30"
+    crm_base_url:
+      type: string
+      description: "Base URL of the CRM REST API used for the 360 pull and the writeback (HubSpot or Salesforce)."
+      default: "https://your-instance.my.salesforce.com/services/data/v60.0"
+      example: "https://acme.my.salesforce.com/services/data/v60.0"
+    zendesk_subdomain:
+      type: string
+      description: "Zendesk subdomain used to fetch recent support tickets for the account."
+      default: "acme"
+      example: "acme"
+    offer_cap_pct:
+      type: number
+      description: "Hard policy cap on any retention discount/credit a save play may grant automatically. Anything above this routes to human approval."
+      default: 15
+      example: "15"
+    enterprise_arr_threshold:
+      type: number
+      description: "Annual recurring revenue (USD) at or above which an account is treated as enterprise - any concession on it always routes to human approval regardless of size."
+      default: 100000
+      example: "100000"
+    sendgrid_from:
+      type: string
+      description: "Verified SendGrid sender address the save email is sent from."
+      default: "success@acme.com"
+      example: "success@acme.com"
+    twilio_from:
+      type: string
+      description: "Twilio sender number for the optional SMS nudge (E.164). Leave empty to skip SMS."
+      default: ""
+      example: "+14155550123"
+    enable_sms_nudge:
+      type: boolean
+      description: "Whether to send the optional Twilio SMS nudge in addition to the email."
+      default: false
+      example: "false"
+    approval_timeout_hours:
+      type: number
+      description: "Hours the human concession approval waits before the timeout aborts the offer (the email still goes out, the concession does not)."
+      default: 24
+      example: "24"
+    poll_interval_seconds:
+      type: number
+      description: "How often the usage sensor re-polls the metrics endpoint while waiting for a qualifying drop."
+      default: 3600
+      example: "3600"
+    sensor_timeout_seconds:
+      type: number
+      description: "Max seconds the usage sensor watches before giving up for this scheduled run."
+      default: 86400
+      example: "86400"
+    slack_csm_channel:
+      type: string
+      description: "Slack channel (or DM) for the account's CSM where the play + risk score is posted."
+      default: "#cs-saves"
+      example: "#cs-saves"
+
+steps:
+  # 1) SENSOR - poll the usage/metrics endpoint on a schedule and fire ONLY when this account's
+  #    week-over-week weekly-active usage has dropped below the threshold vs its trailing baseline.
+  #    Connector: postgresql (PostgREST warehouse view) or datadog/product-analytics query URL.
+  - id: watch_usage_drop
+    type: sensor
+    sensor_config:
+      url: "{input.metrics_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+        Authorization: "Bearer {env.WAREHOUSE_API_KEY}"
+      # Fire when (baseline - current) / baseline * 100 >= drop_threshold_pct. The endpoint returns a
+      # single row (PostgREST list or Datadog series); tolerate both shapes deterministically.
+      condition: "status_code == 200 and (lambda row: bool(row) and float(row.get('wau_trailing_4w_avg', 0) or 0) > 0 and ((float(row.get('wau_trailing_4w_avg', 0) or 0) - float(row.get('wau_this_week', 0) or 0)) / float(row.get('wau_trailing_4w_avg', 1) or 1) * 100.0) >= float({input.drop_threshold_pct}))((response[0] if isinstance(response, list) and response else (response if isinstance(response, dict) else {})))"
+      check_interval: 3600
+      timeout: 86400
+
+  # ---- 360 PULL (runs once the drop fires). Three independent REST reads, then a deterministic merge. ----
+
+  # 2a) CRM account + open deals + renewal date (HubSpot / Salesforce REST). Connector: hubspot, salesforce.
+  - id: fetch_crm_account
+    type: http
+    depends_on: [watch_usage_drop]
+    http_config:
+      url: "{input.crm_base_url}/sobjects/Account/{input.account_id}?fields=Id,Name,AnnualRevenue,ARR__c,Tier__c,OwnerId,Owner.Name,Owner.Email,Renewal_Date__c,(SELECT Id,Name,StageName,Amount,CloseDate FROM Opportunities WHERE IsClosed=false)"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.CRM_ACCESS_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2b) Recent Zendesk support tickets for the account. Connector: zendesk.
+  - id: fetch_zendesk_tickets
+    type: http
+    depends_on: [watch_usage_drop]
+    http_config:
+      url: "https://{input.zendesk_subdomain}.zendesk.com/api/v2/search.json?query=type:ticket organization:{input.account_id} order_by:created_at sort:desc&per_page=25"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.ZENDESK_TOKEN}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 2c) Latest NPS for the account (warehouse / survey store via PostgREST). Connector: postgresql.
+  - id: fetch_nps
+    type: http
+    depends_on: [watch_usage_drop]
+    http_config:
+      url: "{input.crm_base_url}/../nps/v1/scores?account_id=eq.{input.account_id}&order=submitted_at.desc&limit=1"
+      method: GET
+      headers:
+        Accept: "application/json"
+        Authorization: "Bearer {env.WAREHOUSE_API_KEY}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 3) DETERMINISTIC churn-risk score + severity tier (sandboxed Python, NO model, fully auditable).
+  #    Combines the usage drop, open-renewal proximity, support pressure (recent/urgent tickets),
+  #    and NPS into a 0-100 risk score and a tier. This is the load-bearing decision math.
+  - id: compute_churn_risk
+    type: code
+    depends_on: [watch_usage_drop, fetch_crm_account, fetch_zendesk_tickets, fetch_nps]
+    code_config:
+      language: python
+      code: |
+        from datetime import datetime, timezone, date
+
+        sensor = _steps.get('watch_usage_drop') or {}
+        crm = _steps.get('fetch_crm_account') or {}
+        zd = _steps.get('fetch_zendesk_tickets') or {}
+        nps_raw = _steps.get('fetch_nps') or {}
+
+        def _f(val, default=0.0):
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                return float(default)
+
+        # --- Usage drop (re-derive from the sensor's last observation; tolerate list/dict shapes) ---
+        obs = sensor.get('response', sensor) if isinstance(sensor, dict) else {}
+        if isinstance(obs, list):
+            row = obs[0] if obs else {}
+        elif isinstance(obs, dict):
+            row = obs
+        else:
+            row = {}
+        baseline = _f(row.get('wau_trailing_4w_avg'))
+        current = _f(row.get('wau_this_week'))
+        if baseline > 0:
+            drop_pct = round((baseline - current) / baseline * 100.0, 1)
+        else:
+            drop_pct = 0.0
+        drop_pct = max(0.0, drop_pct)
+
+        # --- CRM: ARR/tier + renewal proximity + open pipeline ---
+        arr = _f(crm.get('ARR__c') or crm.get('AnnualRevenue') or crm.get('arr') or 0)
+        tier_field = str(crm.get('Tier__c') or crm.get('tier') or '').strip().lower()
+        ent_threshold = _f(_input.get('enterprise_arr_threshold', 100000) or 100000)
+        is_enterprise = (arr >= ent_threshold) or (tier_field in ('enterprise', 'ent'))
+
+        renewal_raw = crm.get('Renewal_Date__c') or crm.get('renewal_date') or ''
+        days_to_renewal = None
+        if renewal_raw:
+            try:
+                rd = datetime.fromisoformat(str(renewal_raw).replace('Z', '+00:00'))
+                days_to_renewal = (rd.date() - date.today()).days
+            except (ValueError, TypeError):
+                days_to_renewal = None
+
+        opps = crm.get('Opportunities') or {}
+        if isinstance(opps, dict):
+            open_deals = opps.get('records') or opps.get('items') or []
+        elif isinstance(opps, list):
+            open_deals = opps
+        else:
+            open_deals = []
+        open_pipeline = round(sum(_f(o.get('Amount') or o.get('amount')) for o in open_deals if isinstance(o, dict)), 2)
+
+        # --- Zendesk: recent ticket pressure ---
+        tickets = zd.get('results') if isinstance(zd, dict) else None
+        if tickets is None:
+            tickets = zd.get('tickets') if isinstance(zd, dict) else None
+        if not isinstance(tickets, list):
+            tickets = []
+        open_tickets = [t for t in tickets if isinstance(t, dict) and str(t.get('status', '')).lower() in ('open', 'pending', 'new', 'hold')]
+        urgent_tickets = [t for t in tickets if isinstance(t, dict) and str(t.get('priority', '')).lower() in ('high', 'urgent')]
+        ticket_count = len(tickets)
+        open_ticket_count = len(open_tickets)
+        urgent_ticket_count = len(urgent_tickets)
+
+        # --- NPS: latest score (0-10) ---
+        if isinstance(nps_raw, list):
+            nps_row = nps_raw[0] if nps_raw else {}
+        elif isinstance(nps_raw, dict):
+            nps_row = (nps_raw.get('data') or [{}])[0] if isinstance(nps_raw.get('data'), list) else nps_raw
+        else:
+            nps_row = {}
+        nps_score = nps_row.get('score', nps_row.get('nps'))
+        nps_val = _f(nps_score, -1) if nps_score is not None else -1.0  # -1 = unknown
+
+        # --- Deterministic weighted churn-risk score (0-100). Each component is bounded. ---
+        # Usage collapse is the strongest signal (up to 45), renewal proximity (up to 20),
+        # support frustration (up to 20), detractor NPS (up to 15).
+        usage_component = min(45.0, drop_pct * 0.9)
+
+        if days_to_renewal is None:
+            renewal_component = 6.0  # unknown renewal -> mild default risk
+        elif days_to_renewal <= 30:
+            renewal_component = 20.0
+        elif days_to_renewal <= 60:
+            renewal_component = 14.0
+        elif days_to_renewal <= 90:
+            renewal_component = 9.0
+        else:
+            renewal_component = 3.0
+
+        support_component = min(20.0, open_ticket_count * 3.0 + urgent_ticket_count * 5.0)
+
+        if nps_val < 0:
+            nps_component = 5.0   # unknown NPS -> mild default risk
+        elif nps_val <= 6:
+            nps_component = 15.0  # detractor
+        elif nps_val <= 8:
+            nps_component = 7.0   # passive
+        else:
+            nps_component = 0.0   # promoter
+
+        risk_score = round(min(100.0, usage_component + renewal_component + support_component + nps_component), 1)
+
+        if risk_score >= 70:
+            severity = 'critical'
+        elif risk_score >= 45:
+            severity = 'high'
+        elif risk_score >= 25:
+            severity = 'medium'
+        else:
+            severity = 'low'
+
+        account_name = crm.get('Name') or crm.get('name') or 'Unknown account'
+        owner = crm.get('Owner') if isinstance(crm.get('Owner'), dict) else {}
+        owner_name = owner.get('Name') or crm.get('owner_name') or 'Unassigned CSM'
+        owner_email = owner.get('Email') or crm.get('owner_email') or ''
+
+        result = {
+            'account_id': crm.get('Id') or crm.get('id') or _input.get('account_id'),
+            'account_name': account_name,
+            'owner_name': owner_name,
+            'owner_email': owner_email,
+            'arr': round(arr, 2),
+            'is_enterprise': bool(is_enterprise),
+            'days_to_renewal': days_to_renewal,
+            'open_pipeline': open_pipeline,
+            'open_deal_count': len(open_deals),
+            'usage_drop_pct': drop_pct,
+            'ticket_count': ticket_count,
+            'open_ticket_count': open_ticket_count,
+            'urgent_ticket_count': urgent_ticket_count,
+            'nps': None if nps_val < 0 else nps_val,
+            'risk_score': risk_score,
+            'severity': severity,
+            'components': {
+                'usage': round(usage_component, 1),
+                'renewal': round(renewal_component, 1),
+                'support': round(support_component, 1),
+                'nps': round(nps_component, 1),
+            },
+        }
+
+  # 4) CLASSIFY the save-play archetype from the deterministic signal bundle. Cheap model, routing only -
+  #    the offer/credit decision does NOT live here, so the archetype choice never authorizes a concession.
+  - id: classify_save_play
+    type: classify
+    depends_on: [compute_churn_risk]
+    classify_config:
+      categories: ["onboarding_gap", "champion_left", "value_realization", "pricing_objection", "support_frustration"]
+      input: "{steps.compute_churn_risk.output}"
+      model: haiku
+      branches:
+        onboarding_gap: [prime_onboarding_gap]
+        champion_left: [prime_champion_left]
+        value_realization: [prime_value_realization]
+        pricing_objection: [prime_pricing_objection]
+        support_frustration: [prime_support_frustration]
+
+  # 4a-e) Per-archetype primers (deterministic, no model) - give the drafting race the right play angle.
+  - id: prime_onboarding_gap
+    type: code
+    code_config:
+      language: python
+      code: |
+        risk = _steps.get('compute_churn_risk') or {}
+        result = {
+            'archetype': 'onboarding_gap',
+            'angle': 'The account never reached activation. Offer a hands-on onboarding/enablement session and a 30-day success plan; lead with time-to-value, not price.',
+            'offer_allowed': False,
+            'risk': risk,
+        }
+
+  - id: prime_champion_left
+    type: code
+    code_config:
+      language: python
+      code: |
+        risk = _steps.get('compute_churn_risk') or {}
+        result = {
+            'archetype': 'champion_left',
+            'angle': 'The internal champion likely churned. Re-map stakeholders, offer an exec business review, and re-establish value with the new owner before renewal.',
+            'offer_allowed': False,
+            'risk': risk,
+        }
+
+  - id: prime_value_realization
+    type: code
+    code_config:
+      language: python
+      code: |
+        risk = _steps.get('compute_churn_risk') or {}
+        result = {
+            'archetype': 'value_realization',
+            'angle': 'Usage dropped but the relationship is intact. Quantify realized ROI to date, surface unused high-value features, and book a value review. No discount needed.',
+            'offer_allowed': False,
+            'risk': risk,
+        }
+
+  - id: prime_pricing_objection
+    type: code
+    code_config:
+      language: python
+      code: |
+        risk = _steps.get('compute_churn_risk') or {}
+        result = {
+            'archetype': 'pricing_objection',
+            'angle': 'Budget/pricing pressure is the churn driver. A bounded retention credit or right-sizing MAY be appropriate - propose one, but it MUST respect the policy cap and route to approval if over.',
+            'offer_allowed': True,
+            'risk': risk,
+        }
+
+  - id: prime_support_frustration
+    type: code
+    code_config:
+      language: python
+      code: |
+        risk = _steps.get('compute_churn_risk') or {}
+        result = {
+            'archetype': 'support_frustration',
+            'angle': 'Recent support pain is eroding trust. Apologize specifically, assign a named TAM/escalation owner, and offer a goodwill service credit (bounded by policy) rather than a deep price cut.',
+            'offer_allowed': True,
+            'risk': risk,
+        }
+
+  # 5) RACE three providers to draft the personalized save email + talk track and an OPTIONAL proposed
+  #    offer. First valid JSON draft wins (pure first-valid-wins failover, NOT a vote). Each branch is
+  #    pinned to a DIFFERENT provider so swapping providers only affects speed/availability, never the
+  #    eventual offer authorization - that stays in the deterministic clamp + gate below.
+  - id: draft_sonnet
+    type: standard
+    model: sonnet
+    output_schema:
+      type: object
+      properties:
+        subject: { type: string }
+        email_body: { type: string }
+        talk_track: { type: string }
+        proposed_offer_pct: { type: number }
+        offer_type: { type: string, enum: ["none", "discount", "service_credit", "right_size"] }
+      required: ["subject", "email_body", "talk_track", "proposed_offer_pct", "offer_type"]
+    prompt: |
+      You are a senior B2B SaaS Customer Success Manager writing a churn-save outreach.
+      Account + risk facts (deterministic): {steps.compute_churn_risk.output}
+      Save-play archetype + angle: {steps.classify_save_play.output}
+
+      Write a short, warm, specific save email (no markdown, no emojis) plus a 3-bullet CSM talk
+      track. If and only if the archetype angle marks offer_allowed=true, you MAY propose ONE bounded
+      retention offer; otherwise propose offer_type "none" and proposed_offer_pct 0.
+      Do NOT promise anything contractual and do NOT exceed a 15% concession - a downstream policy
+      check is authoritative and will clamp/route anything over cap.
+
+      Return STRICT JSON only:
+      {
+        "subject": "<email subject>",
+        "email_body": "<plain-text email>",
+        "talk_track": "<3 short bullets as one string>",
+        "proposed_offer_pct": <number, 0 if none>,
+        "offer_type": "none" | "discount" | "service_credit" | "right_size"
+      }
+
+  - id: draft_gemini
+    type: standard
+    model: google/gemini-2.5-pro
+    output_schema:
+      type: object
+      properties:
+        subject: { type: string }
+        email_body: { type: string }
+        talk_track: { type: string }
+        proposed_offer_pct: { type: number }
+        offer_type: { type: string, enum: ["none", "discount", "service_credit", "right_size"] }
+      required: ["subject", "email_body", "talk_track", "proposed_offer_pct", "offer_type"]
+    prompt: |
+      You are an independent senior Customer Success Manager drafting a churn-save outreach.
+      Account + risk facts: {steps.compute_churn_risk.output}
+      Save-play archetype + angle: {steps.classify_save_play.output}
+
+      Write a concise, warm save email (no markdown, no emojis) and a 3-bullet talk track. Only
+      propose a retention offer if the archetype angle has offer_allowed=true; never exceed 15% and
+      never make a contractual promise (a deterministic policy check is authoritative).
+      Return STRICT JSON only with keys subject, email_body, talk_track, proposed_offer_pct (number,
+      0 if none), offer_type ("none"|"discount"|"service_credit"|"right_size"). JSON only, no prose.
+
+  - id: draft_mistral
+    type: standard
+    model: mistral/large
+    output_schema:
+      type: object
+      properties:
+        subject: { type: string }
+        email_body: { type: string }
+        talk_track: { type: string }
+        proposed_offer_pct: { type: number }
+        offer_type: { type: string, enum: ["none", "discount", "service_credit", "right_size"] }
+      required: ["subject", "email_body", "talk_track", "proposed_offer_pct", "offer_type"]
+    prompt: |
+      You are a third independent Customer Success Manager drafting a churn-save outreach.
+      Account + risk facts: {steps.compute_churn_risk.output}
+      Save-play archetype + angle: {steps.classify_save_play.output}
+
+      Produce a short, specific save email (no markdown, no emojis) and a 3-bullet talk track. Only
+      include a retention offer when offer_allowed=true in the angle; cap any offer at 15% and make no
+      contractual promises - a downstream deterministic check decides what is actually granted.
+      Return STRICT JSON only with keys subject, email_body, talk_track, proposed_offer_pct, offer_type
+      ("none"|"discount"|"service_credit"|"right_size"). JSON only, no prose.
+
+  - id: draft_save_play
+    type: race
+    depends_on: [classify_save_play, compute_churn_risk]
+    race_config:
+      branches:
+        - [draft_sonnet]
+        - [draft_gemini]
+        - [draft_mistral]
+      # First branch whose JSON parses with a subject + body and a numeric offer field wins.
+      validator: "isinstance(output, dict) and bool(str(output.get('subject','')).strip()) and bool(str(output.get('email_body','')).strip()) and isinstance(output.get('proposed_offer_pct'), (int, float))"
+
+  # 6) DETERMINISTIC offer policy clamp (sandboxed Python, NO model). Clamps the model-proposed offer to
+  #    the cap, flags over-cap proposals, contractual-promise language, and enterprise tier. This is the
+  #    authoritative offer math - the draft can SUGGEST, only this code decides what is within policy.
+  - id: enforce_offer_policy
+    type: code
+    depends_on: [draft_save_play, compute_churn_risk]
+    code_config:
+      language: python
+      code: |
+        draft = _steps.get('draft_save_play') or {}
+        if not isinstance(draft, dict):
+            draft = {}
+        risk = _steps.get('compute_churn_risk') or {}
+
+        def _f(val, default=0.0):
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                return float(default)
+
+        cap = _f(_input.get('offer_cap_pct', 15) or 15)
+        proposed = max(0.0, _f(draft.get('proposed_offer_pct', 0)))
+        offer_type = str(draft.get('offer_type', 'none')).strip().lower()
+        if offer_type not in ('none', 'discount', 'service_credit', 'right_size'):
+            offer_type = 'none'
+        if offer_type == 'none':
+            proposed = 0.0
+        if proposed <= 0:
+            offer_type = 'none'
+
+        is_enterprise = bool(risk.get('is_enterprise'))
+
+        # Detect contractual-promise language the model must never commit to autonomously.
+        body = (str(draft.get('email_body', '')) + ' ' + str(draft.get('talk_track', ''))).lower()
+        promise_markers = [
+            'guarantee', 'guaranteed', 'lock in', 'locked-in', 'price lock', 'forever',
+            'permanent', 'lifetime', 'we commit to', 'contractually', 'amend the contract',
+            'sla credit', 'refund in full', 'unlimited',
+        ]
+        contractual_promise = any(m in body for m in promise_markers)
+
+        over_cap = proposed > cap
+        # Effective (auto-grantable) offer is clamped to the cap; anything above needs a human.
+        effective_offer_pct = min(proposed, cap)
+
+        # Who can clear this automatically? Within-cap, non-enterprise, no contractual promise.
+        within_policy = (not over_cap) and (not is_enterprise) and (not contractual_promise)
+        needs_approval = (not within_policy) and (proposed > 0 or contractual_promise or is_enterprise)
+
+        reasons = []
+        if over_cap:
+            reasons.append(f"proposed offer {proposed}% exceeds policy cap {cap}%")
+        if is_enterprise:
+            reasons.append("enterprise-tier account - all concessions require human approval")
+        if contractual_promise:
+            reasons.append("draft contains contractual-promise language requiring sign-off")
+
+        result = {
+            'cap_pct': cap,
+            'proposed_offer_pct': proposed,
+            'offer_type': offer_type,
+            'effective_offer_pct': round(effective_offer_pct, 2),
+            'is_enterprise': is_enterprise,
+            'over_cap': over_cap,
+            'contractual_promise': contractual_promise,
+            'within_policy': within_policy,
+            'needs_approval': needs_approval,
+            'reasons': reasons,
+            'reasons_text': "; ".join(reasons) if reasons else "offer within policy",
+        }
+
+  # 7) OFFER-POLICY GATE - both strategies must pass. An LLM consistency judge checks the policy record
+  #    is internally coherent (it cannot grant anything), and a human reviewer is the second control on
+  #    any concession. The gate guards the offer; it does not author it.
+  - id: offer_policy_gate
+    type: gate
+    depends_on: [enforce_offer_policy, draft_save_play]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >
+              You are an offer-policy control, not a decision-maker. Answer exactly 'approved' only if
+              this record is internally consistent: effective_offer_pct never exceeds cap_pct, over_cap
+              is true exactly when proposed_offer_pct > cap_pct, and within_policy is false whenever
+              over_cap, is_enterprise, or contractual_promise is true. Otherwise answer 'rejected' and
+              name the inconsistency. You are validating the math only; you cannot grant any credit.
+            input: "{steps.enforce_offer_policy.output}"
+            model: haiku
+        - type: human
+          config:
+            message: >
+              Churn-save offer review for '{steps.compute_churn_risk.output.account_name}'
+              (risk {steps.compute_churn_risk.output.risk_score}, severity
+              {steps.compute_churn_risk.output.severity}). Proposed offer
+              {steps.enforce_offer_policy.output.proposed_offer_pct}% ({steps.enforce_offer_policy.output.offer_type}),
+              cap {steps.enforce_offer_policy.output.cap_pct}%, within policy
+              {steps.enforce_offer_policy.output.within_policy}. Notes:
+              {steps.enforce_offer_policy.output.reasons_text}. Approve to allow the save play to proceed.
+            timeout_hours: 24
+            on_timeout: reject
+
+  # 8) Deterministic routing decision: auto-fire vs route the concession to a human approval.
+  #    Within-policy & non-enterprise -> auto path. Over-cap / enterprise / contractual -> approval.
+  - id: route_offer
+    type: condition
+    depends_on: [enforce_offer_policy, offer_policy_gate]
+    condition_config:
+      expression: "{steps.enforce_offer_policy.output.needs_approval} == true"
+      then: [concession_approval]
+      else: [send_save_email]
+
+  # 8a) APPROVAL - CSM manager signs off on the over-cap / enterprise / contractual concession.
+  #     On timeout the concession is aborted (the within-cap email path can still be re-run without it).
+  - id: concession_approval
+    type: approval
+    approval_config:
+      message: >
+        Concession approval required for '{steps.compute_churn_risk.output.account_name}'. Proposed
+        retention offer {steps.enforce_offer_policy.output.proposed_offer_pct}%
+        ({steps.enforce_offer_policy.output.offer_type}) exceeds policy or is enterprise-tier. Risk
+        score {steps.compute_churn_risk.output.risk_score}, severity
+        {steps.compute_churn_risk.output.severity}, ARR {steps.compute_churn_risk.output.arr}. Reasons:
+        {steps.enforce_offer_policy.output.reasons_text}. Approve to grant the concession and fire the save play.
+      show_data: steps.enforce_offer_policy.output
+      timeout_hours: 24
+      on_timeout: abort
+      allow_edit: true
+
+  # 8b) SEND the save email via SendGrid (auto path: within-cap, non-enterprise). Connector: sendgrid.
+  - id: send_save_email
+    type: http
+    http_config:
+      url: "https://api.sendgrid.com/v3/mail/send"
+      method: POST
+      auth: "bearer:{env.SENDGRID_API_KEY}"
+      headers:
+        Content-Type: "application/json"
+      body: |
+        {
+          "personalizations": [{"to": [{"email": "{steps.compute_churn_risk.output.owner_email}"}]}],
+          "from": {"email": "{input.sendgrid_from}"},
+          "subject": "{steps.draft_save_play.output.subject}",
+          "content": [{"type": "text/plain", "value": "{steps.draft_save_play.output.email_body}"}]
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 9) After approval, the concession-cleared path also sends the save email (same SendGrid send).
+  - id: send_save_email_approved
+    type: http
+    depends_on: [concession_approval]
+    http_config:
+      url: "https://api.sendgrid.com/v3/mail/send"
+      method: POST
+      auth: "bearer:{env.SENDGRID_API_KEY}"
+      headers:
+        Content-Type: "application/json"
+      body: |
+        {
+          "personalizations": [{"to": [{"email": "{steps.compute_churn_risk.output.owner_email}"}]}],
+          "from": {"email": "{input.sendgrid_from}"},
+          "subject": "{steps.draft_save_play.output.subject}",
+          "content": [{"type": "text/plain", "value": "{steps.draft_save_play.output.email_body}"}]
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 10) Join both send paths deterministically into one outcome the writeback/notify can read.
+  - id: finalize_outreach
+    type: code
+    depends_on: [route_offer, send_save_email, send_save_email_approved]
+    code_config:
+      language: python
+      code: |
+        policy = _steps.get('enforce_offer_policy') or {}
+        risk = _steps.get('compute_churn_risk') or {}
+        play = _steps.get('classify_save_play') or {}
+        auto_send = _steps.get('send_save_email')
+        approved_send = _steps.get('send_save_email_approved')
+
+        # Exactly one send branch runs (condition routed it). Approved path implies the concession cleared.
+        if approved_send is not None:
+            path = 'human_approved'
+            sent = True
+            granted_offer_pct = policy.get('effective_offer_pct') if not policy.get('over_cap') else policy.get('proposed_offer_pct')
+        elif auto_send is not None:
+            path = 'auto_within_policy'
+            sent = True
+            granted_offer_pct = policy.get('effective_offer_pct')
+        else:
+            path = 'not_sent'
+            sent = False
+            granted_offer_pct = 0
+
+        archetype = play.get('label') or play.get('category') or play.get('archetype') or 'unknown'
+
+        result = {
+            'sent': sent,
+            'path': path,
+            'archetype': archetype,
+            'granted_offer_pct': granted_offer_pct,
+            'offer_type': policy.get('offer_type'),
+            'account_id': risk.get('account_id'),
+            'account_name': risk.get('account_name'),
+            'owner_name': risk.get('owner_name'),
+            'risk_score': risk.get('risk_score'),
+            'severity': risk.get('severity'),
+        }
+
+  # 11) Create a CS follow-up task + log a save-play activity back in the CRM. Connector: hubspot, salesforce.
+  - id: log_crm_task
+    type: http
+    depends_on: [finalize_outreach]
+    http_config:
+      url: "{input.crm_base_url}/sobjects/Task"
+      method: POST
+      auth: "bearer:{env.CRM_ACCESS_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+      body: |
+        {
+          "WhatId": "{steps.compute_churn_risk.output.account_id}",
+          "Subject": "Churn save play: {steps.finalize_outreach.output.archetype} (risk {steps.compute_churn_risk.output.risk_score})",
+          "Status": "Open",
+          "Priority": "High",
+          "Description": "Save play fired via {steps.finalize_outreach.output.path}. Granted offer {steps.finalize_outreach.output.granted_offer_pct}% ({steps.finalize_outreach.output.offer_type}). Usage drop {steps.compute_churn_risk.output.usage_drop_pct}%, severity {steps.compute_churn_risk.output.severity}. Talk track: {steps.draft_save_play.output.talk_track}"
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 12) Optional Twilio SMS nudge to reinforce the email. Connector: twilio. (Fires regardless; the
+  #     account-level decision to nudge is carried in inputs, and a no-op is harmless.)
+  - id: send_sms_nudge
+    type: http
+    depends_on: [finalize_outreach]
+    http_config:
+      url: "https://api.twilio.com/2010-04-01/Accounts/{env.TWILIO_ACCOUNT_SID}/Messages.json"
+      method: POST
+      auth: "basic:{env.TWILIO_ACCOUNT_SID}:{env.TWILIO_AUTH_TOKEN}"
+      headers:
+        Content-Type: "application/x-www-form-urlencoded"
+      body: "From={input.twilio_from}&To={steps.compute_churn_risk.output.owner_email}&Body=Heads up: churn-save play queued for {steps.compute_churn_risk.output.account_name} (risk {steps.compute_churn_risk.output.risk_score}). Check your inbox + CRM task."
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 13) NOTIFY the account's CSM in Slack with the play, the path, and the deterministic risk score.
+  - id: notify_csm
+    type: notify
+    depends_on: [finalize_outreach, log_crm_task]
+    notify_config:
+      service: slack
+      channel: "{input.slack_csm_channel}"
+      message: >
+        Churn-save play fired for {steps.finalize_outreach.output.account_name}
+        (owner {steps.finalize_outreach.output.owner_name}). Risk
+        {steps.finalize_outreach.output.risk_score} / {steps.finalize_outreach.output.severity},
+        usage drop {steps.compute_churn_risk.output.usage_drop_pct}%, archetype
+        {steps.finalize_outreach.output.archetype}. Outreach path:
+        {steps.finalize_outreach.output.path}; granted offer
+        {steps.finalize_outreach.output.granted_offer_pct}%
+        ({steps.finalize_outreach.output.offer_type}). CRM task logged - review and follow up.
+
+on_complete:
+  storage_path: "churn-save-play-orchestrator/{run_id}/result.json"

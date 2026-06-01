@@ -1,0 +1,556 @@
+# name: Dependency Upgrade Pilot
+# description: Hands-off, auditable Dependabot pilot - opens an upgrade branch + PR from a dependency bump, polls GitHub checks until CI reaches a terminal state, and only when CI is red does it race three providers (Anthropic/OpenAI/Gemini) to diagnose the breakage and propose a minimal patch. An LLM quality gate plus a human approval (allow_edit) guard the fix before it pushes the commit, merges the PR, and posts a merged-or-blocked summary to Slack.
+# tags: [engineering, devex, dependabot, github, ci, failover, upgrade]
+# category: engineering
+
+name: dependency-upgrade-pilot
+description: >-
+  An auditable dependency-upgrade pilot for platform / DevEx teams drowning in
+  Dependabot churn. Given a dependency bump (package + from/to version) it opens
+  a real upgrade branch and PR via the GitHub API, then a SENSOR polls the GitHub
+  checks API until the PR's CI run reaches a terminal conclusion. A deterministic
+  CONDITION routes green CI straight to the gate (nothing to fix), while red CI
+  fetches the failing job logs + diff and a sandboxed CODE step parses them into a
+  compact breakage bundle (failing tests, stack frames, changed symbols). Three
+  providers then RACE - Anthropic Sonnet, OpenAI Codex and Gemini 2.5 Pro, each a
+  plain prompt + JSON schema - and the FIRST schema-valid diagnosis wins (provider
+  failover and fastest-of-N at once; no proprietary feature, so any provider in the
+  pool is interchangeable). An LLM-eval GATE checks the proposed fix is low-risk and
+  actually addresses the failing tests, a human APPROVAL (allow_edit, on_timeout
+  abort) signs off on the exact diff, then HTTP pushes the fix commit + merges the
+  PR and Slack is notified with a merged-or-blocked summary. The load-bearing
+  decisions - CI terminal-state, green/red routing, breakage parsing - are all
+  deterministic; the model only ever proposes a patch behind a gate and a human.
+
+default_model: sonnet
+default_timeout: 900
+
+input_schema:
+  required: ["github_repo", "package_name", "from_version", "to_version"]
+  properties:
+    github_repo:
+      type: string
+      description: "owner/repo the dependency bump targets (e.g. 'acme/platform')"
+      default: ""
+    package_name:
+      type: string
+      description: "Name of the pinned dependency being upgraded (e.g. 'requests')"
+      default: ""
+    from_version:
+      type: string
+      description: "Currently pinned version (e.g. '2.31.0')"
+      default: ""
+    to_version:
+      type: string
+      description: "Target version to upgrade to (e.g. '2.32.3')"
+      default: ""
+    base_branch:
+      type: string
+      description: "Branch the upgrade PR merges into"
+      default: "main"
+    base_sha:
+      type: string
+      description: "SHA of base_branch HEAD that the upgrade branch is cut from"
+      default: ""
+    manifest_path:
+      type: string
+      description: "Path to the manifest the bump is written into (e.g. 'requirements.txt')"
+      default: "requirements.txt"
+    slack_channel:
+      type: string
+      description: "Slack channel for the merged-or-blocked release summary"
+      default: "#releases"
+
+steps:
+  # 1) Open the upgrade branch via the GitHub git-refs API (cuts a ref from base_sha).
+  #    Connector: github
+  - id: create_branch
+    type: http
+    http_config:
+      url: "https://api.github.com/repos/{input.github_repo}/git/refs"
+      method: POST
+      auth: "bearer:{env.GITHUB_TOKEN}"
+      headers:
+        Accept: "application/vnd.github+json"
+        X-GitHub-Api-Version: "2022-11-28"
+        Content-Type: "application/json"
+      body: '{"ref": "refs/heads/deps/{input.package_name}-{input.to_version}", "sha": "{input.base_sha}"}'
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2) Open the upgrade PR (head = the branch we just cut, base = base_branch).
+  #    Connector: github
+  - id: open_pr
+    type: http
+    depends_on: [create_branch]
+    http_config:
+      url: "https://api.github.com/repos/{input.github_repo}/pulls"
+      method: POST
+      auth: "bearer:{env.GITHUB_TOKEN}"
+      headers:
+        Accept: "application/vnd.github+json"
+        X-GitHub-Api-Version: "2022-11-28"
+        Content-Type: "application/json"
+      body: '{"title": "Bump {input.package_name} from {input.from_version} to {input.to_version}", "head": "deps/{input.package_name}-{input.to_version}", "base": "{input.base_branch}", "body": "Automated upgrade pilot: {input.package_name} {input.from_version} -> {input.to_version} in {input.manifest_path}.", "maintainer_can_modify": true}'
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 3) Deterministically capture PR number + head SHA from the open-PR response.
+  - id: pr_context
+    type: code
+    depends_on: [open_pr]
+    code_config:
+      language: python
+      code: |
+        # Normalize the GitHub PR payload into a compact context object used downstream.
+        pr = _steps.get("open_pr") or {}
+        if not isinstance(pr, dict):
+            pr = {}
+        head = pr.get("head") or {}
+        if not isinstance(head, dict):
+            head = {}
+        pr_number = pr.get("number")
+        head_sha = head.get("sha", "")
+        head_ref = head.get("ref", "deps/" + str(_input.get("package_name", "")) + "-" + str(_input.get("to_version", "")))
+        result = {
+            "pr_number": pr_number,
+            "head_sha": head_sha,
+            "head_ref": head_ref,
+            "repo": _input.get("github_repo", ""),
+            "package": _input.get("package_name", ""),
+            "from_version": _input.get("from_version", ""),
+            "to_version": _input.get("to_version", ""),
+            "html_url": pr.get("html_url", ""),
+        }
+
+  # 4) SENSOR: poll the GitHub check-runs API for the PR head SHA until CI reaches a
+  #    TERMINAL conclusion (success/failure/cancelled/timed_out), then stop.
+  #    Connector: github
+  - id: poll_ci
+    type: sensor
+    depends_on: [pr_context]
+    sensor_config:
+      url: "https://api.github.com/repos/{input.github_repo}/commits/{steps.pr_context.output.head_sha}/check-runs"
+      method: GET
+      headers:
+        Accept: "application/vnd.github+json"
+        X-GitHub-Api-Version: "2022-11-28"
+        Authorization: "Bearer {env.GITHUB_TOKEN}"
+      # Terminal when there is at least one check-run and EVERY run has status 'completed'.
+      condition: "status_code == 200 and (response.get('total_count', 0) or 0) > 0 and all(r.get('status') == 'completed' for r in (response.get('check_runs') or []))"
+      check_interval: 60
+      timeout: 7200
+
+  # 5) Deterministically reduce the check-runs to a single CI verdict (green vs red).
+  - id: ci_verdict
+    type: code
+    depends_on: [poll_ci]
+    code_config:
+      language: python
+      code: |
+        # The sensor surfaces its final observation. Read the check-runs and decide green/red.
+        obs = _steps.get("poll_ci") or {}
+        if not isinstance(obs, dict):
+            obs = {}
+        # Sensors return the last HTTP response body; check-runs live under 'check_runs'.
+        runs = obs.get("check_runs")
+        if runs is None and isinstance(obs.get("response"), dict):
+            runs = obs["response"].get("check_runs")
+        if not isinstance(runs, list):
+            runs = []
+
+        PASSING = {"success", "neutral", "skipped"}
+        failing = []
+        for r in runs:
+            if not isinstance(r, dict):
+                continue
+            conclusion = str(r.get("conclusion", "") or "").lower()
+            if conclusion not in PASSING:
+                failing.append({
+                    "name": r.get("name", ""),
+                    "conclusion": conclusion or "unknown",
+                    "id": r.get("id"),
+                    "details_url": r.get("details_url", ""),
+                })
+
+        ci_green = len(runs) > 0 and len(failing) == 0
+        result = {
+            "ci_green": ci_green,
+            "total_runs": len(runs),
+            "fail_count": len(failing),
+            "failing_runs": failing,
+            # First failing check-run id is the one we pull logs for.
+            "first_failing_run_id": (failing[0]["id"] if failing else None),
+        }
+
+  # 6) CONDITION: CI green -> skip straight to the gate (nothing to diagnose);
+  #    CI red -> run the breakage-diagnosis pipeline first.
+  - id: route_on_ci
+    type: condition
+    depends_on: [ci_verdict]
+    condition_config:
+      expression: "{steps.ci_verdict.output.fail_count} > 0"
+      then: [fetch_logs, fetch_diff, breakage_bundle, diagnose_anthropic, diagnose_openai, diagnose_gemini, diagnose_race]
+      else: [green_noop]
+
+  # 6a) GREEN path no-op: produce an empty breakage record so the gate has a stable shape.
+  - id: green_noop
+    type: code
+    code_config:
+      language: python
+      code: |
+        # CI was green - there is no breakage to diagnose and no patch to propose.
+        result = {
+            "ci_green": True,
+            "needs_fix": False,
+            "summary": "CI passed on the upgrade PR; no breakage to diagnose.",
+        }
+
+  # 6b) RED path: fetch the raw logs of the first failing job. Connector: github
+  - id: fetch_logs
+    type: http
+    http_config:
+      url: "https://api.github.com/repos/{input.github_repo}/actions/jobs/{steps.ci_verdict.output.first_failing_run_id}/logs"
+      method: GET
+      auth: "bearer:{env.GITHUB_TOKEN}"
+      headers:
+        Accept: "application/vnd.github+json"
+        X-GitHub-Api-Version: "2022-11-28"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 6c) RED path: fetch the PR diff (the bump itself) for changed-symbol context.
+  #     Connector: github
+  - id: fetch_diff
+    type: http
+    http_config:
+      url: "https://api.github.com/repos/{input.github_repo}/pulls/{steps.pr_context.output.pr_number}/files?per_page=100"
+      method: GET
+      auth: "bearer:{env.GITHUB_TOKEN}"
+      headers:
+        Accept: "application/vnd.github+json"
+        X-GitHub-Api-Version: "2022-11-28"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 6d) RED path: sandboxed parse of logs + diff into a compact breakage bundle.
+  - id: breakage_bundle
+    type: code
+    code_config:
+      language: python
+      code: |
+        # Parse failing-job logs + the PR diff into failing tests, stack frames and
+        # changed symbols. Pure string processing - no shell, no network.
+        import re
+
+        logs = _steps.get("fetch_logs") or ""
+        if isinstance(logs, dict):
+            logs = logs.get("body") or logs.get("content") or str(logs)
+        logs = str(logs)
+
+        files = _steps.get("fetch_diff") or []
+        if isinstance(files, dict):
+            files = files.get("files") or files.get("response") or []
+        if not isinstance(files, list):
+            files = []
+
+        verdict = _steps.get("ci_verdict") or {}
+        if not isinstance(verdict, dict):
+            verdict = {}
+
+        # Failing test names: pytest 'FAILED path::test', unittest 'FAIL: test', jest '✕ test'.
+        failing_tests = []
+        for pat in (
+            r"FAILED\s+([^\s]+::[^\s]+)",
+            r"FAIL:\s+([A-Za-z0-9_\.]+)",
+            r"[x✕✗]\s+([A-Za-z0-9_\. >-]+)\s+\(",
+        ):
+            for m in re.findall(pat, logs):
+                t = m.strip()
+                if t and t not in failing_tests:
+                    failing_tests.append(t)
+        failing_tests = failing_tests[:25]
+
+        # Stack frames: 'File "x.py", line N, in func' and 'at func (file:line)'.
+        frames = []
+        for m in re.findall(r'File "([^"]+)", line (\d+), in (\S+)', logs):
+            frames.append({"file": m[0], "line": int(m[1]), "func": m[2]})
+        for m in re.findall(r"at\s+([\w\.<>]+)\s+\(([^:]+):(\d+)", logs):
+            frames.append({"func": m[0], "file": m[1], "line": int(m[2])})
+        frames = frames[:25]
+
+        # Common breakage signatures from the upgrade (import / attribute / signature drift).
+        signatures = []
+        for pat, label in (
+            (r"(ImportError: [^\n]+)", "import_error"),
+            (r"(ModuleNotFoundError: [^\n]+)", "module_not_found"),
+            (r"(AttributeError: [^\n]+)", "attribute_error"),
+            (r"(TypeError: [^\n]+)", "type_error"),
+            (r"(DeprecationWarning: [^\n]+)", "deprecation"),
+        ):
+            for m in re.findall(pat, logs):
+                signatures.append({"kind": label, "message": m.strip()[:300]})
+        signatures = signatures[:25]
+
+        # Changed symbols approximated from added/removed manifest + source lines in the diff.
+        changed_files = []
+        changed_symbols = []
+        for f in files:
+            if not isinstance(f, dict):
+                continue
+            fname = f.get("filename", "")
+            changed_files.append(fname)
+            patch = str(f.get("patch", "") or "")
+            for m in re.findall(r"^[+-]\s*(?:def|class|function|const|let|var)\s+([A-Za-z0-9_]+)", patch, re.MULTILINE):
+                if m not in changed_symbols:
+                    changed_symbols.append(m)
+        changed_symbols = changed_symbols[:50]
+
+        result = {
+            "needs_fix": True,
+            "package": _input.get("package_name", ""),
+            "from_version": _input.get("from_version", ""),
+            "to_version": _input.get("to_version", ""),
+            "failing_runs": verdict.get("failing_runs", []),
+            "failing_tests": failing_tests,
+            "stack_frames": frames,
+            "breakage_signatures": signatures,
+            "changed_files": changed_files,
+            "changed_symbols": changed_symbols,
+            "log_excerpt": logs[-4000:],
+        }
+
+  # 6e) RACE: three providers diagnose root cause + propose a minimal patch.
+  #     FIRST schema-valid structured verdict wins (failover + fastest-of-N).
+  #     Each branch is the SAME plain prompt + JSON schema, pinned to a different
+  #     provider so the pool is interchangeable. Branch steps have NO depends_on;
+  #     they reach the bundle via {steps.breakage_bundle.output}.
+  - id: diagnose_anthropic
+    type: standard
+    model: sonnet
+    output_schema:
+      type: object
+      properties:
+        root_cause: { type: string }
+        addresses_tests: { type: array, items: { type: string } }
+        patch_path: { type: string }
+        patch_diff: { type: string }
+        risk: { type: string, enum: ["low", "medium", "high"] }
+        confidence: { type: number }
+      required: ["root_cause", "patch_path", "patch_diff", "risk", "confidence"]
+    prompt: |
+      You are diagnosing why a dependency upgrade broke CI and proposing the
+      MINIMAL patch to make the failing tests pass. Use only the breakage bundle.
+
+      Upgrade: {steps.pr_context.output.package} {steps.pr_context.output.from_version} -> {steps.pr_context.output.to_version}
+      Breakage bundle (failing tests, stack frames, signatures, changed symbols):
+      {steps.breakage_bundle.output}
+
+      Return STRICT JSON only, no prose:
+      {
+        "root_cause": "<one sentence proximate cause grounded in the failing tests/frames>",
+        "addresses_tests": ["<failing test name this patch fixes>", ...],
+        "patch_path": "<single file path the patch applies to>",
+        "patch_diff": "<unified diff, smallest change that fixes the failing tests>",
+        "risk": "low" | "medium" | "high",
+        "confidence": <number 0..1>
+      }
+
+  - id: diagnose_openai
+    type: standard
+    model: openai/codex
+    output_schema:
+      type: object
+      properties:
+        root_cause: { type: string }
+        addresses_tests: { type: array, items: { type: string } }
+        patch_path: { type: string }
+        patch_diff: { type: string }
+        risk: { type: string, enum: ["low", "medium", "high"] }
+        confidence: { type: number }
+      required: ["root_cause", "patch_path", "patch_diff", "risk", "confidence"]
+    prompt: |
+      You are a second, independent engineer diagnosing the SAME upgrade breakage.
+      Use only the breakage bundle and propose the minimal patch.
+
+      Upgrade: {steps.pr_context.output.package} {steps.pr_context.output.from_version} -> {steps.pr_context.output.to_version}
+      Breakage bundle: {steps.breakage_bundle.output}
+
+      Return STRICT JSON only with keys root_cause, addresses_tests (array),
+      patch_path, patch_diff (unified diff), risk ("low"|"medium"|"high"),
+      confidence (0..1). Output JSON only, no prose.
+
+  - id: diagnose_gemini
+    type: standard
+    model: google/gemini-2.5-pro
+    output_schema:
+      type: object
+      properties:
+        root_cause: { type: string }
+        addresses_tests: { type: array, items: { type: string } }
+        patch_path: { type: string }
+        patch_diff: { type: string }
+        risk: { type: string, enum: ["low", "medium", "high"] }
+        confidence: { type: number }
+      required: ["root_cause", "patch_path", "patch_diff", "risk", "confidence"]
+    prompt: |
+      You are a third, independent engineer diagnosing the SAME upgrade breakage.
+      Use only the breakage bundle and propose the minimal patch.
+
+      Upgrade: {steps.pr_context.output.package} {steps.pr_context.output.from_version} -> {steps.pr_context.output.to_version}
+      Breakage bundle: {steps.breakage_bundle.output}
+
+      Return STRICT JSON only with keys root_cause, addresses_tests (array),
+      patch_path, patch_diff (unified diff), risk ("low"|"medium"|"high"),
+      confidence (0..1). Output JSON only, no prose.
+
+  - id: diagnose_race
+    type: race
+    race_config:
+      branches:
+        - [diagnose_anthropic]
+        - [diagnose_openai]
+        - [diagnose_gemini]
+      # First branch whose JSON parses with a real patch_diff + risk wins.
+      # Deterministic first-valid-wins failover, NOT a vote.
+      validator: "isinstance(output, dict) and bool(output.get('patch_diff')) and output.get('risk') in ('low', 'medium', 'high')"
+
+  # 7) Deterministically assemble the fix decision shared by green and red paths.
+  - id: fix_decision
+    type: code
+    depends_on: [route_on_ci]
+    code_config:
+      language: python
+      code: |
+        # Join both branches of route_on_ci. Exactly one path populated upstream:
+        # green -> green_noop (no fix); red -> diagnose_race (a proposed patch).
+        green = _steps.get("green_noop")
+        race = _steps.get("diagnose_race")
+        bundle = _steps.get("breakage_bundle") or {}
+        if not isinstance(bundle, dict):
+            bundle = {}
+
+        if isinstance(green, dict) and green.get("ci_green"):
+            result = {
+                "needs_fix": False,
+                "ci_green": True,
+                "root_cause": "",
+                "patch_path": "",
+                "patch_diff": "",
+                "risk": "low",
+                "confidence": 1.0,
+                "addresses_tests": [],
+                "failing_tests": [],
+                "summary": "CI green - merge the upgrade as-is.",
+            }
+        else:
+            v = race if isinstance(race, dict) else {}
+            try:
+                conf = float(v.get("confidence", 0) or 0)
+            except (TypeError, ValueError):
+                conf = 0.0
+            result = {
+                "needs_fix": True,
+                "ci_green": False,
+                "root_cause": str(v.get("root_cause", "")),
+                "patch_path": str(v.get("patch_path", "")),
+                "patch_diff": str(v.get("patch_diff", "")),
+                "risk": str(v.get("risk", "high") or "high").lower(),
+                "confidence": conf,
+                "addresses_tests": v.get("addresses_tests", []) or [],
+                "failing_tests": bundle.get("failing_tests", []),
+                "summary": "CI red - applying the winning low-risk patch before merge.",
+            }
+
+  # 8) GATE (llm_eval): is the proposed fix low-risk AND does it actually address
+  #    the failing tests? Green path trivially passes (no fix to vet).
+  - id: quality_gate
+    type: gate
+    depends_on: [fix_decision]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: |
+              You are gating an automated dependency-upgrade fix. Reply with exactly
+              one word: "approved" or "rejected".
+
+              Approve if EITHER:
+                - needs_fix is false (CI was green, nothing to change), OR
+                - the proposed patch is risk "low" AND its addresses_tests cover the
+                  failing_tests AND the patch_diff is a minimal, plausible change that
+                  fixes those tests.
+              Otherwise reply "rejected".
+
+              Fix decision under review: {steps.fix_decision.output}
+            input: "{steps.fix_decision.output}"
+            model: sonnet
+
+  # 9) APPROVAL: a human reviews diff + breakage bundle + chosen fix. allow_edit so
+  #    the reviewer can tweak the patch; on_timeout abort (never auto-merge silently).
+  - id: human_approval
+    type: approval
+    depends_on: [quality_gate]
+    approval_config:
+      message: "Approve merging the upgrade PR? Review the chosen fix (root_cause, patch_path, patch_diff, risk) and the failing tests it claims to address before sign-off."
+      show_data: steps.fix_decision.output
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: true
+
+  # 10) Push the fix commit to the upgrade branch (only meaningful on the red path;
+  #     on green the patch is empty and this is a no-op content write). Connector: github
+  - id: push_fix
+    type: http
+    depends_on: [human_approval]
+    http_config:
+      url: "https://api.github.com/repos/{input.github_repo}/contents/{steps.fix_decision.output.patch_path}"
+      method: PUT
+      auth: "bearer:{env.GITHUB_TOKEN}"
+      headers:
+        Accept: "application/vnd.github+json"
+        X-GitHub-Api-Version: "2022-11-28"
+        Content-Type: "application/json"
+      body: '{"message": "fix({input.package_name}): patch breakage from {input.from_version}->{input.to_version}", "branch": "{steps.pr_context.output.head_ref}", "content": "{steps.fix_decision.output.patch_diff}", "sha": "{steps.pr_context.output.head_sha}"}'
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
+
+  # 11) Merge the PR. Connector: github
+  - id: merge_pr
+    type: http
+    depends_on: [push_fix]
+    http_config:
+      url: "https://api.github.com/repos/{input.github_repo}/pulls/{steps.pr_context.output.pr_number}/merge"
+      method: PUT
+      auth: "bearer:{env.GITHUB_TOKEN}"
+      headers:
+        Accept: "application/vnd.github+json"
+        X-GitHub-Api-Version: "2022-11-28"
+        Content-Type: "application/json"
+      body: '{"merge_method": "squash", "commit_title": "Bump {input.package_name} to {input.to_version} (upgrade pilot)", "commit_message": "Automated upgrade pilot merge. {steps.fix_decision.output.summary}"}'
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
+
+  # 12) NOTIFY: merged-or-blocked summary to Slack #releases. Connector: slack
+  - id: notify_release
+    type: notify
+    depends_on: [merge_pr]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: ":package: Upgrade pilot: {input.package_name} {input.from_version} -> {input.to_version} on {input.github_repo} MERGED (PR #{steps.pr_context.output.pr_number}). Fix applied: {steps.fix_decision.output.summary} (root cause: {steps.fix_decision.output.root_cause}; risk: {steps.fix_decision.output.risk})."
+
+on_complete:
+  storage_path: "dependency-upgrade-pilot/{run_id}/result.json"

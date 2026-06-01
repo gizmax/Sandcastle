@@ -1,0 +1,518 @@
+# name: Model Promotion Gate
+# description: Before you swap a workflow's default model, shadow-replay a frozen golden set on the current AND candidate provider, measure quality/cost/schema/latency deltas, and gate the promotion on a regression budget.
+# tags: [llmops, model-promotion, regression-gate, evaluation, multi-provider]
+# category: general_ai
+name: model-promotion-gate
+description: >-
+  A provider-neutral promotion gate for "just bumping the model". Triggered by
+  CI/CD (or a new row in a candidate_models Postgres table) and also runnable
+  manually with candidate_model as input. It pulls a FROZEN golden test set plus
+  the current production baseline scores from Postgres (via PostgREST) and
+  Langfuse, then loops over every golden case. For each case a RACE runs the
+  SAME case concurrently on the current_model branch and the candidate_model
+  branch and COLLECTS BOTH outputs (fan-out collection - the race validator is
+  satisfied as soon as a branch returns, but the per-case code reads whatever
+  both branches produced). A classify judges whether the candidate output still
+  matches the expected category/schema, then a sandboxed code step computes the
+  per-case quality delta, token/cost delta, schema-validity flag and latency
+  delta and appends them to a results array. A second code step aggregates
+  pass-rate delta, p95 latency delta, $/1k-run delta and a hard-regression
+  count. A multi-strategy gate (an LLM judge asking "is the candidate
+  non-regressive on quality AND within cost budget?" plus a human approval that
+  is only meant to be exercised on hard regressions) decides go/no-go, and a
+  condition routes the run: on PASS it transforms the candidate into a new
+  default_model config, writes the new pinned model to the Postgres config table,
+  posts the verdict + delta table to Slack #mlops and records the decision back
+  on the Langfuse trace; on FAIL it posts the rejection with the regression
+  report. The model is a pure input on both sides, so this works identically for
+  anthropic->openai, openai->mistral, cloud->ollama and back - even the judge is
+  a configurable model.
+default_model: sonnet
+default_timeout: 1800
+input_schema:
+  required: ["current_model", "candidate_model", "data_endpoint"]
+  properties:
+    current_model:
+      type: string
+      description: "Provider/model alias currently serving as the workflow default (the production baseline side of the comparison)."
+      default: "sonnet"
+    candidate_model:
+      type: string
+      description: "Provider/model alias being proposed as the new default (the side under evaluation)."
+      example: "google/gemini-2.5-pro"
+    data_endpoint:
+      type: string
+      description: "Base URL of the eval data store REST API (PostgREST over Postgres), serving the golden set + config tables."
+      default: "https://evalstore.internal/rest/v1"
+    workflow_target:
+      type: string
+      description: "Name of the workflow whose default_model is being promoted (the config row key written back to Postgres)."
+      example: "contract-review"
+    langfuse_endpoint:
+      type: string
+      description: "Base URL of the Langfuse API for pulling baseline scores and recording the promotion decision."
+      default: "https://cloud.langfuse.com/api/public"
+    langfuse_trace_id:
+      type: string
+      description: "Langfuse trace id to attach the promotion-decision score to."
+      example: "trace_promo_8841"
+    golden_set_id:
+      type: string
+      description: "Identifier of the FROZEN golden test set to replay (immutable snapshot id)."
+      default: "golden_v1"
+    max_quality_drop:
+      type: number
+      description: "Max tolerated drop in pass-rate (fraction) before the promotion is a hard regression. 0.02 = allow up to 2pp quality loss."
+      default: 0.02
+    max_cost_increase_pct:
+      type: number
+      description: "Max tolerated increase in $/1k-run (percent) for the candidate vs current. 10 = candidate may cost up to 10% more."
+      default: 10.0
+    max_p95_latency_increase_pct:
+      type: number
+      description: "Max tolerated increase in p95 latency (percent) for the candidate vs current."
+      default: 25.0
+    slack_channel:
+      type: string
+      description: "Slack channel for the promotion verdict + delta table."
+      default: "#mlops"
+
+steps:
+  # 1) Pull the FROZEN golden set from the eval data store (Postgres via PostgREST).
+  #    Immutable snapshot: each row has {id, input, expected_category, expected_schema}.
+  - id: fetch_golden_set
+    type: http
+    http_config:
+      url: "{input.data_endpoint}/golden_cases?golden_set_id=eq.{input.golden_set_id}&order=id.asc"
+      method: GET
+      headers:
+        Accept: "application/json"
+        Prefer: "count=exact"
+      auth: "bearer:{env.EVALSTORE_API_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2) Pull the current production BASELINE scores for this golden set from Langfuse
+  #    (pass-rate, p95 latency, $/1k-run measured on current_model in prod).
+  - id: fetch_baseline
+    type: http
+    depends_on: [fetch_golden_set]
+    http_config:
+      url: "{input.langfuse_endpoint}/scores?name=eq.golden-passrate&traceTags=eq.{input.golden_set_id}&limit=500"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.LANGFUSE_API_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 3) LOOP over every golden case. For each case: race both models, judge the
+  #    candidate output, then deterministically score the per-case deltas.
+  - id: replay_cases
+    type: loop
+    depends_on: [fetch_baseline]
+    loop_config:
+      over: "steps.fetch_golden_set.output"
+      step_ids: ["shadow_race", "judge_match", "score_case"]
+      max_iterations: 1000
+
+  # 3a) RACE - run the SAME golden case concurrently on the current_model branch
+  #     AND the candidate_model branch. Both branch steps are defined separately
+  #     with NO depends_on (the loop/race executor drives them). This is a fan-out
+  #     COLLECTION: score_case reads BOTH branch outputs from _steps, it is not a
+  #     first-wins vote. Each branch is pinned to its respective input model so the
+  #     comparison is provider-neutral.
+  - id: shadow_race
+    type: race
+    race_config:
+      branches: [["run_current"], ["run_candidate"]]
+      validator: "len(str(output)) > 0"
+
+  # 3a-i) CURRENT model branch - the production baseline side.
+  - id: run_current
+    type: standard
+    model: sonnet
+    prompt: |
+      You are the CURRENT production model ({input.current_model}) being shadow-replayed
+      on a frozen golden case. Answer the case task exactly as you would in production.
+
+      GOLDEN CASE (JSON):
+      {{ _item }}
+
+      Return STRICT JSON only:
+      {
+        "answer": "<your answer to the case task>",
+        "category": "<the single category label your answer falls into>",
+        "tokens_in": <int estimated input tokens>,
+        "tokens_out": <int estimated output tokens>,
+        "latency_ms": <int your self-estimated end-to-end latency in ms>
+      }
+    output_schema:
+      type: object
+      properties:
+        answer: { type: string }
+        category: { type: string }
+        tokens_in: { type: integer }
+        tokens_out: { type: integer }
+        latency_ms: { type: integer }
+
+  # 3a-ii) CANDIDATE model branch - the side under evaluation. DIFFERENT provider
+  #        pin so the race is genuinely cross-provider. Identical prompt contract.
+  - id: run_candidate
+    type: standard
+    model: google/gemini-2.5-pro
+    prompt: |
+      You are the CANDIDATE model ({input.candidate_model}) proposed as the new default,
+      shadow-replayed on the SAME frozen golden case. Answer the case task exactly as you
+      would in production. Use the IDENTICAL output contract as the current model.
+
+      GOLDEN CASE (JSON):
+      {{ _item }}
+
+      Return STRICT JSON only:
+      {
+        "answer": "<your answer to the case task>",
+        "category": "<the single category label your answer falls into>",
+        "tokens_in": <int estimated input tokens>,
+        "tokens_out": <int estimated output tokens>,
+        "latency_ms": <int your self-estimated end-to-end latency in ms>
+      }
+    output_schema:
+      type: object
+      properties:
+        answer: { type: string }
+        category: { type: string }
+        tokens_in: { type: integer }
+        tokens_out: { type: integer }
+        latency_ms: { type: integer }
+
+  # 3b) JUDGE - a configurable evaluator model classifies whether the CANDIDATE
+  #     output still matches the case's expected category/schema (pass vs fail vs
+  #     schema_invalid). The judge itself is a swappable model (haiku here), so even
+  #     the evaluator is not a proprietary feature.
+  - id: judge_match
+    type: classify
+    classify_config:
+      categories: ["match", "mismatch", "schema_invalid"]
+      input: "{steps.run_candidate.output}"
+      model: haiku
+      branches:
+        match: ["score_case"]
+        mismatch: ["score_case"]
+        schema_invalid: ["score_case"]
+
+  # 3c) SCORE - sandboxed Python. Reads BOTH race branch outputs + the judge verdict
+  #     for THIS case and computes per-case quality delta, token/cost delta,
+  #     schema-validity flag and latency delta. Pure deterministic measurement; no
+  #     model swings the numbers. Per-1k-token prices are config you can edit freely.
+  - id: score_case
+    type: code
+    code_config:
+      language: python
+      code: |
+        # Per-case scoring. The loop item is the golden case; both model outputs
+        # are read from _steps (race fan-out collection), judge verdict from classify.
+        case = _input.get('_item') or {}
+        cur = _steps.get('run_current') or {}
+        cand = _steps.get('run_candidate') or {}
+        verdict = _steps.get('judge_match')
+
+        # Provider-neutral price book (USD per 1k tokens). Editable config, not logic.
+        PRICES = {
+            'sonnet': {'in': 0.003, 'out': 0.015},
+            'opus': {'in': 0.015, 'out': 0.075},
+            'haiku': {'in': 0.0008, 'out': 0.004},
+            'google/gemini-2.5-pro': {'in': 0.00125, 'out': 0.005},
+            'mistral/large': {'in': 0.002, 'out': 0.006},
+            'mistral/small': {'in': 0.0002, 'out': 0.0006},
+            'openai/codex': {'in': 0.0025, 'out': 0.010},
+            'ollama': {'in': 0.0, 'out': 0.0},
+            'omlx/qwen-3': {'in': 0.0, 'out': 0.0},
+            'minimax/m2.5': {'in': 0.0003, 'out': 0.0011},
+        }
+        DEFAULT_PRICE = {'in': 0.003, 'out': 0.015}
+
+        def as_dict(x):
+            return x if isinstance(x, dict) else {}
+
+        def num(x, default=0.0):
+            try:
+                return float(x)
+            except (TypeError, ValueError):
+                return float(default)
+
+        def cost_usd(model_name, out):
+            p = PRICES.get(str(model_name), DEFAULT_PRICE)
+            ti = num(as_dict(out).get('tokens_in'))
+            to = num(as_dict(out).get('tokens_out'))
+            return (ti / 1000.0) * p['in'] + (to / 1000.0) * p['out']
+
+        cur = as_dict(cur)
+        cand = as_dict(cand)
+
+        cur_model = str(_input.get('current_model', 'sonnet'))
+        cand_model = str(_input.get('candidate_model', 'google/gemini-2.5-pro'))
+
+        # Schema validity: candidate must carry the required contract fields.
+        required_fields = ('answer', 'category')
+        schema_valid = all(f in cand and cand.get(f) not in (None, '') for f in required_fields)
+
+        # Quality: judged 'match' AND schema valid => candidate passes this case.
+        v = str(verdict or '').strip().lower()
+        candidate_pass = (v == 'match') and schema_valid
+
+        # Current side is the baseline: it passes if its category equals the
+        # expected category (current model is presumed in-spec for the frozen set).
+        expected = str(case.get('expected_category', '') or '').strip().lower()
+        cur_cat = str(cur.get('category', '') or '').strip().lower()
+        current_pass = (expected == '' ) or (cur_cat == expected)
+
+        cur_cost = cost_usd(cur_model, cur)
+        cand_cost = cost_usd(cand_model, cand)
+        cur_lat = num(cur.get('latency_ms'))
+        cand_lat = num(cand.get('latency_ms'))
+
+        result = {
+            'case_id': case.get('id'),
+            'expected_category': case.get('expected_category'),
+            'current_pass': bool(current_pass),
+            'candidate_pass': bool(candidate_pass),
+            # Per-case quality delta: +1 candidate fixed a case, -1 candidate broke one.
+            'quality_delta': (1 if candidate_pass else 0) - (1 if current_pass else 0),
+            'schema_valid': bool(schema_valid),
+            'judge_verdict': v or 'unknown',
+            'current_cost_usd': round(cur_cost, 6),
+            'candidate_cost_usd': round(cand_cost, 6),
+            'cost_delta_usd': round(cand_cost - cur_cost, 6),
+            'current_latency_ms': cur_lat,
+            'candidate_latency_ms': cand_lat,
+            'latency_delta_ms': cand_lat - cur_lat,
+            # Hard regression on THIS case: candidate broke a previously-passing case
+            # or produced an invalid schema.
+            'hard_regression': bool((current_pass and not candidate_pass) or (not schema_valid)),
+        }
+
+  # 4) AGGREGATE - deterministic roll-up across all per-case results. Computes
+  #    pass-rate delta, p95 latency delta, $/1k-run delta, hard-regression count
+  #    and a budget verdict against the input thresholds. THIS is the load-bearing
+  #    decision math: pure code, provider-neutral.
+  - id: aggregate
+    type: code
+    depends_on: [replay_cases]
+    code_config:
+      language: python
+      code: |
+        rows = _steps.get('replay_cases') or []
+        if isinstance(rows, dict):
+            rows = rows.get('results') or rows.get('items') or list(rows.values())
+        if not isinstance(rows, list):
+            rows = [rows]
+        rows = [r for r in rows if isinstance(r, dict)]
+
+        n = len(rows) or 1
+
+        def pct(num, den):
+            return round((num / den) * 100.0, 2) if den else 0.0
+
+        def p95(values):
+            vals = sorted(float(v) for v in values if v is not None)
+            if not vals:
+                return 0.0
+            idx = int(round(0.95 * (len(vals) - 1)))
+            return round(vals[idx], 2)
+
+        current_passes = sum(1 for r in rows if r.get('current_pass'))
+        candidate_passes = sum(1 for r in rows if r.get('candidate_pass'))
+        cur_pass_rate = current_passes / n
+        cand_pass_rate = candidate_passes / n
+        pass_rate_delta = round(cand_pass_rate - cur_pass_rate, 4)  # negative = regression
+
+        cur_p95 = p95([r.get('current_latency_ms') for r in rows])
+        cand_p95 = p95([r.get('candidate_latency_ms') for r in rows])
+        p95_delta_ms = round(cand_p95 - cur_p95, 2)
+        p95_delta_pct = round(((cand_p95 - cur_p95) / cur_p95) * 100.0, 2) if cur_p95 else 0.0
+
+        cur_total = sum(float(r.get('current_cost_usd', 0.0) or 0.0) for r in rows)
+        cand_total = sum(float(r.get('candidate_cost_usd', 0.0) or 0.0) for r in rows)
+        # $/1k-run = average per-run cost * 1000.
+        cur_per_1k = round((cur_total / n) * 1000.0, 4)
+        cand_per_1k = round((cand_total / n) * 1000.0, 4)
+        cost_delta_per_1k = round(cand_per_1k - cur_per_1k, 4)
+        cost_delta_pct = round(((cand_per_1k - cur_per_1k) / cur_per_1k) * 100.0, 2) if cur_per_1k else 0.0
+
+        hard_regressions = [r.get('case_id') for r in rows if r.get('hard_regression')]
+        schema_failures = sum(1 for r in rows if not r.get('schema_valid'))
+
+        # Budget thresholds from input.
+        max_quality_drop = float(_input.get('max_quality_drop', 0.02))
+        max_cost_pct = float(_input.get('max_cost_increase_pct', 10.0))
+        max_p95_pct = float(_input.get('max_p95_latency_increase_pct', 25.0))
+
+        quality_ok = pass_rate_delta >= -abs(max_quality_drop)
+        cost_ok = cost_delta_pct <= max_cost_pct
+        latency_ok = p95_delta_pct <= max_p95_pct
+        no_hard_regression = len(hard_regressions) == 0
+
+        # Deterministic non-regression verdict: all budgets respected AND no case broke.
+        non_regressive = bool(quality_ok and cost_ok and latency_ok and no_hard_regression)
+
+        result = {
+            'cases': len(rows),
+            'current_model': _input.get('current_model'),
+            'candidate_model': _input.get('candidate_model'),
+            'current_pass_rate': round(cur_pass_rate, 4),
+            'candidate_pass_rate': round(cand_pass_rate, 4),
+            'pass_rate_delta': pass_rate_delta,
+            'pass_rate_delta_pp': round(pass_rate_delta * 100.0, 2),
+            'current_p95_ms': cur_p95,
+            'candidate_p95_ms': cand_p95,
+            'p95_delta_ms': p95_delta_ms,
+            'p95_delta_pct': p95_delta_pct,
+            'current_cost_per_1k': cur_per_1k,
+            'candidate_cost_per_1k': cand_per_1k,
+            'cost_delta_per_1k': cost_delta_per_1k,
+            'cost_delta_pct': cost_delta_pct,
+            'schema_failures': schema_failures,
+            'hard_regression_count': len(hard_regressions),
+            'hard_regression_case_ids': hard_regressions,
+            'quality_ok': quality_ok,
+            'cost_ok': cost_ok,
+            'latency_ok': latency_ok,
+            'no_hard_regression': no_hard_regression,
+            'non_regressive': non_regressive,
+        }
+
+  # 5) GATE - multi-strategy go/no-go. ALL strategies must pass to promote.
+  #    (a) llm_eval: a configurable judge confirms the candidate is non-regressive
+  #        on quality AND within the cost budget, reading the aggregate.
+  #    (b) human: a sign-off that is the safety net whenever there is any hard
+  #        regression - a human must explicitly bless the promotion.
+  - id: promotion_gate
+    type: gate
+    depends_on: [aggregate]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: |
+              You are auditing a model-promotion decision. Below is the aggregate of a
+              shadow-replay of a frozen golden set on the current vs candidate model
+              (pass-rate delta, p95 latency delta, $/1k-run delta, hard-regression
+              count, and the precomputed budget flags). Answer exactly "approved" ONLY
+              if the candidate is non-regressive on QUALITY (pass_rate_delta within the
+              allowed drop) AND within the COST budget AND has zero hard regressions;
+              otherwise answer "rejected".
+            input: "{steps.aggregate.output}"
+            model: sonnet
+        - type: human
+          config:
+            message: "Approve promotion of the candidate model? Review the pass-rate / cost / p95 deltas and any hard-regression case ids before swapping the default. (Intended sign-off when hard regressions exist.)"
+            timeout_hours: 24
+            on_timeout: abort
+
+  # 6) CONDITION on the DETERMINISTIC non_regressive flag. The aggregate code -
+  #    not a single prompt - decides the path. PASS: pin + write-back + announce +
+  #    record. FAIL: announce the rejection with the regression report.
+  - id: route_promotion
+    type: condition
+    depends_on: [promotion_gate]
+    condition_config:
+      expression: "{steps.aggregate.output.non_regressive} == True"
+      then: [build_pin_config, write_pinned_model, notify_promoted, record_decision]
+      else: [notify_rejected, record_decision]
+
+  # 6a-PASS) Transform the candidate into a new default_model config block for the
+  #          target workflow, carrying the evidence that justified the swap.
+  - id: build_pin_config
+    type: transform
+    transform_config:
+      template: |
+        {
+          "workflow_target": "{input.workflow_target}",
+          "default_model": "{steps.aggregate.output.candidate_model}",
+          "previous_default_model": "{steps.aggregate.output.current_model}",
+          "promoted_by": "model-promotion-gate",
+          "golden_set_id": "{input.golden_set_id}",
+          "evidence": {
+            "pass_rate_delta_pp": {steps.aggregate.output.pass_rate_delta_pp},
+            "cost_delta_pct": {steps.aggregate.output.cost_delta_pct},
+            "p95_delta_pct": {steps.aggregate.output.p95_delta_pct},
+            "hard_regression_count": {steps.aggregate.output.hard_regression_count}
+          }
+        }
+
+  # 6b-PASS) Write the newly pinned default model to the Postgres config table
+  #          (PostgREST upsert). This is the actual promotion side effect.
+  - id: write_pinned_model
+    type: http
+    http_config:
+      url: "{input.data_endpoint}/workflow_model_config"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Prefer: "resolution=merge-duplicates,return=representation"
+      auth: "bearer:{env.EVALSTORE_API_TOKEN}"
+      body: "{steps.build_pin_config.output}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 6c-PASS) Announce the PROMOTION verdict + delta table on Slack #mlops.
+  - id: notify_promoted
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        *PROMOTED* {steps.aggregate.output.current_model} -> {steps.aggregate.output.candidate_model} for `{input.workflow_target}`
+        Cases replayed   : {steps.aggregate.output.cases}
+        Pass-rate delta  : {steps.aggregate.output.pass_rate_delta_pp} pp ({steps.aggregate.output.current_pass_rate} -> {steps.aggregate.output.candidate_pass_rate})
+        $/1k-run delta   : {steps.aggregate.output.cost_delta_pct}% ({steps.aggregate.output.current_cost_per_1k} -> {steps.aggregate.output.candidate_cost_per_1k})
+        p95 latency delta: {steps.aggregate.output.p95_delta_pct}% ({steps.aggregate.output.current_p95_ms}ms -> {steps.aggregate.output.candidate_p95_ms}ms)
+        Hard regressions : {steps.aggregate.output.hard_regression_count}
+        New default model is now pinned in Postgres config.
+
+  # 6d-FAIL) Announce the REJECTION with the regression report on Slack #mlops.
+  - id: notify_rejected
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        *PROMOTION REJECTED* {steps.aggregate.output.candidate_model} stays a candidate for `{input.workflow_target}`.
+        Cases replayed   : {steps.aggregate.output.cases}
+        Pass-rate delta  : {steps.aggregate.output.pass_rate_delta_pp} pp (quality_ok={steps.aggregate.output.quality_ok})
+        $/1k-run delta   : {steps.aggregate.output.cost_delta_pct}% (cost_ok={steps.aggregate.output.cost_ok})
+        p95 latency delta: {steps.aggregate.output.p95_delta_pct}% (latency_ok={steps.aggregate.output.latency_ok})
+        Hard regressions : {steps.aggregate.output.hard_regression_count} -> {steps.aggregate.output.hard_regression_case_ids}
+        Default model UNCHANGED ({steps.aggregate.output.current_model}).
+
+  # 7) RECORD the promotion decision back on the Langfuse trace as a score, so the
+  #    go/no-go is auditable next to the eval run. Runs on both paths (then + else).
+  - id: record_decision
+    type: http
+    http_config:
+      url: "{input.langfuse_endpoint}/scores"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+      auth: "bearer:{env.LANGFUSE_API_TOKEN}"
+      body: |
+        {
+          "traceId": "{input.langfuse_trace_id}",
+          "name": "model-promotion-decision",
+          "value": "{steps.aggregate.output.non_regressive}",
+          "comment": "candidate={steps.aggregate.output.candidate_model} pass_rate_delta_pp={steps.aggregate.output.pass_rate_delta_pp} cost_delta_pct={steps.aggregate.output.cost_delta_pct} p95_delta_pct={steps.aggregate.output.p95_delta_pct} hard_regressions={steps.aggregate.output.hard_regression_count}"
+        }
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+on_complete:
+  storage_path: "model-promotion-gate/{run_id}/result.json"

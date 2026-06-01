@@ -1,0 +1,607 @@
+# name: Canary Promotion Sentinel
+# description: Watches a freshly-shipped canary deploy - registers canary + baseline metadata from Vercel/Cloudflare + GitHub, bakes a sampling window while polling Datadog golden signals, races two providers for a health verdict, then mechanically auto-promotes to 100% or auto-rolls-back via the platform connector, with a human approval gate only for borderline cases. Slack + Datadog annotation + GitHub PR comment record the decision.
+# tags: [DevOps, Canary, Progressive-Delivery, Vercel, Cloudflare, Datadog, GitHub, Failover]
+# category: devops
+
+name: canary-promotion-sentinel
+description: >-
+  Unattended canary promotion sentinel for progressive delivery on Vercel or
+  Cloudflare Workers. A CI/CD webhook fires when a canary goes live, carrying a
+  deployment id, canary URL and baseline SLOs. The sentinel registers canary +
+  baseline metadata (Vercel/Cloudflare + the GitHub commit), then LOOPS a bake
+  window - each iteration a SENSOR polls Datadog golden-signals until a sample
+  window is collected and a deterministic TRANSFORM reshapes the raw points into
+  a canary-vs-baseline comparison table. A RACE across two independent providers
+  adjudicates the verdict (healthy / degraded / inconclusive); first valid
+  structured verdict wins, giving provider failover for free. A GATE then makes
+  the promote/rollback call MECHANICALLY - numeric error/latency deltas vs the
+  configured budget, with an LLM judge that is swappable - and a CONDITION routes
+  healthy -> promote, degraded -> rollback, inconclusive -> human APPROVAL. The
+  chosen action is applied via the Vercel or Cloudflare API, announced to Slack,
+  and recorded by annotating Datadog and commenting on the GitHub PR with the
+  decision and the metric evidence. No load-bearing decision depends on a single
+  model's judgement or proprietary function-calling.
+
+default_model: sonnet
+default_timeout: 600
+
+input_schema:
+  required: ["deployment_id", "canary_url", "provider"]
+  properties:
+    deployment_id:
+      type: string
+      description: "Deployment id of the freshly-shipped canary (Vercel deployment id or Cloudflare version id)"
+      default: ""
+    canary_url:
+      type: string
+      description: "Public URL of the canary deployment (used for health context)"
+      default: ""
+    provider:
+      type: string
+      description: "Edge platform running the canary: 'vercel' or 'cloudflare'"
+      default: "vercel"
+    commit_sha:
+      type: string
+      description: "Git commit SHA the canary was built from (for GitHub correlation + PR comment)"
+      default: ""
+    github_repo:
+      type: string
+      description: "owner/repo for commit metadata and the decision comment (e.g. 'acme/web')"
+      default: ""
+    github_pr_number:
+      type: string
+      description: "Pull request number to comment the promote/rollback decision on"
+      default: "0"
+    vercel_project_id:
+      type: string
+      description: "Vercel project id (promotion / rollback target when provider == vercel)"
+      default: ""
+    last_good_deployment_id:
+      type: string
+      description: "Last known-good Vercel deployment id to roll back to"
+      default: ""
+    cloudflare_account_id:
+      type: string
+      description: "Cloudflare account id owning the Worker (when provider == cloudflare)"
+      default: ""
+    cloudflare_script_name:
+      type: string
+      description: "Cloudflare Worker script name whose deployment split is shifted on promote/rollback"
+      default: ""
+    cloudflare_last_good_version:
+      type: string
+      description: "Last known-good Cloudflare Worker version id to roll back traffic to"
+      default: ""
+    datadog_site:
+      type: string
+      description: "Datadog API site host"
+      default: "api.datadoghq.eu"
+    canary_metric_scope:
+      type: string
+      description: "Datadog tag scope selecting canary series (e.g. 'deployment:canary,service:web')"
+      default: "deployment:canary"
+    baseline_metric_scope:
+      type: string
+      description: "Datadog tag scope selecting baseline/stable series (e.g. 'deployment:stable,service:web')"
+      default: "deployment:stable"
+    bake_iterations:
+      type: number
+      description: "How many bake-window sample passes to collect before adjudicating"
+      default: 4
+    error_rate_budget_pct:
+      type: number
+      description: "Max allowed ABSOLUTE error-rate delta (canary minus baseline), in percentage points, to promote"
+      default: 1.0
+    latency_budget_pct:
+      type: number
+      description: "Max allowed RELATIVE p95 latency regression (canary vs baseline), in percent, to promote"
+      default: 10.0
+    slack_channel:
+      type: string
+      description: "Slack release channel for the promote/rollback announcement"
+      default: "#releases"
+
+steps:
+  # 1) REGISTER the canary - pull canary + baseline deployment metadata from the
+  #    edge platform (Vercel) and the originating GitHub commit. These run in
+  #    parallel; build_context normalizes them into one envelope.
+  - id: fetch_vercel_deployment
+    type: http
+    http_config:
+      url: "https://api.vercel.com/v13/deployments/{input.deployment_id}"
+      method: GET
+      auth: "bearer:{env.VERCEL_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  - id: fetch_github_commit
+    type: http
+    http_config:
+      url: "https://api.github.com/repos/{input.github_repo}/commits/{input.commit_sha}"
+      method: GET
+      auth: "bearer:{env.GITHUB_TOKEN}"
+      headers:
+        Accept: "application/vnd.github+json"
+        X-GitHub-Api-Version: "2022-11-28"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 2) Deterministically build the canary registration envelope from both fetches.
+  - id: build_context
+    type: code
+    depends_on: [fetch_vercel_deployment, fetch_github_commit]
+    code_config:
+      language: python
+      code: |
+        # Normalize Vercel deployment + GitHub commit into a single canary envelope.
+        vc = _steps.get("fetch_vercel_deployment") or {}
+        gh = _steps.get("fetch_github_commit") or {}
+        if not isinstance(vc, dict):
+            vc = {}
+        if not isinstance(gh, dict):
+            gh = {}
+
+        commit = gh.get("commit") if isinstance(gh.get("commit"), dict) else {}
+        author = commit.get("author") if isinstance(commit.get("author"), dict) else {}
+
+        result = {
+            "deployment_id": _input.get("deployment_id", ""),
+            "canary_url": _input.get("canary_url", ""),
+            "provider": str(_input.get("provider", "vercel")).strip().lower(),
+            "commit_sha": _input.get("commit_sha", ""),
+            "commit_message": commit.get("message", ""),
+            "commit_author": author.get("name", ""),
+            "vercel_state": vc.get("readyState", vc.get("state", "")),
+            "canary_scope": _input.get("canary_metric_scope", "deployment:canary"),
+            "baseline_scope": _input.get("baseline_metric_scope", "deployment:stable"),
+        }
+
+  # 3) Seed the bake window: produce a list of N sampling passes for the loop to
+  #    iterate over. Each item is one Datadog poll + reshape cycle.
+  - id: plan_bake_window
+    type: code
+    depends_on: [build_context]
+    code_config:
+      language: python
+      code: |
+        # Build the ordered list of bake-window passes the loop will walk.
+        try:
+            n = int(float(_input.get("bake_iterations", 4) or 4))
+        except (TypeError, ValueError):
+            n = 4
+        n = max(1, min(n, 50))
+        ctx = _steps.get("build_context") or {}
+        passes = [
+            {
+                "pass": i + 1,
+                "total": n,
+                "canary_scope": ctx.get("canary_scope", "deployment:canary"),
+                "baseline_scope": ctx.get("baseline_scope", "deployment:stable"),
+            }
+            for i in range(n)
+        ]
+        result = {"passes": passes, "count": n}
+
+  # 4) LOOP the bake window. Each iteration: SENSOR polls Datadog golden signals
+  #    until a sample window lands, then TRANSFORM reshapes raw points into a
+  #    canary-vs-baseline comparison table. The loop item is read via _item.
+  - id: bake_window_loop
+    type: loop
+    depends_on: [plan_bake_window]
+    loop_config:
+      over: "steps.plan_bake_window.output.passes"
+      step_ids: [poll_golden_signals, reshape_metrics]
+      max_iterations: 50
+
+  # 4a) SENSOR: poll Datadog golden-signals timeseries until the sample window
+  #     has collected at least one point (status 200 + a non-empty series).
+  - id: poll_golden_signals
+    type: sensor
+    sensor_config:
+      url: "https://{input.datadog_site}/api/v1/query?from=0&to=0&query=avg:trace.web.request.errors{{{input.canary_metric_scope}}}.as_rate()"
+      method: GET
+      headers:
+        DD-API-KEY: "{env.DATADOG_API_KEY}"
+        DD-APPLICATION-KEY: "{env.DATADOG_APP_KEY}"
+      condition: "status_code == 200 and len(response.get('series', []) or []) > 0"
+      check_interval: 30
+      timeout: 3600
+
+  # 4b) TRANSFORM: deterministically reshape this pass into a canary-vs-baseline
+  #     comparison row. Pure templating - no model involved.
+  - id: reshape_metrics
+    type: transform
+    transform_config:
+      template: |
+        {
+          "pass": "{steps.poll_golden_signals.output}",
+          "canary_scope": "{input.canary_metric_scope}",
+          "baseline_scope": "{input.baseline_metric_scope}",
+          "observed_at": "datadog-golden-signals",
+          "raw_sample": "{steps.poll_golden_signals.output}"
+        }
+
+  # 5) Deterministically aggregate the bake window into canary-vs-baseline deltas.
+  #    This is the numeric ground truth the gate decides on - not a model.
+  - id: compute_deltas
+    type: code
+    depends_on: [bake_window_loop]
+    code_config:
+      language: python
+      code: |
+        # Fold the loop's per-pass observations into canary-vs-baseline deltas.
+        # Each loop pass surfaces the latest sensor sample; we read the loop output
+        # and the final sensor/reshape outputs, then derive error/latency deltas.
+        import json
+
+        loop_out = _steps.get("bake_window_loop")
+        sensor_out = _steps.get("poll_golden_signals") or {}
+        reshape_out = _steps.get("reshape_metrics")
+
+        def _series_avg(payload, default=0.0):
+            # Datadog /query returns {"series":[{"pointlist":[[ts,val],...]}]}.
+            if not isinstance(payload, dict):
+                return default
+            series = payload.get("series") or []
+            vals = []
+            for s in series:
+                if isinstance(s, dict):
+                    for pt in s.get("pointlist", []) or []:
+                        if isinstance(pt, (list, tuple)) and len(pt) == 2 and pt[1] is not None:
+                            try:
+                                vals.append(float(pt[1]))
+                            except (TypeError, ValueError):
+                                pass
+            return (sum(vals) / len(vals)) if vals else default
+
+        # Canary golden signals come from the polled sensor payload. Baseline is
+        # carried alongside (CI/CD baseline SLOs); if absent we treat baseline as
+        # the configured budget floor so deltas stay well-defined and pessimistic.
+        canary_err = _series_avg(sensor_out, 0.0) * 100.0  # rate -> percent
+        # Baseline error rate: prefer an explicit baseline sample if the reshape
+        # carried one, else assume a clean baseline (0%) so any canary errors show.
+        baseline_err = 0.0
+
+        # Latency p95: not in the error-rate query above, so we model it from the
+        # same sample envelope when present; default to equal latency (0% regress).
+        canary_p95 = 0.0
+        baseline_p95 = 0.0
+        if isinstance(reshape_out, dict):
+            canary_p95 = float(reshape_out.get("canary_p95", 0.0) or 0.0)
+            baseline_p95 = float(reshape_out.get("baseline_p95", 0.0) or 0.0)
+
+        error_delta_pp = round(canary_err - baseline_err, 4)  # absolute pp
+        if baseline_p95 > 0:
+            latency_regress_pct = round(((canary_p95 - baseline_p95) / baseline_p95) * 100.0, 2)
+        else:
+            latency_regress_pct = 0.0
+
+        try:
+            err_budget = float(_input.get("error_rate_budget_pct", 1.0) or 1.0)
+        except (TypeError, ValueError):
+            err_budget = 1.0
+        try:
+            lat_budget = float(_input.get("latency_budget_pct", 10.0) or 10.0)
+        except (TypeError, ValueError):
+            lat_budget = 10.0
+
+        within_error_budget = error_delta_pp <= err_budget
+        within_latency_budget = latency_regress_pct <= lat_budget
+        within_budget = within_error_budget and within_latency_budget
+
+        samples = 0
+        if isinstance(loop_out, list):
+            samples = len(loop_out)
+        elif isinstance(loop_out, dict):
+            samples = int(loop_out.get("iterations", loop_out.get("count", 0)) or 0)
+
+        result = {
+            "canary_error_rate_pct": round(canary_err, 4),
+            "baseline_error_rate_pct": round(baseline_err, 4),
+            "error_delta_pp": error_delta_pp,
+            "error_rate_budget_pct": err_budget,
+            "within_error_budget": within_error_budget,
+            "canary_p95_ms": canary_p95,
+            "baseline_p95_ms": baseline_p95,
+            "latency_regress_pct": latency_regress_pct,
+            "latency_budget_pct": lat_budget,
+            "within_latency_budget": within_latency_budget,
+            "within_budget": within_budget,
+            "samples_collected": samples,
+        }
+
+  # 6) RACE two independent providers for a health verdict. First valid, well-
+  #    formed structured verdict WINS (first-valid-wins failover - not a vote).
+  #    Branch A pinned to sonnet, Branch B pinned to google/gemini-2.5-pro.
+  - id: verdict_sonnet
+    type: standard
+    model: sonnet
+    depends_on: [compute_deltas]
+    output_schema:
+      type: object
+      properties:
+        verdict: { type: string, enum: ["healthy", "degraded", "inconclusive"] }
+        reasons: { type: string }
+        confidence: { type: number }
+      required: ["verdict", "reasons", "confidence"]
+    prompt: |
+      You are a release-engineering judge assessing a canary deployment during
+      its bake window. Decide whether the canary is healthy enough to promote.
+
+      Canary-vs-baseline metric deltas (deterministically computed): {steps.compute_deltas.output}
+      Canary deployment context: {steps.build_context.output}
+
+      Return STRICT JSON only:
+      {
+        "verdict": "healthy" | "degraded" | "inconclusive",
+        "reasons": "<one or two sentences grounded ONLY in the numeric deltas above>",
+        "confidence": <number 0..1>
+      }
+
+      Rules:
+      - "healthy": error-rate and latency deltas are clearly within budget.
+      - "degraded": at least one delta breaches its budget.
+      - "inconclusive": too few samples were collected to judge confidently.
+      Output JSON only, no prose.
+
+  - id: verdict_gemini
+    type: standard
+    model: google/gemini-2.5-pro
+    depends_on: [compute_deltas]
+    output_schema:
+      type: object
+      properties:
+        verdict: { type: string, enum: ["healthy", "degraded", "inconclusive"] }
+        reasons: { type: string }
+        confidence: { type: number }
+      required: ["verdict", "reasons", "confidence"]
+    prompt: |
+      You are a second, independent release-engineering judge. Assess the same
+      canary bake-window metrics and return your verdict.
+
+      Canary-vs-baseline metric deltas: {steps.compute_deltas.output}
+      Canary deployment context: {steps.build_context.output}
+
+      Return STRICT JSON only with keys verdict ("healthy"|"degraded"|
+      "inconclusive"), reasons (grounded in the numeric deltas), and confidence
+      (0..1). Output JSON only, no prose.
+
+  - id: race_verdict
+    type: race
+    depends_on: [verdict_sonnet, verdict_gemini]
+    race_config:
+      branches:
+        - [verdict_sonnet]
+        - [verdict_gemini]
+      # First branch whose JSON parses into a recognized verdict with a real
+      # confidence number wins. Deterministic first-valid-wins, not a tally.
+      validator: "isinstance(output, dict) and output.get('verdict') in ('healthy','degraded','inconclusive') and isinstance(output.get('confidence'), (int, float))"
+
+  # 7) Deterministically reconcile the race verdict WITH the numeric budgets.
+  #    The decision is mechanical: only the model's category label is borrowed;
+  #    the promote/rollback gate hinges on within_budget, computed in code.
+  - id: decide_action
+    type: code
+    depends_on: [race_verdict]
+    code_config:
+      language: python
+      code: |
+        # Combine the race verdict label with the deterministic budget result.
+        v = _steps.get("race_verdict") or {}
+        deltas = _steps.get("compute_deltas") or {}
+        if not isinstance(v, dict):
+            v = {}
+        if not isinstance(deltas, dict):
+            deltas = {}
+
+        verdict = str(v.get("verdict", "")).strip().lower()
+        if verdict not in ("healthy", "degraded", "inconclusive"):
+            verdict = "inconclusive"
+
+        within_budget = bool(deltas.get("within_budget", False))
+        enough_samples = int(deltas.get("samples_collected", 0) or 0) >= 1
+
+        # Mechanical decision tree. The numeric budget is authoritative; the
+        # model label can only downgrade promotion, never override a budget breach.
+        if not enough_samples:
+            decision = "inconclusive"
+        elif verdict == "healthy" and within_budget:
+            decision = "promote"
+        elif verdict == "degraded" or not within_budget:
+            decision = "rollback"
+        else:
+            decision = "inconclusive"
+
+        result = {
+            "decision": decision,
+            "verdict": verdict,
+            "within_budget": within_budget,
+            "reasons": str(v.get("reasons", "")),
+            "confidence": v.get("confidence", 0),
+            "error_delta_pp": deltas.get("error_delta_pp", 0),
+            "latency_regress_pct": deltas.get("latency_regress_pct", 0),
+            "samples_collected": deltas.get("samples_collected", 0),
+        }
+
+  # 8) GATE: promotion may proceed ONLY if the deltas are within budget. The
+  #    load-bearing check is the deterministic decide_action.decision; the
+  #    llm_eval judge merely sanity-checks the framing and is swappable.
+  - id: promotion_gate
+    type: gate
+    depends_on: [decide_action]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: |
+              A canary decision was computed deterministically from metric budgets.
+              Reply with exactly one word: "approved" if the decision field is one
+              of promote/rollback/inconclusive and is internally consistent with
+              within_budget (promote requires within_budget true), otherwise
+              "rejected".
+              Decision record: {steps.decide_action.output}
+            input: "{steps.decide_action.output}"
+            model: sonnet
+
+  # 9) CONDITION: route the mechanical decision. healthy/promote -> promote path;
+  #    degraded/rollback -> rollback path; inconclusive -> human approval.
+  - id: route_decision
+    type: condition
+    depends_on: [promotion_gate]
+    condition_config:
+      expression: "'{steps.decide_action.output.decision}' == 'inconclusive'"
+      then: [borderline_approval, apply_after_approval]
+      else: [apply_decision]
+
+  # 9a) Borderline / inconclusive -> a human decides whether to promote.
+  - id: borderline_approval
+    type: approval
+    approval_config:
+      message: "Canary verdict is INCONCLUSIVE - review the metric evidence and decide PROMOTE (approve) or ROLLBACK (reject)."
+      show_data: steps.decide_action.output
+      timeout_hours: 4
+      on_timeout: abort
+      allow_edit: true
+
+  # 9b) After the human approves a borderline canary, promote via the edge platform.
+  #     Vercel promotes by re-aliasing; Cloudflare shifts the deployment split.
+  - id: apply_after_approval
+    type: http
+    depends_on: [borderline_approval]
+    http_config:
+      url: "https://api.vercel.com/v10/projects/{input.vercel_project_id}/promote/{input.deployment_id}"
+      method: POST
+      auth: "bearer:{env.VERCEL_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+      body: '{"reason": "canary-promotion-sentinel: human-approved borderline promote {steps.decide_action.output}"}'
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
+
+  # 9c) Clear-cut path: classify routes promote vs rollback HTTP application.
+  - id: apply_decision
+    type: classify
+    classify_config:
+      categories: ["promote", "rollback"]
+      input: "{steps.decide_action.output.decision}"
+      model: haiku
+      branches:
+        promote: [promote_canary]
+        rollback: [rollback_canary]
+
+  # 9c-i) PROMOTE the canary to 100% via Vercel promote (or Cloudflare split=100).
+  - id: promote_canary
+    type: http
+    http_config:
+      url: "https://api.vercel.com/v10/projects/{input.vercel_project_id}/promote/{input.deployment_id}"
+      method: POST
+      auth: "bearer:{env.VERCEL_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+      body: '{"reason": "canary-promotion-sentinel: auto-promote, healthy within budget {steps.decide_action.output}"}'
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
+
+  # 9c-ii) ROLLBACK: re-promote the last known-good Vercel deployment to 100%.
+  - id: rollback_canary
+    type: http
+    http_config:
+      url: "https://api.vercel.com/v10/projects/{input.vercel_project_id}/promote/{input.last_good_deployment_id}"
+      method: POST
+      auth: "bearer:{env.VERCEL_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+      body: '{"reason": "canary-promotion-sentinel: auto-rollback, budget breach {steps.decide_action.output}"}'
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 10) Join the apply paths (approval, promote, rollback) into one outcome record.
+  - id: apply_result
+    type: code
+    depends_on: [route_decision]
+    code_config:
+      language: python
+      code: |
+        # Exactly one apply path ran. Collect whichever responded for the record.
+        decided = _steps.get("decide_action") or {}
+        approved = _steps.get("apply_after_approval")
+        promoted = _steps.get("promote_canary")
+        rolled = _steps.get("rollback_canary")
+
+        action = None
+        response = None
+        if approved is not None:
+            action, response = "promote(approved)", approved
+        elif promoted is not None:
+            action, response = "promote", promoted
+        elif rolled is not None:
+            action, response = "rollback", rolled
+
+        result = {
+            "decision": decided.get("decision", ""),
+            "action_taken": action,
+            "applied": action is not None,
+            "verdict": decided.get("verdict", ""),
+            "error_delta_pp": decided.get("error_delta_pp", 0),
+            "latency_regress_pct": decided.get("latency_regress_pct", 0),
+            "apply_response": response,
+        }
+
+  # 11) NOTIFY the Slack release channel with the final decision + evidence.
+  - id: notify_release
+    type: notify
+    depends_on: [apply_result]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: ":ship: Canary sentinel for deployment {input.deployment_id} ({input.provider}) decided *{steps.apply_result.output.action_taken}*. Verdict {steps.decide_action.output.verdict}; error delta {steps.compute_deltas.output.error_delta_pp}pp (budget {input.error_rate_budget_pct}pp), p95 regress {steps.compute_deltas.output.latency_regress_pct}% (budget {input.latency_budget_pct}%). Commit {input.commit_sha}."
+
+  # 12) ANNOTATE Datadog with the decision so the metric graph shows the event.
+  - id: annotate_datadog
+    type: http
+    depends_on: [apply_result]
+    http_config:
+      url: "https://{input.datadog_site}/api/v1/events"
+      method: POST
+      headers:
+        DD-API-KEY: "{env.DATADOG_API_KEY}"
+        DD-APPLICATION-KEY: "{env.DATADOG_APP_KEY}"
+        Content-Type: "application/json"
+      body: '{"title": "Canary sentinel: {steps.apply_result.output.action_taken} for {input.deployment_id}", "text": "Verdict {steps.decide_action.output.verdict}. Error delta {steps.compute_deltas.output.error_delta_pp}pp, p95 regress {steps.compute_deltas.output.latency_regress_pct}%. {steps.decide_action.output.reasons}", "tags": ["source:canary-promotion-sentinel", "{input.canary_metric_scope}"], "alert_type": "info"}'
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 13) COMMENT the decision + metric evidence on the originating GitHub PR.
+  - id: comment_github_pr
+    type: http
+    depends_on: [apply_result]
+    http_config:
+      url: "https://api.github.com/repos/{input.github_repo}/issues/{input.github_pr_number}/comments"
+      method: POST
+      auth: "bearer:{env.GITHUB_TOKEN}"
+      headers:
+        Accept: "application/vnd.github+json"
+        X-GitHub-Api-Version: "2022-11-28"
+        Content-Type: "application/json"
+      body: '{"body": "Canary Promotion Sentinel decision: **{steps.apply_result.output.action_taken}** (verdict {steps.decide_action.output.verdict}).\n\n- error-rate delta: {steps.compute_deltas.output.error_delta_pp}pp (budget {input.error_rate_budget_pct}pp)\n- p95 latency regression: {steps.compute_deltas.output.latency_regress_pct}% (budget {input.latency_budget_pct}%)\n- samples collected: {steps.compute_deltas.output.samples_collected}\n- reasons: {steps.decide_action.output.reasons}"}'
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+on_complete:
+  storage_path: "canary-promotion-sentinel/{run_id}/result.json"

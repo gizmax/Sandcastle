@@ -1,0 +1,693 @@
+# name: Cloud Cost Guardrail Enforcer
+# description: A scheduled FinOps bot that pulls live spend/usage from Datadog, Vercel, Cloudflare and Snowflake, code-computes burn-rate and a month-end forecast against budget, classifies each offender, RACES two providers (Sonnet vs Gemini 2.5 Pro) for a remediation recommendation, gates auto-enforcement on numeric risk thresholds, takes a human sign-off for prod-affecting actions, applies the guardrail via the cloud APIs, sensor-confirms the spend rate actually dropped, posts a before/after to Slack and opens a Jira cost-savings ticket as the audit trail. The budget math is fully deterministic sandboxed code; only the recommendation text is a swappable cross-provider race.
+# tags: [DevOps, FinOps, Cost, Budget, Datadog, Vercel, Cloudflare, Snowflake, Failover]
+# category: devops
+
+name: cloud-cost-guardrail-enforcer
+description: >
+  Scheduled FinOps guardrail enforcer. Pulls current usage / cost from Datadog
+  usage API, Vercel + Cloudflare billing, and Snowflake credit consumption, then
+  CODE-computes (deterministic Python, no model) burn-rate, a month-end forecast
+  versus budget, and a ranked list of offenders by projected overspend. A CLASSIFY
+  bins the top offender into organic-growth / misconfiguration / runaway-leak /
+  anomaly and routes a per-class primer. Two providers then RACE (Sonnet vs
+  Gemini 2.5 Pro, first-valid-wins failover) for a remediation recommendation plus
+  savings estimate. A policy GATE (LLM eval + numeric human gate) lets only
+  low-risk actions auto-enforce; risky / prod-affecting actions require an explicit
+  human APPROVAL. A CONDITION routes enforce-vs-ticket-only; the enforce path
+  applies the guardrail (pause a Vercel project, disable a Cloudflare Worker, or
+  set a Snowflake resource-monitor throttle) via real REST APIs. A durable SENSOR
+  polls the usage endpoint until the spend rate drops back under the budget line
+  or it times out. Finally a NOTIFY posts before/after to Slack #finops and an HTTP
+  step opens a Jira cost-savings ticket as the audit trail. All load-bearing
+  decisions are deterministic code or numeric gates; only the recommendation text
+  is a swappable cross-provider race.
+
+default_model: sonnet
+default_timeout: 600
+
+input_schema:
+  required: ["monthly_budget_usd", "datadog_site"]
+  properties:
+    monthly_budget_usd:
+      type: number
+      description: "Total monthly cloud + SaaS budget in USD to forecast against."
+      default: 50000
+    day_of_month:
+      type: integer
+      description: "Current day of the month (1-31), used to annualize spend-to-date into a month-end forecast."
+      default: 15
+    days_in_month:
+      type: integer
+      description: "Number of days in the current billing month (28-31)."
+      default: 30
+    breach_threshold_pct:
+      type: number
+      description: "Forecast/budget ratio (e.g. 1.0 = exactly on budget) above which a breach is declared."
+      default: 1.0
+    auto_enforce_max_savings_usd:
+      type: number
+      description: "Max projected monthly savings of an action that may be auto-enforced without human sign-off. Larger blast-radius actions require a human."
+      default: 2000
+    datadog_site:
+      type: string
+      description: "Datadog API site host for the usage API."
+      default: "api.datadoghq.eu"
+    datadog_month:
+      type: string
+      description: "Billing month for the Datadog usage API in YYYY-MM-01THH format (e.g. '2026-06-01T00')."
+      default: "2026-06-01T00"
+    vercel_team_id:
+      type: string
+      description: "Vercel team id whose usage / billing is pulled and (on enforce) whose project is paused."
+      default: ""
+    vercel_project_id:
+      type: string
+      description: "Vercel project id to pause on a runaway-build / runaway-bandwidth enforcement."
+      default: ""
+    cloudflare_account_id:
+      type: string
+      description: "Cloudflare account id owning the Worker billing + the Worker to disable on enforce."
+      default: ""
+    cloudflare_worker_name:
+      type: string
+      description: "Name of the Cloudflare Worker to disable on a runaway-Worker enforcement."
+      default: ""
+    snowflake_account:
+      type: string
+      description: "Snowflake account locator (e.g. 'xy12345.eu-central-1') used for the SQL API + resource monitor throttle."
+      default: ""
+    snowflake_resource_monitor:
+      type: string
+      description: "Snowflake resource monitor name to tighten (suspend credit quota) on a runaway-warehouse enforcement."
+      default: "MAIN_RM"
+    snowflake_throttle_credit_quota:
+      type: integer
+      description: "New (lower) monthly credit quota to set on the Snowflake resource monitor when throttling."
+      default: 1000
+    jira_base_url:
+      type: string
+      description: "Jira Cloud base URL for the cost-savings audit ticket (e.g. https://acme.atlassian.net)."
+      default: "https://acme.atlassian.net"
+    jira_project_key:
+      type: string
+      description: "Jira project key the cost-savings ticket is filed under."
+      default: "FINOPS"
+    slack_channel:
+      type: string
+      description: "Slack channel for the before/after cost guardrail summary."
+      default: "#finops"
+
+steps:
+  # 1) PULL current usage / cost from each connector (real REST APIs).
+  #    Datadog usage API - estimated cost for the billing month.
+  - id: fetch_datadog_usage
+    type: http
+    http_config:
+      url: "https://{input.datadog_site}/api/v1/usage/billable-summary?month={input.datadog_month}"
+      method: GET
+      headers:
+        DD-API-KEY: "{env.DATADOG_API_KEY}"
+        DD-APPLICATION-KEY: "{env.DATADOG_APP_KEY}"
+        Accept: "application/json"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # Vercel billing / usage for the team.
+  - id: fetch_vercel_usage
+    type: http
+    http_config:
+      url: "https://api.vercel.com/v1/teams/{input.vercel_team_id}/billing/usage"
+      method: GET
+      auth: "bearer:{env.VERCEL_TOKEN}"
+      headers:
+        Accept: "application/json"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # Cloudflare Workers billing - account analytics for the current period.
+  - id: fetch_cloudflare_usage
+    type: http
+    http_config:
+      url: "https://api.cloudflare.com/client/v4/accounts/{input.cloudflare_account_id}/billing/profile"
+      method: GET
+      auth: "bearer:{env.CLOUDFLARE_TOKEN}"
+      headers:
+        Accept: "application/json"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # Snowflake credit consumption via the SQL API (queries the ACCOUNT_USAGE metering view).
+  - id: fetch_snowflake_credits
+    type: http
+    http_config:
+      url: "https://{input.snowflake_account}.snowflakecomputing.com/api/v2/statements"
+      method: POST
+      auth: "bearer:{env.SNOWFLAKE_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+        X-Snowflake-Authorization-Token-Type: "KEYPAIR_JWT"
+      body: '{"statement": "SELECT WAREHOUSE_NAME, SUM(CREDITS_USED) AS CREDITS, SUM(CREDITS_USED) * 3.0 AS EST_COST FROM SNOWFLAKE.ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY WHERE START_TIME >= DATE_TRUNC(''MONTH'', CURRENT_TIMESTAMP()) GROUP BY 1 ORDER BY 2 DESC", "timeout": 60}'
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 2) DETERMINISTIC CODE - compute burn-rate, month-end forecast vs budget, rank offenders.
+  #    No model: this is the load-bearing budget decision and it is fully reproducible.
+  - id: compute_burn
+    type: code
+    depends_on: [fetch_datadog_usage, fetch_vercel_usage, fetch_cloudflare_usage, fetch_snowflake_credits]
+    code_config:
+      language: python
+      code: |
+        # Normalize four billing payloads into per-source spend-to-date, then forecast
+        # month-end versus budget and rank offenders by projected overspend. NO model.
+        dd = _steps.get("fetch_datadog_usage") or {}
+        vc = _steps.get("fetch_vercel_usage") or {}
+        cf = _steps.get("fetch_cloudflare_usage") or {}
+        sf = _steps.get("fetch_snowflake_credits") or {}
+
+        def _num(x, default=0.0):
+            try:
+                return float(x)
+            except (TypeError, ValueError):
+                return float(default)
+
+        def _dig(obj, *path, default=None):
+            cur = obj
+            for key in path:
+                if isinstance(cur, dict):
+                    cur = cur.get(key)
+                else:
+                    return default
+            return cur if cur is not None else default
+
+        # --- Datadog: billable-summary surfaces estimated billable usage per product. ---
+        # We sum any *_top99p / *_sum dollar-ish fields conservatively; fall back to a flat field.
+        dd_usage = _dig(dd, "usage", default=dd if isinstance(dd, dict) else {})
+        dd_cost = _num(_dig(dd_usage, "estimated_cost_usd"), 0.0)
+        if dd_cost == 0.0:
+            # Heuristic: sum numeric leaf values that look like cost.
+            for k, v in (dd_usage.items() if isinstance(dd_usage, dict) else []):
+                if "cost" in str(k).lower():
+                    dd_cost += _num(v, 0.0)
+
+        # --- Vercel: billing/usage -> total amount for the period. ---
+        vc_cost = _num(_dig(vc, "total", "amount"), 0.0)
+        if vc_cost == 0.0:
+            vc_cost = _num(_dig(vc, "amount"), 0.0)
+
+        # --- Cloudflare: billing profile -> current period charges. ---
+        cf_cost = _num(_dig(cf, "result", "payment", "current_period_amount"), 0.0)
+        if cf_cost == 0.0:
+            cf_cost = _num(_dig(cf, "result", "balance"), 0.0)
+
+        # --- Snowflake: SQL API returns a result set of [warehouse, credits, est_cost] rows. ---
+        sf_rows = _dig(sf, "data", default=[]) or []
+        sf_cost = 0.0
+        sf_top_warehouse = ""
+        sf_top_warehouse_cost = 0.0
+        for row in sf_rows if isinstance(sf_rows, list) else []:
+            if isinstance(row, (list, tuple)) and len(row) >= 3:
+                wh = str(row[0])
+                est = _num(row[2], 0.0)
+                sf_cost += est
+                if est > sf_top_warehouse_cost:
+                    sf_top_warehouse_cost = est
+                    sf_top_warehouse = wh
+
+        # --- Forecast: annualize spend-to-date across the month. ---
+        day = max(1, int(_num(_input.get("day_of_month", 15), 15)))
+        days_in_month = max(day, int(_num(_input.get("days_in_month", 30), 30)))
+        budget = _num(_input.get("monthly_budget_usd", 50000), 50000)
+        breach_ratio = _num(_input.get("breach_threshold_pct", 1.0), 1.0)
+
+        sources = [
+            {"source": "datadog", "provider": "datadog", "spend_to_date": round(dd_cost, 2)},
+            {"source": "vercel", "provider": "vercel", "spend_to_date": round(vc_cost, 2)},
+            {"source": "cloudflare", "provider": "cloudflare-workers", "spend_to_date": round(cf_cost, 2)},
+            {"source": "snowflake", "provider": "snowflake", "spend_to_date": round(sf_cost, 2),
+             "top_warehouse": sf_top_warehouse},
+        ]
+
+        total_to_date = sum(s["spend_to_date"] for s in sources)
+        # Daily burn-rate and naive linear month-end forecast.
+        daily_burn = total_to_date / day if day else total_to_date
+        forecast = round(daily_burn * days_in_month, 2)
+        budget_share_per_day = budget / days_in_month if days_in_month else budget
+
+        # Per-source forecast + overspend versus an equal-share budget line.
+        for s in sources:
+            s_daily = s["spend_to_date"] / day if day else s["spend_to_date"]
+            s_forecast = round(s_daily * days_in_month, 2)
+            s["forecast"] = s_forecast
+            s["daily_burn"] = round(s_daily, 2)
+            # Overspend = how much this source's forecast exceeds its proportional share.
+            share = (s["spend_to_date"] / total_to_date) if total_to_date else 0.0
+            s_budget_line = budget * share if share else (budget / max(1, len(sources)))
+            s["overspend"] = round(s_forecast - s_budget_line, 2)
+
+        # Rank offenders by projected overspend (worst first).
+        offenders = sorted(sources, key=lambda s: s["overspend"], reverse=True)
+        top = offenders[0] if offenders else {"source": "none", "overspend": 0.0, "forecast": 0.0}
+
+        forecast_ratio = (forecast / budget) if budget else 0.0
+        breach = forecast_ratio >= breach_ratio
+
+        result = {
+            "budget": budget,
+            "spend_to_date": round(total_to_date, 2),
+            "daily_burn": round(daily_burn, 2),
+            "forecast": forecast,
+            "forecast_ratio": round(forecast_ratio, 4),
+            "breach_threshold": breach_ratio,
+            "breach": breach,
+            "offenders": offenders,
+            "top_offender": top,
+            "top_offender_overspend": top.get("overspend", 0.0),
+            "day_of_month": day,
+            "days_in_month": days_in_month,
+        }
+
+  # 3) CLASSIFY the top offender into a root-cause class and route a per-class primer.
+  - id: classify_offender
+    type: classify
+    depends_on: [compute_burn]
+    classify_config:
+      categories: ["organic-growth", "misconfiguration", "runaway-leak", "anomaly"]
+      input: "{steps.compute_burn.output}"
+      model: haiku
+      branches:
+        organic-growth: [prime_organic]
+        misconfiguration: [prime_misconfig]
+        runaway-leak: [prime_runaway]
+        anomaly: [prime_anomaly]
+
+  # 3a) Organic growth - expected, raise budget / no aggressive action.
+  - id: prime_organic
+    type: code
+    code_config:
+      language: python
+      code: |
+        burn = _steps.get("compute_burn") or {}
+        result = {
+            "class": "organic-growth",
+            "risk_band": "low",
+            "default_action": "raise-budget-ticket",
+            "guidance": "Spend tracks usage growth; recommend a budget revision, not a guardrail. Ticket-only.",
+            "burn": burn,
+        }
+
+  # 3b) Misconfiguration - a fixable setting (over-provisioned warehouse, debug logging, etc).
+  - id: prime_misconfig
+    type: code
+    code_config:
+      language: python
+      code: |
+        burn = _steps.get("compute_burn") or {}
+        result = {
+            "class": "misconfiguration",
+            "risk_band": "medium",
+            "default_action": "throttle",
+            "guidance": "Likely a fixable setting. Prefer a reversible throttle / right-size over a hard disable.",
+            "burn": burn,
+        }
+
+  # 3c) Runaway / leak - a resource burning budget unbounded; needs a guardrail now.
+  - id: prime_runaway
+    type: code
+    code_config:
+      language: python
+      code: |
+        burn = _steps.get("compute_burn") or {}
+        result = {
+            "class": "runaway-leak",
+            "risk_band": "high",
+            "default_action": "disable",
+            "guidance": "Unbounded burn. Recommend pausing / disabling the offending resource to stop the bleed.",
+            "burn": burn,
+        }
+
+  # 3d) Anomaly - unexplained spike; investigate, lean conservative on enforcement.
+  - id: prime_anomaly
+    type: code
+    code_config:
+      language: python
+      code: |
+        burn = _steps.get("compute_burn") or {}
+        result = {
+            "class": "anomaly",
+            "risk_band": "medium",
+            "default_action": "throttle",
+            "guidance": "Unexplained spike. Recommend a conservative throttle plus a human review before any disable.",
+            "burn": burn,
+        }
+
+  # 4) RACE two providers for a remediation recommendation + savings estimate.
+  #    First valid JSON wins (failover, NOT a vote). A pinned to sonnet, B to gemini-2.5-pro.
+  - id: reco_sonnet
+    type: standard
+    model: sonnet
+    output_schema:
+      type: object
+      properties:
+        action_kind: { type: string, enum: ["throttle", "disable", "raise-budget-ticket", "investigate"] }
+        target_provider: { type: string, enum: ["datadog", "vercel", "cloudflare-workers", "snowflake"] }
+        rationale: { type: string }
+        estimated_savings_usd: { type: number }
+      required: ["action_kind", "target_provider", "rationale", "estimated_savings_usd"]
+    prompt: |
+      You are a FinOps engineer recommending ONE remediation for a forecast budget
+      breach. The hard numbers are already computed - do not recompute them, just
+      pick the single safest effective action and estimate its monthly savings.
+
+      Burn / forecast (deterministic): {steps.compute_burn.output}
+      Offender classification primers (one applies):
+        organic: {steps.prime_organic.output}
+        misconfig: {steps.prime_misconfig.output}
+        runaway: {steps.prime_runaway.output}
+        anomaly: {steps.prime_anomaly.output}
+
+      Return STRICT JSON only:
+      {
+        "action_kind": "throttle" | "disable" | "raise-budget-ticket" | "investigate",
+        "target_provider": "datadog" | "vercel" | "cloudflare-workers" | "snowflake",
+        "rationale": "<one sentence grounded in the offender and its class>",
+        "estimated_savings_usd": <number, projected monthly USD saved>
+      }
+      Rules:
+      - "throttle": tighten a Snowflake resource-monitor quota (reversible).
+      - "disable": pause a Vercel project or disable a Cloudflare Worker (stops the bleed).
+      - "raise-budget-ticket": organic growth - file a ticket, no guardrail.
+      - "investigate": anomaly with low confidence - human review first.
+      Output JSON only, no prose.
+
+  - id: reco_gemini
+    type: standard
+    model: google/gemini-2.5-pro
+    output_schema:
+      type: object
+      properties:
+        action_kind: { type: string, enum: ["throttle", "disable", "raise-budget-ticket", "investigate"] }
+        target_provider: { type: string, enum: ["datadog", "vercel", "cloudflare-workers", "snowflake"] }
+        rationale: { type: string }
+        estimated_savings_usd: { type: number }
+      required: ["action_kind", "target_provider", "rationale", "estimated_savings_usd"]
+    prompt: |
+      You are a second, independent FinOps engineer (failover for provider A).
+      Recommend ONE remediation for the same forecast budget breach. Do not
+      recompute the numbers. Return STRICT JSON only with keys action_kind
+      ("throttle"|"disable"|"raise-budget-ticket"|"investigate"), target_provider
+      ("datadog"|"vercel"|"cloudflare-workers"|"snowflake"), rationale (one
+      sentence), and estimated_savings_usd (number), grounded in:
+      {steps.compute_burn.output}
+      Output JSON only, no prose.
+
+  - id: reco_race
+    type: race
+    race_config:
+      branches:
+        - [reco_sonnet]
+        - [reco_gemini]
+      # First branch whose JSON parses with a known action_kind and a real savings number wins.
+      validator: "isinstance(output, dict) and output.get('action_kind') in ('throttle','disable','raise-budget-ticket','investigate') and isinstance(output.get('estimated_savings_usd'), (int, float))"
+
+  # 5) DETERMINISTIC policy scoring - decide auto-enforce eligibility on NUMERIC thresholds.
+  - id: score_action
+    type: code
+    depends_on: [reco_race, compute_burn]
+    code_config:
+      language: python
+      code: |
+        # Map the race recommendation to a concrete, reversible-or-not action and
+        # decide if it is small enough (savings + risk) to auto-enforce. NO model.
+        reco = _steps.get("reco_race") or {}
+        burn = _steps.get("compute_burn") or {}
+        if not isinstance(reco, dict):
+            reco = {}
+
+        def _num(x, default=0.0):
+            try:
+                return float(x)
+            except (TypeError, ValueError):
+                return float(default)
+
+        valid_actions = {"throttle", "disable", "raise-budget-ticket", "investigate"}
+        action_kind = str(reco.get("action_kind", "")).strip().lower()
+        if action_kind not in valid_actions:
+            action_kind = "investigate"
+        target_provider = str(reco.get("target_provider", "")).strip().lower()
+        est_savings = _num(reco.get("estimated_savings_usd", 0), 0.0)
+
+        auto_cap = _num(_input.get("auto_enforce_max_savings_usd", 2000), 2000)
+
+        # "disable" is prod-affecting (pauses a Vercel project / disables a Worker) -> never auto.
+        # "throttle" is reversible (tightens a quota) -> auto-enforceable when small.
+        reversible = action_kind == "throttle"
+        prod_affecting = action_kind == "disable"
+
+        # Does this action enforce a guardrail at all, or is it ticket/review only?
+        enforces = action_kind in {"throttle", "disable"}
+
+        # Auto-enforce ONLY a reversible, non-prod-affecting action under the savings cap.
+        auto_enforce = bool(enforces and reversible and not prod_affecting and est_savings <= auto_cap)
+        needs_human = bool(enforces and not auto_enforce)
+
+        result = {
+            "action_kind": action_kind,
+            "target_provider": target_provider,
+            "rationale": str(reco.get("rationale", "")),
+            "estimated_savings_usd": round(est_savings, 2),
+            "auto_enforce_cap": auto_cap,
+            "reversible": reversible,
+            "prod_affecting": prod_affecting,
+            "enforces": enforces,
+            "auto_enforce": auto_enforce,
+            "needs_human": needs_human,
+            "forecast_ratio": burn.get("forecast_ratio", 0.0),
+            "top_offender": burn.get("top_offender", {}),
+        }
+
+  # 6) POLICY GATE - an LLM safety eval AND a numeric human gate. Both must pass to proceed.
+  #    Low-risk auto-enforce clears the human gate immediately; risky actions hold for sign-off.
+  - id: policy_gate
+    type: gate
+    depends_on: [score_action]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: |
+              A cost-guardrail action was scored against numeric policy. Reply with
+              exactly one word: "approved" if the action is a sane, reversible-or-
+              acknowledged guardrail for the offender, otherwise "rejected".
+              Scored action: {steps.score_action.output}
+            input: "{steps.score_action.output}"
+            model: sonnet
+        - type: human
+          config:
+            message: "A cost guardrail is about to be enforced. Auto-enforce was allowed only for reversible, under-cap actions; review before it proceeds."
+            timeout_hours: 6
+            on_timeout: abort
+
+  # 7) HUMAN APPROVAL - explicit sign-off for any enforcement that could affect prod.
+  - id: enforce_approval
+    type: approval
+    depends_on: [policy_gate]
+    approval_config:
+      message: "Final sign-off: enforce this cloud cost guardrail. Review action_kind, target_provider and estimated_savings before approving (disable actions pause prod resources)."
+      show_data: steps.score_action.output
+      timeout_hours: 6
+      on_timeout: abort
+      allow_edit: true
+
+  # 8) CONDITION - enforce a guardrail vs ticket-only. Enforce only when the action enforces.
+  - id: enforce_decision
+    type: condition
+    depends_on: [enforce_approval]
+    condition_config:
+      expression: "{steps.score_action.output.enforces} == True"
+      then: [route_enforcement]
+      else: [no_enforce]
+
+  # 8-else) No enforcement (organic growth / investigate) - record a no-op marker.
+  - id: no_enforce
+    type: code
+    code_config:
+      language: python
+      code: |
+        scored = _steps.get("score_action") or {}
+        result = {
+            "applied": False,
+            "applied_via": None,
+            "reason": "ticket-only action (no guardrail enforced)",
+            "action_kind": scored.get("action_kind", ""),
+        }
+
+  # 8-then) ROUTE the enforce action to exactly one provider apply path (deterministic).
+  - id: route_enforcement
+    type: classify
+    classify_config:
+      categories: ["vercel", "cloudflare-workers", "snowflake"]
+      input: "{steps.score_action.output}"
+      model: haiku
+      branches:
+        vercel: [pause_vercel_project]
+        cloudflare-workers: [disable_cloudflare_worker]
+        snowflake: [throttle_snowflake_monitor]
+
+  # 8a) Vercel - pause the runaway project.
+  - id: pause_vercel_project
+    type: http
+    http_config:
+      url: "https://api.vercel.com/v1/projects/{input.vercel_project_id}/pause?teamId={input.vercel_team_id}"
+      method: POST
+      auth: "bearer:{env.VERCEL_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+      body: '{"reason": "cloud-cost-guardrail-enforcer: {steps.score_action.output}"}'
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
+
+  # 8b) Cloudflare - disable the runaway Worker (remove its route / disable script).
+  - id: disable_cloudflare_worker
+    type: http
+    http_config:
+      url: "https://api.cloudflare.com/client/v4/accounts/{input.cloudflare_account_id}/workers/scripts/{input.cloudflare_worker_name}/settings"
+      method: PATCH
+      auth: "bearer:{env.CLOUDFLARE_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+      body: '{"settings": {"logpush": false}, "enabled": false, "tags": ["finops", "cost-guardrail", "disabled"]}'
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
+
+  # 8c) Snowflake - tighten the resource monitor credit quota (reversible throttle).
+  - id: throttle_snowflake_monitor
+    type: http
+    http_config:
+      url: "https://{input.snowflake_account}.snowflakecomputing.com/api/v2/statements"
+      method: POST
+      auth: "bearer:{env.SNOWFLAKE_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+        X-Snowflake-Authorization-Token-Type: "KEYPAIR_JWT"
+      body: '{"statement": "ALTER RESOURCE MONITOR {input.snowflake_resource_monitor} SET CREDIT_QUOTA = {input.snowflake_throttle_credit_quota} TRIGGERS ON 90 PERCENT DO SUSPEND ON 100 PERCENT DO SUSPEND_IMMEDIATE", "timeout": 60}'
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
+
+  # 9) Join the apply paths into one deterministic enforcement record.
+  - id: enforcement_result
+    type: code
+    depends_on: [enforce_decision]
+    code_config:
+      language: python
+      code: |
+        # At most one apply branch ran (classify routed it); the else branch is no_enforce.
+        scored = _steps.get("score_action") or {}
+        vercel = _steps.get("pause_vercel_project")
+        cloudflare = _steps.get("disable_cloudflare_worker")
+        snowflake = _steps.get("throttle_snowflake_monitor")
+        noop = _steps.get("no_enforce")
+
+        applied = None
+        provider = None
+        if vercel is not None:
+            applied, provider = vercel, "vercel"
+        elif cloudflare is not None:
+            applied, provider = cloudflare, "cloudflare-workers"
+        elif snowflake is not None:
+            applied, provider = snowflake, "snowflake"
+
+        result = {
+            "action_kind": scored.get("action_kind", ""),
+            "target_provider": scored.get("target_provider", ""),
+            "estimated_savings_usd": scored.get("estimated_savings_usd", 0),
+            "applied": applied is not None,
+            "applied_via": provider,
+            "apply_response": applied,
+            "noop": noop if applied is None else None,
+        }
+
+  # 10) SENSOR - poll the Datadog usage endpoint until the projected month-end cost drops
+  #     back under the budget line, or soft-timeout. Deterministic recovery check.
+  - id: verify_spend_drop
+    type: sensor
+    depends_on: [enforcement_result]
+    sensor_config:
+      url: "https://{input.datadog_site}/api/v1/usage/billable-summary?month={input.datadog_month}"
+      method: GET
+      headers:
+        DD-API-KEY: "{env.DATADOG_API_KEY}"
+        DD-APPLICATION-KEY: "{env.DATADOG_APP_KEY}"
+        Accept: "application/json"
+      # Cleared when the latest annualized estimate sits under the configured budget.
+      condition: "status_code == 200 and (float(response.get('usage', {}).get('estimated_cost_usd', 0) or 0) / max(1, int({input.day_of_month})) * int({input.days_in_month})) < float({input.monthly_budget_usd})"
+      check_interval: 300
+      timeout: 86400
+
+  # 11) Deterministically decide whether spend actually dropped after enforcement.
+  - id: evaluate_drop
+    type: code
+    depends_on: [verify_spend_drop]
+    code_config:
+      language: python
+      code: |
+        obs = _steps.get("verify_spend_drop") or {}
+        if not isinstance(obs, dict):
+            obs = {"raw": obs}
+        dropped = bool(obs.get("condition_met", obs.get("met", obs.get("cleared", False))))
+        burn = _steps.get("compute_burn") or {}
+        enforced = _steps.get("enforcement_result") or {}
+        result = {
+            "spend_dropped": dropped,
+            "still_breached": not dropped,
+            "before_forecast": burn.get("forecast", 0.0),
+            "before_ratio": burn.get("forecast_ratio", 0.0),
+            "enforcement": enforced,
+            "observation": obs,
+        }
+
+  # 12) NOTIFY Slack #finops with the before/after.
+  - id: notify_finops
+    type: notify
+    depends_on: [evaluate_drop]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: ":money_with_wings: Cost guardrail run complete. Top offender: {steps.compute_burn.output.top_offender}. Action: {steps.enforcement_result.output}. Before/after: {steps.evaluate_drop.output}."
+
+  # 13) HTTP - open a Jira cost-savings ticket as the audit trail.
+  - id: open_jira_ticket
+    type: http
+    depends_on: [notify_finops]
+    http_config:
+      url: "{input.jira_base_url}/rest/api/3/issue"
+      method: POST
+      auth: "basic:{env.JIRA_EMAIL}:{env.JIRA_API_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      body: '{"fields": {"project": {"key": "{input.jira_project_key}"}, "issuetype": {"name": "Task"}, "summary": "[FinOps] Cost guardrail enforced - forecast breach on {steps.compute_burn.output.top_offender}", "description": "Automated cost-guardrail-enforcer audit trail. Burn/forecast: {steps.compute_burn.output}. Recommendation: {steps.reco_race.output}. Scored action: {steps.score_action.output}. Enforcement: {steps.enforcement_result.output}. Spend verification: {steps.evaluate_drop.output}."}}'
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+on_complete:
+  storage_path: "cloud-cost-guardrail-enforcer/{run_id}/result.json"

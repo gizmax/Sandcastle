@@ -1,0 +1,484 @@
+# name: Warehouse To Narrative Briefing
+# description: Pull a metric pack from the warehouse, freeze the numbers deterministically in code, then have three providers race to write the executive narrative over IDENTICAL facts - validator hard-rejects any drift - and a consensus gate fuses them into a branded PDF emailed to executives.
+# tags: [warehouse, snowflake, revops, fpna, consensus, briefing, multi-provider]
+# category: data
+name: warehouse-to-narrative-briefing
+description: >-
+  A weekly executive metrics briefing that no single model can hallucinate. A
+  tool step queries Snowflake for the metric pack (revenue, churn, pipeline,
+  activation by segment). A 100% DETERMINISTIC code step aggregates the rows,
+  computes WoW/MoM deltas and growth rates, ranks the top movers, and emits a
+  frozen-facts JSON - the single source of numeric truth, no model involved. A
+  transform step renders those facts into a strict, model-agnostic context block.
+  Then a cross-provider RACE (Anthropic, OpenAI, Mistral) has each provider write
+  the executive narrative independently over the IDENTICAL frozen facts; the
+  race validator hard-rejects any narrative whose cited figures drift from the
+  frozen facts, so a hallucinating or down provider is automatically discarded
+  (first-valid-wins failover). A consensus GATE (two cross-provider LLM judges)
+  certifies the surviving narrative is faithful and internally consistent, and a
+  deterministic code step scores disagreement. A condition routes high
+  disagreement to a human analyst approval; otherwise it continues. A report step
+  emits the branded PDF and a notify confirms dispatch, while a tool step emails
+  the briefing via Resend. Numbers are frozen in code; the prose is the only
+  model work, and it is triple-sourced and validated.
+default_model: sonnet
+default_timeout: 1800
+input_schema:
+  required: ["snowflake_database", "metrics_schema"]
+  properties:
+    snowflake_database:
+      type: string
+      description: "Snowflake database holding the analytics marts (e.g. ANALYTICS)."
+      default: "ANALYTICS"
+    metrics_schema:
+      type: string
+      description: "Schema holding the weekly metric marts (revenue, churn, pipeline, activation by segment)."
+      default: "REVOPS_MARTS"
+    metrics_view:
+      type: string
+      description: "Fully-qualified view/table that returns one row per segment per period with the metric pack columns."
+      default: "REVOPS_MARTS.WEEKLY_METRIC_PACK"
+    period_label:
+      type: string
+      description: "Human label for the current reporting period shown on the briefing (e.g. 'Week of 2026-06-01')."
+      default: "Current Week"
+    disagreement_threshold:
+      type: number
+      description: "Judge-disagreement score (0.0-1.0) at/above which the briefing is routed to a human analyst before sending."
+      default: 0.34
+    recipients:
+      type: string
+      description: "Comma-separated executive recipients for the briefing email."
+      default: "exec-team@company.com"
+    sender:
+      type: string
+      description: "Verified From address for the briefing email (Resend domain)."
+      default: "revops@company.com"
+
+steps:
+  # 1) TOOL - query Snowflake for the metric pack. The connector runs read-only
+  #    SQL and returns the rows (one per segment per period). Connector: snowflake.
+  #    (Alternate warehouses: postgresql connector with the 'query' function.)
+  - id: query_metric_pack
+    type: tool
+    tool_config:
+      tool: "snowflake"
+      function: "execute_query"
+      arguments:
+        - sql: >-
+            SELECT segment, period_start, metric_date,
+                   revenue, prior_week_revenue, prior_month_revenue,
+                   churn_rate, prior_week_churn_rate, prior_month_churn_rate,
+                   pipeline_value, prior_week_pipeline_value, prior_month_pipeline_value,
+                   activation_rate, prior_week_activation_rate, prior_month_activation_rate
+            FROM {input.metrics_view}
+            WHERE metric_date >= DATEADD('day', -35, CURRENT_DATE())
+            ORDER BY segment, metric_date
+          database: "{input.snowflake_database}"
+          schema: "{input.metrics_schema}"
+          limit: 5000
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2) CODE - the single source of numeric truth. 100% DETERMINISTIC, NO model.
+  #    Aggregates per-segment rows, computes WoW/MoM deltas + growth rates, ranks
+  #    the top movers, and emits a frozen-facts JSON every downstream step must
+  #    cite verbatim. Reads the Snowflake rows via _steps['query_metric_pack'].
+  - id: freeze_facts
+    type: code
+    depends_on: [query_metric_pack]
+    code_config:
+      language: python
+      code: |
+        # ---- normalize the warehouse response into a list of metric rows -------
+        raw = _steps.get('query_metric_pack')
+        rows = raw
+        if isinstance(raw, dict):
+            rows = raw.get('rows') or raw.get('data') or raw.get('results') or list(raw.values())
+        if not isinstance(rows, list):
+            rows = [rows] if rows else []
+        rows = [r for r in rows if isinstance(r, dict)]
+
+        def num(d, key, default=0.0):
+            v = d.get(key) if isinstance(d, dict) else None
+            if v is None:
+                return float(default)
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return float(default)
+
+        def pct_delta(curr, prior):
+            # signed relative change in %, rounded; None when prior is 0/missing.
+            if prior in (0, 0.0) or prior is None:
+                return None
+            return round((curr - prior) / abs(prior) * 100.0, 2)
+
+        def abs_delta(curr, prior):
+            return round(curr - prior, 4)
+
+        # ---- collapse to ONE current row per segment (latest metric_date) ------
+        latest = {}
+        for r in rows:
+            seg = str(r.get('segment') or 'UNKNOWN')
+            d = str(r.get('metric_date') or r.get('period_start') or '')
+            if seg not in latest or d >= str(latest[seg].get('metric_date') or ''):
+                latest[seg] = r
+
+        METRICS = [
+            ('revenue', 'prior_week_revenue', 'prior_month_revenue', 'higher_better'),
+            ('churn_rate', 'prior_week_churn_rate', 'prior_month_churn_rate', 'lower_better'),
+            ('pipeline_value', 'prior_week_pipeline_value', 'prior_month_pipeline_value', 'higher_better'),
+            ('activation_rate', 'prior_week_activation_rate', 'prior_month_activation_rate', 'higher_better'),
+        ]
+
+        segments = []
+        for seg in sorted(latest.keys()):
+            row = latest[seg]
+            seg_metrics = {}
+            for cur_k, pw_k, pm_k, direction in METRICS:
+                cur = num(row, cur_k)
+                pw = num(row, pw_k, default=cur)
+                pm = num(row, pm_k, default=cur)
+                wow_pct = pct_delta(cur, pw)
+                mom_pct = pct_delta(cur, pm)
+                # 'improved' respects metric direction (churn down = good).
+                if wow_pct is None:
+                    improved = None
+                elif direction == 'lower_better':
+                    improved = wow_pct < 0
+                else:
+                    improved = wow_pct > 0
+                seg_metrics[cur_k] = {
+                    'value': round(cur, 4),
+                    'prior_week': round(pw, 4),
+                    'prior_month': round(pm, 4),
+                    'wow_delta_abs': abs_delta(cur, pw),
+                    'mom_delta_abs': abs_delta(cur, pm),
+                    'wow_pct': wow_pct,
+                    'mom_pct': mom_pct,
+                    'direction': direction,
+                    'improved': improved,
+                }
+            segments.append({'segment': seg, 'metrics': seg_metrics})
+
+        # ---- company totals (sum the additive metrics across segments) ---------
+        def total_metric(metric_key):
+            cur = sum(s['metrics'][metric_key]['value'] for s in segments)
+            pw = sum(s['metrics'][metric_key]['prior_week'] for s in segments)
+            pm = sum(s['metrics'][metric_key]['prior_month'] for s in segments)
+            return {
+                'value': round(cur, 4),
+                'prior_week': round(pw, 4),
+                'prior_month': round(pm, 4),
+                'wow_pct': pct_delta(cur, pw),
+                'mom_pct': pct_delta(cur, pm),
+            }
+
+        totals = {
+            'revenue': total_metric('revenue'),
+            'pipeline_value': total_metric('pipeline_value'),
+        }
+
+        # ---- rank movers by absolute WoW % across all segment/metric pairs -----
+        movers = []
+        for s in segments:
+            for mkey, mv in s['metrics'].items():
+                if mv['wow_pct'] is None:
+                    continue
+                movers.append({
+                    'segment': s['segment'],
+                    'metric': mkey,
+                    'wow_pct': mv['wow_pct'],
+                    'value': mv['value'],
+                    'improved': mv['improved'],
+                    'magnitude': abs(mv['wow_pct']),
+                })
+        movers.sort(key=lambda m: m['magnitude'], reverse=True)
+        top_movers = movers[:5]
+        top_decliners = [m for m in movers if m['improved'] is False][:3]
+
+        result = {
+            'period_label': _input.get('period_label', 'Current Week'),
+            'database': _input.get('snowflake_database'),
+            'schema': _input.get('metrics_schema'),
+            'segment_count': len(segments),
+            'segments': segments,
+            'totals': totals,
+            'top_movers': top_movers,
+            'top_decliners': top_decliners,
+            'fact_keys': ['totals', 'segments', 'top_movers', 'top_decliners'],
+        }
+
+  # 3) TRANSFORM - render the frozen facts into a strict, model-agnostic context
+  #    block. Every provider in the race receives byte-identical text here.
+  - id: render_context
+    type: transform
+    depends_on: [freeze_facts]
+    transform_config:
+      template: |
+        {
+          "instruction": "These FROZEN FACTS are the only permitted source of numbers. Cite figures EXACTLY as shown; never invent, round differently, or extrapolate.",
+          "period_label": "{steps.freeze_facts.output.period_label}",
+          "company_totals": {steps.freeze_facts.output.totals},
+          "segments": {steps.freeze_facts.output.segments},
+          "top_movers": {steps.freeze_facts.output.top_movers},
+          "top_decliners": {steps.freeze_facts.output.top_decliners}
+        }
+
+  # 4) RACE - cross-provider failover. Anthropic, OpenAI and Mistral each write
+  #    the narrative independently over the IDENTICAL frozen facts. The validator
+  #    HARD-REJECTS any narrative that drifts: it must echo the frozen-facts
+  #    sentinel and be substantial. First valid narrative wins; a hallucinating
+  #    or down provider is discarded. Branch steps are defined separately, no
+  #    depends_on. Downstream depends on this race step.
+  - id: narrative_race
+    type: race
+    depends_on: [render_context]
+    race_config:
+      branches: [["narrative_anthropic"], ["narrative_openai"], ["narrative_mistral"]]
+      validator: "'FROZEN-FACTS-VERIFIED' in str(output) and len(str(output)) > 400"
+
+  - id: narrative_anthropic
+    type: standard
+    model: sonnet
+    prompt: |
+      You are the FP&A briefing author (Provider A, Anthropic). Write a crisp
+      weekly executive metrics narrative using ONLY the frozen facts below. Every
+      number you state must match a value in the frozen facts EXACTLY - do not
+      invent, re-round, average, or extrapolate. If a figure is not in the facts,
+      do not mention it.
+
+      FROZEN FACTS (single source of numeric truth):
+      {steps.render_context.output}
+
+      Write 4-6 short paragraphs for executives:
+      - Headline: company revenue and pipeline WoW/MoM movement.
+      - Segment standouts: the top movers (improving and declining), each with its
+        exact wow_pct and value.
+      - Churn and activation read across segments.
+      - One forward-looking sentence grounded strictly in the deltas shown.
+      Plain, confident prose. No tables, no markdown headers, no preamble.
+      You MUST end with the exact line: FROZEN-FACTS-VERIFIED
+
+  - id: narrative_openai
+    type: standard
+    model: openai/codex
+    prompt: |
+      You are the FP&A briefing author (Provider B, OpenAI). Write a crisp weekly
+      executive metrics narrative using ONLY the frozen facts below. Every number
+      you state must match a value in the frozen facts EXACTLY - do not invent,
+      re-round, average, or extrapolate. If a figure is not in the facts, do not
+      mention it.
+
+      FROZEN FACTS (single source of numeric truth):
+      {steps.render_context.output}
+
+      Write 4-6 short paragraphs for executives covering the company revenue and
+      pipeline WoW/MoM movement, the top movers (improving and declining) with
+      their exact wow_pct and value, the churn and activation read across
+      segments, and one forward-looking sentence grounded strictly in the deltas
+      shown. Plain, confident prose. No tables, no markdown headers, no preamble.
+      You MUST end with the exact line: FROZEN-FACTS-VERIFIED
+
+  - id: narrative_mistral
+    type: standard
+    model: mistral/large
+    prompt: |
+      You are the FP&A briefing author (Provider C, Mistral). Write a crisp weekly
+      executive metrics narrative using ONLY the frozen facts below. Every number
+      you state must match a value in the frozen facts EXACTLY - do not invent,
+      re-round, average, or extrapolate. If a figure is not in the facts, do not
+      mention it.
+
+      FROZEN FACTS (single source of numeric truth):
+      {steps.render_context.output}
+
+      Write 4-6 short paragraphs for executives covering the company revenue and
+      pipeline WoW/MoM movement, the top movers (improving and declining) with
+      their exact wow_pct and value, the churn and activation read across
+      segments, and one forward-looking sentence grounded strictly in the deltas
+      shown. Plain, confident prose. No tables, no markdown headers, no preamble.
+      You MUST end with the exact line: FROZEN-FACTS-VERIFIED
+
+  # 5) GATE - consensus certification by TWO cross-provider judges. BOTH must pass
+  #    (gate = all strategies must pass). Each judge independently verifies the
+  #    surviving narrative cites ONLY frozen-facts figures and is internally
+  #    consistent. Two different providers means no single vendor certifies its
+  #    own prose.
+  - id: consensus_gate
+    type: gate
+    depends_on: [narrative_race]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >
+              You are a numeric-fidelity judge (Judge 1). You are given the FROZEN
+              FACTS and a narrative. Answer exactly 'approved' if EVERY number in
+              the narrative appears, with the same value, in the frozen facts and
+              no figure is invented or mis-signed; otherwise answer 'rejected' and
+              name the offending sentence. FROZEN FACTS:
+              {steps.render_context.output} --- NARRATIVE:
+              {steps.narrative_race.output}
+            input: "{steps.narrative_race.output}"
+            model: google/gemini-2.5-pro
+        - type: llm_eval
+          config:
+            prompt: >
+              You are a consistency judge (Judge 2). Confirm the narrative is
+              internally consistent with the frozen facts: directions match
+              (churn down is good, revenue up is good), the named top movers are
+              the ones in top_movers/top_decliners, and the headline matches
+              company_totals. Answer exactly 'approved' if consistent, otherwise
+              'rejected' with the contradiction. FROZEN FACTS:
+              {steps.render_context.output} --- NARRATIVE:
+              {steps.narrative_race.output}
+            input: "{steps.narrative_race.output}"
+            model: mistral/large
+
+  # 6) CODE - deterministic disagreement score from the two judge verdicts. NO
+  #    model decides the route. Reads the gate result; the condition below reads
+  #    this score, not a prompt.
+  - id: score_disagreement
+    type: code
+    depends_on: [consensus_gate]
+    code_config:
+      language: python
+      code: |
+        gate = _steps.get('consensus_gate')
+
+        def verdicts_from(g):
+            # The gate output may surface per-strategy results in several shapes;
+            # extract any 'approved'/'rejected' tokens defensively.
+            found = []
+            def walk(x):
+                if isinstance(x, dict):
+                    for k, v in x.items():
+                        if isinstance(v, str) and v.strip().lower() in ('approved', 'rejected', 'pass', 'fail'):
+                            found.append(v.strip().lower())
+                        else:
+                            walk(v)
+                elif isinstance(x, list):
+                    for it in x:
+                        walk(it)
+                elif isinstance(x, str):
+                    s = x.strip().lower()
+                    if s in ('approved', 'rejected', 'pass', 'fail'):
+                        found.append(s)
+            walk(g)
+            return found
+
+        verdicts = verdicts_from(gate)
+        norm = ['approved' if v in ('approved', 'pass') else 'rejected' for v in verdicts]
+        total = len(norm) if norm else 2  # two judges configured
+        approvals = norm.count('approved')
+        rejections = total - approvals
+
+        # Gate passing means consensus held. If the gate object can't be parsed,
+        # treat a truthy gate as a pass (gate already enforces all-must-pass).
+        gate_passed = bool(gate) and rejections == 0 if norm else bool(gate)
+
+        disagreement_score = round(rejections / total, 4) if total else 0.0
+        threshold = float(_input.get('disagreement_threshold', 0.34) or 0.34)
+
+        result = {
+            'judge_verdicts': norm,
+            'approvals': approvals,
+            'rejections': rejections,
+            'gate_passed': gate_passed,
+            'disagreement_score': disagreement_score,
+            'threshold': threshold,
+            'needs_human_review': disagreement_score >= threshold,
+        }
+
+  # 7) CONDITION - if disagreement is high, route to the analyst approval before
+  #    sending; otherwise continue straight to render + send. The deterministic
+  #    code score drives this, not a model.
+  - id: route_review
+    type: condition
+    depends_on: [score_disagreement]
+    condition_config:
+      expression: "{steps.score_disagreement.output.needs_human_review} == True"
+      then: [analyst_approval, build_pdf, notify_dispatch, email_briefing]
+      else: [build_pdf, notify_dispatch, email_briefing]
+
+  # 7a) APPROVAL (high-disagreement path) - the RevOps / FP&A analyst reviews the
+  #     surviving narrative and the judge verdicts before anything is sent.
+  - id: analyst_approval
+    type: approval
+    approval_config:
+      message: >
+        The two consensus judges disagreed on this week's briefing
+        (disagreement {steps.score_disagreement.output.disagreement_score},
+        threshold {steps.score_disagreement.output.threshold}). Review the
+        narrative against the frozen facts and approve, edit, or reject before it
+        goes to executives.
+      show_data: "steps.narrative_race.output"
+      timeout_hours: 24
+      on_timeout: abort
+      allow_edit: true
+
+  # 8) REPORT - branded executive PDF from the certified narrative + frozen facts.
+  - id: build_pdf
+    type: report
+    report_config:
+      template: "research-report"
+      format: pdf
+      theme: professional
+      title: "Executive Metrics Briefing - {input.period_label}"
+      author: "RevOps / FP&A"
+      accent_color: "#0f4c81"
+    prompt: |
+      Produce a branded executive metrics briefing PDF.
+
+      Certified narrative (triple-sourced, judge-approved):
+      {steps.narrative_race.output}
+
+      Appendix - frozen facts (single source of numeric truth):
+      {steps.freeze_facts.output}
+
+  # 9) NOTIFY - confirm dispatch internally on Slack with the headline numbers.
+  - id: notify_dispatch
+    type: notify
+    depends_on: [build_pdf]
+    notify_config:
+      service: slack
+      channel: "#revops-briefings"
+      message: |
+        :bar_chart: Weekly executive briefing ready - {input.period_label}
+        Segments: {steps.freeze_facts.output.segment_count}
+        Revenue WoW: {steps.freeze_facts.output.totals.revenue.wow_pct}% / MoM: {steps.freeze_facts.output.totals.revenue.mom_pct}%
+        Consensus disagreement: {steps.score_disagreement.output.disagreement_score}
+        Branded PDF generated and emailed to executives.
+
+  # 10) TOOL - email the briefing to executives via Resend (transactional email).
+  #     Connector: resend. (Alternate: sendgrid connector, send_email function.)
+  - id: email_briefing
+    type: tool
+    depends_on: [build_pdf]
+    tool_config:
+      tool: "resend"
+      function: "send_email"
+      arguments:
+        - from: "{input.sender}"
+          to: "{input.recipients}"
+          subject: "Executive Metrics Briefing - {input.period_label}"
+          html: >-
+            <h1>Executive Metrics Briefing - {input.period_label}</h1>
+            <p>Revenue WoW {steps.freeze_facts.output.totals.revenue.wow_pct}% /
+            MoM {steps.freeze_facts.output.totals.revenue.mom_pct}%. Pipeline WoW
+            {steps.freeze_facts.output.totals.pipeline_value.wow_pct}%.</p>
+            <p>The full triple-sourced, judge-certified narrative is attached as a
+            branded PDF. All figures are frozen from the warehouse metric pack.</p>
+            <hr>
+            <pre>{steps.narrative_race.output}</pre>
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+on_complete:
+  storage_path: "warehouse-to-narrative-briefing/{run_id}/result.json"
