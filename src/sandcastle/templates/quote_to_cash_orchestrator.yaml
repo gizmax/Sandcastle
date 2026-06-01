@@ -1,0 +1,391 @@
+# name: Quote-to-Cash Orchestrator
+# description: Drive a closed-won opportunity to cash - render order form, e-sign, poll DocuSign, bill in Stripe, write back to CRM. Spine is deterministic (transform + approval + sensor + http), almost no model in the path.
+# tags: [Salesforce, HubSpot, DocuSign, Stripe, Slack, Quote-to-Cash, RevOps, Billing]
+# category: sales_crm
+
+name: quote-to-cash-orchestrator
+description: >
+  Closed-won opportunity to cash with almost no model in the critical path - the purest
+  model-independence proof. Pulls the won opportunity, account, and agreed terms from the CRM
+  (Salesforce/HubSpot REST), deterministically renders the order-form / quote payload via a
+  Jinja template (no model), routes it to the deal owner for an edit-and-approve gate, creates
+  and sends a DocuSign e-sign envelope, polls the envelope status until it settles, then branches:
+  voided/expired -> notify owner + patch the CRM 'signature_lost' and stop; completed -> create
+  the customer and subscription/invoice in Stripe from the agreed terms, write the contract and
+  Stripe ids back to the CRM, and Slack a win + billing summary. The only optional model use is a
+  short natural-language billing blurb in the final notification, computed via a cross-provider
+  race so no single LLM provider is on the path.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 600
+
+input_schema:
+  required: ["opportunity_id"]
+  properties:
+    opportunity_id:
+      type: string
+      description: "CRM id of the closed-won opportunity to convert to cash"
+      example: "0065g00000XyZ12AAB"
+    crm_base_url:
+      type: string
+      description: "Base URL of the CRM REST API (Salesforce or HubSpot)"
+      default: "https://your-instance.my.salesforce.com/services/data/v60.0"
+      example: "https://your-instance.my.salesforce.com/services/data/v60.0"
+    docusign_base_url:
+      type: string
+      description: "DocuSign eSignature REST base URL including account id"
+      default: "https://demo.docusign.net/restapi/v2.1/accounts/{account_id}"
+      example: "https://demo.docusign.net/restapi/v2.1/accounts/12345"
+    docusign_template_id:
+      type: string
+      description: "DocuSign server template id used to build the envelope"
+      default: "00000000-0000-0000-0000-000000000000"
+      example: "a1b2c3d4-0000-0000-0000-000000000000"
+    stripe_base_url:
+      type: string
+      description: "Stripe REST API base URL"
+      default: "https://api.stripe.com/v1"
+      example: "https://api.stripe.com/v1"
+    slack_channel:
+      type: string
+      description: "Slack channel to post the win + billing summary to"
+      default: "#revenue-wins"
+      example: "#revenue-wins"
+
+steps:
+  # 1) PULL - read the won opportunity + account + agreed terms from the CRM (Salesforce/HubSpot REST).
+  - id: pull_opportunity
+    type: http
+    http_config:
+      url: "{input.crm_base_url}/sobjects/Opportunity/{input.opportunity_id}?fields=Id,Name,StageName,Amount,CurrencyIsoCode,AccountId,Account.Name,Account.BillingAddress,Pricebook2Id,ContractTerm__c,BillingFrequency__c,Quantity__c,UnitPrice__c,ContactEmail__c"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.CRM_ACCESS_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2) NORMALIZE - deterministic sanity check + canonical terms object. Load-bearing logic lives in
+  #    Python (no model): validate the opp is actually closed-won and has billable terms.
+  - id: normalize_terms
+    type: code
+    depends_on: [pull_opportunity]
+    code_config:
+      language: python
+      code: |
+        opp = _steps['pull_opportunity'] or {}
+        # CRM REST returns a flat record; tolerate both Salesforce and HubSpot field shapes.
+        stage = str(opp.get('StageName') or opp.get('dealstage') or '').lower()
+        amount = float(opp.get('Amount') or opp.get('amount') or 0)
+        qty = int(opp.get('Quantity__c') or opp.get('quantity') or 1)
+        unit_price = float(opp.get('UnitPrice__c') or opp.get('unit_price') or (amount / qty if qty else 0))
+        term_months = int(opp.get('ContractTerm__c') or opp.get('contract_term') or 12)
+        billing_freq = str(opp.get('BillingFrequency__c') or opp.get('billing_frequency') or 'monthly').lower()
+        currency = str(opp.get('CurrencyIsoCode') or opp.get('currency') or 'USD').upper()
+        account = (opp.get('Account') or {})
+        is_won = 'closed won' in stage or stage in ('closedwon', 'won')
+        # Stripe wants the smallest currency unit; zero-decimal currencies are billed as-is.
+        zero_decimal = currency in ('JPY', 'KRW', 'VND', 'CLP')
+        unit_amount_minor = int(round(unit_price if zero_decimal else unit_price * 100))
+        interval = 'year' if 'annual' in billing_freq or 'year' in billing_freq else 'month'
+        blockers = []
+        if not is_won:
+            blockers.append(f"opportunity is not closed-won (stage={stage!r})")
+        if amount <= 0:
+            blockers.append("opportunity amount is zero or missing")
+        if not (opp.get('ContactEmail__c') or opp.get('contact_email')):
+            blockers.append("no signer contact email on opportunity")
+        result = {
+            'eligible': len(blockers) == 0,
+            'blockers': blockers,
+            'opportunity_id': opp.get('Id') or opp.get('id'),
+            'opportunity_name': opp.get('Name') or opp.get('dealname') or 'Untitled deal',
+            'account_id': opp.get('AccountId') or opp.get('account_id'),
+            'account_name': account.get('Name') or opp.get('account_name') or 'Unknown account',
+            'signer_email': opp.get('ContactEmail__c') or opp.get('contact_email') or '',
+            'currency': currency,
+            'quantity': qty,
+            'unit_price': unit_price,
+            'unit_amount_minor': unit_amount_minor,
+            'term_months': term_months,
+            'interval': interval,
+            'total_amount': round(unit_price * qty, 2),
+        }
+
+  # 3) GATE - eligibility must pass deterministically AND a cheap LLM eval double-checks there are
+  #    no blockers before we ever touch DocuSign/Stripe. ALL strategies must pass.
+  - id: eligibility_gate
+    type: gate
+    depends_on: [normalize_terms]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: "You are a deal-desk control. Given this normalized order record, answer exactly 'approved' if the JSON field eligible is true and blockers is empty, otherwise answer 'rejected' and name the blocker. Record: {steps.normalize_terms.output}"
+            input: "{steps.normalize_terms.output}"
+            model: haiku
+        - type: human
+          config:
+            message: "Deal desk: confirm this closed-won opportunity is clear to convert to an order form (no legal hold, terms look right)."
+            timeout_hours: 12
+            on_timeout: abort
+
+  # 4) RENDER - deterministic order-form / quote payload from the opportunity. Pure Jinja, no model.
+  - id: render_order_form
+    type: transform
+    depends_on: [eligibility_gate]
+    transform_config:
+      template: |
+        {
+          "order_form": {
+            "title": "Order Form - {{ steps.normalize_terms.output.opportunity_name }}",
+            "account": {
+              "id": "{{ steps.normalize_terms.output.account_id }}",
+              "name": "{{ steps.normalize_terms.output.account_name }}"
+            },
+            "signer_email": "{{ steps.normalize_terms.output.signer_email }}",
+            "line_items": [
+              {
+                "description": "Subscription - {{ steps.normalize_terms.output.opportunity_name }}",
+                "quantity": {{ steps.normalize_terms.output.quantity }},
+                "unit_price": {{ steps.normalize_terms.output.unit_price }},
+                "currency": "{{ steps.normalize_terms.output.currency }}"
+              }
+            ],
+            "billing": {
+              "interval": "{{ steps.normalize_terms.output.interval }}",
+              "term_months": {{ steps.normalize_terms.output.term_months }},
+              "total_contract_value": {{ steps.normalize_terms.output.total_amount }}
+            }
+          }
+        }
+
+  # 5) APPROVAL - the deal owner reviews the rendered order form and may edit it before signature.
+  - id: owner_review
+    type: approval
+    depends_on: [render_order_form]
+    approval_config:
+      message: "Deal owner: review the rendered order form for this closed-won deal. Edit pricing, quantity, or term if needed before we send it for e-signature."
+      show_data: steps.render_order_form.output
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: true
+
+  # 6) SEND ENVELOPE - create + send the e-sign envelope via DocuSign REST.
+  - id: create_envelope
+    type: http
+    depends_on: [owner_review]
+    http_config:
+      url: "{input.docusign_base_url}/envelopes"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.DOCUSIGN_ACCESS_TOKEN}"
+      body: |
+        {
+          "templateId": "{input.docusign_template_id}",
+          "status": "sent",
+          "emailSubject": "Please sign your order form",
+          "templateRoles": [
+            {
+              "roleName": "Signer",
+              "name": "{steps.normalize_terms.output.account_name}",
+              "email": "{steps.normalize_terms.output.signer_email}"
+            }
+          ],
+          "customFields": {
+            "textCustomFields": [
+              {"name": "opportunity_id", "value": "{input.opportunity_id}"},
+              {"name": "order_form", "value": "rendered"}
+            ]
+          }
+        }
+      value_map:
+        envelope_id: "envelopeId"
+        envelope_status: "status"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 7) WAIT - poll the DocuSign envelope status until the signer settles it. Long timeout (24h).
+  - id: await_signature
+    type: sensor
+    depends_on: [create_envelope]
+    sensor_config:
+      url: "{input.docusign_base_url}/envelopes/{steps.create_envelope.output.envelope_id}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "json.get('status') in ('completed', 'voided', 'declined', 'expired')"
+      check_interval: 120
+      timeout: 86400
+
+  # 8) BRANCH - terminal envelope state decides everything from here. Deterministic, no model.
+  - id: classify_signature
+    type: code
+    depends_on: [await_signature]
+    code_config:
+      language: python
+      code: |
+        env = _steps['await_signature'] or {}
+        status = str(env.get('status') or '').lower()
+        completed = status == 'completed'
+        result = {
+            'status': status or 'unknown',
+            'completed': completed,
+            'lost': status in ('voided', 'declined', 'expired'),
+            'envelope_id': env.get('envelopeId') or _steps['create_envelope'].get('envelope_id'),
+        }
+
+  - id: signature_outcome
+    type: condition
+    depends_on: [classify_signature]
+    condition_config:
+      expression: "{steps.classify_signature.output.completed} == true"
+      then:
+        - provision_stripe_customer
+        - create_subscription
+        - billing_summary_race
+        - crm_writeback_won
+        - notify_win
+      else:
+        - crm_writeback_lost
+        - notify_lost
+
+  # ---- LOST PATH: signer voided/declined/expired -> mark CRM signature_lost + tell the owner. ----
+  - id: crm_writeback_lost
+    type: http
+    http_config:
+      url: "{input.crm_base_url}/sobjects/Opportunity/{input.opportunity_id}"
+      method: PATCH
+      headers:
+        Content-Type: "application/json"
+      auth: "bearer:{env.CRM_ACCESS_TOKEN}"
+      body: |
+        {
+          "Signature_Status__c": "signature_lost",
+          "Envelope_Status__c": "{steps.classify_signature.output.status}",
+          "DocuSign_Envelope_Id__c": "{steps.classify_signature.output.envelope_id}"
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  - id: notify_lost
+    type: notify
+    depends_on: [crm_writeback_lost]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: "Signature lost on '{steps.normalize_terms.output.opportunity_name}' ({steps.normalize_terms.output.account_name}). DocuSign envelope ended as {steps.classify_signature.output.status}. CRM marked signature_lost - no billing created."
+
+  # ---- WON PATH: signed -> Stripe customer + subscription, CRM writeback, Slack win. ----
+  - id: provision_stripe_customer
+    type: http
+    http_config:
+      url: "{input.stripe_base_url}/customers"
+      method: POST
+      headers:
+        Content-Type: "application/x-www-form-urlencoded"
+      auth: "bearer:{env.STRIPE_SECRET_KEY}"
+      body: "name={steps.normalize_terms.output.account_name}&email={steps.normalize_terms.output.signer_email}&metadata[opportunity_id]={input.opportunity_id}&metadata[crm_account_id]={steps.normalize_terms.output.account_id}"
+      value_map:
+        customer_id: "id"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  - id: create_subscription
+    type: http
+    depends_on: [provision_stripe_customer]
+    http_config:
+      url: "{input.stripe_base_url}/subscription_items_and_invoice"
+      method: POST
+      headers:
+        Content-Type: "application/x-www-form-urlencoded"
+      auth: "bearer:{env.STRIPE_SECRET_KEY}"
+      body: "customer={steps.provision_stripe_customer.output.customer_id}&items[0][price_data][currency]={steps.normalize_terms.output.currency}&items[0][price_data][unit_amount]={steps.normalize_terms.output.unit_amount_minor}&items[0][price_data][recurring][interval]={steps.normalize_terms.output.interval}&items[0][price_data][product_data][name]={steps.normalize_terms.output.opportunity_name}&items[0][quantity]={steps.normalize_terms.output.quantity}"
+      value_map:
+        subscription_id: "id"
+        invoice_id: "latest_invoice"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # Optional NL billing blurb via CROSS-PROVIDER race (first-valid-wins failover, no single
+  # provider on the path). This is the ONLY model use on the success spine and it is non-blocking.
+  - id: summary_sonnet
+    prompt: |
+      Write one upbeat sentence (max 30 words) summarizing this new billing for a Slack post.
+      Account: {steps.normalize_terms.output.account_name}.
+      Total contract value: {steps.normalize_terms.output.total_amount} {steps.normalize_terms.output.currency}.
+      Billing interval: {steps.normalize_terms.output.interval}. No emojis, no markdown.
+    model: sonnet
+
+  - id: summary_gemini
+    prompt: |
+      Write one upbeat sentence (max 30 words) summarizing this new billing for a Slack post.
+      Account: {steps.normalize_terms.output.account_name}.
+      Total contract value: {steps.normalize_terms.output.total_amount} {steps.normalize_terms.output.currency}.
+      Billing interval: {steps.normalize_terms.output.interval}. No emojis, no markdown.
+    model: google/gemini-2.5-pro
+
+  - id: summary_mistral
+    prompt: |
+      Write one upbeat sentence (max 30 words) summarizing this new billing for a Slack post.
+      Account: {steps.normalize_terms.output.account_name}.
+      Total contract value: {steps.normalize_terms.output.total_amount} {steps.normalize_terms.output.currency}.
+      Billing interval: {steps.normalize_terms.output.interval}. No emojis, no markdown.
+    model: mistral/large
+
+  - id: billing_summary_race
+    type: race
+    depends_on: [create_subscription]
+    race_config:
+      branches:
+        - [summary_sonnet]
+        - [summary_gemini]
+        - [summary_mistral]
+      validator: "len(str(output).strip()) > 0"
+
+  - id: crm_writeback_won
+    type: http
+    depends_on: [create_subscription]
+    http_config:
+      url: "{input.crm_base_url}/sobjects/Opportunity/{input.opportunity_id}"
+      method: PATCH
+      headers:
+        Content-Type: "application/json"
+      auth: "bearer:{env.CRM_ACCESS_TOKEN}"
+      body: |
+        {
+          "Signature_Status__c": "signed",
+          "DocuSign_Envelope_Id__c": "{steps.classify_signature.output.envelope_id}",
+          "Stripe_Customer_Id__c": "{steps.provision_stripe_customer.output.customer_id}",
+          "Stripe_Subscription_Id__c": "{steps.create_subscription.output.subscription_id}",
+          "Stripe_Invoice_Id__c": "{steps.create_subscription.output.invoice_id}",
+          "Billing_Status__c": "active"
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  - id: notify_win
+    type: notify
+    depends_on: [billing_summary_race, crm_writeback_won]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: "Closed-won converted to cash: {steps.billing_summary_race.output} | Deal: {steps.normalize_terms.output.opportunity_name} | TCV {steps.normalize_terms.output.total_amount} {steps.normalize_terms.output.currency} | Stripe sub {steps.create_subscription.output.subscription_id} | CRM updated."
+
+on_complete:
+  storage_path: "quote-to-cash-orchestrator/{run_id}/result.json"

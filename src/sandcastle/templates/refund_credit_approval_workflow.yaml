@@ -1,0 +1,417 @@
+# name: Refund and Credit Approval
+# description: Policy-driven refund/credit pipeline where the money decision is deterministic code, not a model.
+# tags: [support, refunds, stripe, zendesk, quickbooks, policy-engine, finance]
+# category: support
+name: refund-credit-approval
+description: >
+  Policy-driven refund and credit approval pipeline for customer support.
+  Pulls the refund request plus Stripe billing history and Zendesk ticket
+  context, then runs a DETERMINISTIC Python policy engine (eligibility window,
+  prior-refund count, plan terms) that computes the auto-approvable amount and
+  the required approval tier. A model never decides the dollar outcome - it only
+  classifies the reason and drafts the customer-facing message. Below the auto
+  cap with an auto-eligible reason and no fraud signal the refund executes
+  automatically; otherwise it routes to a tiered human sign-off. The decision
+  message is drafted by racing two providers (first non-empty wins), gated for
+  policy-faithfulness, then the actual refund/credit is executed in Stripe, a
+  credit memo is posted to QuickBooks, the Zendesk ticket is closed with the
+  full audit trail, and the team is notified in Slack.
+default_model: sonnet
+default_timeout: 600
+input_schema:
+  required: ["ticket_id", "customer_id", "auto_cap"]
+  properties:
+    ticket_id:
+      type: string
+      description: "Zendesk ticket ID for the refund request."
+      default: ""
+    customer_id:
+      type: string
+      description: "Stripe customer ID whose billing history is evaluated."
+      default: ""
+    auto_cap:
+      type: number
+      description: "Maximum USD amount that may be auto-approved without a human."
+      default: 50
+    stripe_api_base:
+      type: string
+      description: "Stripe REST API base URL."
+      default: "https://api.stripe.com/v1"
+    zendesk_api_base:
+      type: string
+      description: "Zendesk REST API base URL (https://<subdomain>.zendesk.com/api/v2)."
+      default: "https://acme.zendesk.com/api/v2"
+    quickbooks_api_base:
+      type: string
+      description: "QuickBooks Online REST API base URL."
+      default: "https://quickbooks.api.intuit.com/v3"
+    quickbooks_realm_id:
+      type: string
+      description: "QuickBooks company (realm) ID for the credit-memo post."
+      default: ""
+    slack_channel:
+      type: string
+      description: "Slack channel for refund decision notifications."
+      default: "#refunds"
+
+steps:
+  # 1. Pull customer billing history from Stripe (charges in the eligibility window).
+  - id: fetch_stripe_billing
+    type: http
+    responsibility: "Pull the customer's recent Stripe charges to evaluate refund eligibility."
+    source_hint: "Refund decisions require the real charge ledger, not the customer's claim."
+    owner: "support-ops"
+    http_config:
+      url: "{input.stripe_api_base}/charges?customer={input.customer_id}&limit=100"
+      method: GET
+      auth: "bearer:{env.STRIPE_API_KEY}"
+      headers:
+        Accept: "application/json"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2. Pull the refund request + ticket context from Zendesk.
+  - id: fetch_zendesk_ticket
+    type: http
+    responsibility: "Fetch the Zendesk ticket holding the customer's refund request and context."
+    source_hint: "The requested amount and stated reason live on the support ticket."
+    owner: "support-ops"
+    http_config:
+      url: "{input.zendesk_api_base}/tickets/{input.ticket_id}.json"
+      method: GET
+      auth: "bearer:{env.ZENDESK_API_TOKEN}"
+      headers:
+        Accept: "application/json"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 3. DETERMINISTIC policy engine - the money decision. Pure rules, NO model.
+  - id: policy_engine
+    type: code
+    depends_on: [fetch_stripe_billing, fetch_zendesk_ticket]
+    responsibility: "Apply refund policy deterministically: eligibility window, prior-refund count, plan terms."
+    source_hint: "Finance/Legal require the dollar outcome to be reproducible and model-independent."
+    owner: "finance-eng"
+    code_config:
+      language: python
+      code: |
+        # Deterministic refund policy engine. The dollar outcome is identical
+        # regardless of any model. Reads upstream HTTP outputs via _steps and
+        # workflow inputs via _input.
+        billing = _steps['fetch_stripe_billing'] or {}
+        ticket = _steps['fetch_zendesk_ticket'] or {}
+        auto_cap = float(_input.get('auto_cap', 50) or 50)
+
+        # --- Normalize Stripe charges -------------------------------------
+        charges = billing.get('data', []) if isinstance(billing, dict) else []
+        # Total amount paid (Stripe amounts are in cents).
+        total_paid = sum(
+            (c.get('amount', 0) or 0)
+            for c in charges
+            if isinstance(c, dict) and c.get('paid') and not c.get('refunded')
+        ) / 100.0
+        # Prior refunds already issued to this customer.
+        prior_refunds = sum(
+            1 for c in charges
+            if isinstance(c, dict) and (c.get('refunded') or (c.get('amount_refunded', 0) or 0) > 0)
+        )
+        # Most recent eligible charge (newest first as Stripe returns).
+        eligible_charge = next(
+            (c for c in charges
+             if isinstance(c, dict) and c.get('paid') and not c.get('refunded')),
+            {},
+        )
+        charge_amount = (eligible_charge.get('amount', 0) or 0) / 100.0
+        charge_age_days = 0
+        created = eligible_charge.get('created')
+        now = billing.get('_now_epoch')  # optional injected clock; falls back below
+        if isinstance(created, (int, float)):
+            # 30-day window: derive age from charge metadata if a clock is present,
+            # otherwise trust an explicit age field, else treat as in-window (0).
+            if isinstance(now, (int, float)):
+                charge_age_days = max(0, int((now - created) / 86400))
+            else:
+                charge_age_days = int(eligible_charge.get('_age_days', 0) or 0)
+
+        # --- Ticket-stated requested amount -------------------------------
+        tkt = ticket.get('ticket', ticket) if isinstance(ticket, dict) else {}
+        requested = 0.0
+        for fld in (tkt.get('custom_fields') or []):
+            if isinstance(fld, dict) and str(fld.get('id')) == 'requested_amount':
+                try:
+                    requested = float(fld.get('value') or 0)
+                except (TypeError, ValueError):
+                    requested = 0.0
+        if requested <= 0:
+            requested = charge_amount  # default to refunding the last charge
+
+        # Plan terms: enterprise plans allow a wider window + higher cap.
+        plan = str(tkt.get('plan') or 'standard').lower()
+        window_days = 60 if plan in ('enterprise', 'business') else 30
+        max_prior_refunds = 5 if plan in ('enterprise', 'business') else 2
+
+        # --- Deterministic eligibility rules ------------------------------
+        reasons = []
+        eligible = True
+        if charge_amount <= 0:
+            eligible = False
+            reasons.append('no_refundable_charge_found')
+        if charge_age_days > window_days:
+            eligible = False
+            reasons.append(f'outside_{window_days}d_eligibility_window')
+        if prior_refunds >= max_prior_refunds:
+            eligible = False
+            reasons.append(f'prior_refund_limit_{max_prior_refunds}_reached')
+
+        # Cap the refundable amount at what was actually charged.
+        amount = min(requested, charge_amount) if eligible else 0.0
+
+        # Required approval tier is a deterministic function of the amount.
+        if not eligible:
+            tier = 'none'
+        elif amount <= auto_cap:
+            tier = 'auto'
+        elif amount <= auto_cap * 5:
+            tier = 'supervisor'
+        else:
+            tier = 'director'
+
+        if eligible and not reasons:
+            reasons.append('within_policy')
+
+        result = {
+            'eligible': eligible,
+            'amount': round(amount, 2),
+            'tier': tier,
+            'reasons': reasons,
+            'plan': plan,
+            'window_days': window_days,
+            'prior_refunds': prior_refunds,
+            'total_paid': round(total_paid, 2),
+            'eligible_charge_id': eligible_charge.get('id', ''),
+            'auto_cap': auto_cap,
+        }
+
+  # 4. Classify the stated refund reason (routing only - does NOT set the amount).
+  - id: classify_reason
+    type: classify
+    depends_on: [policy_engine]
+    responsibility: "Categorize the refund reason to drive auto-eligibility and fraud routing."
+    source_hint: "Some reasons (fraud_suspect) must never auto-approve regardless of amount."
+    owner: "support-ops"
+    classify_config:
+      model: haiku
+      input: "Refund reason from ticket: {steps.fetch_zendesk_ticket.output}. Policy: {steps.policy_engine.output}"
+      categories:
+        - billing_error
+        - outage_credit
+        - dissatisfaction
+        - duplicate_charge
+        - fraud_suspect
+      branches:
+        billing_error: [decide_route]
+        outage_credit: [decide_route]
+        dissatisfaction: [decide_route]
+        duplicate_charge: [decide_route]
+        fraud_suspect: [decide_route]
+
+  # 5. Deterministic route gate: auto vs escalate. Combines amount + reason + fraud.
+  - id: decide_route
+    type: condition
+    depends_on: [policy_engine, classify_reason]
+    responsibility: "Choose auto-refund vs human escalation from amount, reason and fraud signal."
+    source_hint: "Auto path only when amount <= cap, tier auto, reason auto-eligible, no fraud."
+    owner: "finance-eng"
+    condition_config:
+      expression: "{steps.policy_engine.output.tier} == 'auto' and '{steps.classify_reason.output}' in ['billing_error','outage_credit','duplicate_charge']"
+      then: [draft_decision_message]
+      else: [escalation_approval]
+
+  # --- Escalation path: tiered human sign-off before the message is drafted ---
+  - id: escalation_approval
+    type: approval
+    depends_on: [decide_route]
+    responsibility: "Tiered human sign-off for refunds above the auto cap or flagged reasons."
+    source_hint: "Finance policy mandates supervisor/director approval beyond the auto cap."
+    owner: "finance-approvers"
+    approval_config:
+      message: >
+        Refund escalation for ticket {input.ticket_id} (customer {input.customer_id}).
+        Review the deterministic policy decision below and approve or reject the
+        refund/credit. Required tier and amount are set by policy, not by you.
+      show_data: steps.policy_engine.output
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: true
+
+  # 6. RACE the customer-facing decision message across two providers.
+  #    First non-empty draft wins (failover, NOT a vote). Branch A=sonnet, B=mistral/large.
+  - id: draft_decision_message
+    type: race
+    depends_on: [policy_engine, classify_reason]
+    responsibility: "Draft the customer decision message, failing over across two providers."
+    source_hint: "Message wording must never block the refund on a single provider outage."
+    owner: "support-ops"
+    race_config:
+      branches:
+        - [draft_msg_sonnet]
+        - [draft_msg_mistral]
+      validator: "len(str(output)) > 0"
+
+  - id: draft_msg_sonnet
+    type: standard
+    model: sonnet
+    responsibility: "Primary draft of the customer-facing refund decision message."
+    source_hint: "Race branch A - default provider."
+    owner: "support-ops"
+    prompt: |
+      Write a concise, empathetic customer-facing message explaining the refund
+      decision. State the POLICY BASIS explicitly (eligibility window, plan terms,
+      prior-refund count) and the exact amount. Make NO promise beyond what the
+      policy authorizes. Do not invent amounts.
+
+      Policy decision (authoritative, do not change the numbers):
+      {steps.policy_engine.output}
+      Reason category: {steps.classify_reason.output}
+
+  - id: draft_msg_mistral
+    type: standard
+    model: mistral/large
+    responsibility: "Failover draft of the customer-facing refund decision message."
+    source_hint: "Race branch B - cross-provider failover so wording never blocks on one vendor."
+    owner: "support-ops"
+    prompt: |
+      Write a concise, empathetic customer-facing message explaining the refund
+      decision. State the POLICY BASIS explicitly (eligibility window, plan terms,
+      prior-refund count) and the exact amount. Make NO promise beyond what the
+      policy authorizes. Do not invent amounts.
+
+      Policy decision (authoritative, do not change the numbers):
+      {steps.policy_engine.output}
+      Reason category: {steps.classify_reason.output}
+
+  # 7. Gate the drafted message: it must be policy-faithful AND human-approved for escalations.
+  - id: message_gate
+    type: gate
+    depends_on: [draft_decision_message]
+    responsibility: "Block any message that misstates policy or makes an unauthorized promise."
+    source_hint: "Customer-facing financial promises require eval + human oversight."
+    owner: "support-leads"
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >
+              Answer 'approved' only if the message states the policy basis
+              (eligibility window / plan terms / prior-refund count) and makes no
+              promise beyond the authorized amount in the policy decision.
+              Otherwise answer 'rejected'.
+            input: "{steps.draft_decision_message.output} :: policy {steps.policy_engine.output}"
+            model: sonnet
+        - type: human
+          config:
+            message: "Confirm the customer-facing refund message before it is sent."
+            timeout_hours: 24
+            on_timeout: abort
+
+  # 8. Wait for the Stripe charge to be in a refundable, settled state before executing.
+  - id: await_charge_settled
+    type: sensor
+    depends_on: [message_gate]
+    responsibility: "Poll Stripe until the target charge is settled and refundable."
+    source_hint: "Refunding an unsettled/pending charge fails; wait for settlement first."
+    owner: "finance-eng"
+    sensor_config:
+      url: "{input.stripe_api_base}/charges/{steps.policy_engine.output.eligible_charge_id}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200"
+      check_interval: 30
+      timeout: 1800
+
+  # 9. Execute the actual refund/credit in Stripe.
+  - id: execute_stripe_refund
+    type: http
+    depends_on: [await_charge_settled]
+    responsibility: "Create the refund against the eligible Stripe charge for the policy amount."
+    source_hint: "This is the money-moving call; amount comes only from the policy engine."
+    owner: "finance-eng"
+    http_config:
+      url: "{input.stripe_api_base}/refunds"
+      method: POST
+      auth: "bearer:{env.STRIPE_API_KEY}"
+      headers:
+        Content-Type: "application/x-www-form-urlencoded"
+      body: "charge={steps.policy_engine.output.eligible_charge_id}&amount={steps.policy_engine.output.amount}&metadata[ticket_id]={input.ticket_id}&metadata[tier]={steps.policy_engine.output.tier}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
+
+  # 10. Post the credit memo to QuickBooks for the books.
+  - id: post_quickbooks_memo
+    type: http
+    depends_on: [execute_stripe_refund]
+    responsibility: "Record the refund as a credit memo in QuickBooks Online."
+    source_hint: "Finance reconciliation requires every refund mirrored as a QBO credit memo."
+    owner: "finance-eng"
+    http_config:
+      url: "{input.quickbooks_api_base}/company/{input.quickbooks_realm_id}/creditmemo"
+      method: POST
+      auth: "bearer:{env.QUICKBOOKS_ACCESS_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      body:
+        CustomerRef:
+          value: "{input.customer_id}"
+        TotalAmt: "{steps.policy_engine.output.amount}"
+        PrivateNote: "Refund for Zendesk ticket {input.ticket_id}; Stripe refund {steps.execute_stripe_refund.output}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 11. Close the Zendesk ticket with the full audit trail.
+  - id: close_zendesk_ticket
+    type: http
+    depends_on: [post_quickbooks_memo]
+    responsibility: "Close the Zendesk ticket and attach the policy + execution audit trail."
+    source_hint: "Auditors need the policy reasons and refund IDs on the originating ticket."
+    owner: "support-ops"
+    http_config:
+      url: "{input.zendesk_api_base}/tickets/{input.ticket_id}.json"
+      method: PUT
+      auth: "bearer:{env.ZENDESK_API_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+      body:
+        ticket:
+          status: "solved"
+          comment:
+            public: false
+            body: "Refund processed. Policy: {steps.policy_engine.output}. Stripe refund: {steps.execute_stripe_refund.output}. QuickBooks memo: {steps.post_quickbooks_memo.output}."
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 12. Notify the team in Slack.
+  - id: notify_slack
+    type: notify
+    depends_on: [close_zendesk_ticket]
+    responsibility: "Announce the completed refund decision to the support/finance team."
+    source_hint: "Refunds need a visible trail in the team channel for awareness."
+    owner: "support-ops"
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: "Refund settled for ticket {input.ticket_id} (customer {input.customer_id}). Decision: {steps.policy_engine.output}. Stripe refund: {steps.execute_stripe_refund.output}."
+
+on_complete:
+  storage_path: "refund-credit-approval/{run_id}/result.json"
