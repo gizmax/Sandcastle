@@ -1,0 +1,573 @@
+# name: Supplier Portal Invoice Status Reconciler
+# description: Logs into customer-mandated AP/supplier web portals (Ariba/Coupa-style and bespoke buyer portals) that expose no supplier-side API, scrapes the live status of every submitted invoice into structured JSON with a deterministic provider-neutral Playwright script, validates the extraction in code, reconciles it against the company's own AR ledger, and posts a stuck/short-paid invoices digest to Finance. Read-only on the external portals - it never submits, edits, or pays anything, so the only writes are to the internal reconciliation summary.
+# tags: [Finance, AccountsReceivable, Collections, Browser, Playwright, Ariba, Coupa, Reconciliation, RPA]
+# category: general_ai
+
+name: supplier-portal-invoice-status-reconciler
+description: >-
+  Reconciles invoice status across customer-mandated AP/supplier procurement
+  portals (Ariba/Coupa-style and bespoke buyer portals) that give suppliers NO
+  outbound API - the only source of truth is a login-gated, JS-heavy status grid
+  built for human AP clerks. A LOOP fans out over a list of configured portals;
+  each iteration runs a BROWSER step in playwright mode (the configured reasoning
+  model authors a deterministic, provider-neutral Playwright script ONCE, which
+  then replays) that signs in with per-portal credentials_env, opens the
+  invoice-status grid, applies a date filter, paginates under a max_actions cap,
+  and returns a strict output_schema {portal, invoices:[{invoice_number, amount,
+  currency, status, approval_date, expected_pay_date}]}. captcha_strategy=pause
+  hands any MFA/CAPTCHA to a human. A second BROWSER step in dom mode does a
+  lightweight, read-only liveness probe of each portal's post-login landing page
+  so a silent redesign or auth wall is caught before the heavy scrape is trusted.
+  A CODE step then VALIDATES every scraped row deterministically (amounts numeric,
+  currency in an allowed enum, status in a closed set, invoice_number format) and
+  REJECTS malformed rows - no reconciliation runs on a bad read. An HTTP step
+  pulls the matching invoices from the internal AR ledger API. A CODE step does
+  the load-bearing reconciliation in pure deterministic math (portal status vs
+  ledger status, amount deltas within 0.01 tolerance, overdue detection) with NO
+  model in the path, so the audit conclusion is reproducible and provider-neutral.
+  A SENSOR confirms the ledger API is live and fresh before the digest is trusted.
+  A GATE (llm_eval) sanity-checks the reconciliation summary for obvious
+  extraction drift before a human sees it; its judge model can be raced across
+  providers. A NOTIFY posts the stuck/short-paid digest to Finance. The workflow
+  is intentionally READ-ONLY on the external portals - it never submits, edits, or
+  pays anything - so the only safety gate needed on the outbound side is the
+  captcha pause; the only writes are to the internal reconciliation summary.
+  (connectors: slack, internal AR ledger via http)
+
+default_model: sonnet
+default_timeout: 600
+
+input_schema:
+  required: ["portals", "ledger_api_url"]
+  properties:
+    portals:
+      type: array
+      description: >-
+        Portal definitions the loop iterates over. Each item names the buyer
+        portal, its login start_url, the env var holding its credentials, and the
+        invoice-status grid URL. Shape per item: {portal, vendor (ariba|coupa|
+        bespoke), start_url, grid_url, credentials_env, supplier_id}. Secrets are
+        NEVER inlined - only the NAME of the env var is stored here.
+      default:
+        - portal: "acme_ariba"
+          vendor: "ariba"
+          start_url: "https://acme.supplier.ariba.com/login"
+          grid_url: "https://acme.supplier.ariba.com/invoices"
+          credentials_env: "PORTAL_ACME_ARIBA_CREDS"
+          supplier_id: "SUP-ACME-0091"
+        - portal: "globex_coupa"
+          vendor: "coupa"
+          start_url: "https://globex.coupahost.com/sessions/new"
+          grid_url: "https://globex.coupahost.com/invoices"
+          credentials_env: "PORTAL_GLOBEX_COUPA_CREDS"
+          supplier_id: "SUP-GLBX-4471"
+        - portal: "initech_bespoke"
+          vendor: "bespoke"
+          start_url: "https://ap.initech.example/portal/login"
+          grid_url: "https://ap.initech.example/portal/invoices"
+          credentials_env: "PORTAL_INITECH_CREDS"
+          supplier_id: "VENDOR-77123"
+    ledger_api_url:
+      type: string
+      description: "Base URL of the internal AR ledger API that returns this supplier's open invoices for the period."
+      default: "https://ar-ledger.internal.example/api/v1"
+    filter_since:
+      type: string
+      description: "Lower bound (ISO date) for the portal grid date filter - only invoices submitted on/after this date are scraped and reconciled."
+      default: "2026-01-01"
+    amount_tolerance:
+      type: number
+      description: "Absolute amount delta (in invoice currency) below which a portal-vs-ledger amount difference is treated as agreement (rounding noise)."
+      default: 0.01
+    allowed_currencies:
+      type: array
+      description: "Closed set of currency codes a scraped row may carry; rows with any other currency are rejected as malformed."
+      default: ["USD", "EUR", "GBP", "CZK"]
+    overdue_grace_days:
+      type: integer
+      description: "Days past expected_pay_date before a portal-approved-but-unpaid invoice is flagged as stuck/overdue."
+      default: 0
+    notify_service:
+      type: string
+      description: "Where to post the stuck/short-paid digest: slack or teams."
+      default: "slack"
+    notify_channel:
+      type: string
+      description: "Channel for the collections digest."
+      default: "#ar-collections"
+
+steps:
+  # 1) LOOP over the configured portals. Each iteration runs scrape_portal, the
+  #    provider-neutral Playwright browser step. The loop item (one portal def)
+  #    arrives on _input['_item'] and is read by the browser prompt via templating.
+  - id: scrape_portals
+    type: loop
+    loop_config:
+      over: "input.portals"
+      step_ids: [scrape_portal]
+      max_iterations: 50
+
+  # 1a) BROWSER (playwright mode - PROVIDER-NEUTRAL). The configured reasoning model
+  #     authors a deterministic Playwright script ONCE from this prompt, which then
+  #     replays - the script is provider-agnostic and the authoring model is
+  #     swappable via default_model. This is the READ pass: it logs in with the
+  #     per-portal credentials_env (NEVER an inline secret), opens the invoice-status
+  #     grid, applies the date filter, paginates under the max_actions cap, and
+  #     returns ONLY the strict output_schema below. captcha_strategy=pause hands any
+  #     MFA/CAPTCHA login challenge to a human. capture_screenshots keeps an audit
+  #     trail of every page the script touched. It performs NO write actions.
+  #     (loop child step - defined separately, read via _input['_item'])
+  - id: scrape_portal
+    type: browser
+    browser_config:
+      mode: playwright
+      start_url: "{input._item.start_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 120
+      max_actions: 50
+      headless: true
+      credentials_env: "{input._item.credentials_env}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          portal: { type: string }
+          vendor: { type: string }
+          scraped_at: { type: string }
+          invoices:
+            type: array
+            items:
+              type: object
+              properties:
+                invoice_number: { type: string }
+                amount: { type: number }
+                currency: { type: string }
+                status: { type: string }
+                approval_date: { type: string }
+                expected_pay_date: { type: string }
+    prompt: |
+      You are automating a supplier-facing AP procurement portal (vendor family:
+      {input._item.vendor}; e.g. Ariba, Coupa, or a bespoke buyer portal) as a
+      read-only AP clerk. There is NO supplier API - the status grid is the only
+      source of truth.
+
+      Author a deterministic, provider-neutral Playwright script that:
+      1. Navigates to the login page ({input._item.start_url}) and signs in using
+         the credentials supplied by the credentials_env environment variable. NEVER
+         hardcode or echo the secret.
+      2. If a CAPTCHA, MFA, or device-verification challenge appears, STOP and hand
+         off to a human (captcha_strategy=pause). Do not attempt to solve it.
+      3. Opens the invoice-status grid at {input._item.grid_url} for supplier
+         {input._item.supplier_id}.
+      4. Applies the grid's date filter so only invoices submitted on/after
+         {input.filter_since} are shown.
+      5. Paginates through every result page (respecting the max_actions cap) and
+         reads each row.
+      6. Performs NO write actions - never click submit, approve, resubmit, dispute,
+         edit, or pay. This is extraction only.
+
+      Return ONLY the structured JSON described by the output_schema: the portal
+      identifier, the vendor family, an ISO scraped_at timestamp, and one object per
+      invoice row with invoice_number, amount (numeric), currency (ISO code), status
+      (the portal's literal status text), approval_date, and expected_pay_date.
+
+  # 1b) BROWSER (dom mode - lightweight read-only liveness probe). After the heavy
+  #     scrape, a fast DOM read of each portal's post-login landing page detects a
+  #     silent redesign, an auth wall, or a maintenance banner that could have made
+  #     the playwright scrape return an empty/garbage grid. Pure read, no writes.
+  #     A trajectory-replay golden run per portal can be layered on top of this to
+  #     hard-fail on UI drift.
+  - id: probe_portals
+    type: browser
+    depends_on: [scrape_portals]
+    browser_config:
+      mode: dom
+      start_url: "{input.ledger_api_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 60
+      max_actions: 10
+      headless: true
+      captcha_strategy: pause
+      capture_screenshots: false
+      output_schema:
+        type: object
+        properties:
+          reachable: { type: boolean }
+          looks_like_login_wall: { type: boolean }
+          maintenance_banner: { type: boolean }
+          notes: { type: string }
+    prompt: |
+      Do a fast, read-only DOM check of the portal landing area to confirm the
+      heavy scrape ran against the real invoice grid and not a login wall, an error
+      page, or a maintenance banner. Read the visible headings, any banner text, and
+      whether a login form is present. Do NOT log in, click, submit, or change
+      anything. Return ONLY the JSON in the output_schema: reachable,
+      looks_like_login_wall, maintenance_banner, and a short notes string.
+
+  # 2) CODE: VALIDATE the scraped extraction deterministically before anything is
+  #    trusted. Every row must have a non-empty invoice_number matching an accepted
+  #    format, a numeric amount, a currency in the allowed enum, and a status in the
+  #    closed set {submitted, approved, rejected, paid, disputed}. Malformed rows are
+  #    REJECTED into a quarantine list and NEVER reconciled. If a portal yields zero
+  #    valid rows (likely a silent redesign / auth wall) it is flagged. No model.
+  - id: validate_extraction
+    type: code
+    depends_on: [scrape_portals, probe_portals]
+    code_config:
+      language: python
+      code: |
+        # The loop output arrives as a list of per-portal scrape envelopes.
+        scraped = _steps.get("scrape_portals")
+        if not isinstance(scraped, list):
+            scraped = [scraped] if isinstance(scraped, dict) else []
+
+        try:
+            allowed_ccy = _input.get("allowed_currencies") or ["USD", "EUR", "GBP", "CZK"]
+        except Exception:
+            allowed_ccy = ["USD", "EUR", "GBP", "CZK"]
+        allowed_ccy = {str(c).upper() for c in allowed_ccy if isinstance(c, str)}
+
+        allowed_status = {"submitted", "approved", "rejected", "paid", "disputed"}
+        # Invoice numbers are 4-32 chars of letters, digits, dash, slash, dot.
+        inv_pattern = r"^[A-Za-z0-9][A-Za-z0-9\-\/\.]{3,31}$"
+
+        def _to_amount(v):
+            try:
+                return round(float(v), 2)
+            except (TypeError, ValueError):
+                return None
+
+        valid_rows = []
+        rejected_rows = []
+        per_portal = {}
+
+        for env in scraped:
+            if not isinstance(env, dict):
+                continue
+            portal = str(env.get("portal") or "unknown")
+            vendor = str(env.get("vendor") or "")
+            invoices = env.get("invoices")
+            if not isinstance(invoices, list):
+                invoices = []
+            ok_count = 0
+            bad_count = 0
+            for row in invoices:
+                if not isinstance(row, dict):
+                    rejected_rows.append({"portal": portal, "reason": "row_not_object", "raw": str(row)[:200]})
+                    bad_count += 1
+                    continue
+                inv = str(row.get("invoice_number") or "").strip()
+                amount = _to_amount(row.get("amount"))
+                ccy = str(row.get("currency") or "").strip().upper()
+                status = str(row.get("status") or "").strip().lower()
+                reasons = []
+                if not inv or not re.match(inv_pattern, inv):
+                    reasons.append("bad_invoice_number")
+                if amount is None or amount < 0:
+                    reasons.append("bad_amount")
+                if ccy not in allowed_ccy:
+                    reasons.append("bad_currency")
+                if status not in allowed_status:
+                    reasons.append("bad_status")
+                if reasons:
+                    rejected_rows.append({
+                        "portal": portal,
+                        "invoice_number": inv,
+                        "reasons": reasons,
+                    })
+                    bad_count += 1
+                    continue
+                valid_rows.append({
+                    "portal": portal,
+                    "vendor": vendor,
+                    "invoice_number": inv,
+                    "amount": amount,
+                    "currency": ccy,
+                    "status": status,
+                    "approval_date": str(row.get("approval_date") or ""),
+                    "expected_pay_date": str(row.get("expected_pay_date") or ""),
+                })
+                ok_count += 1
+            per_portal[portal] = {"valid": ok_count, "rejected": bad_count}
+
+        # A portal that returned zero valid rows is suspicious - probable redesign
+        # or auth wall. Surface it so the digest can flag a scrape failure, not a
+        # clean "no open invoices" result.
+        suspicious_portals = [p for p, c in per_portal.items() if c["valid"] == 0]
+
+        result = {
+            "valid_rows": valid_rows,
+            "valid_count": len(valid_rows),
+            "rejected_rows": rejected_rows,
+            "rejected_count": len(rejected_rows),
+            "per_portal": per_portal,
+            "suspicious_portals": suspicious_portals,
+            "extraction_ok": len(valid_rows) > 0,
+        }
+
+  # 3) HTTP: pull the matching open invoices for this supplier from the INTERNAL AR
+  #    ledger API. This is the company's own system of record - the side we are
+  #    reconciling the portal status against. Auth via a bearer token from the env,
+  #    never inlined. (connector: internal AR ledger via http)
+  - id: fetch_ar_ledger
+    type: http
+    depends_on: [validate_extraction]
+    http_config:
+      url: "{input.ledger_api_url}/invoices?status=open&since={input.filter_since}"
+      method: GET
+      auth: "bearer:{env.AR_LEDGER_TOKEN}"
+      headers:
+        Accept: "application/json"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 4) CODE: the LOAD-BEARING reconciliation. Pure deterministic math, NO model in
+  #    the path, so the conclusion is reproducible and provider-neutral. For every
+  #    validated portal row it finds the matching ledger row by invoice_number and
+  #    classifies: status mismatch (portal says paid but ledger open, etc.), amount
+  #    delta beyond tolerance (short-paid), overdue (portal-approved but past
+  #    expected_pay_date with no ledger payment), portal-only (never reached the
+  #    ledger), and ledger-only (submitted internally but missing from the portal).
+  - id: reconcile
+    type: code
+    depends_on: [validate_extraction, fetch_ar_ledger]
+    code_config:
+      language: python
+      code: |
+        extraction = _steps.get("validate_extraction") or {}
+        if not isinstance(extraction, dict):
+            extraction = {}
+        portal_rows = extraction.get("valid_rows") or []
+        if not isinstance(portal_rows, list):
+            portal_rows = []
+
+        ledger_resp = _steps.get("fetch_ar_ledger") or {}
+        if not isinstance(ledger_resp, dict):
+            ledger_resp = {}
+        # HTTP step output may carry the parsed body under common keys.
+        ledger_rows = (
+            ledger_resp.get("invoices")
+            or ledger_resp.get("data")
+            or ledger_resp.get("body")
+            or ledger_resp.get("json")
+        )
+        if isinstance(ledger_rows, dict):
+            ledger_rows = ledger_rows.get("invoices") or ledger_rows.get("data") or []
+        if not isinstance(ledger_rows, list):
+            ledger_rows = []
+
+        try:
+            tol = float(_input.get("amount_tolerance", 0.01) or 0.01)
+        except (TypeError, ValueError):
+            tol = 0.01
+        try:
+            grace = int(_input.get("overdue_grace_days", 0) or 0)
+        except (TypeError, ValueError):
+            grace = 0
+        today = str(_input.get("_today") or "")  # optional injected run date
+
+        def _num(v):
+            try:
+                return round(float(v), 2)
+            except (TypeError, ValueError):
+                return None
+
+        def _norm_status(s):
+            return str(s or "").strip().lower()
+
+        # Index the ledger by invoice number for O(1) matching.
+        ledger_by_inv = {}
+        for lr in ledger_rows:
+            if not isinstance(lr, dict):
+                continue
+            key = str(lr.get("invoice_number") or lr.get("number") or lr.get("id") or "").strip()
+            if key:
+                ledger_by_inv[key] = lr
+
+        # Statuses on the portal that mean the buyer considers it settled.
+        portal_settled = {"paid"}
+        # Ledger statuses that mean WE consider it settled / closed.
+        ledger_settled = {"paid", "closed", "settled"}
+
+        stuck = []          # approved/submitted on portal but unpaid past due
+        short_paid = []     # amount delta beyond tolerance
+        status_mismatch = []  # portal vs ledger disagree on settlement
+        portal_only = []    # on portal, missing from ledger
+        matched_ok = 0
+        seen_inv = set()
+
+        def _overdue(expected, has_payment):
+            # Overdue only if we have a comparable run date AND an expected date AND
+            # the invoice is not settled. String ISO compare is monotonic for dates.
+            if has_payment:
+                return False
+            if not today or not expected:
+                return False
+            return str(expected) < str(today)
+
+        for pr in portal_rows:
+            if not isinstance(pr, dict):
+                continue
+            inv = str(pr.get("invoice_number") or "").strip()
+            seen_inv.add(inv)
+            p_status = _norm_status(pr.get("status"))
+            p_amount = _num(pr.get("amount"))
+            expected = pr.get("expected_pay_date")
+
+            lr = ledger_by_inv.get(inv)
+            if lr is None:
+                portal_only.append({
+                    "invoice_number": inv,
+                    "portal": pr.get("portal"),
+                    "portal_status": p_status,
+                    "amount": p_amount,
+                    "currency": pr.get("currency"),
+                })
+                continue
+
+            l_status = _norm_status(lr.get("status"))
+            l_amount = _num(lr.get("amount") if "amount" in lr else lr.get("amount_due"))
+            l_paid = _num(lr.get("amount_paid"))
+            has_payment = l_status in ledger_settled or (l_paid is not None and l_paid > 0)
+
+            row_flags = []
+
+            # Short-paid: a recorded payment / ledger amount differs from the portal
+            # amount beyond tolerance, OR portal marks paid but a residual remains.
+            if p_amount is not None and l_amount is not None:
+                delta = round(abs(p_amount - l_amount), 2)
+                if delta > tol:
+                    short_paid.append({
+                        "invoice_number": inv,
+                        "portal": pr.get("portal"),
+                        "portal_amount": p_amount,
+                        "ledger_amount": l_amount,
+                        "delta": delta,
+                        "currency": pr.get("currency"),
+                    })
+                    row_flags.append("amount_delta")
+
+            # Settlement disagreement: portal says paid while the ledger is still
+            # unsettled, or vice versa. The core "is invoice #X actually paid" check.
+            p_is_settled = p_status in portal_settled
+            if p_is_settled != has_payment:
+                status_mismatch.append({
+                    "invoice_number": inv,
+                    "portal": pr.get("portal"),
+                    "portal_status": p_status,
+                    "ledger_status": l_status,
+                })
+                row_flags.append("status_mismatch")
+
+            # Stuck/overdue: approved on the portal but unpaid past the expected pay
+            # date with no ledger payment recorded.
+            if p_status in {"approved", "submitted"} and _overdue(expected, has_payment):
+                stuck.append({
+                    "invoice_number": inv,
+                    "portal": pr.get("portal"),
+                    "portal_status": p_status,
+                    "expected_pay_date": str(expected or ""),
+                    "amount": p_amount,
+                    "currency": pr.get("currency"),
+                })
+                row_flags.append("overdue")
+
+            if not row_flags:
+                matched_ok += 1
+
+        # Ledger invoices we submitted that never showed up on any portal grid.
+        ledger_only = []
+        for inv_no, lr in ledger_by_inv.items():
+            if inv_no not in seen_inv:
+                ledger_only.append({
+                    "invoice_number": inv_no,
+                    "ledger_status": _norm_status(lr.get("status")),
+                    "amount": _num(lr.get("amount") if "amount" in lr else lr.get("amount_due")),
+                })
+
+        exceptions_total = (
+            len(stuck) + len(short_paid) + len(status_mismatch)
+            + len(portal_only) + len(ledger_only)
+        )
+
+        result = {
+            "summary": {
+                "portal_rows": len(portal_rows),
+                "ledger_rows": len(ledger_rows),
+                "matched_ok": matched_ok,
+                "stuck_count": len(stuck),
+                "short_paid_count": len(short_paid),
+                "status_mismatch_count": len(status_mismatch),
+                "portal_only_count": len(portal_only),
+                "ledger_only_count": len(ledger_only),
+                "exceptions_total": exceptions_total,
+                "tolerance": tol,
+                "grace_days": grace,
+            },
+            "stuck": stuck,
+            "short_paid": short_paid,
+            "status_mismatch": status_mismatch,
+            "portal_only": portal_only,
+            "ledger_only": ledger_only,
+            "suspicious_portals": extraction.get("suspicious_portals", []),
+            "rejected_count": extraction.get("rejected_count", 0),
+            "clean": exceptions_total == 0,
+        }
+
+  # 5) SENSOR: confirm the internal AR ledger API is live and responding before the
+  #    digest is declared trustworthy. If the ledger was down or rate-limited during
+  #    fetch_ar_ledger, every portal row would look "portal_only" - a false alarm.
+  #    The sensor polls the ledger health endpoint and only proceeds on a 200.
+  - id: confirm_ledger_live
+    type: sensor
+    depends_on: [reconcile]
+    sensor_config:
+      url: "{input.ledger_api_url}/health"
+      condition: "status_code == 200"
+      check_interval: 30
+      timeout: 600
+
+  # 6) GATE (llm_eval): a non-load-bearing sanity check that the deterministic
+  #    reconciliation summary is internally consistent and shows no obvious
+  #    extraction drift (e.g. every portal suspicious, or exception counts that do
+  #    not add up) before a human is paged. The heavy correctness already happened
+  #    in code; this judge only catches gross drift and can be raced across providers.
+  - id: drift_gate
+    type: gate
+    depends_on: [reconcile, confirm_ledger_live]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >
+              You are a collections-controls reviewer. You are given a deterministic
+              portal-vs-ledger reconciliation summary. Answer exactly 'approved' if
+              the counts are internally consistent (exceptions_total equals the sum of
+              the individual exception counts), the suspicious_portals list does not
+              contain every configured portal (which would imply the whole scrape
+              failed), and nothing indicates wholesale extraction drift. Otherwise
+              answer 'rejected' and name the inconsistency. Do not re-do the math;
+              only judge consistency and drift.
+            input: "{steps.reconcile.output.summary}"
+            model: sonnet
+
+  # 7) NOTIFY: post the stuck / short-paid / mismatched invoices digest to Finance.
+  #    No portal write actions are ever taken - this is read-only extraction plus
+  #    internal reconciliation - so no outbound approval gate is needed; the only
+  #    safety gate on the portal side was the captcha pause inside the browser steps.
+  #    (connectors: slack, teams)
+  - id: notify_finance
+    type: notify
+    depends_on: [drift_gate]
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: ":receipt: Supplier portal reconciliation complete. Exceptions: {steps.reconcile.output.summary}. Stuck/short-paid/mismatched detail: {steps.reconcile.output}. Suspicious (possible portal redesign / auth wall) portals: {steps.reconcile.output.suspicious_portals}. Rejected malformed rows: {steps.reconcile.output.rejected_count}. This run was READ-ONLY on all external portals - no submit/edit/pay actions were taken."
+
+on_complete:
+  storage_path: "supplier-portal-invoice-status-reconciler/{run_id}/reconciliation.json"

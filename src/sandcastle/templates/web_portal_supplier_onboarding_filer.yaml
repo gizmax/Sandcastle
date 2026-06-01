@@ -1,0 +1,350 @@
+# name: Web Portal Supplier Onboarding Filer
+# description: Fills and submits a supplier/vendor onboarding application across a buyer's JS-heavy procurement portal (Ariba/Coupa-style SPA or government e-procurement) that has no public submission API. Uses provider-neutral Playwright mode - the reasoning model AUTHORS a Playwright script, so any of the 7 providers can drive it. Read is split from write; the irreversible filing is gated behind deterministic validation, an llm_eval verifier, and a human approval.
+# tags: [Procurement, Ariba, Coupa, SupplierOnboarding, Playwright, RPA, SalesOps, BidManagement, e-Procurement, HumanInTheLoop]
+# category: sales_crm
+
+name: web-portal-supplier-onboarding-filer
+description: >-
+  Registers a supplier on a buyer's bespoke, login-gated procurement portal (Ariba /
+  Coupa-style SPA or a government e-procurement wizard) that has NO public submission API
+  and renders entirely client-side, so a plain http step cannot post the form. Because the
+  pages are real DOM (not a remote-desktop canvas), this template uses Playwright mode: the
+  swappable reasoning model AUTHORS a deterministic Playwright script to log in, walk the
+  multi-page wizard, fill fields from the canonical company profile, upload the document set,
+  and STOP on the final REVIEW page WITHOUT submitting. The read pass returns structured JSON
+  via output_schema. A DETERMINISTIC Python step then validates that every required field is
+  non-empty and every expected document was uploaded - failing closed on any gap. A swappable
+  llm_eval gate compares the captured review-page screenshot against the source profile to
+  catch transposed values, then a human approval gates the actual, irreversible submission.
+  Only on approval does a second Playwright step click Submit and capture the confirmation /
+  reference number; a sensor polls the portal's own confirmation endpoint, and a
+  trajectory-replay against a sandbox-portal golden run catches when a portal redesign breaks
+  the wizard path. Provider-neutral end to end - no vendor agent runtime, no computer_use lock-in.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 1800
+
+input_schema:
+  required: ["portal_id", "profile_ref", "portal_login_url"]
+  properties:
+    portal_id:
+      type: string
+      description: "Stable identifier for the target buyer portal (drives golden-run lookup and storage path)."
+      example: "acme-coupa-eu"
+    profile_ref:
+      type: string
+      description: "Reference to the canonical company profile + document set in gdrive/s3 (path, URL, or @file: ref)."
+      example: "s3://supplier-profiles/globex/onboarding-pack.json"
+    portal_login_url:
+      type: string
+      description: "Login URL of the buyer's procurement portal SPA where the onboarding wizard begins."
+      example: "https://acme.coupahost.com/sessions/new"
+    portal_confirm_url:
+      type: string
+      description: "Portal endpoint that returns 200 once a submitted registration is accepted (used to poll the portal's own confirmation)."
+      default: "https://acme.coupahost.com/api/suppliers/registration/status"
+      example: "https://acme.coupahost.com/api/suppliers/registration/status"
+    crm_ack_url:
+      type: string
+      description: "CRM webhook to acknowledge that the registration task was picked up by this run."
+      default: "https://crm.internal/api/registration-tasks/ack"
+      example: "https://crm.internal/api/registration-tasks/ack"
+    expected_documents:
+      type: string
+      description: "Comma-separated list of document keys the portal requires (validated against actual uploads). e.g. 'w9,insurance_cert,iso9001,banking_letter'."
+      default: "w9,insurance_cert,iso9001,banking_letter"
+      example: "w9,insurance_cert,iso9001,banking_letter"
+    golden_run_id:
+      type: string
+      description: "Run id of the recorded sandbox-portal golden trajectory for this portal, used to detect wizard-path drift."
+      default: "golden-coupa-onboarding-v1"
+      example: "golden-coupa-onboarding-v1"
+    notify_channel:
+      type: string
+      description: "Slack channel for the final filed/blocked notification."
+      default: "#bid-management"
+      example: "#bid-management"
+
+steps:
+  # 1) TRIGGER ack: tell the CRM this registration task was picked up. http (deterministic).
+  - id: ack_task
+    type: http
+    http_config:
+      url: "{input.crm_ack_url}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+      auth: "bearer:{env.CRM_TOKEN}"
+      body: '{"portal_id": "{input.portal_id}", "status": "picked_up", "profile_ref": "{input.profile_ref}"}'
+
+  # 2) LOAD the canonical company profile + document manifest from gdrive/s3. parse.
+  - id: load_profile
+    type: parse
+    depends_on: [ack_task]
+    prompt: "{input.profile_ref}"
+    parse_config:
+      output: json
+
+  # 3) READ PASS (Playwright, NO submit). The reasoning model AUTHORS a Playwright script to
+  #    log in (creds from PORTAL_CREDS - never inlined), walk the multi-page wizard, fill
+  #    fields from the profile, upload the document set, and STOP on the final review page.
+  #    captcha_strategy=pause hands off to a human on the near-certain procurement CAPTCHA.
+  #    max_actions=120 bounds the multi-page wizard; output_schema returns structured JSON.
+  - id: fill_to_review
+    type: browser
+    depends_on: [load_profile]
+    prompt: >-
+      You are filling a supplier/vendor onboarding application on a JavaScript procurement
+      portal SPA. Authenticate using the credentials provided via the PORTAL_CREDS environment
+      variable. Then walk the multi-page registration wizard end to end: on each page, map fields
+      from the canonical company profile below and fill them, handling dynamic client-side
+      validation (wait for fields to settle before advancing). Upload every required document
+      from the profile's document manifest. CRITICAL: advance only to the FINAL REVIEW / SUMMARY
+      page and STOP there. DO NOT click the final Submit / Confirm / File button - submission is a
+      separate, human-approved step. If a CAPTCHA or step-up auth appears, pause for a human.
+      Company profile and document manifest (JSON): {steps.load_profile.output}.
+      Return structured JSON describing exactly what you filled and uploaded, a human-readable
+      review summary of the values shown on the final review page, and whether the submit button
+      is present and enabled.
+    browser_config:
+      mode: playwright
+      start_url: "{input.portal_login_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 600
+      max_actions: 120
+      headless: true
+      credentials_env: "PORTAL_CREDS"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          fields_filled:
+            type: array
+            items:
+              type: object
+              properties:
+                name: { type: string }
+                value: { type: string }
+                page: { type: string }
+          files_uploaded:
+            type: array
+            items:
+              type: object
+              properties:
+                doc_key: { type: string }
+                filename: { type: string }
+                status: { type: string }
+          review_summary:
+            type: object
+            properties:
+              legal_name: { type: string }
+              tax_id: { type: string }
+              duns: { type: string }
+              primary_contact_email: { type: string }
+              page_count: { type: integer }
+          review_screenshot_ref: { type: string }
+          submit_button_present: { type: boolean }
+
+  # 4) DETERMINISTIC validation (sandboxed Python). Fail CLOSED if any required field is empty
+  #    or any expected document is missing. This is the load-bearing correctness - not a model.
+  - id: validate_fill
+    type: code
+    depends_on: [fill_to_review]
+    code_config:
+      language: python
+      code: |
+        read_out = _steps['fill_to_review'] or {}
+        if not isinstance(read_out, dict):
+            read_out = {}
+
+        fields = read_out.get('fields_filled') or []
+        uploads = read_out.get('files_uploaded') or []
+        review = read_out.get('review_summary') or {}
+
+        # Expected document keys come from input (comma-separated).
+        expected_raw = _input.get('expected_documents') or ''
+        expected_docs = [d.strip() for d in expected_raw.split(',') if d.strip()]
+
+        problems = []
+
+        # 4a) Every filled field must carry a non-empty value.
+        empty_fields = []
+        for f in fields:
+            if not isinstance(f, dict):
+                continue
+            name = str(f.get('name', '')).strip()
+            value = str(f.get('value', '')).strip()
+            if not value:
+                empty_fields.append(name or '<unnamed>')
+        if not fields:
+            problems.append('no fields were filled on the wizard')
+        if empty_fields:
+            problems.append('empty required fields: ' + ', '.join(empty_fields))
+
+        # 4b) Every expected document must have a successful upload.
+        uploaded_keys = set()
+        for u in uploads:
+            if not isinstance(u, dict):
+                continue
+            status = str(u.get('status', '')).strip().lower()
+            key = str(u.get('doc_key', '')).strip()
+            if key and status in ('ok', 'success', 'uploaded', 'complete', 'completed'):
+                uploaded_keys.add(key)
+        missing_docs = [d for d in expected_docs if d not in uploaded_keys]
+        if missing_docs:
+            problems.append('missing document uploads: ' + ', '.join(missing_docs))
+
+        # 4c) Core review-summary identity fields must be present.
+        for core in ('legal_name', 'tax_id'):
+            if not str(review.get(core, '')).strip():
+                problems.append('review summary missing ' + core)
+
+        # 4d) The wizard must actually have reached a submit-capable review page.
+        if not read_out.get('submit_button_present'):
+            problems.append('submit button not present - wizard did not reach the review page')
+
+        ok = len(problems) == 0
+        result = {
+            'ok': ok,
+            'problems': problems,
+            'fields_checked': len(fields),
+            'docs_expected': expected_docs,
+            'docs_uploaded': sorted(uploaded_keys),
+            'review_summary': review,
+            'review_screenshot_ref': read_out.get('review_screenshot_ref', ''),
+        }
+
+  # 5) Hard stop on a bad read - the workflow must NOT advance toward submission.
+  - id: validation_gate
+    type: condition
+    depends_on: [validate_fill]
+    condition_config:
+      expression: "{steps.validate_fill.output.ok} == True"
+      then: [verify_review]
+      else: [notify_blocked]
+
+  # 5b) Blocked branch: tell the bid team the application was NOT submitted and why.
+  - id: notify_blocked
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        Supplier onboarding on portal {input.portal_id} was BLOCKED before submission.
+        Validation failed: {steps.validate_fill.output.problems}. No filing was made.
+
+  # 6) SWAPPABLE llm_eval gate: a verifier model compares the review-page screenshot against
+  #    the source profile to catch transposed values BEFORE a human looks, plus a human
+  #    attester. ALL strategies must pass. The verifier can be a cheaper/different provider
+  #    than the script author - independently swappable.
+  - id: verify_review
+    type: gate
+    depends_on: [validation_gate]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are a data-fidelity reviewer for a supplier onboarding filing. Compare the
+              values shown on the portal's final REVIEW page against the canonical source company
+              profile. Answer exactly 'approved' only if every reviewed value (legal name, tax id,
+              DUNS, contact email, addresses) matches the source profile with NO transpositions,
+              truncations, or wrong-field placements; otherwise answer 'rejected' and name each
+              mismatch. Validated extraction: {steps.validate_fill.output} . Source profile:
+              {steps.load_profile.output}
+            input: "{steps.validate_fill.output}"
+            model: google/gemini-2.5-pro
+
+  # 7) HUMAN APPROVAL before the irreversible filing. The person reviews the captured
+  #    review-page screenshot + validated diff and approves the ACTUAL submit. No submission
+  #    can happen without this gate.
+  - id: approve_submit
+    type: approval
+    depends_on: [verify_review]
+    approval_config:
+      message: >-
+        Approve SUBMISSION of the supplier onboarding application on portal {input.portal_id}.
+        This is IRREVERSIBLE - it files the registration with the buyer. Review the captured
+        review-page screenshot and the validated field/document summary, then approve to submit
+        or reject to abort. Validated summary: {steps.validate_fill.output.review_summary}.
+        Screenshot: {steps.validate_fill.output.review_screenshot_ref}.
+      show_data: steps.validate_fill.output
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: false
+
+  # 8) WRITE PASS (Playwright, resumed): on approval ONLY, click the final Submit button and
+  #    capture the confirmation / reference number. capture_screenshots gives an auditable
+  #    after-submit record. max_actions kept small - this is a single confirm action.
+  - id: submit_application
+    type: browser
+    depends_on: [approve_submit]
+    prompt: >-
+      The supplier onboarding application is already filled and sitting on the portal's final
+      review page (a human has approved submission). Authenticate with PORTAL_CREDS if the
+      session expired, return to the review/summary page, and click the final Submit / Confirm /
+      File button ONCE to file the registration. Then read the confirmation page and capture the
+      buyer-issued confirmation or reference number. If a CAPTCHA appears, pause for a human. Do
+      not edit any field values. Return structured JSON with the submission outcome.
+    browser_config:
+      mode: playwright
+      start_url: "{input.portal_login_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 300
+      max_actions: 25
+      headless: true
+      credentials_env: "PORTAL_CREDS"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          submitted: { type: boolean }
+          confirmation_number: { type: string }
+          confirmation_message: { type: string }
+          confirmation_screenshot_ref: { type: string }
+
+  # 9) CONFIRM via the portal's OWN endpoint - never trust the click alone. Poll until the
+  #    buyer's registration-status endpoint reports the submission was accepted (200).
+  - id: await_portal_confirmation
+    type: sensor
+    depends_on: [submit_application]
+    sensor_config:
+      url: "{input.portal_confirm_url}?portal_id={input.portal_id}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200"
+      check_interval: 60
+      timeout: 3600
+
+  # 10) RELIABILITY: replay this run against a recorded sandbox-portal golden trajectory.
+  #     Fails when a portal redesign breaks the wizard path or cost blows up - catching drift
+  #     deterministically rather than on a model's say-so.
+  - id: drift_check
+    type: trajectory-replay
+    depends_on: [await_portal_confirmation]
+    trajectory_replay_config:
+      golden_run_id: "{input.golden_run_id}"
+      fail_below_score: 0.85
+      allow_cost_delta_pct: 15.0
+      cost_budget_usd: 0.5
+
+  # 11) SUCCESS notification with the buyer-issued reference number.
+  - id: notify_filed
+    type: notify
+    depends_on: [drift_check]
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        Supplier onboarding FILED on portal {input.portal_id}. Confirmation:
+        {steps.submit_application.output.confirmation_number}. Portal status endpoint
+        confirmed acceptance and the run passed golden-trajectory drift check.
+
+on_complete:
+  storage_path: "web-portal-supplier-onboarding-filer/{input.portal_id}/{run_id}/result.json"
