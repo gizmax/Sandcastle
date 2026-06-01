@@ -1,0 +1,398 @@
+# name: Synthetic Signup Journey Sentinel
+# description: Every 15 minutes a synthetic user drives your real production signup -> verify-email -> first-login -> onboarding journey in a headless browser, asserts each step structurally in deterministic code, replays against a recorded golden run to catch silent UI regressions, and pages on-call when account creation breaks.
+# tags: [SRE, Synthetic-Monitoring, Browser, Playwright, Signup, Activation, Golden-Run, On-Call]
+# category: engineering
+
+name: synthetic-signup-journey-sentinel
+description: >-
+  A read-only synthetic-monitoring sentinel for the most revenue-critical flow
+  in a self-serve SaaS: account creation. An http healthcheck on /signup returns
+  200 even when the submit button is wired to a dead endpoint, the verification
+  email never sends, or step 3 of the onboarding wizard throws in React. Only a
+  real browser driving the actual DOM proves a human can still create an account.
+
+  A SENSOR acts as a heartbeat clock (check_interval = 900s) and is also exposed
+  as a webhook so CI can fire the run post-deploy. A BROWSER step in provider-
+  neutral playwright mode authors a Playwright script from its prompt: it loads
+  the signup page, fills the form with a disposable seeded test account
+  (credentials_env = SYNTH_USER_SECRETS - never inline), polls a test-inbox page
+  for the verification link, clicks it, lands logged-in, and walks the onboarding
+  wizard - returning STRUCTURED JSON via output_schema (steps reached, http
+  status, email-received flag, onboarding-completed flag, per-step latency,
+  error text). A deterministic sandboxed CODE step then ASSERTS every field:
+  each expected milestone present, email received, onboarding completed, no error
+  text, every per-step latency under SLO - emitting pass/fail plus the exact
+  failing assertion. A TRAJECTORY-REPLAY scores the live run against a recorded
+  golden signup (fail_below_score = 0.85) to flag structural drift - a renamed
+  selector, a new interstitial - even when the assertions technically still pass.
+  A CONDITION routes the verdict: green -> a quiet NOTIFY on the ok channel; red
+  -> a NOTIFY that pages on-call with the failing assertion, the failure
+  screenshot URL, and the diff vs golden.
+
+  The journey only ever creates a known disposable test account, so there is NO
+  irreversible action and NO approval gate is required; the single human-in-the-
+  loop is captcha_strategy = pause. max_actions = 60 caps runaway clicking and
+  capture_screenshots = true gives an audit trail on the synthetic account.
+  Every load-bearing correctness check is deterministic code plus a golden-run
+  replay - never a single model's opinion. Swap default_model and nothing else
+  changes; dom mode is the cheap fallback for non-canvas signup forms.
+
+default_model: sonnet
+default_timeout: 900
+
+input_schema:
+  required: ["signup_url"]
+  properties:
+    signup_url:
+      type: string
+      description: "Production signup page URL the synthetic user starts from (e.g. https://app.acme.com/signup)"
+      default: ""
+    test_inbox_url:
+      type: string
+      description: "Disposable test-inbox web page the script polls for the verification email (e.g. https://inbox.testmail.app/u/synthetic)"
+      default: ""
+    expected_post_signup_url_contains:
+      type: string
+      description: "Substring the final logged-in URL must contain to prove first-login + onboarding landed (e.g. /app/welcome)"
+      default: "/app"
+    expected_steps:
+      type: string
+      description: "Comma-separated milestones the journey MUST reach, in order (used by the deterministic assertion code)"
+      default: "signup_form,form_submitted,verification_email_received,email_link_clicked,first_login,onboarding_completed"
+    browser_mode:
+      type: string
+      description: "Documented browser-mode choice for this monitor: 'playwright' (default, provider-neutral - the model authors the script) or swap the browser step's mode to 'dom' for cheap read-only checks of non-canvas signup forms"
+      default: "playwright"
+    step_latency_slo_ms:
+      type: number
+      description: "Per-step latency SLO in milliseconds; any per_step_latency_ms above this fails the run"
+      default: 8000
+    golden_run_id:
+      type: string
+      description: "Run id of a recorded healthy signup journey to replay against for structural-drift detection"
+      default: "golden-signup-baseline"
+    heartbeat_url:
+      type: string
+      description: "Lightweight heartbeat/clock endpoint the sensor polls on interval (also a CI webhook target for post-deploy firing)"
+      default: "https://app.acme.com/healthz/heartbeat"
+    ok_slack_channel:
+      type: string
+      description: "Quiet Slack channel for green synthetic-check confirmations"
+      default: "#synthetics-ok"
+    oncall_slack_channel:
+      type: string
+      description: "On-call Slack channel that pages when signup breaks (mirror of the PagerDuty route)"
+      default: "#oncall-activation"
+
+steps:
+  # 1) SENSOR heartbeat clock. On a schedule it ticks every 15 min (check_interval
+  #    = 900s); exposed as a webhook so CI can fire the same run post-deploy. It
+  #    gates the journey on the app being reachable at all before we drive a
+  #    browser at it - a cheap pre-flight, not the real proof of signup health.
+  - id: heartbeat_clock
+    type: sensor
+    sensor_config:
+      url: "{input.heartbeat_url}"
+      method: GET
+      condition: "status_code == 200"
+      check_interval: 900
+      timeout: 3600
+
+  # 2) BROWSER (provider-neutral playwright mode). The reasoning model authors a
+  #    Playwright script from this prompt that drives the REAL production signup
+  #    journey end to end and returns STRUCTURED JSON via output_schema (the read
+  #    pass). Disposable seeded credentials come from credentials_env, never
+  #    inline. captcha_strategy = pause hands a human the wheel on CAPTCHA;
+  #    max_actions = 60 caps runaway clicking; capture_screenshots = true keeps an
+  #    audit trail on the synthetic account. No write to any real system - it only
+  #    creates a known disposable test account - so no approval gate is needed.
+  - id: browser_journey
+    type: browser
+    depends_on: [heartbeat_clock]
+    browser_config:
+      mode: playwright
+      start_url: "{input.signup_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 120
+      max_actions: 60
+      headless: true
+      credentials_env: "SYNTH_USER_SECRETS"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          steps_reached:
+            type: array
+            items: { type: string }
+          signup_http_status: { type: integer }
+          verification_email_received: { type: boolean }
+          onboarding_completed: { type: boolean }
+          final_url: { type: string }
+          per_step_latency_ms: { type: object }
+          screenshot_url: { type: string }
+          error_text: { type: ["string", "null"] }
+        required:
+          - steps_reached
+          - signup_http_status
+          - verification_email_received
+          - onboarding_completed
+          - final_url
+          - per_step_latency_ms
+          - error_text
+    prompt: |
+      You are a synthetic monitoring user. Author and run a Playwright script that
+      drives the REAL production signup -> verify-email -> first-login ->
+      onboarding journey, behaving like a careful human creating one account.
+
+      Use ONLY the disposable seeded test account supplied via the credentials
+      environment (SYNTH_USER_SECRETS): it carries the test email address, a
+      strong password, and an inbox access token. NEVER print or echo the secret.
+
+      Journey (record a milestone string in steps_reached as each is reached, and
+      the wall-clock duration of each in per_step_latency_ms keyed by the same
+      milestone name):
+        1. "signup_form"                 - load {input.signup_url}; confirm the
+                                           signup form rendered (email + password
+                                           fields are present and interactable).
+        2. "form_submitted"              - fill email + password from the secret,
+                                           submit, and capture the HTTP status of
+                                           the submit request into signup_http_status.
+        3. "verification_email_received" - open {input.test_inbox_url}, poll (with
+                                           a bounded wait) until the verification
+                                           email arrives; set
+                                           verification_email_received = true and
+                                           extract the verify link. If it never
+                                           arrives, set it false and stop.
+        4. "email_link_clicked"          - click / navigate the verification link.
+        5. "first_login"                 - confirm you land authenticated (a
+                                           logged-in shell / dashboard chrome).
+        6. "onboarding_completed"        - walk every step of the onboarding wizard
+                                           to completion; set onboarding_completed
+                                           = true only if the final step succeeds.
+
+      Record final_url as the last URL after onboarding. Put a URL to the captured
+      failure screenshot (or the last screenshot) in screenshot_url. If anything
+      throws, breaks, or a milestone cannot be reached, put a short human-readable
+      explanation in error_text (otherwise error_text = null). On a CAPTCHA,
+      pause for the human per captcha_strategy.
+
+      Return ONLY the structured JSON object matching the output_schema. Do not
+      add prose outside the JSON.
+
+  # 3) DETERMINISTIC ASSERTION (sandboxed code). This is the load-bearing pass/fail
+  #    - NOT a model opinion. It validates the browser's structured extraction:
+  #    every expected milestone present, email received, onboarding completed, no
+  #    error text, and every per-step latency under SLO. Rejects on empty/bad reads.
+  - id: assert_journey
+    type: code
+    depends_on: [browser_journey]
+    code_config:
+      language: python
+      code: |
+        # Validate the browser's structured extraction field by field. Any miss is
+        # a hard fail; we record the FIRST failing assertion for the page-out.
+        j = _steps.get("browser_journey") or {}
+        if not isinstance(j, dict):
+            j = {}
+
+        # Parse the required milestone list from input (comma-separated, ordered).
+        raw_expected = str(_input.get("expected_steps", "") or "")
+        expected = [s.strip() for s in raw_expected.split(",") if s.strip()]
+        if not expected:
+            expected = [
+                "signup_form",
+                "form_submitted",
+                "verification_email_received",
+                "email_link_clicked",
+                "first_login",
+                "onboarding_completed",
+            ]
+
+        reached = j.get("steps_reached") or []
+        if not isinstance(reached, list):
+            reached = []
+        reached_set = {str(s).strip() for s in reached}
+
+        latencies = j.get("per_step_latency_ms") or {}
+        if not isinstance(latencies, dict):
+            latencies = {}
+
+        try:
+            slo_ms = float(_input.get("step_latency_slo_ms", 8000) or 8000)
+        except (TypeError, ValueError):
+            slo_ms = 8000.0
+
+        failures = []
+
+        # Guard against an empty / malformed read - a blank browser result must
+        # never be reported as a healthy signup.
+        if not reached_set:
+            failures.append("empty_read: browser returned no steps_reached")
+
+        # Assertion 1: every expected milestone was reached.
+        missing = [m for m in expected if m not in reached_set]
+        if missing:
+            failures.append("missing_steps: " + ", ".join(missing))
+
+        # Assertion 2: the submit HTTP status is a real 2xx (dead endpoint -> not).
+        status = j.get("signup_http_status")
+        try:
+            status_int = int(status)
+        except (TypeError, ValueError):
+            status_int = -1
+        if not (200 <= status_int < 300):
+            failures.append("bad_signup_status: " + str(status))
+
+        # Assertion 3: the verification email actually arrived.
+        if not bool(j.get("verification_email_received", False)):
+            failures.append("no_verification_email")
+
+        # Assertion 4: onboarding finished.
+        if not bool(j.get("onboarding_completed", False)):
+            failures.append("onboarding_incomplete")
+
+        # Assertion 5: the journey landed where first-login + onboarding should.
+        final_url = str(j.get("final_url", "") or "")
+        expect_frag = str(_input.get("expected_post_signup_url_contains", "") or "")
+        if expect_frag and expect_frag not in final_url:
+            failures.append("wrong_final_url: " + final_url)
+
+        # Assertion 6: the browser reported no error text.
+        err = j.get("error_text")
+        if err not in (None, "", "null"):
+            failures.append("browser_error: " + str(err))
+
+        # Assertion 7: every per-step latency is under SLO.
+        slow = []
+        for name, val in latencies.items():
+            try:
+                ms = float(val)
+            except (TypeError, ValueError):
+                continue
+            if ms > slo_ms:
+                slow.append(str(name) + "=" + str(int(ms)) + "ms")
+        if slow:
+            failures.append("latency_slo_breach(>" + str(int(slo_ms)) + "ms): " + ", ".join(slow))
+
+        passed = len(failures) == 0
+        result = {
+            "passed": passed,
+            "failing_assertion": ("" if passed else failures[0]),
+            "all_failures": failures,
+            "steps_reached": sorted(reached_set),
+            "missing_steps": missing,
+            "signup_http_status": status_int,
+            "verification_email_received": bool(j.get("verification_email_received", False)),
+            "onboarding_completed": bool(j.get("onboarding_completed", False)),
+            "final_url": final_url,
+            "screenshot_url": str(j.get("screenshot_url", "") or ""),
+            "slo_ms": slo_ms,
+        }
+
+  # 4) TRAJECTORY-REPLAY against a recorded healthy signup. Scores structural
+  #    similarity to the golden run and fails below 0.85 - catching drift (a
+  #    renamed selector, a new interstitial, an extra wizard step) even when the
+  #    field assertions above technically still pass. Reliability layer, not a vote.
+  - id: golden_replay
+    type: trajectory-replay
+    depends_on: [browser_journey, assert_journey]
+    trajectory_replay_config:
+      golden_run_id: "{input.golden_run_id}"
+      fail_below_score: 0.85
+      allow_cost_delta_pct: 15.0
+      cost_budget_usd: 0.5
+
+  # 5) Deterministically fold the assertion verdict AND the golden-replay verdict
+  #    into one health decision. Either a failed assertion OR structural drift
+  #    below threshold turns the synthetic check red. Pure code - no model here.
+  - id: synth_verdict
+    type: code
+    depends_on: [assert_journey, golden_replay]
+    code_config:
+      language: python
+      code: |
+        # Combine the deterministic assertion with the golden-run replay score.
+        a = _steps.get("assert_journey") or {}
+        rep = _steps.get("golden_replay") or {}
+        if not isinstance(a, dict):
+            a = {}
+        if not isinstance(rep, dict):
+            rep = {}
+
+        assertions_passed = bool(a.get("passed", False))
+
+        # The replay step surfaces a score and/or a pass flag depending on backend
+        # shape; read whichever is present and compare to the configured floor.
+        threshold = 0.85
+        score = rep.get("score", rep.get("replay_score"))
+        try:
+            score_f = float(score)
+        except (TypeError, ValueError):
+            score_f = None
+
+        if "passed" in rep:
+            replay_ok = bool(rep.get("passed"))
+        elif score_f is not None:
+            replay_ok = score_f >= threshold
+        else:
+            # No replay signal (e.g. golden run missing) - do not let a missing
+            # baseline mask a real assertion failure, but do not invent a drift
+            # failure either; treat replay as neutral/ok and rely on assertions.
+            replay_ok = True
+
+        healthy = assertions_passed and replay_ok
+
+        if not assertions_passed:
+            reason = "assertion_failed: " + str(a.get("failing_assertion", "unknown"))
+        elif not replay_ok:
+            sc = "n/a" if score_f is None else str(round(score_f, 3))
+            reason = "golden_drift: replay score " + sc + " below " + str(threshold)
+        else:
+            reason = "all_clear"
+
+        result = {
+            "healthy": healthy,
+            "status": ("green" if healthy else "red"),
+            "reason": reason,
+            "assertions_passed": assertions_passed,
+            "replay_ok": replay_ok,
+            "replay_score": score_f,
+            "failing_assertion": str(a.get("failing_assertion", "")),
+            "all_failures": a.get("all_failures", []),
+            "steps_reached": a.get("steps_reached", []),
+            "final_url": a.get("final_url", ""),
+            "screenshot_url": a.get("screenshot_url", ""),
+        }
+
+  # 6) CONDITION: route the verdict. healthy -> quiet OK notify; broken signup ->
+  #    page on-call. Read-only journey, so no destructive action and no approval.
+  - id: route_verdict
+    type: condition
+    depends_on: [synth_verdict]
+    condition_config:
+      expression: "{steps.synth_verdict.output.healthy} == True"
+      then: [notify_ok]
+      else: [notify_oncall]
+
+  # 6a) GREEN: a quiet confirmation on the synthetics-ok channel. Low noise.
+  - id: notify_ok
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.ok_slack_channel}"
+      message: ":white_check_mark: Synthetic signup journey GREEN. Reached {steps.synth_verdict.output.steps_reached}, landed {steps.synth_verdict.output.final_url}, golden replay score {steps.synth_verdict.output.replay_score}. (signup {input.signup_url})"
+
+  # 6b) RED: page on-call with the FAILING ASSERTION, the failure screenshot URL,
+  #     and the structural diff vs the golden run. This is the page that fires when
+  #     account creation is broken and every new signup that day is at risk.
+  - id: notify_oncall
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.oncall_slack_channel}"
+      message: ":rotating_light: SIGNUP BROKEN - synthetic journey RED. Cause: {steps.synth_verdict.output.reason}. Failing assertion: {steps.synth_verdict.output.failing_assertion}. Reached {steps.synth_verdict.output.steps_reached}. Golden replay score {steps.synth_verdict.output.replay_score} (drift threshold 0.85). Failure screenshot: {steps.synth_verdict.output.screenshot_url}. Signup URL {input.signup_url}. Paging on-call."
+
+on_complete:
+  storage_path: "synthetic-signup-journey-sentinel/{run_id}/result.json"

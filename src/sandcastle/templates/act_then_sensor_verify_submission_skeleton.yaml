@@ -1,0 +1,445 @@
+# name: Act Then Sensor Verify Submission Skeleton
+# description: The act-then-verify RPA skeleton for submitting into a third-party web portal that has no write API - drive the UI to FILL a form (stopping before submit), deterministically validate the filled preview, gate the irreversible submit behind a human approval, click submit only after sign-off, then poll the portal's own status page with a sensor until the action provably took effect (status accepted / reference number rendered) before declaring success. The fill and verify-poll steps are provider-neutral playwright/dom mode where the model authors the script; the irreversible click is gated by a human, not by trust in any one model, so reasoning providers swap freely without weakening safety. The load-bearing correctness is deterministic code + an engine-native sensor, never a single model's opinion; a silently-failed submit can never be mistaken for a win.
+# tags: [RPA, BrowserAutomation, Playwright, FormSubmission, HumanApproval, Sensor, ActThenVerify, PortalSubmission, NoAPI, ProviderNeutral]
+# category: general_ai
+
+name: act-then-sensor-verify-submission-skeleton
+description: >-
+  A provider-neutral act-then-verify skeleton for operations teams who must SUBMIT something
+  into a third-party web portal that exposes no write API - filing a regulatory return, posting
+  an invoice to a customer's AP portal, updating a marketplace back-office listing, or scheduling
+  a carrier pickup - and need proof the submission was ACCEPTED, not merely clicked. Triggered by
+  an upstream workflow that hands in the approved payload (an invoice, a filing draft) or by a
+  deadline-driven scheduled run. Step 1 drives the portal in playwright mode: it logs in via
+  credentials_env, navigates to the submission form, and FILLS every field from the input payload
+  - but STOPS before clicking submit, returning a structured preview via output_schema
+  (field_values, computed_total, target_entity_id, confirmation_required). Step 2 is deterministic
+  sandboxed Python that VALIDATES the preview with no model: totals reconcile to the expected
+  amount, required fields are non-empty, and the target entity id matches what was expected -
+  rejecting on any mismatch so nothing is submitted on a bad read. Step 3 is a mandatory human
+  approval that shows the validated preview plus the fill-time screenshot and BLOCKS until a person
+  authorizes the irreversible submit. Only on approval does step 4 (a second playwright browser step
+  under captcha_strategy=pause, capture_screenshots on for audit) click submit. Step 5 is an
+  engine-native sensor that re-drives a cheap dom-mode read of the portal's status page on each poll
+  until status == accepted or a reference number appears, with a hard timeout. Step 6 deterministically
+  decides the outcome, and a condition either pages on-call and leaves the run in a needs-attention
+  state (never a false success) on sensor timeout, or emits the portal reference number on confirmed
+  acceptance. Splitting fill (read) from submit (write) means the approval gate sees the exact state
+  the human authorizes; the sensor refuses to report success until the portal itself confirms, so a
+  silently-failed submit cannot be mistaken for a win. Both browser steps ride default_model and stay
+  swappable across providers; the approval and sensor safety are model-independent and engine-native.
+
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 1200
+
+input_schema:
+  required: ["portal_form_url", "portal_status_url", "submission_payload"]
+  properties:
+    portal_form_url:
+      type: string
+      description: "URL of the portal's submission form to drive and fill (logged-in SPA, no write API). Templated into the fill browser step's start_url."
+      example: "https://ap-portal.customer.example/invoices/new"
+    portal_status_url:
+      type: string
+      description: "URL of the portal's own status page for THIS submission; the verify sensor and the post-submit read re-drive a cheap dom read of it to confirm acceptance."
+      example: "https://ap-portal.customer.example/invoices/INV-2026-00412/status"
+    submission_payload:
+      type: string
+      description: "The approved payload to submit, handed in by the upstream workflow (e.g. an approved invoice or filing draft) as a JSON string - drives the form fill."
+      example: '{"target_entity_id":"AP-CUST-77","line_items":[{"desc":"Consulting","amount":4200.00},{"desc":"Travel","amount":318.50}],"currency":"USD"}'
+    expected_total:
+      type: number
+      description: "The total the upstream system expects the portal to compute from the payload; the validate step reconciles the portal's computed_total against this and rejects on mismatch."
+      default: 0
+      example: "4518.50"
+    expected_entity_id:
+      type: string
+      description: "The target entity id the submission MUST land against (customer/account/filing id). The validate step rejects if the portal-rendered target_entity_id differs - prevents submitting to the wrong account."
+      default: ""
+      example: "AP-CUST-77"
+    total_tolerance:
+      type: number
+      description: "Absolute currency tolerance allowed when reconciling computed_total vs expected_total (covers rounding/fees)."
+      default: 0.01
+      example: "0.01"
+    portal_credentials_env:
+      type: string
+      description: "Name of the environment variable holding the portal login credentials (NEVER inline secrets). Passed to the browser step's credentials_env."
+      default: "PORTAL_CREDS"
+      example: "PORTAL_CREDS"
+    approval_timeout_hours:
+      type: integer
+      description: "Hours the human submit-approval waits before its timeout fires (on_timeout: abort - never auto-submit)."
+      default: 24
+      example: "24"
+    sensor_poll_interval_seconds:
+      type: integer
+      description: "Seconds between status-page polls while waiting for the portal to confirm acceptance."
+      default: 60
+      example: "60"
+    sensor_timeout_seconds:
+      type: integer
+      description: "Hard ceiling in seconds the verify sensor waits for portal confirmation before it gives up and the run is routed to needs-attention (never reported as success)."
+      default: 3600
+      example: "3600"
+    oncall_channel:
+      type: string
+      description: "Slack channel paged when the sensor times out without confirmation, or when submit could not be confirmed - the run is left in a needs-attention state."
+      default: "#submission-oncall"
+      example: "#submission-oncall"
+    submission_label:
+      type: string
+      description: "Human-readable label for this submission used in the approval message and notifications (e.g. invoice number or filing name)."
+      default: "portal submission"
+      example: "Invoice INV-2026-00412 to AP-CUST-77"
+
+steps:
+  # 1) FILL (READ pass) - drive the portal in provider-neutral PLAYWRIGHT mode: log in via
+  #    credentials_env (no inline secrets), navigate to the form, fill EVERY field from the
+  #    payload, and STOP before clicking submit. Returns a structured preview via output_schema
+  #    so downstream validation is on JSON, not screen-scraping. max_actions caps the form fill;
+  #    captcha_strategy=pause hands off to a human if a CAPTCHA appears. No write happens here.
+  - id: fill_form_preview
+    type: browser
+    prompt: >-
+      Log into the submission portal using the credentials provided via the environment, then
+      navigate to the submission form at the start URL. Fill EVERY required field of the form
+      from this approved payload (a JSON string): {input.submission_payload}. Set each line item,
+      the target entity / account id, and the currency exactly as given. Let the portal compute
+      its own total. CRITICAL: do NOT click Submit, Send, File, Pay, or any final/confirm button
+      - stop at the filled-but-unsubmitted state. Read back the values the form now shows and the
+      portal's computed total. Return ONLY the structured object described by the output schema:
+      the field_values you entered, the portal's computed_total, the target_entity_id the form is
+      bound to, and confirmation_required=true. If a CAPTCHA or unexpected login wall appears,
+      pause for a human rather than guessing.
+    browser_config:
+      mode: playwright
+      start_url: "{input.portal_form_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 120
+      max_actions: 50
+      headless: true
+      credentials_env: "{input.portal_credentials_env}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          field_values:
+            type: object
+            description: "Map of form field name to the value entered (the exact filled state)."
+          computed_total:
+            type: number
+            description: "The total the portal itself computed from the entered line items."
+          target_entity_id:
+            type: string
+            description: "The customer/account/filing entity id the form is currently bound to."
+          required_fields_filled:
+            type: array
+            items:
+              type: string
+            description: "Names of required fields that were successfully filled (non-empty)."
+          missing_fields:
+            type: array
+            items:
+              type: string
+            description: "Names of required fields the form still reports as empty/invalid."
+          confirmation_required:
+            type: boolean
+            description: "True when the form is filled and awaiting a final submit click (never auto-clicked here)."
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
+
+  # 2) VALIDATE the preview DETERMINISTICALLY (no model) - this is the load-bearing correctness
+  #    check that gates the human approval. Totals must reconcile to expected_total within
+  #    tolerance, all required fields non-empty, and the portal-bound entity id must match the
+  #    expected target. ANY mismatch/empty read => ok=False and a human-readable reason; nothing
+  #    is ever submitted on a bad read.
+  - id: validate_preview
+    type: code
+    depends_on: [fill_form_preview]
+    code_config:
+      language: python
+      code: |
+        # Deterministic gate over the browser READ pass. No model decides correctness here.
+        preview = _steps.get("fill_form_preview") or {}
+        if not isinstance(preview, dict):
+            preview = {"raw": preview}
+        # The browser step may nest its structured payload under "output" or "data".
+        for key in ("output", "data", "result"):
+            inner = preview.get(key)
+            if isinstance(inner, dict) and ("computed_total" in inner or "field_values" in inner):
+                preview = inner
+                break
+
+        reasons = []
+
+        def _num(v, default=0.0):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return default
+
+        # --- Totals reconcile to what the upstream system expects (within tolerance) ---
+        computed_total = _num(preview.get("computed_total"), 0.0)
+        expected_total = _num(_input.get("expected_total"), 0.0)
+        tolerance = abs(_num(_input.get("total_tolerance"), 0.01))
+        total_ok = abs(computed_total - expected_total) <= tolerance
+        if expected_total <= 0:
+            total_ok = False
+            reasons.append("expected_total not provided (cannot reconcile portal computed_total)")
+        elif not total_ok:
+            reasons.append(
+                "total mismatch: portal computed " + str(round(computed_total, 2))
+                + " vs expected " + str(round(expected_total, 2))
+            )
+
+        # --- Required fields non-empty ---
+        field_values = preview.get("field_values")
+        if not isinstance(field_values, dict):
+            field_values = {}
+        missing = preview.get("missing_fields")
+        if not isinstance(missing, list):
+            missing = []
+        empty_fields = [k for k, v in field_values.items() if v in (None, "", [], {})]
+        fields_ok = (len(missing) == 0) and (len(empty_fields) == 0) and (len(field_values) > 0)
+        if len(field_values) == 0:
+            reasons.append("no field_values returned by the fill step (empty read)")
+        if missing:
+            reasons.append("portal reports missing/invalid required fields: " + ", ".join(str(m) for m in missing))
+        if empty_fields:
+            reasons.append("filled fields came back empty: " + ", ".join(str(m) for m in empty_fields))
+
+        # --- Target entity id matches the expected account/filing ---
+        got_entity = str(preview.get("target_entity_id", "") or "").strip()
+        want_entity = str(_input.get("expected_entity_id", "") or "").strip()
+        if want_entity:
+            entity_ok = (got_entity == want_entity)
+            if not entity_ok:
+                reasons.append("target entity mismatch: form bound to '" + got_entity + "' but expected '" + want_entity + "'")
+        else:
+            # No expected entity pinned: require the form to at least report a non-empty target.
+            entity_ok = bool(got_entity)
+            if not entity_ok:
+                reasons.append("form reported no target_entity_id and none was pinned")
+
+        # --- Confirmation must still be pending (the fill step must NOT have submitted) ---
+        confirmation_required = bool(preview.get("confirmation_required", False))
+        if not confirmation_required:
+            reasons.append("fill step did not return confirmation_required=true (state unsafe to approve)")
+
+        ok = bool(total_ok and fields_ok and entity_ok and confirmation_required)
+
+        result = {
+            "ok": ok,
+            "total_ok": total_ok,
+            "fields_ok": fields_ok,
+            "entity_ok": entity_ok,
+            "computed_total": round(computed_total, 2),
+            "expected_total": round(expected_total, 2),
+            "target_entity_id": got_entity,
+            "field_count": len(field_values),
+            "reasons": reasons,
+            "reason_summary": "; ".join(reasons) if reasons else "all checks passed",
+        }
+
+  # 3) Deterministic CONDITION - only route to the human approval when the preview is clean.
+  #    On a bad read, skip approval entirely and page on-call (no submit can possibly happen).
+  - id: preview_gate
+    type: condition
+    depends_on: [validate_preview]
+    condition_config:
+      expression: "{steps.validate_preview.output.ok} == True"
+      then: [approve_submit]
+      else: [notify_bad_preview]
+
+  # 3a) BAD-READ PATH - the validated preview failed; tell on-call exactly why and STOP.
+  #     The run is left needing attention; nothing was ever submitted.
+  - id: notify_bad_preview
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.oncall_channel}"
+      message: >-
+        BLOCKED before submit: {input.submission_label}. The deterministically-validated form
+        preview FAILED, so the human approval was not even offered and nothing was submitted.
+        Reason(s): {steps.validate_preview.output.reason_summary}. Portal computed
+        {steps.validate_preview.output.computed_total} vs expected
+        {steps.validate_preview.output.expected_total}; target entity
+        {steps.validate_preview.output.target_entity_id}. Fix the payload or portal state and re-run.
+
+  # 4) MANDATORY HUMAN APPROVAL before the irreversible submit. Shows the deterministically
+  #    validated preview AND the fill-time screenshot, and BLOCKS until a person authorizes.
+  #    Nothing is submitted on the model's word alone; on_timeout: abort means a missed approval
+  #    NEVER auto-submits.
+  - id: approve_submit
+    type: approval
+    approval_config:
+      message: >-
+        AUTHORIZE IRREVERSIBLE SUBMIT for {input.submission_label}. The form is filled and is
+        awaiting a final submit click. Validated preview: total
+        {steps.validate_preview.output.computed_total} (expected
+        {steps.validate_preview.output.expected_total}), target entity
+        {steps.validate_preview.output.target_entity_id}, {steps.validate_preview.output.field_count}
+        fields filled, checks: {steps.validate_preview.output.reason_summary}. Review the attached
+        fill-time screenshot - this is the EXACT state you are authorizing. Approve to click submit;
+        reject to abort with nothing submitted.
+      show_data: steps.validate_preview.output
+      show_images: ["steps.fill_form_preview.output.screenshot"]
+      timeout_hours: 24
+      on_timeout: abort
+      allow_edit: false
+
+  # 5) SUBMIT (WRITE pass) - only reached AFTER human approval. A second PLAYWRIGHT browser step
+  #    re-opens the filled form and clicks the single final submit button. captcha_strategy=pause
+  #    in case a CAPTCHA appears at the final wall; capture_screenshots on for an audit trail of
+  #    the write; max_actions tightly capped (one confirm click, no runaway). Returns whatever
+  #    immediate acknowledgement the portal renders - but acceptance is NOT trusted from here; the
+  #    sensor below re-reads the portal's own status page to confirm.
+  - id: click_submit
+    type: browser
+    depends_on: [approve_submit]
+    prompt: >-
+      A human has authorized this irreversible submission: {input.submission_label}. Log into the
+      portal using the environment credentials, return to the submission form, confirm the filled
+      values still match the approved preview (target entity
+      {steps.validate_preview.output.target_entity_id}, total
+      {steps.validate_preview.output.computed_total}), then click the SINGLE final submit/file/send
+      button ONCE to submit. Do not re-edit fields and do not click submit more than once. If a
+      CAPTCHA or step-up auth appears at this final wall, PAUSE for a human - do not attempt to
+      solve it. Capture a screenshot of the post-submit screen. Return any immediate reference
+      number or acknowledgement text the portal shows, plus submitted=true if the click was
+      accepted by the UI. Treat this only as an attempt - final acceptance is confirmed separately
+      by re-reading the status page.
+    browser_config:
+      mode: playwright
+      start_url: "{input.portal_form_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 120
+      max_actions: 12
+      headless: true
+      credentials_env: "{input.portal_credentials_env}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          submitted:
+            type: boolean
+            description: "True if the UI accepted the final submit click without an error."
+          acknowledgement_text:
+            type: string
+            description: "Any immediate on-screen acknowledgement the portal rendered after submit."
+          reference_number:
+            type: string
+            description: "A reference/confirmation number if the portal printed one immediately (may be empty until the status page updates)."
+    retry:
+      max_attempts: 1
+      backoff: fixed
+      on_failure: abort
+
+  # 6) VERIFY (engine-native SENSOR) - the act-then-VERIFY core. Poll the portal's OWN status page
+  #    until the action PROVABLY took effect: the status reads accepted/processed OR a reference
+  #    number is present. This re-drives a cheap dom-mode read of the status URL each interval. A
+  #    provider-agnostic boolean over the polled JSON - pure control flow, no model. Hard timeout
+  #    so we never wait forever; a timeout is NOT treated as success.
+  - id: verify_acceptance
+    type: sensor
+    depends_on: [click_submit]
+    sensor_config:
+      url: "{input.portal_status_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200 and (str(response.get('status', '')).strip().lower() in ('accepted', 'processed', 'confirmed', 'received') or bool(str(response.get('reference_number', '') or response.get('reference', '') or '').strip()))"
+      check_interval: 60
+      timeout: 3600
+
+  # 7) Deterministically decide acceptance from the sensor's last polled status payload. No model.
+  #    A missing confirmation (sensor timed out) yields confirmed=False so a silent failure can
+  #    NEVER be reported as a win.
+  - id: evaluate_acceptance
+    type: code
+    depends_on: [verify_acceptance]
+    code_config:
+      language: python
+      code: |
+        watch = _steps.get("verify_acceptance") or {}
+        if not isinstance(watch, dict):
+            watch = {"raw": watch}
+        # The sensor surfaces the last polled `response` payload.
+        resp = watch.get("response") if isinstance(watch.get("response"), dict) else watch
+        if not isinstance(resp, dict):
+            resp = {}
+
+        status = str(resp.get("status", "") or "").strip().lower()
+        reference = str(resp.get("reference_number", "") or resp.get("reference", "") or "").strip()
+
+        accepted_states = ("accepted", "processed", "confirmed", "received")
+        confirmed = (status in accepted_states) or bool(reference)
+
+        # Whether the sensor itself reported it satisfied its condition vs timed out.
+        sensor_satisfied = bool(watch.get("satisfied", watch.get("met", confirmed)))
+        timed_out = bool(watch.get("timed_out", False)) or (not sensor_satisfied and not confirmed)
+
+        result = {
+            "confirmed": bool(confirmed and not timed_out),
+            "status": status,
+            "reference_number": reference,
+            "timed_out": timed_out,
+            # fail_count > 0 routes the run to the needs-attention path (never false success).
+            "fail_count": 0 if (confirmed and not timed_out) else 1,
+            "submission_label": _input.get("submission_label", "portal submission"),
+        }
+
+  # 8) CONDITION - emit the portal reference on confirmed acceptance, OR page on-call and leave
+  #    the run in a needs-attention state on timeout/no-confirmation. We NEVER report a false win.
+  - id: acceptance_outcome
+    type: condition
+    depends_on: [evaluate_acceptance]
+    condition_config:
+      expression: "{steps.evaluate_acceptance.output.fail_count} > 0"
+      then: [notify_needs_attention]
+      else: [emit_reference]
+
+  # 8a) NEEDS-ATTENTION PATH - the sensor never saw the portal confirm acceptance (timeout or
+  #     non-accepted status). Page on-call; the run stays unresolved. A silently-failed submit is
+  #     surfaced, never mistaken for success.
+  - id: notify_needs_attention
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.oncall_channel}"
+      message: >-
+        NEEDS ATTENTION: {input.submission_label} was SUBMITTED but the portal has NOT confirmed
+        acceptance within the timeout (last status '{steps.evaluate_acceptance.output.status}',
+        reference '{steps.evaluate_acceptance.output.reference_number}',
+        timed_out={steps.evaluate_acceptance.output.timed_out}). Do NOT assume success - manually
+        check the portal status page and resolve. The run is left in a needs-attention state.
+
+  # 8b) SUCCESS PATH - the portal itself confirmed acceptance. Emit the portal reference number
+  #     deterministically as the authoritative proof of a landed submission.
+  - id: emit_reference
+    type: code
+    depends_on: [evaluate_acceptance]
+    code_config:
+      language: python
+      code: |
+        ev = _steps.get("evaluate_acceptance") or {}
+        if not isinstance(ev, dict):
+            ev = {}
+        result = {
+            "submission": _input.get("submission_label", "portal submission"),
+            "accepted": True,
+            "portal_reference_number": str(ev.get("reference_number", "") or ""),
+            "portal_status": str(ev.get("status", "") or ""),
+            "proof": "Portal status page confirmed acceptance; reference is the landed-submission proof.",
+        }
+
+on_complete:
+  storage_path: "act-then-sensor-verify-submission-skeleton/{run_id}/result.json"

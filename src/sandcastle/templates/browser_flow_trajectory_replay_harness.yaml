@@ -1,0 +1,326 @@
+# name: Browser Flow Trajectory Replay Harness
+# description: Drop-in regression harness that re-drives a recorded browser RPA flow against a golden trajectory and fails the run on UI drift or cost blowup - the reliability layer that makes fragile RPA testable in CI.
+# tags: [rpa, browser, trajectory-replay, regression, ci, reliability, playwright, drift-detection]
+# category: engineering
+
+name: browser-flow-trajectory-replay-harness
+description: >-
+  A read-only regression harness for fleets of business-critical browser RPA
+  flows. Given a {golden_run_id} and the target flow's inputs, it re-drives the
+  recorded flow against the LIVE site, captures the candidate action/extraction
+  trajectory (Playwright mode, screenshots on every action so the diff is
+  deterministic and vendor-free), then trajectory-replays it against the golden
+  run. The run FAILS when the replay score drops below fail_below_score or cost
+  exceeds the allowed delta / budget. A deterministic code step turns the replay
+  diff into a human-readable drift report (which selector / step diverged), a
+  condition routes regressions to an on-call notification that fails CI, and a
+  sub-workflow archives the certified-or-drifted verdict. This skeleton performs
+  NO outbound writes - it is a pure verification wrapper, so no approval gate is
+  needed. The same harness scores any flow authored by any reasoning model,
+  because it compares observable actions and extracted outputs, never provider
+  internals.
+
+default_model: sonnet
+default_timeout: 900
+
+input_schema:
+  required: ["golden_run_id", "target_flow", "target_start_url"]
+  properties:
+    golden_run_id:
+      type: string
+      description: >-
+        ID of the known-good recorded run to diff against. The trajectory-replay
+        step loads this golden trajectory and scores the candidate run against it.
+      default: "golden-portal-login-2fa-extract-2026-05-01"
+    target_flow:
+      type: string
+      description: >-
+        Name of the existing browser RPA workflow template whose live trajectory
+        we re-drive and certify (e.g. the recorded login+2FA+extract flow).
+      default: "portal_login_2fa_extract_skeleton"
+    target_start_url:
+      type: string
+      description: >-
+        Entry URL of the third-party portal the recorded flow drives. The
+        re-driven smoke run starts here. Provider-neutral - any portal works.
+      default: "https://portal.vendor.example.com/login"
+    flow_inputs_json:
+      type: string
+      description: >-
+        JSON object of inputs the target flow needs (account id, date range,
+        etc.), forwarded verbatim into the re-driven run. NEVER put secrets here -
+        credentials come from credentials_env inside the browser step.
+      default: '{"account_id": "ACME-001", "report": "monthly-statement"}'
+    fail_below_score:
+      type: string
+      description: "Replay similarity floor (0..1). Below this the flow is drifted and CI fails."
+      default: "0.85"
+    allow_cost_delta_pct:
+      type: string
+      description: "Max % cost increase vs the golden run before the replay is rejected."
+      default: "15.0"
+    cost_budget_usd:
+      type: string
+      description: "Hard per-replay cost cap. Exceeding it fails the run regardless of score."
+      default: "0.50"
+    oncall_channel:
+      type: string
+      description: "Slack channel the drift alert is posted to when a regression is detected."
+      default: "#rpa-oncall"
+
+steps:
+  # ---------------------------------------------------------------------------
+  # 1. DELEGATE - re-execute the target browser RPA flow against the LIVE site.
+  #    Hands the recorded flow off to its own existing workflow so the harness
+  #    stays a thin wrapper. Produces the candidate run referenced by replay.
+  # ---------------------------------------------------------------------------
+  - id: re-execute-target-flow
+    type: delegate
+    delegate_config:
+      workflow: "{input.target_flow}"
+      task_description: >-
+        Re-drive the recorded RPA flow against the live portal at
+        {input.target_start_url} using inputs {input.flow_inputs_json}. Run it
+        exactly as recorded so its trajectory can be diffed against golden run
+        {input.golden_run_id}. This is a read-only smoke test - extract only,
+        perform NO submit / pay / send actions.
+      timeout: 600
+
+  # ---------------------------------------------------------------------------
+  # 2. BROWSER - the candidate re-driver. Playwright mode (provider-neutral: the
+  #    model AUTHORS a Playwright script, swappable). capture_screenshots=true
+  #    records every action so the trajectory diff is deterministic and vendor-
+  #    free. output_schema makes this a structured READ pass (extract only).
+  #    Credentials via credentials_env (never inline). captcha_strategy: pause
+  #    hands CAPTCHA to a human. max_actions caps runaway clicking.
+  # ---------------------------------------------------------------------------
+  - id: drive-candidate-trajectory
+    type: browser
+    depends_on: [re-execute-target-flow]
+    prompt: >-
+      Re-drive the recorded portal smoke path step by step and emit a structured
+      trajectory. Open {input.target_start_url}, authenticate using the
+      credentials in the PORTAL_CREDS environment variable, complete any 2FA
+      challenge, navigate to the same report the golden run reached, and extract
+      the same fields. Record each action (selector + action type) and each
+      extracted value. Do NOT submit forms, pay, send, or mutate anything - this
+      is a read-only regression smoke test. If a CAPTCHA appears, pause for a
+      human. Stop after extraction and return the data matching output_schema.
+    browser_config:
+      mode: playwright
+      start_url: "{input.target_start_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 120
+      max_actions: 50
+      headless: true
+      credentials_env: "PORTAL_CREDS"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          reached_url:
+            type: string
+            description: "Final URL the flow landed on (should match the golden run's target page)."
+          actions:
+            type: array
+            description: "Ordered observable actions taken (selector + action type), for the diff."
+            items:
+              type: object
+              properties:
+                selector: { type: string }
+                action: { type: string }
+          extracted:
+            type: object
+            description: "The structured fields the recorded flow is meant to scrape."
+          action_count:
+            type: integer
+            description: "Total actions taken during the re-driven run."
+        required: ["reached_url", "actions", "extracted"]
+
+  # ---------------------------------------------------------------------------
+  # 3. VALIDATE EXTRACTION - deterministic guard on the browser READ pass BEFORE
+  #    we trust the trajectory. Rejects empty / malformed extractions (a blank
+  #    scrape must never be scored as a passing replay). No LLM in this gate.
+  # ---------------------------------------------------------------------------
+  - id: validate-extraction
+    type: code
+    depends_on: [drive-candidate-trajectory]
+    code_config:
+      language: python
+      code: |
+        cand = _steps['drive-candidate-trajectory']
+        if not isinstance(cand, dict):
+            cand = {}
+        reached = str(cand.get('reached_url') or '').strip()
+        actions = cand.get('actions')
+        if not isinstance(actions, list):
+            actions = []
+        extracted = cand.get('extracted')
+        if not isinstance(extracted, dict):
+            extracted = {}
+        # A trustworthy candidate must have landed somewhere, taken at least one
+        # observable action, and scraped at least one non-empty field. Anything
+        # less means the live UI likely changed under us - reject before replay.
+        non_empty_fields = [
+            k for k, v in extracted.items()
+            if v is not None and str(v).strip() != ''
+        ]
+        looks_like_url = reached.startswith('http')
+        errors = []
+        if not looks_like_url:
+            errors.append('candidate did not land on a valid URL')
+        if len(actions) == 0:
+            errors.append('candidate recorded zero observable actions')
+        if len(non_empty_fields) == 0:
+            errors.append('candidate extracted zero non-empty fields')
+        valid = len(errors) == 0
+        result = {
+            'valid': valid,
+            'errors': errors,
+            'reached_url': reached,
+            'action_count': len(actions),
+            'extracted_field_count': len(non_empty_fields),
+            'extracted_fields': non_empty_fields,
+        }
+
+  # ---------------------------------------------------------------------------
+  # 4. TRAJECTORY-REPLAY - the load-bearing reliability check. Loads the golden
+  #    trajectory by golden_run_id, diffs the candidate against it, and FAILS the
+  #    run when replay score < fail_below_score (UI drift) OR cost exceeds
+  #    allow_cost_delta_pct / cost_budget_usd (cost blowup). Deterministic scorer,
+  #    not a model's opinion. Provider-neutral: it compares observable actions and
+  #    extracted outputs only.
+  # ---------------------------------------------------------------------------
+  - id: replay-vs-golden
+    type: trajectory-replay
+    depends_on: [validate-extraction]
+    trajectory_replay_config:
+      golden_run_id: "{input.golden_run_id}"
+      fail_below_score: 0.85
+      allow_cost_delta_pct: 15.0
+      cost_budget_usd: 0.50
+
+  # ---------------------------------------------------------------------------
+  # 5. DRIFT REPORT - deterministic translation of the replay diff into a human-
+  #    readable verdict: which selector / step diverged, the score, and whether
+  #    the candidate read pass was even valid. This is the CI-facing summary.
+  # ---------------------------------------------------------------------------
+  - id: build-drift-report
+    type: code
+    depends_on: [replay-vs-golden]
+    code_config:
+      language: python
+      code: |
+        replay = _steps['replay-vs-golden']
+        if not isinstance(replay, dict):
+            replay = {}
+        check = _steps['validate-extraction']
+        if not isinstance(check, dict):
+            check = {}
+        # Pull the score / cost / diff from the replay result, defending against
+        # missing keys so the report never crashes the harness itself.
+        score = replay.get('score')
+        if score is None:
+            score = replay.get('replay_score', 0.0)
+        try:
+            score = float(score)
+        except (TypeError, ValueError):
+            score = 0.0
+        passed = bool(replay.get('passed', False))
+        cost_delta = replay.get('cost_delta_pct')
+        try:
+            cost_delta = float(cost_delta)
+        except (TypeError, ValueError):
+            cost_delta = 0.0
+        # Collect the diverged steps/selectors the replay reported, if any.
+        raw_diff = replay.get('diff') or replay.get('mismatches') or []
+        if isinstance(raw_diff, dict):
+            raw_diff = list(raw_diff.values())
+        if not isinstance(raw_diff, list):
+            raw_diff = [raw_diff]
+        diverged = []
+        for d in raw_diff:
+            if isinstance(d, dict):
+                where = d.get('selector') or d.get('step') or d.get('field') or 'unknown'
+                why = d.get('reason') or d.get('detail') or d.get('expected') or ''
+                diverged.append({'where': str(where), 'why': str(why)})
+            else:
+                diverged.append({'where': str(d), 'why': ''})
+        extraction_ok = bool(check.get('valid', False))
+        # Regression if the read pass was invalid, the replay did not pass, or
+        # the score sits under the configured floor. All deterministic.
+        try:
+            floor = float(str(_input.get('fail_below_score', '0.85')))
+        except (TypeError, ValueError):
+            floor = 0.85
+        regression = (not extraction_ok) or (not passed) or (score < floor)
+        lines = []
+        lines.append('Replay score: ' + str(round(score, 4)) + ' (floor ' + str(floor) + ')')
+        lines.append('Cost delta: ' + str(round(cost_delta, 2)) + '%')
+        lines.append('Extraction valid: ' + str(extraction_ok))
+        lines.append('Replay passed: ' + str(passed))
+        if diverged:
+            lines.append('Diverged points:')
+            for d in diverged[:25]:
+                lines.append('  - ' + d['where'] + (': ' + d['why'] if d['why'] else ''))
+        if not extraction_ok:
+            lines.append('Extraction errors: ' + '; '.join(check.get('errors', [])))
+        verdict = 'REGRESSION' if regression else 'CERTIFIED'
+        result = {
+            'verdict': verdict,
+            'regression': regression,
+            'score': round(score, 4),
+            'floor': floor,
+            'cost_delta_pct': round(cost_delta, 2),
+            'extraction_ok': extraction_ok,
+            'replay_passed': passed,
+            'diverged': diverged,
+            'report': verdict + '\n' + '\n'.join(lines),
+        }
+
+  # ---------------------------------------------------------------------------
+  # 6. ROUTE - deterministic branch on the drift verdict. Regression -> alert the
+  #    on-call channel (fails CI) and archive the failing verdict. Clean -> just
+  #    archive the certified verdict so the flow is cleared to run for real.
+  # ---------------------------------------------------------------------------
+  - id: route-on-verdict
+    type: condition
+    depends_on: [build-drift-report]
+    condition_config:
+      expression: "{steps.build-drift-report.output.regression} == True"
+      then: [alert-oncall, archive-verdict]
+      else: [archive-verdict]
+
+  # --- REGRESSION branch ----------------------------------------------------
+  # 6a. Post the drift report + screenshots to on-call. This failing notify is
+  #     the CI gate: a drifted flow is loudly flagged instead of silently
+  #     scraping garbage in production.
+  - id: alert-oncall
+    type: notify
+    depends_on: [route-on-verdict]
+    notify_config:
+      service: slack
+      channel: "{input.oncall_channel}"
+      message: >-
+        RPA REGRESSION on flow {input.target_flow} vs golden {input.golden_run_id}.
+        {steps.build-drift-report.output.report}
+        Screenshots from the re-driven run are attached to this replay; review the
+        diverged selectors before this flow is allowed to run in production.
+
+  # --- ARCHIVE (both branches) ---------------------------------------------
+  # 6b. Persist the verdict (certified or drifted) via a reusable summarizer
+  #     sub-workflow so every replay leaves an auditable record. Read-only.
+  - id: archive-verdict
+    type: sub_workflow
+    depends_on: [route-on-verdict]
+    sub_workflow:
+      workflow: "summarize"
+      input_mapping:
+        text: "{steps.build-drift-report.output.report}"
+        format: "bullet-points"
+      max_concurrent: 1
+
+on_complete:
+  storage_path: "rpa/trajectory-replay/{workflow_id}/{run_id}.json"

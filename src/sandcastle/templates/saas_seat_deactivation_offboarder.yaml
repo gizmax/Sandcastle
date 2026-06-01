@@ -1,0 +1,545 @@
+# name: SaaS Seat Deactivation Offboarder
+# description: Deactivate or downgrade a CSV/HR-feed list of departed users across SaaS admin consoles that expose no bulk-deactivation API, by driving the logged-in console. Before/after seat reconciliation per user, gated behind a single batch human approval.
+# tags: [Offboarding, SecOps, IT, SaaS, SCIM, Deprovision, Browser, Playwright, Reconciliation, Audit]
+# category: devops
+
+name: saas-seat-deactivation-offboarder
+description: >-
+  Deactivate (or downgrade) a list of departed users across one or more SaaS admin
+  consoles that ship NO bulk-deactivation API on the customer's plan. The only way to
+  apply the change at scale is to drive the authenticated admin SPA: per-user
+  'Deactivate' / 'Remove seat' buttons are rendered client-side, so a plain http step
+  cannot reach the gated, JS-rendered member rows.
+
+  Flow: a parse step reads the offboarding CSV/HR-feed into {email, requested_action}
+  rows. A READ-ONLY browser census (mode: dom) snapshots the live members page into a
+  structured before_roster via output_schema - it mutates nothing. A DETERMINISTIC code
+  step diffs the requested list against before_roster, classifies each user into
+  to_deactivate / already_inactive / not_found / ambiguous_duplicate, and runs an
+  ALLOWLIST GUARD that rejects any target email not present in the input CSV (no scope
+  creep). An llm_eval gate sanity-checks the plan shape (flags if an implausible fraction
+  of all seats would be deactivated - a likely bad feed). Then ONE human approval signs
+  off the entire batch_plan: the single place a human authorizes mutation. Only after that
+  does a loop run a per-user browser step (mode: playwright, max_actions capped,
+  capture_screenshots on) that navigates to each user and clicks Deactivate. A second
+  dom census produces after_roster, a final DETERMINISTIC code reconcile asserts every
+  targeted email is now inactive and every untouched email is unchanged (emitting a drift
+  list of failures), an llm_eval gate confirms the portal's own after-state, and Slack is
+  notified with a tamper-evident audit record of plan, approver, and per-user diffs.
+
+  PROVIDER NEUTRAL: both census and per-item deactivation use dom/playwright modes where
+  the reasoning model only authors a DOM extraction / Playwright script from the prompt;
+  the mutation itself is deterministic Playwright, so any of the 7 reasoning providers can
+  author it and is swappable. No vendor agent runtime is in the loop. Reconciliation and
+  the allowlist guard are pure Python, independent of any model.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 1800
+
+input_schema:
+  required: ["offboarding_csv", "admin_members_url"]
+  properties:
+    offboarding_csv:
+      type: string
+      description: "Reference to the offboarding CSV / HR-feed export (one row per departed user). Accepts @upload:<file_id>, @file:<path>, a URL, or a pasted CSV. Expected columns: email, requested_action (deactivate|downgrade)."
+      example: "@upload:offboarding-2026-06-02.csv"
+    admin_members_url:
+      type: string
+      description: "URL of the SaaS admin console members/users page where per-user seats are listed and the Deactivate / Remove-seat button lives (authenticated SPA)."
+      default: "https://app.your-saas.com/admin/members"
+      example: "https://app.acme-design.com/settings/team/members"
+    member_url_template:
+      type: string
+      description: "URL template for a single member's admin page; {email} is substituted per user during the deactivation loop. If your console deep-links by email or user id, set it here."
+      default: "https://app.your-saas.com/admin/members?q={email}"
+      example: "https://app.acme-design.com/settings/team/members?search={email}"
+    credentials_env_var:
+      type: string
+      description: "Name of the environment variable holding the admin login (username+password or session token). The value is NEVER inlined into the workflow."
+      default: "SAAS_ADMIN_CREDS"
+      example: "ACME_ADMIN_CREDS"
+    max_deactivation_fraction:
+      type: number
+      description: "Sanity ceiling: if the plan would deactivate more than this fraction of ALL observed seats, the gate flags a likely bad feed and the batch must be reviewed."
+      default: 0.4
+      example: "0.4"
+    slack_channel:
+      type: string
+      description: "Slack channel for the offboarding completion summary + drift report."
+      default: "#it-offboarding"
+      example: "#it-offboarding"
+
+steps:
+  # 1) PARSE the offboarding CSV / HR-feed into structured rows {email, requested_action}.
+  #    Deterministic ingest; no console contact yet.
+  - id: parse_offboarding_feed
+    type: parse
+    prompt: "{input.offboarding_csv}"
+    parse_config:
+      output: json
+
+  # 2) READ-ONLY CENSUS of the live members page (mode: dom). The reasoning model only
+  #    authors a DOM extraction from the prompt; output_schema returns a STRUCTURED
+  #    before_roster for every member row. This step MUTATES NOTHING (no clicks that change
+  #    state) - it is the pre-image of the audit before/after pair. credentials_env supplies
+  #    the admin login (never inlined); captcha_strategy pauses for a human on a CAPTCHA.
+  - id: census_before
+    type: browser
+    depends_on: [parse_offboarding_feed]
+    prompt: >
+      Log in to the SaaS admin console using the supplied credentials and open the members /
+      users management page. Do NOT click any Deactivate, Remove, Suspend, Downgrade, or
+      Delete control - this is a read-only census. Read every visible member row (paginate
+      through all pages if the list is paginated) and extract, for each member, their email,
+      their current account status (active or inactive/suspended/deactivated), their role,
+      and their seat/plan type. Return the full roster as structured JSON matching the schema.
+      The offboarding feed under review is: {steps.parse_offboarding_feed.output}.
+    browser_config:
+      mode: dom
+      start_url: "{input.admin_members_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 180
+      max_actions: 80
+      headless: true
+      credentials_env: "{input.credentials_env_var}"
+      captcha_strategy: pause
+      capture_screenshots: false
+      output_schema:
+        type: object
+        properties:
+          before_roster:
+            type: array
+            items:
+              type: object
+              properties:
+                email: { type: string }
+                status: { type: string, enum: ["active", "inactive"] }
+                role: { type: string }
+                seat_type: { type: string }
+              required: ["email", "status"]
+          total_seats_observed: { type: integer }
+        required: ["before_roster"]
+
+  # 3) DETERMINISTIC reconcile-plan. The load-bearing correctness: diff the requested feed
+  #    against before_roster, classify every requested user, and run the ALLOWLIST GUARD that
+  #    asserts no email outside the input CSV ever enters the plan. Pure Python, no model.
+  - id: reconcile_plan
+    type: code
+    depends_on: [parse_offboarding_feed, census_before]
+    code_config:
+      language: python
+      code: |
+        import json
+
+        # --- Normalize the parsed offboarding feed into [{email, requested_action}] -------
+        raw_feed = _steps['parse_offboarding_feed']
+        if isinstance(raw_feed, str):
+            try:
+                raw_feed = json.loads(raw_feed) if raw_feed.strip() else []
+            except (ValueError, TypeError):
+                raw_feed = []
+        if isinstance(raw_feed, dict):
+            raw_feed = raw_feed.get('rows') or raw_feed.get('records') or raw_feed.get('data') or []
+
+        requested = []
+        requested_allow = set()  # the canonical CSV allowlist
+        for row in (raw_feed or []):
+            if not isinstance(row, dict):
+                continue
+            email = str(row.get('email') or row.get('Email') or row.get('user') or '').strip().lower()
+            if not email:
+                continue
+            action = str(row.get('requested_action') or row.get('action') or 'deactivate').strip().lower()
+            if action not in ('deactivate', 'downgrade'):
+                action = 'deactivate'
+            requested.append({'email': email, 'requested_action': action})
+            requested_allow.add(email)
+
+        # --- Normalize the read-only census ---------------------------------------------
+        census = _steps['census_before'] or {}
+        if isinstance(census, str):
+            try:
+                census = json.loads(census) if census.strip() else {}
+            except (ValueError, TypeError):
+                census = {}
+        before_roster = census.get('before_roster', []) if isinstance(census, dict) else []
+
+        # Index roster by email; detect ambiguous duplicates (same email twice on the console).
+        by_email = {}
+        dup_emails = set()
+        for m in before_roster:
+            if not isinstance(m, dict):
+                continue
+            em = str(m.get('email') or '').strip().lower()
+            if not em:
+                continue
+            if em in by_email:
+                dup_emails.add(em)
+            by_email[em] = {
+                'email': em,
+                'status': str(m.get('status') or '').strip().lower() or 'active',
+                'role': m.get('role'),
+                'seat_type': m.get('seat_type'),
+            }
+
+        total_seats = len(by_email)
+
+        to_deactivate = []
+        already_inactive = []
+        not_found = []
+        ambiguous_duplicate = []
+        for req in requested:
+            em = req['email']
+            if em in dup_emails:
+                ambiguous_duplicate.append({**req, 'reason': 'multiple_console_rows_same_email'})
+                continue
+            current = by_email.get(em)
+            if current is None:
+                not_found.append({**req, 'reason': 'email_not_on_console'})
+                continue
+            if current['status'] == 'inactive':
+                already_inactive.append({**req, 'current_status': 'inactive'})
+                continue
+            to_deactivate.append({
+                'email': em,
+                'requested_action': req['requested_action'],
+                'before_status': current['status'],
+                'role': current.get('role'),
+                'seat_type': current.get('seat_type'),
+            })
+
+        # --- ALLOWLIST GUARD: no email outside the input CSV may ever be in the plan ------
+        plan_emails = {x['email'] for x in (to_deactivate + already_inactive + not_found + ambiguous_duplicate)}
+        scope_violations = sorted(plan_emails - requested_allow)
+        allowlist_ok = len(scope_violations) == 0
+
+        deactivate_fraction = (len(to_deactivate) / total_seats) if total_seats else 0.0
+
+        result = {
+            'allowlist_ok': allowlist_ok,
+            'scope_violations': scope_violations,
+            'total_seats_observed': total_seats,
+            'requested_count': len(requested),
+            'counts': {
+                'to_deactivate': len(to_deactivate),
+                'already_inactive': len(already_inactive),
+                'not_found': len(not_found),
+                'ambiguous_duplicate': len(ambiguous_duplicate),
+            },
+            'deactivate_fraction': round(deactivate_fraction, 4),
+            'batch_plan': {
+                'to_deactivate': to_deactivate,
+                'already_inactive': already_inactive,
+                'not_found': not_found,
+                'ambiguous_duplicate': ambiguous_duplicate,
+            },
+            'allowlist': sorted(requested_allow),
+        }
+
+  # 4) GATE (llm_eval): sanity-check the PLAN SHAPE before a human ever looks at it. Flags an
+  #    implausible deactivation fraction (likely a bad/over-broad feed) or any allowlist
+  #    violation. This is a secondary guard - the allowlist correctness already lives in code.
+  - id: plan_sanity_gate
+    type: gate
+    depends_on: [reconcile_plan]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >
+              You are an offboarding safety reviewer. Answer exactly 'approved' if this
+              deactivation plan looks safe to send to a human approver, or 'rejected' with the
+              reason if it looks like a bad feed. Reject if allowlist_ok is not true (scope
+              creep), if scope_violations is non-empty, or if deactivate_fraction exceeds
+              {input.max_deactivation_fraction} of all observed seats (an implausibly large
+              batch that suggests the wrong list was loaded). Otherwise approve. Plan:
+              {steps.reconcile_plan.output}
+            input: "{steps.reconcile_plan.output}"
+            model: sonnet
+
+  # 5) APPROVAL: the SINGLE human sign-off over the whole batch_plan. This is the ONLY place
+  #    a human authorizes mutation; nothing irreversible runs before this returns approved.
+  #    The reviewer sees the validated plan + counts and can edit (e.g. drop a borderline row).
+  - id: batch_approval
+    type: approval
+    depends_on: [plan_sanity_gate]
+    approval_config:
+      message: >
+        Offboarding batch - APPROVE to deactivate the listed seats, REJECT to abort the whole
+        run. This is the only authorization gate before any seat is changed. Review the counts
+        and the to_deactivate list carefully. to_deactivate will be deactivated one-by-one in
+        the admin console; already_inactive / not_found / ambiguous_duplicate will be SKIPPED
+        and reported. Allowlist OK: {steps.reconcile_plan.output.allowlist_ok}. Counts:
+        {steps.reconcile_plan.output.counts}. Seats observed: {steps.reconcile_plan.output.total_seats_observed}.
+      show_data: steps.reconcile_plan.output
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: true
+
+  # 6) LOOP over batch_plan.to_deactivate. Each iteration runs the per-user browser
+  #    deactivation (child step deactivate_one) reading the current user via _item. Runs ONLY
+  #    after the human approval above. max_iterations caps the batch size.
+  - id: deactivation_loop
+    type: loop
+    depends_on: [batch_approval]
+    loop_config:
+      over: "steps.reconcile_plan.output.batch_plan.to_deactivate"
+      step_ids: [deactivate_one]
+      max_iterations: 2000
+
+  # 6a) PER-USER deactivation (mode: playwright). The reasoning model only authors a
+  #     Playwright script from the prompt; the mutation itself is deterministic Playwright, so
+  #     any provider can author it and is swappable. max_actions is tightly capped so a
+  #     misnavigation cannot rampage through the roster; capture_screenshots is ON for audit;
+  #     captcha_strategy pauses for a human. output_schema returns a structured per-user result.
+  - id: deactivate_one
+    type: browser
+    prompt: >
+      You are deactivating exactly ONE departed user in the SaaS admin console. The target user
+      is: {{ _item }}. Navigate to that user's member row (search by their email if needed),
+      open their account, and click the control that DEACTIVATES / removes the seat for that
+      user only (Deactivate, Suspend, or Remove seat - whichever the console exposes). If the
+      requested_action is 'downgrade', instead set them to the lowest/free seat tier rather than
+      fully deactivating. Operate on this one email ONLY - never touch any other member row. If
+      a confirmation dialog appears, confirm it. Then read back this user's resulting account
+      status and return it. Do not navigate away to bulk actions or settings unrelated to this
+      user.
+    browser_config:
+      mode: playwright
+      start_url: "{input.member_url_template}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 120
+      max_actions: 25
+      headless: true
+      credentials_env: "{input.credentials_env_var}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          email: { type: string }
+          action_taken: { type: string, enum: ["deactivated", "downgraded", "skipped", "failed"] }
+          post_status: { type: string, enum: ["active", "inactive"] }
+          screenshot_ref: { type: string }
+        required: ["email", "action_taken", "post_status"]
+
+  # 7) RE-SNAPSHOT the roster (mode: dom, read-only) into after_roster - the post-image of the
+  #    audit pair. Same structured extraction as the census; no mutation.
+  - id: census_after
+    type: browser
+    depends_on: [deactivation_loop]
+    prompt: >
+      Re-open the members / users management page in the SaaS admin console (reload to get
+      fresh state). This is a read-only re-census after a batch of deactivations: do NOT click
+      any Deactivate, Remove, Suspend, or Delete control. Read every visible member row
+      (paginate through all pages) and extract each member's email, current account status
+      (active or inactive), role, and seat/plan type. Return the full roster as structured JSON.
+    browser_config:
+      mode: dom
+      start_url: "{input.admin_members_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 180
+      max_actions: 80
+      headless: true
+      credentials_env: "{input.credentials_env_var}"
+      captcha_strategy: pause
+      capture_screenshots: false
+      output_schema:
+        type: object
+        properties:
+          after_roster:
+            type: array
+            items:
+              type: object
+              properties:
+                email: { type: string }
+                status: { type: string, enum: ["active", "inactive"] }
+                role: { type: string }
+                seat_type: { type: string }
+              required: ["email", "status"]
+        required: ["after_roster"]
+
+  # 8) DETERMINISTIC final reconcile. The load-bearing post-check: assert EVERY targeted email
+  #    is now status==inactive and EVERY untouched email is unchanged vs the before census.
+  #    Emits a drift list of any user that did not reach the expected state. Pure Python.
+  - id: final_reconcile
+    type: code
+    depends_on: [reconcile_plan, census_after, deactivation_loop]
+    code_config:
+      language: python
+      code: |
+        import json
+
+        plan = _steps['reconcile_plan'] or {}
+        batch_plan = plan.get('batch_plan', {}) if isinstance(plan, dict) else {}
+        to_deactivate = batch_plan.get('to_deactivate', [])
+        targeted_emails = {x['email'] for x in to_deactivate}
+
+        # --- Before roster (from the original census, re-derived here for the diff) --------
+        census_b = _steps['census_before'] or {}
+        if isinstance(census_b, str):
+            try:
+                census_b = json.loads(census_b) if census_b.strip() else {}
+            except (ValueError, TypeError):
+                census_b = {}
+        before_rows = census_b.get('before_roster', []) if isinstance(census_b, dict) else []
+        before_status = {}
+        for m in before_rows:
+            if isinstance(m, dict):
+                em = str(m.get('email') or '').strip().lower()
+                if em:
+                    before_status[em] = str(m.get('status') or 'active').strip().lower()
+
+        # --- After roster -----------------------------------------------------------------
+        census_a = _steps['census_after'] or {}
+        if isinstance(census_a, str):
+            try:
+                census_a = json.loads(census_a) if census_a.strip() else {}
+            except (ValueError, TypeError):
+                census_a = {}
+        after_rows = census_a.get('after_roster', []) if isinstance(census_a, dict) else []
+        after_status = {}
+        for m in after_rows:
+            if isinstance(m, dict):
+                em = str(m.get('email') or '').strip().lower()
+                if em:
+                    after_status[em] = str(m.get('status') or 'active').strip().lower()
+
+        # --- Per-loop browser results, indexed by reported email --------------------------
+        loop_out = _steps['deactivation_loop'] or {}
+        loop_items = loop_out if isinstance(loop_out, list) else (
+            loop_out.get('results') or loop_out.get('items') or []
+        )
+        result_by_email = {}
+        for it in loop_items:
+            if isinstance(it, dict):
+                em = str(it.get('email') or '').strip().lower()
+                if em:
+                    result_by_email[em] = it
+
+        # --- Assert every targeted email is now inactive ----------------------------------
+        confirmed = []
+        drift = []
+        for em in sorted(targeted_emails):
+            post = after_status.get(em)
+            browser_res = result_by_email.get(em, {})
+            diff_row = {
+                'email': em,
+                'before_status': before_status.get(em),
+                'after_status': post,
+                'browser_action': browser_res.get('action_taken'),
+                'screenshot_ref': browser_res.get('screenshot_ref'),
+            }
+            if post == 'inactive':
+                confirmed.append(diff_row)
+            else:
+                drift.append({**diff_row, 'drift_reason': 'targeted_but_not_inactive'})
+
+        # --- Assert no UNTOUCHED user changed status (scope-creep / collateral check) ------
+        collateral = []
+        for em, before_s in before_status.items():
+            if em in targeted_emails:
+                continue
+            post = after_status.get(em)
+            if post is not None and post != before_s:
+                collateral.append({
+                    'email': em,
+                    'before_status': before_s,
+                    'after_status': post,
+                    'drift_reason': 'untouched_user_status_changed',
+                })
+
+        all_clean = (len(drift) == 0 and len(collateral) == 0)
+
+        result = {
+            'all_clean': all_clean,
+            'targeted_count': len(targeted_emails),
+            'confirmed_count': len(confirmed),
+            'drift_count': len(drift),
+            'collateral_count': len(collateral),
+            'confirmed': confirmed,
+            'drift': drift,
+            'collateral': collateral,
+        }
+
+  # 9) CONFIRMATION GATE (llm_eval) over the portal's OWN after-state. Secondary to the code
+  #    reconcile above (which is the authoritative correctness check): confirms the console's
+  #    reported roster is internally consistent before declaring success / shipping the audit.
+  - id: completion_gate
+    type: gate
+    depends_on: [final_reconcile]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >
+              You are an offboarding completion reviewer reading the console's own after-state
+              reconciliation. Answer exactly 'approved' if the result is internally consistent:
+              every targeted user that failed to reach inactive appears in the drift list, no
+              untouched user changed status (collateral_count must be 0), and the confirmed +
+              drift counts add up to targeted_count. Otherwise answer 'rejected' and name the
+              defect. Reconciliation: {steps.final_reconcile.output}
+            input: "{steps.final_reconcile.output}"
+            model: sonnet
+
+  # 10) AUDIT record: deterministic, tamper-evident SHA-256 over the canonical offboarding
+  #     record (plan, approver outcome, per-user before/after diffs, drift). No model.
+  - id: audit_record
+    type: code
+    depends_on: [reconcile_plan, batch_approval, final_reconcile, completion_gate]
+    code_config:
+      language: python
+      code: |
+        import json
+        import hashlib
+        from datetime import datetime, timezone
+
+        plan = _steps['reconcile_plan'] or {}
+        reconcile = _steps['final_reconcile'] or {}
+        approval = _steps['batch_approval'] or {}
+
+        approver = 'unknown'
+        if isinstance(approval, dict):
+            approver = str(approval.get('approver') or approval.get('approved_by') or 'unknown')
+
+        record = {
+            'generated_at': datetime.now(timezone.utc).isoformat(),
+            'approver': approver,
+            'allowlist_ok': plan.get('allowlist_ok'),
+            'plan_counts': plan.get('counts'),
+            'total_seats_observed': plan.get('total_seats_observed'),
+            'targeted_count': reconcile.get('targeted_count'),
+            'confirmed_count': reconcile.get('confirmed_count'),
+            'drift_count': reconcile.get('drift_count'),
+            'collateral_count': reconcile.get('collateral_count'),
+            'per_user_diffs': reconcile.get('confirmed', []) + reconcile.get('drift', []),
+            'collateral': reconcile.get('collateral', []),
+            'all_clean': reconcile.get('all_clean'),
+        }
+
+        # Canonical (sorted-key) serialization so the audit hash is reproducible byte-for-byte.
+        canonical = json.dumps(record, sort_keys=True, separators=(',', ':'))
+        digest = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+
+        result = {
+            'sha256': digest,
+            'byte_length': len(canonical),
+            'audit_record': record,
+            'canonical_json': canonical,
+        }
+
+  # 11) NOTIFY the offboarding channel with the result + drift report + audit integrity hash.
+  - id: notify_summary
+    type: notify
+    depends_on: [audit_record]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: "Offboarding batch complete. Targeted: {steps.final_reconcile.output.targeted_count} | Confirmed inactive: {steps.final_reconcile.output.confirmed_count} | Drift (failed): {steps.final_reconcile.output.drift_count} | Collateral (untouched changed): {steps.final_reconcile.output.collateral_count} | All clean: {steps.final_reconcile.output.all_clean} | Approver: {steps.audit_record.output.audit_record.approver} | Audit sha256 {steps.audit_record.output.sha256}."
+
+on_complete:
+  storage_path: "saas-seat-deactivation-offboarder/{run_id}/result.json"
