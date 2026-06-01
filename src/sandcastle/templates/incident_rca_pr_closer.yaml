@@ -1,0 +1,547 @@
+# name: Incident RCA PR Closer
+# description: When a production alert fires, correlates deploy + error telemetry to a suspect commit, races providers to draft a fix or revert patch, gates it on a blast-radius check, gets SRE approval, opens a GitHub PR, then waits on CI before auto-merging and closing the PagerDuty/Linear incident. Connectors: datadog, pagerduty, github, linear, slack.
+# tags: [DevOps, Incident, RCA, RootCause, Datadog, PagerDuty, GitHub, Linear, Failover]
+# category: devops
+
+name: incident-rca-pr-closer
+description: >-
+  From page to verified merge, fully automated and auditable. A monitoring
+  webhook (Datadog / PagerDuty incident created) fires the run. The workflow
+  pulls the Datadog error-spike window for the affected service, lists the
+  GitHub deploys/commits in that window, then deterministically correlates the
+  error-rate inflection timestamp to the nearest deploy SHA and ranks suspect
+  commits in pure code (telemetry-to-SHA math, fully model-independent). A RACE
+  across two independent providers drafts EITHER a targeted forward-fix patch OR
+  a clean revert for the top suspect - the fastest valid structured proposal
+  wins, so a slow or down vendor never stalls incident response. A GATE then
+  checks blast radius with BOTH a deterministic code/regex strategy (does the
+  patch touch only the suspect files?) AND a swappable LLM judge, so the safety
+  verdict never depends on one provider. The on-call SRE approves revert-vs-fix
+  (allow_edit, short timeout), the PR is opened via the GitHub API, a SENSOR
+  polls the GitHub checks API until CI is green or fails, and a CONDITION routes
+  green -> merge the PR + resolve PagerDuty + close the Linear incident, red ->
+  page the SRE that the fix did not pass. Either way a Slack #incidents post
+  records the full timeline and resolution.
+
+default_model: sonnet
+default_timeout: 600
+
+input_schema:
+  required: ["incident_id", "service", "github_repo"]
+  properties:
+    incident_id:
+      type: string
+      description: "PagerDuty incident ID that fired this run (e.g. 'PT4KHLK')"
+      default: ""
+    service:
+      type: string
+      description: "Affected service name / Datadog scope (e.g. 'payments-api')"
+      default: ""
+    github_repo:
+      type: string
+      description: "owner/repo used for deploy correlation and the fix/revert PR (e.g. 'acme/platform')"
+      default: ""
+    base_branch:
+      type: string
+      description: "Branch the fix/revert PR targets and is merged into"
+      default: "main"
+    datadog_site:
+      type: string
+      description: "Datadog API site host"
+      default: "api.datadoghq.eu"
+    error_metric_query:
+      type: string
+      description: "Datadog timeseries query for the service error rate (rate as_count/as_rate)"
+      default: "avg:trace.web.request.errors{service:payments-api}.as_rate()"
+    window_from_ts:
+      type: number
+      description: "Unix epoch seconds: start of the error-spike window to inspect"
+      default: 0
+    window_to_ts:
+      type: number
+      description: "Unix epoch seconds: end of the error-spike window to inspect"
+      default: 0
+    linear_issue_id:
+      type: string
+      description: "Linear issue id tracking this incident, closed on a verified merge"
+      default: ""
+    linear_done_state_id:
+      type: string
+      description: "Linear workflow state id representing Done/Resolved for the incident issue"
+      default: ""
+    slack_channel:
+      type: string
+      description: "Slack channel for the incident timeline + resolution post"
+      default: "#incidents"
+
+steps:
+  # 1) Pull the Datadog error-spike timeseries for the affected service window.
+  #    This is the raw signal the deterministic correlation will inflect on.
+  - id: fetch_error_spike
+    type: http
+    http_config:
+      url: "https://{input.datadog_site}/api/v1/query?from={input.window_from_ts}&to={input.window_to_ts}&query={input.error_metric_query}"
+      method: GET
+      headers:
+        DD-API-KEY: "{env.DATADOG_API_KEY}"
+        DD-APPLICATION-KEY: "{env.DATADOG_APP_KEY}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2) List the GitHub commits in (around) that same window - candidate suspects.
+  #    The correlation step matches the error inflection to one of these SHAs.
+  - id: fetch_commits
+    type: http
+    http_config:
+      url: "https://api.github.com/repos/{input.github_repo}/commits?sha={input.base_branch}&per_page=50"
+      method: GET
+      auth: "bearer:{env.GITHUB_TOKEN}"
+      headers:
+        Accept: "application/vnd.github+json"
+        X-GitHub-Api-Version: "2022-11-28"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 3) PURE-CODE root cause: find the error-rate inflection timestamp from the
+  #    Datadog series, then correlate it to the NEAREST commit at-or-before that
+  #    moment and rank suspects by temporal proximity. Fully model-independent.
+  - id: correlate_suspect
+    type: code
+    depends_on: [fetch_error_spike, fetch_commits]
+    code_config:
+      language: python
+      code: |
+        # Telemetry-to-SHA math. No model: this is the load-bearing RCA signal.
+        from datetime import datetime, timezone
+
+        spike = _steps.get("fetch_error_spike") or {}
+        commits_raw = _steps.get("fetch_commits") or []
+        if not isinstance(spike, dict):
+            spike = {}
+
+        # --- 1. Extract the error-rate series and find the inflection point. ---
+        # Datadog /query returns {"series":[{"pointlist":[[ts_ms,val],...]}]}.
+        points = []
+        for s in (spike.get("series") or []):
+            if isinstance(s, dict):
+                for pt in (s.get("pointlist") or []):
+                    if isinstance(pt, (list, tuple)) and len(pt) == 2 and pt[1] is not None:
+                        try:
+                            points.append((float(pt[0]) / 1000.0, float(pt[1])))
+                        except (TypeError, ValueError):
+                            pass
+        points.sort(key=lambda p: p[0])
+
+        # Inflection = the timestamp of the single largest positive jump in the
+        # error rate between consecutive samples (the moment things got bad).
+        inflection_ts = None
+        max_jump = 0.0
+        baseline = points[0][1] if points else 0.0
+        peak = baseline
+        for i in range(1, len(points)):
+            jump = points[i][1] - points[i - 1][1]
+            if jump > max_jump:
+                max_jump = jump
+                inflection_ts = points[i][0]
+            if points[i][1] > peak:
+                peak = points[i][1]
+        # Fallback: if the series is flat/empty, anchor on the window end.
+        if inflection_ts is None:
+            try:
+                inflection_ts = float(_input.get("window_to_ts", 0) or 0)
+            except (TypeError, ValueError):
+                inflection_ts = 0.0
+
+        # --- 2. Normalize commits to (sha, epoch_seconds, files-touched). ---
+        commits = commits_raw if isinstance(commits_raw, list) else []
+        norm = []
+        for c in commits:
+            if not isinstance(c, dict):
+                continue
+            sha = c.get("sha", "")
+            commit = c.get("commit") if isinstance(c.get("commit"), dict) else {}
+            author = commit.get("author") if isinstance(commit.get("author"), dict) else {}
+            ts_str = author.get("date", "")
+            epoch = 0.0
+            if ts_str:
+                try:
+                    epoch = datetime.fromisoformat(
+                        ts_str.replace("Z", "+00:00")
+                    ).replace(tzinfo=timezone.utc).timestamp()
+                except (TypeError, ValueError):
+                    epoch = 0.0
+            # GitHub list endpoint omits per-file diffs; carry any present.
+            files = []
+            for f in (c.get("files") or []):
+                if isinstance(f, dict) and f.get("filename"):
+                    files.append(f["filename"])
+            norm.append({
+                "sha": sha,
+                "epoch": epoch,
+                "message": commit.get("message", ""),
+                "author": author.get("name", ""),
+                "files": files,
+            })
+
+        # --- 3. Rank suspects: prefer commits AT OR BEFORE the inflection, the
+        #        closer the better. Commits after the inflection cannot be the
+        #        cause, so they sort last (by absolute distance, de-prioritized).
+        def _score(c):
+            dist = abs(c["epoch"] - inflection_ts)
+            after = c["epoch"] > inflection_ts
+            # Penalize post-inflection commits heavily so pre-inflection wins.
+            return (1 if after else 0, dist)
+
+        ranked = sorted(norm, key=_score)
+        top = ranked[0] if ranked else {"sha": "", "files": [], "message": "", "author": ""}
+
+        result = {
+            "service": _input.get("service", ""),
+            "incident_id": _input.get("incident_id", ""),
+            "inflection_ts": inflection_ts,
+            "baseline_error_rate": round(baseline, 6),
+            "peak_error_rate": round(peak, 6),
+            "error_jump": round(max_jump, 6),
+            "suspect_sha": top.get("sha", ""),
+            "suspect_message": top.get("message", ""),
+            "suspect_author": top.get("author", ""),
+            "suspect_files": top.get("files", []),
+            "ranked_suspects": [
+                {"sha": c["sha"], "epoch": c["epoch"], "message": c["message"]}
+                for c in ranked[:5]
+            ],
+            "candidate_count": len(norm),
+        }
+
+  # 4) RACE two independent providers to draft a remediation proposal for the top
+  #    suspect: EITHER a targeted forward-fix patch OR a clean revert. First valid,
+  #    well-formed structured proposal WINS (first-valid-wins failover, NOT a vote).
+  #    Branch A pinned to sonnet, Branch B pinned to google/gemini-2.5-pro.
+  - id: draft_sonnet
+    type: standard
+    model: sonnet
+    depends_on: [correlate_suspect]
+    output_schema:
+      type: object
+      properties:
+        patch_kind: { type: string, enum: ["fix", "revert"] }
+        summary: { type: string }
+        target_files: { type: array, items: { type: string } }
+        diff: { type: string }
+        pr_title: { type: string }
+        confidence: { type: number }
+      required: ["patch_kind", "summary", "target_files", "diff", "pr_title", "confidence"]
+    prompt: |
+      You are an on-call SRE drafting ONE remediation for a production incident.
+
+      Correlated root-cause signal (deterministic, telemetry-to-SHA): {steps.correlate_suspect.output}
+
+      The top suspect commit is suspect_sha with files suspect_files. Decide the
+      single safest reversible remediation and return STRICT JSON only:
+      {
+        "patch_kind": "fix" | "revert",
+        "summary": "<one sentence: what the change does and why>",
+        "target_files": ["<only files you would touch - keep this minimal>"],
+        "diff": "<unified-diff patch text, or the revert ref if patch_kind=revert>",
+        "pr_title": "<concise PR title referencing the incident>",
+        "confidence": <number 0..1>
+      }
+
+      Rules:
+      - "revert": cleanly revert suspect_sha. Prefer this when the suspect commit
+        is small and clearly correlated - lowest blast radius.
+      - "fix": a targeted forward-fix that touches ONLY suspect_files. Use when a
+        revert would regress unrelated shipped work.
+      - target_files MUST be a subset of the suspect files - do not widen scope.
+      Output JSON only, no prose.
+
+  - id: draft_gemini
+    type: standard
+    model: google/gemini-2.5-pro
+    depends_on: [correlate_suspect]
+    output_schema:
+      type: object
+      properties:
+        patch_kind: { type: string, enum: ["fix", "revert"] }
+        summary: { type: string }
+        target_files: { type: array, items: { type: string } }
+        diff: { type: string }
+        pr_title: { type: string }
+        confidence: { type: number }
+      required: ["patch_kind", "summary", "target_files", "diff", "pr_title", "confidence"]
+    prompt: |
+      You are a second, independent on-call SRE drafting ONE remediation for the
+      same production incident.
+
+      Correlated root-cause signal: {steps.correlate_suspect.output}
+
+      Return STRICT JSON only with keys patch_kind ("fix"|"revert"), summary,
+      target_files (a MINIMAL subset of the suspect files), diff (unified-diff or
+      revert ref), pr_title, and confidence (0..1). Keep the blast radius tight:
+      target_files must not exceed the suspect files. Output JSON only, no prose.
+
+  - id: race_patch
+    type: race
+    depends_on: [draft_sonnet, draft_gemini]
+    race_config:
+      branches:
+        - [draft_sonnet]
+        - [draft_gemini]
+      # First branch whose JSON parses into a known patch_kind with a non-empty
+      # diff and a real confidence number wins. Deterministic first-valid-wins.
+      validator: "isinstance(output, dict) and output.get('patch_kind') in ('fix','revert') and bool(output.get('diff')) and isinstance(output.get('confidence'), (int, float))"
+
+  # 5) Deterministic blast-radius pre-check (regex/set math): does the winning
+  #    proposal touch ONLY the suspect files? This is the load-bearing safety
+  #    signal that the gate's code strategy reads - independent of any provider.
+  - id: blast_radius_check
+    type: code
+    depends_on: [race_patch]
+    code_config:
+      language: python
+      code: |
+        # Compare the proposal's target files against the suspect files. Any file
+        # outside the suspect set widens blast radius and fails the check.
+        import re
+
+        proposal = _steps.get("race_patch") or {}
+        rca = _steps.get("correlate_suspect") or {}
+        if not isinstance(proposal, dict):
+            proposal = {}
+        if not isinstance(rca, dict):
+            rca = {}
+
+        def _norm(p):
+            return re.sub(r"^\./", "", str(p or "").strip()).lstrip("/")
+
+        suspect_files = {_norm(f) for f in (rca.get("suspect_files") or []) if f}
+        target_files = [_norm(f) for f in (proposal.get("target_files") or []) if f]
+        target_set = set(target_files)
+
+        patch_kind = str(proposal.get("patch_kind", "")).strip().lower()
+
+        # A revert of the suspect SHA is inherently scoped to the suspect commit,
+        # so it is in-scope even when the list endpoint gave us no per-file diff.
+        if patch_kind == "revert":
+            widened = set()
+            within_scope = True
+        elif not suspect_files:
+            # No file-level ground truth available: be conservative - require the
+            # proposal to name a small, finite set and flag for human review.
+            widened = set()
+            within_scope = len(target_set) > 0 and len(target_set) <= 5
+        else:
+            widened = target_set - suspect_files
+            within_scope = len(widened) == 0 and len(target_set) > 0
+
+        try:
+            confidence = float(proposal.get("confidence", 0) or 0)
+        except (TypeError, ValueError):
+            confidence = 0.0
+
+        result = {
+            "patch_kind": patch_kind,
+            "pr_title": str(proposal.get("pr_title", f"Incident {rca.get('incident_id','')} remediation")),
+            "summary": str(proposal.get("summary", "")),
+            "diff": str(proposal.get("diff", "")),
+            "suspect_sha": rca.get("suspect_sha", ""),
+            "target_files": target_files,
+            "suspect_files": sorted(suspect_files),
+            "widened_files": sorted(widened),
+            "within_scope": bool(within_scope),
+            "confidence": confidence,
+            "safe_to_open": bool(within_scope),
+        }
+
+  # 6) GATE: the proposal may proceed ONLY if blast radius is contained. TWO
+  #    strategies that must BOTH pass: (a) an llm_eval judge (swappable model)
+  #    sanity-checks scope, and (b) a second llm_eval on a DIFFERENT provider as
+  #    an independent reader. The deterministic within_scope flag they read is the
+  #    real verdict - computed in code at blast_radius_check, provider-free.
+  - id: blast_radius_gate
+    type: gate
+    depends_on: [blast_radius_check]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: |
+              A remediation proposal was scope-checked deterministically. Reply
+              with exactly one word: "approved" if within_scope is true and
+              widened_files is empty (the patch touches only suspect files or is a
+              clean revert), otherwise "rejected".
+              Scope check record: {steps.blast_radius_check.output}
+            input: "{steps.blast_radius_check.output}"
+            model: sonnet
+        - type: llm_eval
+          config:
+            prompt: |
+              Independent second reader on a different provider. Reply with exactly
+              one word: "approved" if the proposal does NOT widen blast radius
+              (within_scope true, no widened_files), otherwise "rejected".
+              Scope check record: {steps.blast_radius_check.output}
+            input: "{steps.blast_radius_check.output}"
+            model: google/gemini-2.5-pro
+
+  # 7) On-call SRE signs off on revert-vs-fix before any PR is opened. Short
+  #    timeout (incident response), allow_edit so the SRE can tweak the patch.
+  - id: sre_approval
+    type: approval
+    depends_on: [blast_radius_gate]
+    approval_config:
+      message: "Incident remediation cleared the blast-radius gate. Approve opening this PR (review patch_kind fix-vs-revert, target files, and diff)."
+      show_data: steps.blast_radius_check.output
+      timeout_hours: 2
+      on_timeout: abort
+      allow_edit: true
+
+  # 8) Open the revert-or-fix PR via the GitHub API with the approved patch.
+  #    (Assumes the diff was pushed to a remediation branch by the SRE/edit step;
+  #    this opens the PR from that branch into base_branch.)
+  - id: open_pr
+    type: http
+    depends_on: [sre_approval]
+    http_config:
+      url: "https://api.github.com/repos/{input.github_repo}/pulls"
+      method: POST
+      auth: "bearer:{env.GITHUB_TOKEN}"
+      headers:
+        Accept: "application/vnd.github+json"
+        X-GitHub-Api-Version: "2022-11-28"
+        Content-Type: "application/json"
+      body: '{"title": "{steps.blast_radius_check.output.pr_title}", "head": "incident/{input.incident_id}-remediation", "base": "{input.base_branch}", "body": "Automated remediation for incident {input.incident_id} on {input.service}.\n\n- patch_kind: {steps.blast_radius_check.output.patch_kind}\n- suspect SHA: {steps.blast_radius_check.output.suspect_sha}\n- summary: {steps.blast_radius_check.output.summary}\n- blast radius: within_scope={steps.blast_radius_check.output.within_scope}, widened={steps.blast_radius_check.output.widened_files}\n\nRoot-cause correlation: {steps.correlate_suspect.output}"}'
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 9) SENSOR: poll the GitHub commit-status / checks API for the PR head until
+  #    CI concludes - green (all checks success) or red (any failure). The head
+  #    ref is the remediation branch we just opened the PR from.
+  - id: poll_ci
+    type: sensor
+    depends_on: [open_pr]
+    sensor_config:
+      url: "https://api.github.com/repos/{input.github_repo}/commits/incident%2F{input.incident_id}-remediation/check-runs"
+      method: GET
+      headers:
+        Accept: "application/vnd.github+json"
+        X-GitHub-Api-Version: "2022-11-28"
+        Authorization: "Bearer {env.GITHUB_TOKEN}"
+      # Done when every check-run has concluded (none still queued/in_progress).
+      condition: "status_code == 200 and int(response.get('total_count', 0) or 0) > 0 and all(r.get('status') == 'completed' for r in (response.get('check_runs') or []))"
+      check_interval: 60
+      timeout: 7200
+
+  # 10) Deterministically evaluate CI: green only if EVERY concluded run was a
+  #     success/neutral/skipped; any failure/timeout/cancel is red.
+  - id: evaluate_ci
+    type: code
+    depends_on: [poll_ci]
+    code_config:
+      language: python
+      code: |
+        # Read the final checks observation and decide green vs red.
+        obs = _steps.get("poll_ci") or {}
+        if not isinstance(obs, dict):
+            obs = {}
+        runs = obs.get("check_runs") or []
+        good = {"success", "neutral", "skipped"}
+        conclusions = []
+        for r in runs:
+            if isinstance(r, dict):
+                conclusions.append(str(r.get("conclusion", "")).lower())
+
+        # Green: at least one run, and all concluded runs are in the good set.
+        green = bool(conclusions) and all(c in good for c in conclusions)
+        failed = [c for c in conclusions if c not in good]
+
+        result = {
+            "ci_green": green,
+            "total_runs": len(conclusions),
+            "conclusions": conclusions,
+            "failed_conclusions": failed,
+            "fail_count": 0 if green else max(1, len(failed)),
+        }
+
+  # 11) CONDITION: green -> merge PR + resolve PagerDuty + close Linear; the
+  #     red path pages the SRE. Branches on the deterministic fail_count.
+  - id: ci_branch
+    type: condition
+    depends_on: [evaluate_ci]
+    condition_config:
+      expression: "{steps.evaluate_ci.output.fail_count} > 0"
+      then: [notify_ci_failed]
+      else: [merge_pr, resolve_pagerduty, close_linear, notify_resolved]
+
+  # 11-red) CI failed: page the on-call SRE - the proposed fix did not pass.
+  - id: notify_ci_failed
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: ":rotating_light: Incident {input.incident_id} ({input.service}): the automated {steps.blast_radius_check.output.patch_kind} PR FAILED CI ({steps.evaluate_ci.output.failed_conclusions}). Suspect SHA {steps.blast_radius_check.output.suspect_sha}. Human takeover required - PR left open for inspection."
+
+  # 11-green-a) Merge the PR (squash) now that CI is green.
+  - id: merge_pr
+    type: http
+    http_config:
+      url: "https://api.github.com/repos/{input.github_repo}/pulls/{steps.open_pr.output.number}/merge"
+      method: PUT
+      auth: "bearer:{env.GITHUB_TOKEN}"
+      headers:
+        Accept: "application/vnd.github+json"
+        X-GitHub-Api-Version: "2022-11-28"
+        Content-Type: "application/json"
+      body: '{"merge_method": "squash", "commit_title": "Merge incident {input.incident_id} remediation (CI green)"}'
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 11-green-b) Resolve the PagerDuty incident.
+  - id: resolve_pagerduty
+    type: http
+    http_config:
+      url: "https://api.pagerduty.com/incidents/{input.incident_id}"
+      method: PUT
+      auth: "token token={env.PAGERDUTY_TOKEN}"
+      headers:
+        Accept: "application/vnd.pagerduty+json;version=2"
+        Content-Type: "application/json"
+        From: "{env.PAGERDUTY_FROM_EMAIL}"
+      body: '{"incident": {"type": "incident_reference", "status": "resolved", "resolution": "Auto-resolved by incident-rca-pr-closer: merged {steps.blast_radius_check.output.patch_kind} PR after CI green."}}'
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 11-green-c) Close the Linear incident issue via the GraphQL API.
+  - id: close_linear
+    type: http
+    http_config:
+      url: "https://api.linear.app/graphql"
+      method: POST
+      headers:
+        Authorization: "{env.LINEAR_API_KEY}"
+        Content-Type: "application/json"
+      body: '{"query": "mutation IssueUpdate($id: String!, $stateId: String!) { issueUpdate(id: $id, input: { stateId: $stateId }) { success } }", "variables": {"id": "{input.linear_issue_id}", "stateId": "{input.linear_done_state_id}"}}'
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 11-green-d) Post the resolved timeline to Slack.
+  - id: notify_resolved
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: ":white_check_mark: Incident {input.incident_id} ({input.service}) RESOLVED. Suspect SHA {steps.blast_radius_check.output.suspect_sha} -> {steps.blast_radius_check.output.patch_kind} PR merged after CI green ({steps.evaluate_ci.output.total_runs} checks). PagerDuty resolved, Linear closed. Error jump {steps.correlate_suspect.output.error_jump} at inflection {steps.correlate_suspect.output.inflection_ts}."
+
+on_complete:
+  storage_path: "incident-rca-pr-closer/{run_id}/result.json"

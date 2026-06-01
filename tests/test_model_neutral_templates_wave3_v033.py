@@ -250,12 +250,15 @@ def test_code_steps_pass_engine_sandbox_blocklist(template_name: str) -> None:
 
 def test_wave_introduces_breadth() -> None:
     """The wave as a whole should span many domains and exercise diverse patterns."""
+    # Resolve the catalog once - calling list_templates() per template parses the whole
+    # 170+ template catalog each time and times out the test.
+    by_file = {t.file_name: t for t in list_templates()}
     categories: set[str] = set()
     types_seen: set[str] = set()
     for name in WAVE3_TEMPLATES:
         wf = parse_yaml_string(_load(name))
         types_seen |= {s.type for s in wf.steps}
-        info = next((t for t in list_templates() if t.file_name == f"{name}.yaml"), None)
+        info = by_file.get(f"{name}.yaml")
         if info and info.category:
             categories.add(info.category)
     assert len(categories) >= 5, f"wave 3 should span >= 5 categories, got {sorted(categories)}"

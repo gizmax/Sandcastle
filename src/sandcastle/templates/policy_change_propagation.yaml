@@ -1,0 +1,588 @@
+# name: Policy Change Propagation
+# description: When a master policy or templated clause changes, deterministically diff new vs prior version, find every downstream contract embedding the affected clause, draft tailored amendment letters, route them through a two-judge + human gate, bulk-send re-signature envelopes via DocuSign, poll for acceptance across the portfolio, then bucket outcomes and produce branded compliance evidence.
+# tags: [Legal, CLM, Policy, DPA, DocuSign, Notion, Postgres, GitHub, Compliance, Amendment, ReSignature]
+# category: hr_legal
+
+name: policy-change-propagation
+description: >
+  Master-clause change propagation for a legal-operations team running hundreds of live
+  agreements. A trigger fires when an updated master policy / clause-library version lands
+  (GitHub commit, Google Drive file, or a row flip in a PostgreSQL policy table). The new
+  version is PARSED into structured clause text, then a DETERMINISTIC Python step computes a
+  semantic diff against the prior version supplied in input and emits the exact list of
+  changed_clause_ids - this model-free diff is what drives the entire fan-out, so which
+  contracts get touched never depends on an LLM. An HTTP step queries the CLM of record
+  (PostgreSQL REST / Notion database) for every document that embeds those clause ids. A LOOP
+  drafts a tailored amendment / re-signature notice per affected contract (a swappable,
+  provider-agnostic standard call that routes by cost / quality). A GATE then verifies each
+  draft: a first llm_eval judge checks faithfulness to the diff, a SECOND llm_eval judge on a
+  DIFFERENT provider re-checks for hallucinated obligations, and a human legal approver signs
+  off the batch with a hard timeout - giving provider-independent verification. Approved
+  amendments are bulk-sent as DocuSign envelopes; a durable SENSOR polls DocuSign every 4h
+  (timeout 30 days) until accepted_count == sent_count or the window closes. A CLASSIFY bins
+  each contract outcome into accepted / declined / no_response and branches to per-bucket
+  follow-up: Slack to the deal owners and Gmail to counterparties. Finally a TRANSFORM folds
+  the portfolio into an acceptance report and a REPORT renders branded PDF compliance evidence
+  proving every counterparty was notified. Diffing, querying, bulk-send, polling and bucketing
+  are all deterministic; only the per-draft wording and the two faithfulness judges are model
+  work, and each is swappable across providers.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 900
+
+input_schema:
+  required: ["policy_id", "new_policy_source", "prior_clauses"]
+  properties:
+    policy_id:
+      type: string
+      description: "Identifier of the master policy / clause library being propagated (e.g. 'DPA-2026', 'MSA-LIABILITY-CAP')."
+      default: "DPA-2026"
+      example: "DPA-2026"
+    new_policy_source:
+      type: string
+      description: "Location of the new policy version to parse - a GitHub raw URL, a Google Drive export URL, or an uploaded file ref. Parsed into clause text."
+      default: "https://raw.githubusercontent.com/your-org/policies/main/dpa/v2.md"
+      example: "https://raw.githubusercontent.com/acme/policies/main/dpa/v2.md"
+    prior_clauses:
+      type: string
+      description: >
+        The prior approved clause set as JSON, used as the model-free diff baseline. Shape:
+        {"clauses":[{"clause_id":"dpa-3.2","text":"...","version":"1.0"}, ...]}.
+      default: '{"clauses": [{"clause_id": "dpa-3.2", "text": "Processor shall retain logs for 90 days.", "version": "1.0"}]}'
+      example: '{"clauses": [{"clause_id": "dpa-3.2", "text": "Processor shall retain logs for 90 days.", "version": "1.0"}]}'
+    clm_query_url:
+      type: string
+      description: "REST endpoint of the CLM of record (PostgreSQL REST / PostgREST or Notion database query) that returns documents referencing given clause ids."
+      default: "https://clm.internal/api/postgrest/documents"
+      example: "https://acme.internal/postgrest/contract_clause_refs"
+    clm_backend:
+      type: string
+      description: "Which CLM backend the query URL speaks: 'postgrest' (PostgreSQL REST) or 'notion'. Controls auth header + response shape parsing."
+      default: "postgrest"
+      example: "notion"
+    docusign_base_url:
+      type: string
+      description: "DocuSign eSignature REST base URL including account id, used to bulk-create amendment envelopes and poll their status."
+      default: "https://eu.docusign.net/restapi/v2.1/accounts/your-account-id"
+      example: "https://eu.docusign.net/restapi/v2.1/accounts/abc123"
+    similarity_threshold:
+      type: number
+      description: "Token-overlap ratio (0-1) below which a clause is treated as materially changed by the deterministic diff."
+      default: 0.85
+      example: "0.85"
+    poll_interval:
+      type: integer
+      description: "Seconds between DocuSign acceptance polls (default 4h)."
+      default: 14400
+      example: "14400"
+    poll_timeout:
+      type: integer
+      description: "Total seconds to wait for full portfolio acceptance before closing the window (default 30 days)."
+      default: 2592000
+      example: "2592000"
+    slack_channel:
+      type: string
+      description: "Slack channel for the deal-owner follow-up on declined / no-response counterparties."
+      default: "#contracts-ops"
+      example: "#legal-ops"
+    counterparty_from:
+      type: string
+      description: "From address for the Gmail re-signature reminder to counterparties."
+      default: "contracts@your-org.com"
+      example: "contracts@acme.com"
+
+steps:
+  # 1) PARSE the new master policy version (GitHub / Google Drive / uploaded file) into clause text.
+  - id: parse_new_policy
+    type: parse
+    prompt: "{input.new_policy_source}"
+    parse_config:
+      output: markdown
+      pages: null
+      ocr: false
+      ocr_engine: auto
+
+  # 2) DETERMINISTIC semantic diff: extract clauses from the parsed new version, compare against the
+  #    prior approved clause set (token-overlap ratio), and emit the EXACT changed_clause_ids list.
+  #    This model-free step is the load-bearing decision that drives the whole fan-out.
+  - id: diff_clauses
+    type: code
+    depends_on: [parse_new_policy]
+    code_config:
+      language: python
+      code: |
+        import json
+        import re
+
+        parsed = _steps.get('parse_new_policy') or {}
+        # Parsed output may be a dict {markdown/text/content} or a raw string.
+        if isinstance(parsed, dict):
+            new_text = str(parsed.get('markdown') or parsed.get('text') or parsed.get('content') or '')
+        else:
+            new_text = str(parsed)
+
+        threshold = float(_input.get('similarity_threshold', 0.85) or 0.85)
+
+        # --- Parse the prior approved baseline (JSON string or already-parsed dict). ---
+        raw_prior = _input.get('prior_clauses') or {}
+        if isinstance(raw_prior, str):
+            try:
+                raw_prior = json.loads(raw_prior) if raw_prior.strip() else {}
+            except (ValueError, TypeError):
+                raw_prior = {}
+        prior_clauses = raw_prior.get('clauses', []) if isinstance(raw_prior, dict) else []
+        prior_by_id = {}
+        for c in prior_clauses:
+            if isinstance(c, dict) and c.get('clause_id'):
+                prior_by_id[str(c['clause_id'])] = str(c.get('text', ''))
+
+        # --- Extract clauses from the new parsed markdown. Convention: each clause is a
+        #     section headed by an id token like "[dpa-3.2]" or "## dpa-3.2". Tolerate both. ---
+        new_by_id = {}
+        # Pattern A: explicit [clause-id] markers.
+        for m in re.finditer(r'\[([a-zA-Z0-9._-]+)\]\s*(.*?)(?=\n\[[a-zA-Z0-9._-]+\]|\Z)', new_text, re.DOTALL):
+            new_by_id[m.group(1)] = m.group(2).strip()
+        # Pattern B: markdown headings "## <id>" if no bracket markers were found.
+        if not new_by_id:
+            for m in re.finditer(r'^#{1,6}\s*([a-zA-Z0-9._-]+)\s*\n(.*?)(?=^#{1,6}\s|\Z)', new_text, re.DOTALL | re.MULTILINE):
+                new_by_id[m.group(1)] = m.group(2).strip()
+
+        def _norm_tokens(s):
+            return set(t for t in re.findall(r'[a-z0-9]+', s.lower()) if t)
+
+        def _overlap(a, b):
+            ta, tb = _norm_tokens(a), _norm_tokens(b)
+            if not ta and not tb:
+                return 1.0
+            if not ta or not tb:
+                return 0.0
+            inter = len(ta & tb)
+            union = len(ta | tb)
+            return inter / union if union else 0.0
+
+        changed = []
+        added = []
+        all_ids = set(prior_by_id) | set(new_by_id)
+        for cid in sorted(all_ids):
+            old = prior_by_id.get(cid)
+            new = new_by_id.get(cid)
+            if old is None and new is not None:
+                added.append(cid)
+                changed.append({
+                    'clause_id': cid, 'change_type': 'added',
+                    'similarity': 0.0, 'new_text': new, 'old_text': '',
+                })
+                continue
+            if old is not None and new is None:
+                # Clause removed in new version - still a material change to propagate.
+                changed.append({
+                    'clause_id': cid, 'change_type': 'removed',
+                    'similarity': 0.0, 'new_text': '', 'old_text': old,
+                })
+                continue
+            sim = _overlap(old, new)
+            if sim < threshold:
+                changed.append({
+                    'clause_id': cid, 'change_type': 'modified',
+                    'similarity': round(sim, 4), 'new_text': new, 'old_text': old,
+                })
+
+        changed_clause_ids = [c['clause_id'] for c in changed]
+        result = {
+            'policy_id': _input.get('policy_id'),
+            'threshold': threshold,
+            'changed_clause_ids': changed_clause_ids,
+            'changed_count': len(changed_clause_ids),
+            'changes': changed,
+            'added_clause_ids': added,
+            'has_changes': len(changed_clause_ids) > 0,
+        }
+
+  # 3) QUERY the CLM of record (PostgreSQL REST / Notion) for every document embedding the changed clauses.
+  #    changed_clause_ids comes straight from the deterministic diff, so the fan-out is model-free.
+  - id: find_affected_contracts
+    type: http
+    depends_on: [diff_clauses]
+    http_config:
+      url: "{input.clm_query_url}?clause_id=in.({steps.diff_clauses.output.changed_clause_ids})&select=document_id,counterparty,counterparty_email,owner,clause_id,envelope_template_id"
+      method: GET
+      headers:
+        Accept: "application/json"
+        Content-Type: "application/json"
+      auth: "bearer:{env.CLM_API_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 4) DETERMINISTIC normalization: fold the CLM response into one affected-contract list
+  #    (dedupe by document_id, attach the specific clause change each contract is impacted by). No model.
+  - id: build_affected_list
+    type: code
+    depends_on: [diff_clauses, find_affected_contracts]
+    code_config:
+      language: python
+      code: |
+        diff = _steps.get('diff_clauses') or {}
+        resp = _steps.get('find_affected_contracts') or {}
+        backend = str(_input.get('clm_backend', 'postgrest') or 'postgrest').lower()
+
+        # PostgREST returns a list; Notion returns {"results": [{"properties": {...}}]}.
+        if backend == 'notion':
+            rows = resp.get('results', []) if isinstance(resp, dict) else []
+        else:
+            rows = resp if isinstance(resp, list) else (resp.get('data') or resp.get('rows') or [])
+
+        change_by_id = {c.get('clause_id'): c for c in diff.get('changes', []) if isinstance(c, dict)}
+
+        def _notion_text(prop):
+            # Flatten a Notion property to plain text.
+            if not isinstance(prop, dict):
+                return str(prop)
+            for key in ('rich_text', 'title'):
+                arr = prop.get(key)
+                if isinstance(arr, list) and arr:
+                    return ''.join(str(p.get('plain_text', '')) for p in arr if isinstance(p, dict))
+            if 'email' in prop:
+                return str(prop.get('email') or '')
+            if 'select' in prop and isinstance(prop.get('select'), dict):
+                return str(prop['select'].get('name', ''))
+            return str(prop.get('plain_text', '') or '')
+
+        affected = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            if backend == 'notion':
+                props = row.get('properties', {}) if isinstance(row.get('properties'), dict) else {}
+                doc_id = _notion_text(props.get('document_id')) or row.get('id', '')
+                counterparty = _notion_text(props.get('counterparty'))
+                cp_email = _notion_text(props.get('counterparty_email'))
+                owner = _notion_text(props.get('owner'))
+                clause_id = _notion_text(props.get('clause_id'))
+                envelope_tpl = _notion_text(props.get('envelope_template_id'))
+            else:
+                doc_id = str(row.get('document_id') or row.get('id') or '')
+                counterparty = str(row.get('counterparty') or '')
+                cp_email = str(row.get('counterparty_email') or '')
+                owner = str(row.get('owner') or '')
+                clause_id = str(row.get('clause_id') or '')
+                envelope_tpl = str(row.get('envelope_template_id') or '')
+            if not doc_id:
+                continue
+            entry = affected.setdefault(doc_id, {
+                'document_id': doc_id,
+                'counterparty': counterparty,
+                'counterparty_email': cp_email,
+                'owner': owner,
+                'envelope_template_id': envelope_tpl,
+                'impacted_clause_ids': [],
+                'impacted_changes': [],
+            })
+            if clause_id and clause_id not in entry['impacted_clause_ids']:
+                entry['impacted_clause_ids'].append(clause_id)
+                ch = change_by_id.get(clause_id)
+                if ch:
+                    entry['impacted_changes'].append({
+                        'clause_id': clause_id,
+                        'change_type': ch.get('change_type'),
+                        'old_text': ch.get('old_text', ''),
+                        'new_text': ch.get('new_text', ''),
+                    })
+
+        affected_list = list(affected.values())
+        result = {
+            'policy_id': diff.get('policy_id'),
+            'affected_count': len(affected_list),
+            'affected_contracts': affected_list,
+            'has_affected': len(affected_list) > 0,
+        }
+
+  # 5) LOOP each affected contract: draft a tailored amendment / re-signature notice referencing
+  #    the specific clause change. The child is a swappable, provider-agnostic standard call.
+  - id: draft_amendments
+    type: loop
+    depends_on: [build_affected_list]
+    loop_config:
+      over: "steps.build_affected_list.output.affected_contracts"
+      step_ids: [draft_amendment_letter]
+      max_iterations: 500
+
+  # 5a) Per-contract amendment draft. Reads the current affected contract via _item. Swappable model;
+  #     stays on default_model so it routes by cost/quality, no provider lock-in.
+  - id: draft_amendment_letter
+    type: standard
+    output_schema:
+      type: object
+      properties:
+        document_id: { type: string }
+        subject: { type: string }
+        amendment_body: { type: string }
+      required: ["document_id", "subject", "amendment_body"]
+    prompt: |
+      You are a contracts attorney drafting a precise, plain-language amendment / re-signature
+      notice for a single live agreement affected by a master-policy clause change. Reference ONLY
+      the specific clause change(s) provided - do not invent new obligations, dates, or parties.
+
+      Master policy: {input.policy_id}
+      Affected contract (document_id, counterparty, and the exact impacted clause changes with
+      old_text -> new_text) :
+      {_item}
+
+      Write a formal amendment notice that: names the counterparty, identifies the agreement by
+      document_id, states for each impacted clause the prior language and the new language, explains
+      it must be re-signed to remain in force, and gives a courteous call to action. No markdown.
+
+      Return STRICT JSON only:
+      {
+        "document_id": "<the document_id from the input>",
+        "subject": "<email subject line for the re-signature request>",
+        "amendment_body": "<the full amendment notice text>"
+      }
+      Output JSON only, no prose.
+
+  # 6) GATE: provider-independent verification of the drafted amendments. A first faithfulness judge,
+  #    a SECOND judge on a DIFFERENT provider re-checking for hallucinated obligations, and a human
+  #    legal approver on the batch. ALL must pass.
+  - id: amendment_gate
+    type: gate
+    depends_on: [draft_amendments]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >
+              You are a legal-review control. Answer exactly 'approved' if EVERY drafted amendment
+              is faithful to its source clause change - it cites only the clause ids that actually
+              changed, reproduces the old_text -> new_text accurately, and adds no new obligations -
+              otherwise answer 'rejected' and name the first defective document_id.
+            input: "{steps.draft_amendments.output}"
+            model: sonnet
+        - type: llm_eval
+          config:
+            prompt: >
+              Independent second judge (different provider). Re-read every amendment for HALLUCINATED
+              terms: any obligation, deadline, monetary amount, or party that is NOT present in the
+              provided clause change. Answer exactly 'approved' if none are found, else 'rejected'
+              naming the offending document_id and the invented term.
+            input: "{steps.draft_amendments.output}"
+            model: google/gemini-2.5-pro
+        - type: human
+          config:
+            message: "Legal approver: review this batch of policy-change amendment letters before re-signature requests are sent to counterparties. Approve to release the DocuSign bulk-send."
+            timeout_hours: 72
+            on_timeout: abort
+
+  # 7) HUMAN APPROVAL of the final bulk-send with the full payload shown (edits allowed). Distinct
+  #    from the gate: this is the explicit go/no-go to dispatch envelopes to live counterparties.
+  - id: approve_bulk_send
+    type: approval
+    depends_on: [amendment_gate]
+    approval_config:
+      message: >
+        Confirm bulk-send of re-signature amendment envelopes for policy {input.policy_id}. Review
+        the affected-contract count and drafts; edit any letter before release. Approving dispatches
+        DocuSign envelopes to all listed counterparties.
+      show_data: steps.build_affected_list.output
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: true
+
+  # 8) DocuSign BULK-SEND: create amendment envelopes for the whole affected batch in one call.
+  - id: docusign_bulk_send
+    type: http
+    depends_on: [approve_bulk_send]
+    http_config:
+      url: "{input.docusign_base_url}/envelopes"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.DOCUSIGN_ACCESS_TOKEN}"
+      body: |
+        {
+          "policy_id": "{input.policy_id}",
+          "emailSubject": "Re-signature required: amendment to your agreement ({input.policy_id})",
+          "status": "sent",
+          "batch": {steps.build_affected_list.output.affected_contracts},
+          "drafts": {steps.draft_amendments.output}
+        }
+      value_map:
+        batch_id: "batchId"
+        sent_count: "batchSize"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 9) DURABLE SENSOR: poll DocuSign for acceptance across the batch every 4h, up to 30 days,
+  #    until accepted_count == sent_count (full portfolio acceptance) or the window closes.
+  - id: await_acceptance
+    type: sensor
+    depends_on: [docusign_bulk_send]
+    sensor_config:
+      url: "{input.docusign_base_url}/envelopes?from_date=2026-01-01&status=completed&count=1000"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200 and int(response.get('resultSetSize', 0) or 0) >= int(response.get('totalSetSize', 0) or 1)"
+      check_interval: 14400
+      timeout: 2592000
+
+  # 10) DETERMINISTIC reconciliation: pull the per-envelope status into one portfolio table,
+  #     compute accepted / declined / no_response per contract. No model on this critical path.
+  - id: reconcile_outcomes
+    type: http
+    depends_on: [await_acceptance]
+    http_config:
+      url: "{input.docusign_base_url}/envelopes/status?envelope_ids={steps.docusign_bulk_send.output.batch_id}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.DOCUSIGN_ACCESS_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 11) DETERMINISTIC fold: map each affected contract to its DocuSign status bucket. No model.
+  - id: tally_portfolio
+    type: code
+    depends_on: [build_affected_list, docusign_bulk_send, reconcile_outcomes]
+    code_config:
+      language: python
+      code: |
+        affected = (_steps.get('build_affected_list') or {}).get('affected_contracts', [])
+        sent = _steps.get('docusign_bulk_send') or {}
+        recon = _steps.get('reconcile_outcomes') or {}
+
+        # DocuSign status list: {"envelopes": [{"envelopeId":..,"status":"completed"|"declined"|"sent"}]}.
+        env_rows = recon.get('envelopes', []) if isinstance(recon, dict) else []
+        status_by_doc = {}
+        for e in env_rows:
+            if not isinstance(e, dict):
+                continue
+            key = str(e.get('document_id') or e.get('envelopeId') or e.get('envelope_id') or '')
+            status_by_doc[key] = str(e.get('status', '')).lower()
+
+        accepted, declined, no_response = [], [], []
+        for c in affected:
+            doc_id = str(c.get('document_id', ''))
+            st = status_by_doc.get(doc_id, '')
+            row = {
+                'document_id': doc_id,
+                'counterparty': c.get('counterparty', ''),
+                'counterparty_email': c.get('counterparty_email', ''),
+                'owner': c.get('owner', ''),
+                'status': st or 'no_response',
+            }
+            if st in ('completed', 'signed', 'accepted'):
+                accepted.append(row)
+            elif st in ('declined', 'voided', 'rejected'):
+                declined.append(row)
+            else:
+                no_response.append(row)
+
+        sent_count = int(sent.get('sent_count') or len(affected) or 0)
+        result = {
+            'policy_id': _input.get('policy_id'),
+            'sent_count': sent_count,
+            'accepted_count': len(accepted),
+            'declined_count': len(declined),
+            'no_response_count': len(no_response),
+            'acceptance_rate': round(len(accepted) / sent_count, 4) if sent_count else 0.0,
+            'accepted': accepted,
+            'declined': declined,
+            'no_response': no_response,
+            'fully_propagated': len(accepted) == sent_count and sent_count > 0,
+        }
+
+  # 12) CLASSIFY the overall portfolio outcome and route to the matching per-bucket follow-up.
+  - id: classify_outcome
+    type: classify
+    depends_on: [tally_portfolio]
+    classify_config:
+      model: haiku
+      input: >
+        Classify the policy-propagation portfolio outcome. fully_accepted = every sent envelope was
+        accepted; has_declines = at least one counterparty declined; awaiting_response = some
+        envelopes are still unsigned with none declined. Tally: {steps.tally_portfolio.output}
+      categories:
+        - fully_accepted
+        - has_declines
+        - awaiting_response
+      branches:
+        fully_accepted: [notify_slack_followup]
+        has_declines: [notify_slack_followup, email_counterparties]
+        awaiting_response: [notify_slack_followup, email_counterparties]
+
+  # 12a) Slack follow-up to the deal owners with the per-bucket breakdown.
+  - id: notify_slack_followup
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: >
+        Policy {input.policy_id} re-signature status - accepted {steps.tally_portfolio.output.accepted_count},
+        declined {steps.tally_portfolio.output.declined_count}, no-response {steps.tally_portfolio.output.no_response_count}
+        of {steps.tally_portfolio.output.sent_count} sent (rate {steps.tally_portfolio.output.acceptance_rate}).
+        Owners: chase the declined / no-response counterparties listed in the run.
+
+  # 12b) Gmail reminder to counterparties who declined or have not responded.
+  - id: email_counterparties
+    type: notify
+    notify_config:
+      service: gmail
+      channel: "{input.counterparty_from}"
+      message: >
+        Reminder: an amendment to your agreement under policy {input.policy_id} is awaiting your
+        re-signature in DocuSign and remains required to keep the contract in force. Please review and
+        sign. Outstanding counterparties: declined={steps.tally_portfolio.output.declined_count},
+        no-response={steps.tally_portfolio.output.no_response_count}.
+
+  # 13) TRANSFORM the portfolio tally into a structured acceptance report payload for the PDF.
+  - id: acceptance_report
+    type: transform
+    depends_on: [classify_outcome]
+    transform_config:
+      template: |
+        {
+          "policy_id": "{input.policy_id}",
+          "changed_clause_ids": {steps.diff_clauses.output.changed_clause_ids},
+          "changed_count": {steps.diff_clauses.output.changed_count},
+          "affected_contracts": {steps.build_affected_list.output.affected_count},
+          "sent_count": {steps.tally_portfolio.output.sent_count},
+          "accepted_count": {steps.tally_portfolio.output.accepted_count},
+          "declined_count": {steps.tally_portfolio.output.declined_count},
+          "no_response_count": {steps.tally_portfolio.output.no_response_count},
+          "acceptance_rate": {steps.tally_portfolio.output.acceptance_rate},
+          "fully_propagated": {steps.tally_portfolio.output.fully_propagated},
+          "accepted": {steps.tally_portfolio.output.accepted},
+          "declined": {steps.tally_portfolio.output.declined},
+          "no_response": {steps.tally_portfolio.output.no_response}
+        }
+
+  # 14) REPORT: branded PDF compliance evidence proving every counterparty was notified.
+  - id: compliance_evidence_pdf
+    type: report
+    depends_on: [acceptance_report]
+    report_config:
+      template: "research-report"
+      format: pdf
+      theme: professional
+      title: "Policy Change Propagation Evidence - {input.policy_id}"
+      author: "Legal Operations"
+    prompt: |
+      Produce a formal, branded compliance-evidence PDF for the propagation of master policy
+      {input.policy_id}. Include: the changed clause ids and counts, the number of downstream
+      contracts identified as embedding those clauses, how many re-signature envelopes were sent,
+      and the accepted / declined / no-response breakdown with the acceptance rate. List each
+      counterparty and its final status as the auditable proof that every affected counterparty was
+      notified. State whether the policy is fully propagated across the portfolio.
+
+      Acceptance report payload:
+      {steps.acceptance_report.output}
+
+on_complete:
+  storage_path: "policy-change-propagation/{run_id}/result.json"

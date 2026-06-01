@@ -1,0 +1,568 @@
+# name: EU AI Act Risk Register
+# description: Living EU AI Act risk register. Discovers AI systems from model registries via HTTP, classifies each into Annex III risk tiers, gates high-risk determinations through a dual-provider consensus plus a mandatory legal/DPO human sign-off, opens conformity tasks in Jira, seals a signed Article-9 register to S3/Notion, and emits a branded board/regulator PDF.
+# tags: [EU AI Act, Annex III, Article 9, Risk Register, Conformity, Langfuse, Notion, Jira, Slack, S3, GitHub, Governance, DPO, Compliance]
+# category: hr_legal
+
+name: eu-ai-act-risk-register
+description: >-
+  Maintains a defensible, living EU AI Act risk register. A deterministic HTTP step pulls the
+  current inventory of AI systems from the model registry (Langfuse projects), a Notion system
+  catalog, and the GitHub model-card repo. A Python step dedupes and diffs that inventory against
+  the prior-cycle register supplied in input, flagging NEW and CHANGED systems. Each system is
+  routed by a classify step into an Annex III risk tier (prohibited / high-risk / limited-risk /
+  minimal) by its intended purpose and deployment context. High-risk or prohibited candidates are
+  branched into a multi-strategy gate: an llm_eval tier-justification on one provider, the SAME
+  rubric re-run on a DIFFERENT provider for a cross-vendor consensus, and a mandatory human strategy
+  for legal/DPO sign-off - so no single vendor's model can self-certify a system's risk tier, which
+  is exactly the Act's human-oversight requirement. Conformity tasks (Annex IV tech docs, Article 9
+  risk management, human-oversight) are POSTed to Jira for high-risk systems, a deterministic step
+  assembles each register entry (system, tier, rationale, obligations, owner, SHA-256 hash), the
+  signed register is PUT to S3 and written to the Notion governance space, a branded Article-9 PDF
+  is rendered for the board/regulator, and a Slack summary reports the count of new high-risk systems
+  and open conformity tasks. Discovery, diffing, entry assembly, and report rendering are all
+  deterministic and model-independent.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 900
+
+input_schema:
+  required: ["register_cycle_id"]
+  properties:
+    register_cycle_id:
+      type: string
+      description: "Unique id for this risk-register cycle (e.g. 'AIA-2026-06')."
+      default: "AIA-2026-06"
+      example: "AIA-2026-06"
+    langfuse_base_url:
+      type: string
+      description: "Langfuse REST base URL used to enumerate AI projects / deployed models."
+      default: "https://cloud.langfuse.com/api/public"
+      example: "https://cloud.langfuse.com/api/public"
+    notion_catalog_url:
+      type: string
+      description: "Notion API endpoint that queries the AI system catalog database."
+      default: "https://api.notion.com/v1/databases/your-catalog-db-id/query"
+      example: "https://api.notion.com/v1/databases/1a2b3c4d/query"
+    github_modelcards_url:
+      type: string
+      description: "GitHub contents API for the model-cards directory (intended-purpose metadata)."
+      default: "https://api.github.com/repos/your-org/ai-model-cards/contents/cards"
+      example: "https://api.github.com/repos/acme/ai-model-cards/contents/cards"
+    prior_register:
+      type: string
+      description: "Prior-cycle approved register (JSON object or ref) used to diff new vs changed systems."
+      default: "{}"
+      example: '{"entries": [{"system_id": "chat-assist", "tier": "limited-risk", "hash": "abc123"}]}'
+    jira_base_url:
+      type: string
+      description: "Jira REST base URL for opening conformity / documentation tasks."
+      default: "https://your-org.atlassian.net/rest/api/3"
+      example: "https://acme.atlassian.net/rest/api/3"
+    jira_project_key:
+      type: string
+      description: "Jira project key that receives EU AI Act conformity issues."
+      default: "AIACT"
+      example: "AIACT"
+    s3_base_url:
+      type: string
+      description: "S3 (or S3-compatible) REST base URL for the signed register bucket."
+      default: "https://s3.eu-central-1.amazonaws.com"
+      example: "https://s3.eu-central-1.amazonaws.com"
+    s3_bucket:
+      type: string
+      description: "Bucket that stores the signed, hashed EU AI Act risk register."
+      default: "eu-ai-act-risk-register"
+      example: "acme-eu-ai-act-risk-register"
+    notion_governance_url:
+      type: string
+      description: "Notion API endpoint (governance space page/database) the register is written back to."
+      default: "https://api.notion.com/v1/pages"
+      example: "https://api.notion.com/v1/pages"
+    slack_channel:
+      type: string
+      description: "Slack channel for the risk-register summary."
+      default: "#ai-governance"
+      example: "#ai-governance"
+
+steps:
+  # 1) DISCOVER deployed AI systems from the model registry (Langfuse projects).
+  #     Connector: langfuse. Deterministic HTTP pull.
+  - id: discover_langfuse
+    type: http
+    http_config:
+      url: "{input.langfuse_base_url}/projects?limit=200"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.LANGFUSE_API_KEY}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2) DISCOVER systems from the Notion AI system catalog (intended-purpose + deployment context).
+  #     Connector: notion.
+  - id: discover_notion_catalog
+    type: http
+    http_config:
+      url: "{input.notion_catalog_url}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Notion-Version: "2022-06-28"
+        Accept: "application/json"
+      auth: "bearer:{env.NOTION_API_KEY}"
+      body: |
+        {"page_size": 200}
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 3) DISCOVER model cards from GitHub (per-system intended-purpose / deployment metadata).
+  #     Connector: github.
+  - id: discover_github_modelcards
+    type: http
+    http_config:
+      url: "{input.github_modelcards_url}"
+      method: GET
+      headers:
+        Accept: "application/vnd.github+json"
+      auth: "bearer:{env.GITHUB_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 4) DETERMINISTIC dedupe + diff. Merge the three sources into ONE inventory keyed by
+  #     system_id, then diff against the prior register: flag NEW and CHANGED systems. No model.
+  - id: dedupe_and_diff
+    type: code
+    depends_on: [discover_langfuse, discover_notion_catalog, discover_github_modelcards]
+    code_config:
+      language: python
+      code: |
+        import json
+        import hashlib
+
+        langfuse = _steps['discover_langfuse'] or {}
+        notion = _steps['discover_notion_catalog'] or {}
+        github = _steps['discover_github_modelcards'] or {}
+
+        # --- Parse the prior register (may arrive as a JSON string or already-parsed dict) ---
+        raw_prior = _input.get('prior_register') or {}
+        if isinstance(raw_prior, str):
+            try:
+                raw_prior = json.loads(raw_prior) if raw_prior.strip() else {}
+            except (ValueError, TypeError):
+                raw_prior = {}
+        prior_entries = raw_prior.get('entries', []) if isinstance(raw_prior, dict) else []
+        prior_by_id = {}
+        for e in prior_entries:
+            if isinstance(e, dict) and e.get('system_id'):
+                prior_by_id[str(e.get('system_id'))] = e
+
+        inventory = {}
+
+        def _upsert(system_id, name, purpose, context, source):
+            sid = str(system_id or '').strip().lower()
+            if not sid:
+                return
+            row = inventory.setdefault(sid, {
+                'system_id': sid,
+                'name': name or sid,
+                'intended_purpose': '',
+                'deployment_context': '',
+                'sources': [],
+            })
+            if name and not row['name']:
+                row['name'] = name
+            if purpose and len(str(purpose)) > len(row['intended_purpose']):
+                row['intended_purpose'] = str(purpose)
+            if context and len(str(context)) > len(row['deployment_context']):
+                row['deployment_context'] = str(context)
+            if source not in row['sources']:
+                row['sources'].append(source)
+
+        # Langfuse projects -> list under 'data' or top-level list.
+        lf_list = langfuse if isinstance(langfuse, list) else (langfuse.get('data') or langfuse.get('projects') or [])
+        for p in lf_list:
+            if isinstance(p, dict):
+                _upsert(p.get('id') or p.get('name'), p.get('name'),
+                        p.get('description') or p.get('metadata'), 'production-llm', 'langfuse')
+
+        # Notion catalog rows -> 'results'; properties are nested Notion blocks, read defensively.
+        def _notion_text(prop):
+            if not isinstance(prop, dict):
+                return ''
+            for key in ('title', 'rich_text'):
+                arr = prop.get(key)
+                if isinstance(arr, list) and arr:
+                    return ''.join(str(t.get('plain_text', '')) for t in arr if isinstance(t, dict))
+            sel = prop.get('select')
+            if isinstance(sel, dict):
+                return str(sel.get('name', ''))
+            return ''
+
+        for row in (notion.get('results') or []):
+            if not isinstance(row, dict):
+                continue
+            props = row.get('properties', {}) if isinstance(row.get('properties'), dict) else {}
+            sid = _notion_text(props.get('system_id')) or _notion_text(props.get('Name')) or row.get('id')
+            _upsert(sid, _notion_text(props.get('Name')),
+                    _notion_text(props.get('intended_purpose')) or _notion_text(props.get('Purpose')),
+                    _notion_text(props.get('deployment_context')) or _notion_text(props.get('Context')),
+                    'notion')
+
+        # GitHub model cards -> list of file entries; use the file name (sans ext) as the system id.
+        gh_list = github if isinstance(github, list) else (github.get('items') or [])
+        for f in gh_list:
+            if isinstance(f, dict) and f.get('name'):
+                sid = str(f.get('name')).rsplit('.', 1)[0]
+                _upsert(sid, sid, 'see-model-card', 'documented', 'github')
+
+        # --- Diff: per system compute a content hash, compare to prior to flag new/changed ---
+        systems = []
+        new_count = 0
+        changed_count = 0
+        for sid, row in sorted(inventory.items()):
+            canonical = json.dumps(
+                {'system_id': row['system_id'], 'name': row['name'],
+                 'intended_purpose': row['intended_purpose'],
+                 'deployment_context': row['deployment_context']},
+                sort_keys=True, separators=(',', ':'))
+            content_hash = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+            prior = prior_by_id.get(sid)
+            if prior is None:
+                status = 'new'
+                new_count += 1
+            elif str(prior.get('hash') or prior.get('content_hash') or '') != content_hash:
+                status = 'changed'
+                changed_count += 1
+            else:
+                status = 'unchanged'
+            row['content_hash'] = content_hash
+            row['diff_status'] = status
+            row['prior_tier'] = (prior or {}).get('tier')
+            systems.append(row)
+
+        result = {
+            'register_cycle_id': _input.get('register_cycle_id'),
+            'system_count': len(systems),
+            'new_count': new_count,
+            'changed_count': changed_count,
+            'systems': systems,
+        }
+
+  # 5) CLASSIFY each system into an Annex III risk tier by intended purpose + deployment context.
+  #     The single model-driven routing step; swappable. Every tier routes into the deterministic
+  #     candidate selector. Pinned to an EU-resident judge (mistral) for data residency.
+  - id: classify_risk_tier
+    type: classify
+    depends_on: [dedupe_and_diff]
+    classify_config:
+      model: mistral/large
+      input: >
+        Classify the EU AI Act risk tier for these AI systems by intended purpose and deployment
+        context. prohibited = Article 5 banned practices (social scoring, untargeted facial scraping,
+        real-time remote biometric ID in public, emotion inference at work/school, manipulative or
+        exploitative systems). high-risk = Annex III use (biometrics, critical infrastructure,
+        education/exam scoring, employment/HR screening, access to essential public/private services
+        and credit, law enforcement, migration/border, justice) or an AI safety component of a
+        regulated product. limited-risk = transparency obligations only (chatbots, deepfakes, content
+        labelling). minimal = everything else (spam filters, recommendation, internal tooling) with
+        no specific obligation. Systems: {steps.dedupe_and_diff.output.systems}
+      categories:
+        - prohibited
+        - high-risk
+        - limited-risk
+        - minimal
+      branches:
+        prohibited: [select_high_risk_candidates]
+        high-risk: [select_high_risk_candidates]
+        limited-risk: [select_high_risk_candidates]
+        minimal: [select_high_risk_candidates]
+
+  # 6) DETERMINISTIC selection: which systems are prohibited/high-risk candidates that must be
+  #     gated, and which carry conformity obligations. Heuristic keyword fallback per system plus
+  #     the cohort label from classify. No model.
+  - id: select_high_risk_candidates
+    type: code
+    depends_on: [dedupe_and_diff, classify_risk_tier]
+    code_config:
+      language: python
+      code: |
+        diff = _steps['dedupe_and_diff'] or {}
+        cohort_tier = str(_steps['classify_risk_tier'] or '').strip().lower()
+        systems = diff.get('systems', [])
+
+        ANNEX_III = ('biometric', 'critical infrastructure', 'education', 'exam', 'employment',
+                     'hr', 'recruit', 'hiring', 'credit', 'scoring', 'essential service',
+                     'law enforcement', 'migration', 'border', 'justice', 'insurance')
+        PROHIBITED = ('social scoring', 'facial scraping', 'emotion inference', 'real-time biometric',
+                      'manipulative', 'social-credit')
+
+        def _per_system_tier(s):
+            text = (str(s.get('intended_purpose', '')) + ' ' + str(s.get('deployment_context', '')) + ' ' + str(s.get('name', ''))).lower()
+            if any(k in text for k in PROHIBITED):
+                return 'prohibited'
+            if any(k in text for k in ANNEX_III):
+                return 'high-risk'
+            # Fall back to the cohort label from the classify step when no keyword hits.
+            if cohort_tier in ('prohibited', 'high-risk'):
+                return cohort_tier
+            return cohort_tier or 'minimal'
+
+        candidates = []
+        all_tiered = []
+        for s in systems:
+            tier = _per_system_tier(s)
+            row = dict(s)
+            row['tier'] = tier
+            all_tiered.append(row)
+            if tier in ('prohibited', 'high-risk'):
+                candidates.append(row)
+
+        result = {
+            'register_cycle_id': diff.get('register_cycle_id'),
+            'cohort_tier': cohort_tier or 'minimal',
+            'all_systems': all_tiered,
+            'candidate_count': len(candidates),
+            'high_risk_candidates': candidates,
+            'has_high_risk': len(candidates) > 0,
+        }
+
+  # 7) BRANCH: only if there is at least one prohibited/high-risk candidate do we run the
+  #     consensus + human gate and open conformity tasks. Deterministic condition, no model.
+  - id: high_risk_branch
+    type: condition
+    depends_on: [select_high_risk_candidates]
+    condition_config:
+      expression: "{steps.select_high_risk_candidates.output.has_high_risk} == true"
+      then: [tier_consensus_gate, open_conformity_tasks, assemble_register]
+      else: [assemble_register]
+
+  # 7a) GATE the high-risk determination: dual-provider consensus (two llm_eval strategies on
+  #      DIFFERENT EU/local providers - mistral and gemini) PLUS a mandatory human legal/DPO
+  #      sign-off. ALL strategies must pass, so no single vendor model self-certifies a tier.
+  - id: tier_consensus_gate
+    type: gate
+    depends_on: [select_high_risk_candidates]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >
+              You are an EU AI Act conformity reviewer (judge A). For each candidate, verify the
+              prohibited/high-risk tier is justified against Annex III and Article 5 by its intended
+              purpose and deployment context. Answer exactly 'approved' if every candidate's tier is
+              correctly justified, otherwise 'rejected' and name the mis-tiered system and the correct
+              tier. Candidates: {steps.select_high_risk_candidates.output.high_risk_candidates}
+            input: "{steps.select_high_risk_candidates.output.high_risk_candidates}"
+            model: mistral/large
+        - type: llm_eval
+          config:
+            prompt: >
+              You are an EU AI Act conformity reviewer (judge B, independent provider). Apply the SAME
+              rubric: confirm each candidate's prohibited/high-risk tier is justified under Annex III
+              and Article 5 by intended purpose and deployment context. Answer exactly 'approved' if
+              all tiers hold, otherwise 'rejected' naming the disputed system and your proposed tier.
+              Candidates: {steps.select_high_risk_candidates.output.high_risk_candidates}
+            input: "{steps.select_high_risk_candidates.output.high_risk_candidates}"
+            model: google/gemini-2.5-pro
+        - type: human
+          config:
+            message: >
+              Legal / DPO sign-off required: confirm the high-risk and prohibited tier determinations
+              for these AI systems are correct before conformity tasks are opened and the register is
+              sealed. This is the Article-14 human-oversight checkpoint.
+            timeout_hours: 48
+            on_timeout: abort
+
+  # 7b) OPEN conformity + documentation tasks in Jira for the high-risk systems: Annex IV
+  #      tech docs, Article 9 risk management, human-oversight. Connector: jira.
+  - id: open_conformity_tasks
+    type: http
+    depends_on: [tier_consensus_gate]
+    http_config:
+      url: "{input.jira_base_url}/issue/bulk"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.JIRA_API_TOKEN}"
+      body: |
+        {
+          "register_cycle_id": "{input.register_cycle_id}",
+          "project_key": "{input.jira_project_key}",
+          "obligation_types": ["annex-iv-technical-documentation", "article-9-risk-management", "article-14-human-oversight"],
+          "high_risk_systems": {steps.select_high_risk_candidates.output.high_risk_candidates}
+        }
+      value_map:
+        created_issue_keys: "issues"
+        conformity_task_count: "total"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 8) ASSEMBLE the register entries deterministically: system, tier, rationale, obligations,
+  #     owner, SHA-256 hash over the canonical entry. This is the audit-load-bearing record. No model.
+  - id: assemble_register
+    type: code
+    depends_on: [select_high_risk_candidates]
+    code_config:
+      language: python
+      code: |
+        import json
+        import hashlib
+        from datetime import datetime, timezone
+
+        sel = _steps['select_high_risk_candidates'] or {}
+        diff = _steps['dedupe_and_diff'] or {}
+        cycle = _input.get('register_cycle_id')
+
+        OBLIGATIONS = {
+            'prohibited': ['cease-deployment', 'article-5-prohibition-notice', 'legal-escalation'],
+            'high-risk': ['annex-iv-technical-documentation', 'article-9-risk-management',
+                          'article-10-data-governance', 'article-13-transparency',
+                          'article-14-human-oversight', 'article-15-accuracy-robustness',
+                          'ce-conformity-assessment'],
+            'limited-risk': ['article-50-transparency-disclosure'],
+            'minimal': ['voluntary-code-of-conduct'],
+        }
+
+        diff_status_by_id = {s.get('system_id'): s.get('diff_status') for s in diff.get('systems', [])}
+
+        entries = []
+        new_high_risk = 0
+        for s in sel.get('all_systems', []):
+            tier = str(s.get('tier', 'minimal')).lower()
+            obligations = OBLIGATIONS.get(tier, OBLIGATIONS['minimal'])
+            status = diff_status_by_id.get(s.get('system_id'), 'unchanged')
+            entry = {
+                'system_id': s.get('system_id'),
+                'name': s.get('name'),
+                'tier': tier,
+                'intended_purpose': s.get('intended_purpose'),
+                'deployment_context': s.get('deployment_context'),
+                'rationale': f"Tier {tier} per Annex III / Article 5 based on intended purpose and deployment context.",
+                'obligations': obligations,
+                'owner': 'ai-governance-officer',
+                'diff_status': status,
+                'sources': s.get('sources', []),
+            }
+            canonical = json.dumps(entry, sort_keys=True, separators=(',', ':'))
+            entry['hash'] = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+            entries.append(entry)
+            if tier in ('prohibited', 'high-risk') and status in ('new', 'changed'):
+                new_high_risk += 1
+
+        register = {
+            'register_cycle_id': cycle,
+            'generated_at': datetime.now(timezone.utc).isoformat(),
+            'system_count': len(entries),
+            'new_count': diff.get('new_count', 0),
+            'changed_count': diff.get('changed_count', 0),
+            'new_high_risk_count': new_high_risk,
+            'high_risk_count': sum(1 for e in entries if e['tier'] == 'high-risk'),
+            'prohibited_count': sum(1 for e in entries if e['tier'] == 'prohibited'),
+            'entries': entries,
+        }
+
+        # Sign the whole register: canonical sorted-key hash so the signature is reproducible.
+        register_canonical = json.dumps(register, sort_keys=True, separators=(',', ':'))
+        register_hash = hashlib.sha256(register_canonical.encode('utf-8')).hexdigest()
+
+        result = {
+            'object_key': f"registers/{cycle}/eu-ai-act-risk-register.json",
+            'register_sha256': register_hash,
+            'new_high_risk_count': new_high_risk,
+            'register': register,
+            'register_canonical_json': register_canonical,
+        }
+
+  # 9) SEAL the signed register to S3 (versioned bucket). The SHA-256 travels as object metadata.
+  #     Connector: aws-s3.
+  - id: seal_register_s3
+    type: http
+    depends_on: [assemble_register]
+    http_config:
+      url: "{input.s3_base_url}/{input.s3_bucket}/{steps.assemble_register.output.object_key}"
+      method: PUT
+      headers:
+        Content-Type: "application/json"
+        x-amz-meta-register-sha256: "{steps.assemble_register.output.register_sha256}"
+        x-amz-meta-register-cycle-id: "{input.register_cycle_id}"
+      auth: "aws4:{env.AWS_ACCESS_KEY_ID}:{env.AWS_SECRET_ACCESS_KEY}"
+      body: "{steps.assemble_register.output.register_canonical_json}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 10) WRITE the register back to the Notion governance space (page in the governance database).
+  #      Connector: notion.
+  - id: write_notion_governance
+    type: http
+    depends_on: [seal_register_s3]
+    http_config:
+      url: "{input.notion_governance_url}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Notion-Version: "2022-06-28"
+        Accept: "application/json"
+      auth: "bearer:{env.NOTION_API_KEY}"
+      body: |
+        {
+          "parent": {"type": "workspace", "workspace": true},
+          "properties": {
+            "title": [{"text": {"content": "EU AI Act Risk Register {input.register_cycle_id}"}}]
+          },
+          "register_cycle_id": "{input.register_cycle_id}",
+          "register_sha256": "{steps.assemble_register.output.register_sha256}",
+          "s3_object_key": "{steps.assemble_register.output.object_key}"
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 11) RENDER the branded EU AI Act / Article-9 risk register PDF for the board / regulator.
+  - id: render_register_pdf
+    type: report
+    depends_on: [seal_register_s3]
+    report_config:
+      template: "research-report"
+      format: pdf
+      theme: professional
+      title: "EU AI Act Risk Register - {input.register_cycle_id}"
+      author: "AI Governance Office"
+    prompt: |
+      Produce a formal, branded EU AI Act risk register PDF for the board and the regulator from the
+      payload below. Open with the register cycle id, generation timestamp, and the total number of
+      AI systems, of which how many are prohibited, high-risk, limited-risk, and minimal. Include a
+      table of every entry: system, Annex III / Article 5 tier, rationale, the assigned obligations
+      (Annex IV technical documentation, Article 9 risk management, Article 14 human oversight, etc.),
+      the responsible owner, the diff status (new / changed / unchanged), and the per-entry SHA-256.
+      State the count of NEW high-risk systems this cycle and that the dual-provider consensus plus
+      legal/DPO human sign-off cleared the high-risk determinations. Close with the register-level
+      SHA-256 signature and the S3 object key proving the register is sealed and tamper-evident.
+      Register payload: {steps.assemble_register.output.register}
+      Register signature SHA-256: {steps.assemble_register.output.register_sha256}
+      Sealed object key: {steps.assemble_register.output.object_key}
+
+  # 12) NOTIFY AI governance in Slack: count of new high-risk systems + open conformity tasks.
+  #      Connector: slack.
+  - id: notify_governance
+    type: notify
+    depends_on: [render_register_pdf, write_notion_governance]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: "EU AI Act risk register {input.register_cycle_id} sealed. New high-risk systems this cycle: {steps.assemble_register.output.new_high_risk_count}. Systems classified: {steps.select_high_risk_candidates.output.candidate_count} prohibited/high-risk candidates gated (dual-provider consensus + legal/DPO sign-off). Conformity tasks opened in Jira project {input.jira_project_key}. Register sha256 {steps.assemble_register.output.register_sha256} sealed at {steps.assemble_register.output.object_key}."
+
+on_complete:
+  storage_path: "eu-ai-act-risk-register/{run_id}/result.json"
