@@ -1,0 +1,406 @@
+# name: Deal Desk Discount Approval Gate
+# description: Automated deal desk for non-standard discounts - fetch the opportunity + line items from the CRM, run deterministic margin/policy math in sandboxed Python, route to the right approver tier (rep manager / VP / CFO) by discount band, then write approved terms back to the CRM and confirm in Slack. The financial decision is model-independent by construction.
+# tags: [Salesforce, HubSpot, Slack, DealDesk, SalesFinance, DiscountGovernance, RevOps, Approval]
+# category: sales_crm
+
+name: deal-desk-discount-approval-gate
+description: >
+  An automated deal desk for non-standard discount requests. Triggered by a CRM webhook
+  (Salesforce / HubSpot opportunity hits 'Quote Requested' or a discount field exceeds the
+  policy threshold), it pulls the full opportunity, its line items, and list prices from the
+  CRM REST API, then runs a DETERMINISTIC sandboxed-Python step that computes the effective
+  discount %, gross margin, term-length penalties, and any hard policy violations - no model
+  on the financial path, fully auditable. A multi-strategy gate follows: an optional llm_eval
+  strategy writes a human-readable deal rationale + risk summary (configured for cross-provider
+  failover so no single LLM provider is on the path), and a human strategy routes to the correct
+  approver tier by discount band - rep manager under 15%, VP 15-30%, CFO over 30% - with a
+  timeout that auto-rejects after N hours. A deterministic condition then branches: if rejected,
+  notify the rep with the reasons and stop; if approved, PATCH the CRM opportunity with the
+  approved_discount, approval_id, and approver, attach the audit record, and post a Slack
+  confirmation to the rep and the finance channel. Swapping the summarizer model can never
+  change an approval outcome - the deterministic math and the human approval are authoritative.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 600
+
+input_schema:
+  required: ["opportunity_id"]
+  properties:
+    opportunity_id:
+      type: string
+      description: "CRM id of the opportunity whose non-standard discount needs deal-desk approval."
+      example: "0065g00000XyZ12AAB"
+    crm_base_url:
+      type: string
+      description: "Base URL of the CRM REST API (Salesforce or HubSpot)."
+      default: "https://your-instance.my.salesforce.com/services/data/v60.0"
+      example: "https://acme.my.salesforce.com/services/data/v60.0"
+    standard_discount_pct:
+      type: number
+      description: "Maximum discount a rep may give without deal-desk approval. Anything above is non-standard."
+      default: 10
+      example: "10"
+    min_gross_margin_pct:
+      type: number
+      description: "Hard floor on gross margin %; a quote below this is a policy violation regardless of approver."
+      default: 35
+      example: "35"
+    max_term_months:
+      type: number
+      description: "Contract term (months) above which a term-length penalty/flag applies."
+      default: 24
+      example: "24"
+    approval_timeout_hours:
+      type: number
+      description: "Hours the tiered human approval waits before the timeout strategy auto-rejects the discount."
+      default: 48
+      example: "48"
+    slack_rep_channel:
+      type: string
+      description: "Slack channel (or DM) to notify the requesting rep of the outcome."
+      default: "#deal-desk-reps"
+      example: "#deal-desk-reps"
+    slack_finance_channel:
+      type: string
+      description: "Slack channel for the deal-desk / sales-finance team's signed-off record."
+      default: "#deal-desk-finance"
+      example: "#deal-desk-finance"
+
+steps:
+  # 1) FETCH the full opportunity + line items + list price from the CRM (Salesforce / HubSpot REST).
+  #    Salesforce: OpportunityLineItem carries ListPrice, UnitPrice, Quantity, TotalPrice, unit cost.
+  - id: fetch_opportunity
+    type: http
+    http_config:
+      url: "{input.crm_base_url}/sobjects/Opportunity/{input.opportunity_id}?fields=Id,Name,StageName,Amount,CurrencyIsoCode,AccountId,Account.Name,OwnerId,Owner.Name,Owner.Email,ContractTerm__c,Discount__c,(SELECT Id,Product2.Name,Quantity,UnitPrice,ListPrice,TotalPrice,UnitCost__c FROM OpportunityLineItems)"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.CRM_ACCESS_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2) DETERMINISTIC margin & policy math (sandboxed Python, NO model, fully auditable).
+  #    Computes effective discount %, blended gross margin, term-length penalty, and the
+  #    discount band that decides which approver tier the gate must route to.
+  - id: compute_margin_policy
+    type: code
+    depends_on: [fetch_opportunity]
+    code_config:
+      language: python
+      code: |
+        opp = _steps['fetch_opportunity'] or {}
+
+        std_discount = float(_input.get('standard_discount_pct', 10) or 10)
+        min_margin = float(_input.get('min_gross_margin_pct', 35) or 35)
+        max_term = float(_input.get('max_term_months', 24) or 24)
+
+        # Line items live under a paged subquery on Salesforce; tolerate HubSpot shapes too.
+        oli = opp.get('OpportunityLineItems') or {}
+        if isinstance(oli, dict):
+            line_items = oli.get('records') or oli.get('items') or []
+        elif isinstance(oli, list):
+            line_items = oli
+        else:
+            line_items = []
+        if not line_items:
+            line_items = opp.get('line_items') or opp.get('lineItems') or []
+
+        def _f(val, default=0.0):
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                return float(default)
+
+        total_list = 0.0      # sum of list price * qty (what catalog price would be)
+        total_net = 0.0       # sum of quoted (discounted) price
+        total_cost = 0.0      # sum of unit cost * qty (COGS)
+        normalized_items = []
+        for li in line_items:
+            if not isinstance(li, dict):
+                continue
+            qty = _f(li.get('Quantity') or li.get('quantity') or 1, 1)
+            list_price = _f(li.get('ListPrice') or li.get('list_price') or li.get('UnitPrice') or li.get('unit_price'))
+            unit_price = _f(li.get('UnitPrice') or li.get('unit_price') or list_price)
+            unit_cost = _f(li.get('UnitCost__c') or li.get('unit_cost') or 0)
+            line_list = list_price * qty
+            line_net = _f(li.get('TotalPrice') or li.get('total_price') or (unit_price * qty), unit_price * qty)
+            line_cost = unit_cost * qty
+            total_list += line_list
+            total_net += line_net
+            total_cost += line_cost
+            normalized_items.append({
+                'name': (li.get('Product2') or {}).get('Name') if isinstance(li.get('Product2'), dict) else (li.get('product_name') or li.get('name') or 'Line item'),
+                'quantity': qty,
+                'list_price': round(list_price, 2),
+                'unit_price': round(unit_price, 2),
+                'unit_cost': round(unit_cost, 2),
+                'line_net': round(line_net, 2),
+            })
+
+        # Effective discount = how far below catalog list the quote actually is.
+        if total_list > 0:
+            effective_discount_pct = round((1 - (total_net / total_list)) * 100, 2)
+        else:
+            # Fall back to the CRM-stamped discount field if no priced line items.
+            effective_discount_pct = round(_f(opp.get('Discount__c') or opp.get('discount') or 0), 2)
+            total_net = total_net or _f(opp.get('Amount') or opp.get('amount') or 0)
+
+        # Blended gross margin on the quoted (net) revenue.
+        if total_net > 0:
+            gross_margin_pct = round(((total_net - total_cost) / total_net) * 100, 2)
+        else:
+            gross_margin_pct = 0.0
+
+        term_months = _f(opp.get('ContractTerm__c') or opp.get('contract_term') or 12, 12)
+        # Longer terms erode realized margin (deferred revenue / churn risk) - a flat penalty model.
+        term_penalty_pct = round(max(0.0, (term_months - max_term)) * 0.5, 2)
+        margin_after_penalty = round(gross_margin_pct - term_penalty_pct, 2)
+
+        # --- Deterministic policy violations (hard stops, independent of approver) ---
+        violations = []
+        if margin_after_penalty < min_margin:
+            violations.append(f"gross margin {margin_after_penalty}% below floor {min_margin}%")
+        if effective_discount_pct < 0:
+            violations.append("quoted price is above list (negative discount) - check line items")
+        if effective_discount_pct >= 100:
+            violations.append("effective discount >= 100% - quote nets to zero or below")
+        if not normalized_items and total_net <= 0:
+            violations.append("no priced line items and no opportunity amount - nothing to approve")
+
+        is_non_standard = effective_discount_pct > std_discount
+
+        # --- Approver tier by discount band ---
+        #   rep manager  <15%   |   VP  15-30%   |   CFO  >30%
+        if effective_discount_pct > 30:
+            approver_tier = 'cfo'
+        elif effective_discount_pct >= 15:
+            approver_tier = 'vp'
+        else:
+            approver_tier = 'rep_manager'
+
+        result = {
+            'opportunity_id': opp.get('Id') or opp.get('id') or _input.get('opportunity_id'),
+            'opportunity_name': opp.get('Name') or opp.get('dealname') or 'Untitled opportunity',
+            'account_name': (opp.get('Account') or {}).get('Name') if isinstance(opp.get('Account'), dict) else (opp.get('account_name') or 'Unknown account'),
+            'owner_name': (opp.get('Owner') or {}).get('Name') if isinstance(opp.get('Owner'), dict) else (opp.get('owner_name') or 'Unknown rep'),
+            'owner_email': (opp.get('Owner') or {}).get('Email') if isinstance(opp.get('Owner'), dict) else (opp.get('owner_email') or ''),
+            'currency': str(opp.get('CurrencyIsoCode') or opp.get('currency') or 'USD').upper(),
+            'total_list_price': round(total_list, 2),
+            'total_net_price': round(total_net, 2),
+            'total_cost': round(total_cost, 2),
+            'effective_discount_pct': effective_discount_pct,
+            'gross_margin_pct': gross_margin_pct,
+            'term_months': term_months,
+            'term_penalty_pct': term_penalty_pct,
+            'margin_after_penalty': margin_after_penalty,
+            'is_non_standard': is_non_standard,
+            'approver_tier': approver_tier,
+            'policy_violations': violations,
+            'has_violation': len(violations) > 0,
+            'line_items': normalized_items,
+        }
+
+  # ---- Cross-provider rationale branches. Each writes ONLY a human-readable summary; their
+  #      output never gates the math. Pinned to DIFFERENT providers so the race is a real
+  #      first-valid-wins failover (not a vote, not on the decision path). ----
+  - id: rationale_sonnet
+    type: standard
+    model: sonnet
+    prompt: |
+      Write a concise deal-desk rationale (max 4 sentences, no markdown, no emojis) for an
+      approver reviewing this non-standard discount. State the effective discount, the gross
+      margin after any term penalty, whether the policy floor is met, and the single biggest
+      risk. Do NOT make an approve/reject recommendation - the approver decides.
+      Deal facts: {steps.compute_margin_policy.output}
+
+  - id: rationale_gemini
+    type: standard
+    model: google/gemini-2.5-pro
+    prompt: |
+      Write a concise deal-desk rationale (max 4 sentences, no markdown, no emojis) for an
+      approver reviewing this non-standard discount. State the effective discount, the gross
+      margin after any term penalty, whether the policy floor is met, and the single biggest
+      risk. Do NOT make an approve/reject recommendation - the approver decides.
+      Deal facts: {steps.compute_margin_policy.output}
+
+  - id: rationale_mistral
+    type: standard
+    model: mistral/large
+    prompt: |
+      Write a concise deal-desk rationale (max 4 sentences, no markdown, no emojis) for an
+      approver reviewing this non-standard discount. State the effective discount, the gross
+      margin after any term penalty, whether the policy floor is met, and the single biggest
+      risk. Do NOT make an approve/reject recommendation - the approver decides.
+      Deal facts: {steps.compute_margin_policy.output}
+
+  - id: deal_rationale
+    type: race
+    depends_on: [compute_margin_policy]
+    race_config:
+      branches:
+        - [rationale_sonnet]
+        - [rationale_gemini]
+        - [rationale_mistral]
+      validator: "len(str(output).strip()) > 0"
+
+  # 3) GATE - multi-strategy. The llm_eval strategy only checks the deterministic math is
+  #    internally consistent (it cannot fabricate an approval); the human strategy is the
+  #    actual tiered approval whose message names the routed approver tier and shows the
+  #    rationale; a timeout auto-rejects after N hours. ALL strategies must pass to approve.
+  - id: discount_approval_gate
+    type: gate
+    depends_on: [compute_margin_policy, deal_rationale]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >
+              You are a deal-desk control. Answer exactly 'approved' if this record is internally
+              consistent - effective_discount_pct is present, approver_tier matches the discount
+              band (rep_manager <15, vp 15-30, cfo >30), and there are NO entries in
+              policy_violations - otherwise answer 'rejected' and name the defect. You are only
+              validating the math; you are NOT authorizing the discount.
+            input: "{steps.compute_margin_policy.output}"
+            model: haiku
+        - type: human
+          config:
+            message: >
+              Discount approval (tier: {steps.compute_margin_policy.output.approver_tier}).
+              Deal '{steps.compute_margin_policy.output.opportunity_name}' for
+              {steps.compute_margin_policy.output.account_name}: effective discount
+              {steps.compute_margin_policy.output.effective_discount_pct}%, gross margin after
+              penalty {steps.compute_margin_policy.output.margin_after_penalty}%. Routing rule -
+              rep manager under 15%, VP 15-30%, CFO over 30%. Rationale:
+              {steps.deal_rationale.output}. Approve to authorize the discount; reject to deny.
+            timeout_hours: 48
+            on_timeout: reject
+
+  # 4) Capture the gate outcome deterministically so the branch reads a clean boolean. No model.
+  - id: record_decision
+    type: code
+    depends_on: [discount_approval_gate]
+    code_config:
+      language: python
+      code: |
+        import hashlib
+        from datetime import datetime, timezone
+
+        gate_out = _steps['discount_approval_gate'] or {}
+        policy = _steps['compute_margin_policy'] or {}
+
+        # The gate result may surface as a dict or a bare bool/string depending on backend.
+        if isinstance(gate_out, dict):
+            approved = bool(gate_out.get('approved', gate_out.get('passed', False)))
+            approver = gate_out.get('approver') or gate_out.get('decided_by') or policy.get('approver_tier')
+        else:
+            approved = str(gate_out).strip().lower() in ('approved', 'true', 'pass', 'passed')
+            approver = policy.get('approver_tier')
+
+        # A hard policy violation forces a denial regardless of what the gate returned.
+        if policy.get('has_violation'):
+            approved = False
+
+        decided_at = datetime.now(timezone.utc).isoformat()
+        # Deterministic, reproducible approval/audit id over the canonical decision facts.
+        seed = f"{policy.get('opportunity_id')}|{policy.get('effective_discount_pct')}|{approver}|{approved}|{decided_at}"
+        approval_id = "DD-" + hashlib.sha256(seed.encode('utf-8')).hexdigest()[:16].upper()
+
+        reasons = list(policy.get('policy_violations') or [])
+        if not approved and not reasons:
+            reasons.append("approver rejected the non-standard discount or the request timed out")
+
+        result = {
+            'approved': approved,
+            'approver_tier': approver,
+            'approval_id': approval_id,
+            'decided_at': decided_at,
+            'effective_discount_pct': policy.get('effective_discount_pct'),
+            'margin_after_penalty': policy.get('margin_after_penalty'),
+            'reasons': reasons,
+            'reasons_text': "; ".join(reasons) if reasons else "approved within policy",
+        }
+
+  # 5) BRANCH on the deterministic decision. Approved -> CRM writeback + dual Slack confirm.
+  #    Rejected -> notify the rep with reasons and stop (no CRM mutation).
+  - id: decision_branch
+    type: condition
+    depends_on: [record_decision]
+    condition_config:
+      expression: "{steps.record_decision.output.approved} == true"
+      then: [crm_writeback_approved, notify_rep_approved, notify_finance_approved]
+      else: [notify_rep_rejected]
+
+  # ---- REJECTED PATH: tell the rep why, and stop. No CRM mutation, no order form. ----
+  - id: notify_rep_rejected
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_rep_channel}"
+      message: >
+        Discount request DENIED for '{steps.compute_margin_policy.output.opportunity_name}'
+        ({steps.compute_margin_policy.output.account_name}). Requested effective discount
+        {steps.compute_margin_policy.output.effective_discount_pct}% at margin
+        {steps.compute_margin_policy.output.margin_after_penalty}%. Reason(s):
+        {steps.record_decision.output.reasons_text}. Approval id
+        {steps.record_decision.output.approval_id}. Revise the quote and resubmit if needed.
+
+  # ---- APPROVED PATH: PATCH the CRM opportunity with the approved terms + audit record. ----
+  - id: crm_writeback_approved
+    type: http
+    http_config:
+      url: "{input.crm_base_url}/sobjects/Opportunity/{input.opportunity_id}"
+      method: PATCH
+      headers:
+        Content-Type: "application/json"
+      auth: "bearer:{env.CRM_ACCESS_TOKEN}"
+      body: |
+        {
+          "Discount_Status__c": "approved",
+          "Approved_Discount__c": {steps.record_decision.output.effective_discount_pct},
+          "Approved_Margin__c": {steps.record_decision.output.margin_after_penalty},
+          "Discount_Approval_Id__c": "{steps.record_decision.output.approval_id}",
+          "Discount_Approver_Tier__c": "{steps.record_decision.output.approver_tier}",
+          "Discount_Approved_At__c": "{steps.record_decision.output.decided_at}",
+          "Deal_Desk_Audit__c": "{steps.deal_rationale.output}"
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  - id: notify_rep_approved
+    type: notify
+    depends_on: [crm_writeback_approved]
+    notify_config:
+      service: slack
+      channel: "{input.slack_rep_channel}"
+      message: >
+        Discount APPROVED for '{steps.compute_margin_policy.output.opportunity_name}'
+        ({steps.compute_margin_policy.output.account_name}) by tier
+        {steps.record_decision.output.approver_tier}. Approved discount
+        {steps.record_decision.output.effective_discount_pct}% at margin
+        {steps.record_decision.output.margin_after_penalty}%. Approval id
+        {steps.record_decision.output.approval_id} written to the CRM - order form is cleared to proceed.
+
+  - id: notify_finance_approved
+    type: notify
+    depends_on: [crm_writeback_approved]
+    notify_config:
+      service: slack
+      channel: "{input.slack_finance_channel}"
+      message: >
+        Signed-off discount on record: deal '{steps.compute_margin_policy.output.opportunity_name}'
+        / {steps.compute_margin_policy.output.account_name} | rep
+        {steps.compute_margin_policy.output.owner_name} | discount
+        {steps.record_decision.output.effective_discount_pct}% | margin after penalty
+        {steps.record_decision.output.margin_after_penalty}% | term
+        {steps.compute_margin_policy.output.term_months}mo | approver
+        {steps.record_decision.output.approver_tier} | approval id
+        {steps.record_decision.output.approval_id}. CRM patched, audit record attached.
+
+on_complete:
+  storage_path: "deal-desk-discount-approval-gate/{run_id}/result.json"

@@ -1,0 +1,422 @@
+# name: Ticket Resolution Autopilot
+# description: Closed-loop ticket deflection - RAG-ground a draft answer over the real KB, gate it for hallucination and policy, escalate low-confidence drafts to a human, then write the approved reply back into the helpdesk and link the resolving KB article.
+# tags: [support, deflection, rag, groundedness, helpdesk, failover]
+# category: support
+name: ticket-resolution-autopilot
+description: >-
+  Closed-loop ticket resolution for a SaaS support org. On ticket.created
+  (webhook from Zendesk/Intercom, or run manually for backfill) this workflow
+  fetches the full ticket + conversation, classifies intent and whether it is
+  answerable from the knowledge base, semantically searches a vendor-neutral
+  vector store (Pinecone/Qdrant) for the top-k grounding chunks, then RACES three
+  providers (Anthropic, OpenAI, Gemini) on the SAME grounded prompt - first
+  schema-valid, fully-cited JSON wins, giving automatic provider failover and
+  fastest-of-N latency. A two-judge gate (groundedness + policy, on different
+  models) checks that every claim cites a retrieved chunk and that no refund or
+  legal promises slipped in. A deterministic code step turns the gate verdict +
+  draft confidence into an auto/escalate decision; a condition routes high-trust
+  drafts straight to the helpdesk and everything else to a human approver in
+  Slack/dashboard. The approved reply is written back to Zendesk as a public
+  comment, the ticket is set solved and tagged with the resolving kb_article_id,
+  and a deflection summary is posted to Slack. Correctness never depends on any
+  single provider's proprietary retrieval or tool-use.
+default_model: sonnet
+default_timeout: 900
+input_schema:
+  required: ["helpdesk_base_url", "ticket_id", "vector_search_url"]
+  properties:
+    helpdesk_base_url:
+      type: string
+      description: "Base URL of the helpdesk REST API (Zendesk v2 or Intercom), e.g. https://acme.zendesk.com/api/v2"
+      default: "https://acme.zendesk.com/api/v2"
+    ticket_id:
+      type: string
+      description: "Helpdesk ticket id from the ticket.created webhook (or supplied manually for backfill)."
+      example: "440231"
+    vector_search_url:
+      type: string
+      description: "Vendor-neutral vector store query endpoint (Pinecone or Qdrant). POST a query, get top-k KB chunks back."
+      default: "https://kb-index.svc.internal/query"
+    kb_namespace:
+      type: string
+      description: "Vector store namespace / collection holding the published KB articles."
+      default: "kb-public-en"
+    top_k:
+      type: integer
+      description: "Number of KB chunks to retrieve for grounding."
+      default: 6
+    confidence_threshold:
+      type: number
+      description: "Minimum draft confidence required (alongside a passing gate) to auto-send without human review."
+      default: 0.82
+    slack_channel:
+      type: string
+      description: "Slack channel for the deflection / resolution digest."
+      default: "#support-autopilot"
+steps:
+  # 1) FETCH - pull the full ticket + conversation thread from the helpdesk (Zendesk/Intercom).
+  - id: fetch_ticket
+    type: http
+    http_config:
+      url: "{input.helpdesk_base_url}/tickets/{input.ticket_id}/comments.json?include=users"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.HELPDESK_API_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2) TRIAGE - classify intent AND whether this is answerable from the KB or needs a human.
+  #    answerable_from_kb -> attempt deflection (search + draft + gate).
+  #    needs_human -> skip drafting, go straight to the human queue.
+  - id: triage
+    type: classify
+    depends_on: [fetch_ticket]
+    classify_config:
+      categories: ["answerable_from_kb", "needs_human"]
+      input: "{steps.fetch_ticket.output}"
+      model: haiku
+      branches:
+        answerable_from_kb: ["kb_search", "draft_race", "groundedness_gate", "score_decision", "route_decision"]
+        needs_human: ["score_decision", "route_decision"]
+
+  # 3) RETRIEVE - semantic search the KB over a vendor-neutral vector store (Pinecone/Qdrant).
+  #    Plain RAG: embed the ticket text server-side, return top-k chunks with article ids + scores.
+  - id: kb_search
+    type: http
+    http_config:
+      url: "{input.vector_search_url}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.VECTOR_STORE_API_KEY}"
+      body: |
+        {
+          "namespace": "{input.kb_namespace}",
+          "top_k": {input.top_k},
+          "include_metadata": true,
+          "query": {steps.fetch_ticket.output}
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 4) DRAFT RACE - SAME grounded prompt on three providers concurrently. First schema-valid,
+  #    fully-cited JSON wins = provider failover + fastest-of-N. Branches defined separately, no depends_on.
+  - id: draft_race
+    type: race
+    race_config:
+      branches: [["draft_anthropic"], ["draft_openai"], ["draft_gemini"]]
+      validator: "len(str(output)) > 20 and 'cited_chunk_ids' in str(output)"
+
+  - id: draft_anthropic
+    type: standard
+    model: sonnet
+    prompt: |
+      You are a support deflection assistant. Draft a customer reply that is
+      GROUNDED ONLY in the retrieved KB chunks below. Every factual claim MUST
+      cite the id of the chunk it came from. If the chunks do not actually answer
+      the question, say so honestly and set answerable=false - do NOT invent.
+
+      DO NOT promise refunds, credits, legal outcomes, SLAs, or anything not
+      explicitly stated in a cited chunk.
+
+      Ticket + conversation (JSON):
+      {{ _steps['fetch_ticket'] }}
+
+      Retrieved KB chunks (JSON, each has id, article_id, text, score):
+      {{ _steps['kb_search'] }}
+
+      Return STRICT JSON only:
+      {
+        "answerable": <true|false>,
+        "reply": "<customer-facing answer, grounded, with inline [chunk:<id>] citations>",
+        "cited_chunk_ids": ["<id>", ...],
+        "primary_article_id": "<the KB article_id that best resolves the ticket, or null>",
+        "confidence": <float 0.0-1.0, calibrated>,
+        "provider": "anthropic"
+      }
+
+  - id: draft_openai
+    type: standard
+    model: openai/codex
+    prompt: |
+      You are a support deflection assistant. Draft a customer reply that is
+      GROUNDED ONLY in the retrieved KB chunks below. Every factual claim MUST
+      cite the id of the chunk it came from. If the chunks do not actually answer
+      the question, say so honestly and set answerable=false - do NOT invent.
+
+      DO NOT promise refunds, credits, legal outcomes, SLAs, or anything not
+      explicitly stated in a cited chunk.
+
+      Ticket + conversation (JSON):
+      {{ _steps['fetch_ticket'] }}
+
+      Retrieved KB chunks (JSON, each has id, article_id, text, score):
+      {{ _steps['kb_search'] }}
+
+      Return STRICT JSON only:
+      {
+        "answerable": <true|false>,
+        "reply": "<customer-facing answer, grounded, with inline [chunk:<id>] citations>",
+        "cited_chunk_ids": ["<id>", ...],
+        "primary_article_id": "<the KB article_id that best resolves the ticket, or null>",
+        "confidence": <float 0.0-1.0, calibrated>,
+        "provider": "openai"
+      }
+
+  - id: draft_gemini
+    type: standard
+    model: google/gemini-2.5-pro
+    prompt: |
+      You are a support deflection assistant. Draft a customer reply that is
+      GROUNDED ONLY in the retrieved KB chunks below. Every factual claim MUST
+      cite the id of the chunk it came from. If the chunks do not actually answer
+      the question, say so honestly and set answerable=false - do NOT invent.
+
+      DO NOT promise refunds, credits, legal outcomes, SLAs, or anything not
+      explicitly stated in a cited chunk.
+
+      Ticket + conversation (JSON):
+      {{ _steps['fetch_ticket'] }}
+
+      Retrieved KB chunks (JSON, each has id, article_id, text, score):
+      {{ _steps['kb_search'] }}
+
+      Return STRICT JSON only:
+      {
+        "answerable": <true|false>,
+        "reply": "<customer-facing answer, grounded, with inline [chunk:<id>] citations>",
+        "cited_chunk_ids": ["<id>", ...],
+        "primary_article_id": "<the KB article_id that best resolves the ticket, or null>",
+        "confidence": <float 0.0-1.0, calibrated>,
+        "provider": "gemini"
+      }
+
+  # 5) GATE - TWO judges on DIFFERENT models. Both must pass.
+  #    Judge 1: groundedness/citation (every claim cites a retrieved chunk).
+  #    Judge 2: policy (no refund/legal/SLA promises, on-brand, safe to send).
+  - id: groundedness_gate
+    type: gate
+    depends_on: [draft_race]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: |
+              You are a GROUNDEDNESS auditor. You are given the winning draft and
+              the retrieved KB chunks it was grounded on. Approve ONLY if every
+              factual claim in the reply is supported by a chunk listed in
+              cited_chunk_ids, and those ids actually exist in the retrieved set.
+              Reject if the reply contains any claim not traceable to a cited
+              chunk (hallucination) or cites a chunk id that was not retrieved.
+              Answer exactly "approved" or "rejected".
+            input: "{steps.draft_race.output}"
+            model: sonnet
+        - type: llm_eval
+          config:
+            prompt: |
+              You are a POLICY auditor on a DIFFERENT model than the groundedness
+              judge. Approve ONLY if the draft makes no promises about refunds,
+              credits, legal outcomes, contractual SLAs, or pricing exceptions,
+              and contains nothing unsafe, off-brand, or that discloses another
+              customer's data. Answer exactly "approved" or "rejected".
+            input: "{steps.draft_race.output}"
+            model: google/gemini-2.5-pro
+
+  # 6) SCORE - DETERMINISTIC decision. Combine the gate verdict, draft confidence,
+  #    triage label and citation completeness into auto_send vs escalate.
+  #    This is the load-bearing decision and it is pure code (no single prompt decides).
+  - id: score_decision
+    type: code
+    depends_on: [triage, groundedness_gate]
+    code_config:
+      language: python
+      code: |
+        triage = _steps.get('triage')
+        # classify output may be the raw label string or a dict with 'category'.
+        if isinstance(triage, dict):
+            triage_label = triage.get('category') or triage.get('label') or str(triage)
+        else:
+            triage_label = str(triage or '')
+        needs_human_triage = 'needs_human' in triage_label
+
+        draft = _steps.get('draft_race') or {}
+        if not isinstance(draft, dict):
+            draft = {}
+
+        gate = _steps.get('groundedness_gate')
+        # gate output may be a bool, a dict with 'passed', or a string verdict.
+        if isinstance(gate, dict):
+            gate_passed = bool(gate.get('passed', gate.get('approved', False)))
+        elif isinstance(gate, bool):
+            gate_passed = gate
+        else:
+            gate_passed = 'approv' in str(gate or '').lower() and 'reject' not in str(gate or '').lower()
+
+        try:
+            confidence = float(draft.get('confidence', 0.0))
+        except (TypeError, ValueError):
+            confidence = 0.0
+
+        cited = draft.get('cited_chunk_ids') or []
+        if not isinstance(cited, list):
+            cited = []
+        has_citations = len(cited) > 0
+        answerable = bool(draft.get('answerable', False))
+
+        threshold = float(_input.get('confidence_threshold', 0.82))
+
+        # Auto-send ONLY when: KB-answerable triage, the draft is answerable,
+        # the two-judge gate passed, citations exist, and confidence clears the bar.
+        auto_send = (
+            not needs_human_triage
+            and answerable
+            and gate_passed
+            and has_citations
+            and confidence >= threshold
+        )
+
+        if needs_human_triage:
+            reason = 'triage flagged needs_human'
+        elif not answerable:
+            reason = 'draft reported KB cannot answer this ticket'
+        elif not gate_passed:
+            reason = 'groundedness/policy gate did not pass'
+        elif not has_citations:
+            reason = 'draft has no KB citations'
+        elif confidence < threshold:
+            reason = 'confidence %.2f below threshold %.2f' % (confidence, threshold)
+        else:
+            reason = 'gate passed and confidence above threshold'
+
+        result = {
+            'auto_send': bool(auto_send),
+            'decision': 'auto' if auto_send else 'escalate',
+            'reason': reason,
+            'confidence': round(confidence, 4),
+            'threshold': threshold,
+            'gate_passed': bool(gate_passed),
+            'triage_label': triage_label,
+            'cited_chunk_ids': cited,
+            'primary_article_id': draft.get('primary_article_id'),
+            'reply': draft.get('reply', ''),
+        }
+
+  # 7) ROUTE - auto path skips the human; escalate path requires approval first.
+  #    Both paths converge on assemble_reply -> post_reply -> notify_summary.
+  - id: route_decision
+    type: condition
+    depends_on: [score_decision]
+    condition_config:
+      expression: "{steps.score_decision.output.auto_send} == true"
+      then: [assemble_reply, post_reply, notify_summary]
+      else: [human_review, assemble_reply, post_reply, notify_summary]
+
+  # 8) HUMAN REVIEW - escalate path only. Agent reviews drafts that failed the gate,
+  #    were low-confidence, or were triaged needs_human, via Slack/dashboard. Can edit the reply.
+  - id: human_review
+    type: approval
+    depends_on: [route_decision]
+    approval_config:
+      message: "Review this support draft before it is sent to the customer. It was escalated (failed the groundedness/policy gate, was low-confidence, or needs human handling)."
+      show_data: "steps.score_decision.output"
+      timeout_hours: 8
+      on_timeout: abort
+      allow_edit: true
+
+  # 9) ASSEMBLE - DETERMINISTIC final-reply selection. On the escalate path use the
+  #    (possibly human-edited) approved reply; on the auto path use the drafted reply.
+  - id: assemble_reply
+    type: code
+    depends_on: [score_decision]
+    code_config:
+      language: python
+      code: |
+        decision = _steps.get('score_decision') or {}
+        if not isinstance(decision, dict):
+            decision = {}
+        review = _steps.get('human_review')  # None on the auto path
+
+        # Prefer a human-edited reply when the approval step provided one.
+        reply = decision.get('reply', '')
+        approved_by = 'autopilot'
+        if isinstance(review, dict):
+            edited = review.get('edited_data') or review.get('data') or {}
+            if isinstance(edited, dict) and edited.get('reply'):
+                reply = edited.get('reply')
+            elif review.get('reply'):
+                reply = review.get('reply')
+            approved_by = review.get('approved_by') or review.get('actor') or 'human-agent'
+        elif review is not None and str(review).strip():
+            reply = str(review)
+            approved_by = 'human-agent'
+
+        article_id = decision.get('primary_article_id')
+        cited = decision.get('cited_chunk_ids') or []
+
+        # Tags written back onto the ticket: resolving article + how it was handled.
+        tags = ['autopilot-resolved']
+        if decision.get('decision') == 'escalate':
+            tags = ['autopilot-escalated', 'human-reviewed']
+        if article_id:
+            tags.append('kb_article_%s' % article_id)
+
+        result = {
+            'reply': reply,
+            'public': True,
+            'status': 'solved',
+            'tags': tags,
+            'kb_article_id': article_id,
+            'cited_chunk_ids': cited,
+            'approved_by': approved_by,
+            'handled_as': decision.get('decision', 'auto'),
+        }
+
+  # 10) WRITE-BACK - post the approved reply to the helpdesk as a PUBLIC comment,
+  #     set status=solved, and tag with the resolving kb_article_id.
+  - id: post_reply
+    type: http
+    depends_on: [assemble_reply]
+    http_config:
+      url: "{input.helpdesk_base_url}/tickets/{input.ticket_id}.json"
+      method: PUT
+      headers:
+        Content-Type: "application/json"
+      auth: "bearer:{env.HELPDESK_API_TOKEN}"
+      body: |
+        {
+          "ticket": {
+            "status": "solved",
+            "tags": {steps.assemble_reply.output.tags},
+            "comment": {
+              "public": true,
+              "body": {steps.assemble_reply.output.reply}
+            }
+          }
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 11) NOTIFY - post the resolution + deflection stats to Slack.
+  - id: notify_summary
+    type: notify
+    depends_on: [post_reply]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        :white_check_mark: Ticket {input.ticket_id} resolved by Autopilot
+        Handled as : {steps.score_decision.output.decision} ({steps.score_decision.output.reason})
+        Confidence : {steps.score_decision.output.confidence} (threshold {steps.score_decision.output.threshold})
+        Gate passed : {steps.score_decision.output.gate_passed}
+        Resolving KB article : {steps.assemble_reply.output.kb_article_id}
+        Approved by : {steps.assemble_reply.output.approved_by}
+on_complete:
+  storage_path: "ticket-resolution-autopilot/{run_id}/result.json"

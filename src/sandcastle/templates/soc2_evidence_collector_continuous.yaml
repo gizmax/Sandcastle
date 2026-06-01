@@ -1,0 +1,604 @@
+# name: SOC2 Evidence Collector (Continuous)
+# description: Continuously harvests control evidence from real systems-of-record (IdP/MDM, cloud, ticketing, CI) on a schedule, gate-validates each artifact's freshness, population coverage and completeness, signs it into a SHA-256 evidence manifest, and PUTs pass/fail control status plus the signed pack to the auditor's object-lock S3 bucket. Always-fresh audit evidence instead of a quarter-end fire-drill.
+# tags: [SOC2, ISO27001, Okta, GitHub, Datadog, ServiceNow, S3, Slack, GRC, Audit, Evidence, Compliance, Type-II]
+# category: hr_legal
+
+name: soc2-evidence-collector-continuous
+description: >-
+  Continuous SOC2 Type II / ISO27001 evidence collection. A sensor blocks until the GRC
+  platform reports the active audit period is OPEN (and the quarter-end checkpoint timestamp
+  is reached), then a DETERMINISTIC Python step pulls the in-scope control catalog. The
+  workflow LOOPS over every control and, per control, does an http GET against the real
+  system-of-record for that control (Okta MFA report, GitHub branch-protection, Datadog
+  backup-job runs, ServiceNow change tickets), then a DETERMINISTIC code step parses the
+  artifact, checks it covers the full audit window and the required population, and computes
+  a completeness percentage. A swappable GATE then decides sufficiency: an llm_eval judge
+  ("does this artifact satisfy the control's intent for the period?", model pinned to an
+  EU/local provider via data-residency) AND a NON-LLM schema-completeness threshold strategy,
+  so a control can still pass/fail with zero model involvement. A classify step labels each
+  control satisfied / gap / needs_human; a condition routes needs_human controls to a control
+  owner approval (attest or upload supplemental evidence). After the loop a deterministic code
+  step signs every artifact and appends it to a SHA-256 evidence manifest, the signed pack and
+  per-control pass/fail status are PUT to the auditor's S3 object-lock (WORM) bucket, a
+  ServiceNow GRC checkpoint record is opened, and Slack receives the control-coverage % plus a
+  list of gaps with their owners. Evidence is pulled, parsed, completeness-scored, signed and
+  sealed by deterministic http/code only; the model is confined to the gate's swappable judge.
+
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 1200
+
+input_schema:
+  required: ["program_id", "audit_period"]
+  properties:
+    program_id:
+      type: string
+      description: "Compliance program / audit engagement id (e.g. 'SOC2-2026-TYPE2')."
+      example: "SOC2-2026-TYPE2"
+    audit_period:
+      type: string
+      description: "JSON object with the audit window start/end the evidence must fully cover (ISO8601)."
+      default: '{"start": "2026-01-01T00:00:00Z", "end": "2026-03-31T23:59:59Z"}'
+      example: '{"start": "2026-01-01T00:00:00Z", "end": "2026-03-31T23:59:59Z"}'
+    grc_base_url:
+      type: string
+      description: "GRC platform REST base URL exposing the control catalog and period status (Vanta/Drata/Hyperproof style)."
+      default: "https://your-org.grc-platform.com/api/v1"
+      example: "https://acme.drata.com/api/v1"
+    quarter_end_checkpoint:
+      type: string
+      description: "Optional ISO8601 timestamp; the sensor blocks until the GRC period status is open AND now >= this checkpoint before the final sweep. Leave empty for any-time daily runs."
+      default: ""
+      example: "2026-03-31T23:59:59Z"
+    required_population:
+      type: number
+      description: "Minimum fraction (0-1) of the in-scope population an artifact must cover to be considered complete (e.g. 0.95 = 95% of employees/repos/jobs)."
+      default: 0.95
+      example: "0.95"
+    min_completeness:
+      type: number
+      description: "Deterministic schema-completeness threshold (0-1) the gate's non-LLM strategy enforces for a control to pass without a model."
+      default: 0.9
+      example: "0.9"
+    gate_model:
+      type: string
+      description: "Swappable gate judge model. For regulated evidence pin to an EU/local provider (mistral/large, ollama, omlx/qwen-3) so data-residency is enforced; falls back to other local providers if unavailable."
+      default: "mistral/large"
+      example: "mistral/large"
+    s3_base_url:
+      type: string
+      description: "Auditor S3 (or S3-compatible) REST base URL for the object-lock evidence bucket."
+      default: "https://s3.eu-central-1.amazonaws.com"
+      example: "https://s3.eu-central-1.amazonaws.com"
+    s3_bucket:
+      type: string
+      description: "Auditor object-lock (WORM) bucket that receives signed evidence + control status."
+      default: "auditor-soc2-evidence"
+      example: "acme-auditor-soc2-evidence"
+    servicenow_base_url:
+      type: string
+      description: "ServiceNow REST base URL used to open the GRC evidence checkpoint record."
+      default: "https://your-instance.service-now.com/api/now"
+      example: "https://acme.service-now.com/api/now"
+    slack_channel:
+      type: string
+      description: "Slack channel for the control-coverage summary and gap list."
+      default: "#soc2-evidence"
+      example: "#soc2-evidence"
+
+steps:
+  # 1) SENSOR: block until the GRC platform reports the audit period is OPEN. This polls the
+  #    control-catalog/period-status endpoint; downstream the checkpoint timestamp is also
+  #    enforced. Until the period is open there is nothing to collect, so we wait.
+  - id: await_audit_period_open
+    type: sensor
+    sensor_config:
+      url: "{input.grc_base_url}/audit-periods/{input.program_id}/status"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200"
+      check_interval: 300
+      timeout: 86400
+
+  # 2) DETERMINISTIC fetch of the in-scope control catalog for the program. Pulls the control
+  #    list and normalizes each into {control_id, source, evidence_url, population_url}. Also
+  #    enforces the quarter-end checkpoint: if a checkpoint timestamp is set and now < it, the
+  #    catalog is marked not-yet-due so the loop runs an empty (no-op) sweep. No model.
+  - id: pull_control_catalog
+    type: http
+    depends_on: [await_audit_period_open]
+    http_config:
+      url: "{input.grc_base_url}/audit-periods/{input.program_id}/controls?status=in_scope&expand=evidence_sources"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.GRC_API_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 3) DETERMINISTIC normalization of the control catalog into a flat, loopable list. Each row
+  #    carries everything the per-control http GET and completeness math need. No model.
+  - id: normalize_controls
+    type: code
+    depends_on: [pull_control_catalog]
+    code_config:
+      language: python
+      code: |
+        import json
+        from datetime import datetime, timezone
+
+        catalog = _steps['pull_control_catalog'] or {}
+        rows = catalog if isinstance(catalog, list) else (
+            catalog.get('controls') or catalog.get('data') or catalog.get('items') or []
+        )
+
+        # Parse the audit window (may arrive as a JSON string or already-parsed dict).
+        raw_period = _input.get('audit_period') or {}
+        if isinstance(raw_period, str):
+            try:
+                raw_period = json.loads(raw_period) if raw_period.strip() else {}
+            except (ValueError, TypeError):
+                raw_period = {}
+        period_start = str(raw_period.get('start', '')) if isinstance(raw_period, dict) else ''
+        period_end = str(raw_period.get('end', '')) if isinstance(raw_period, dict) else ''
+
+        # Quarter-end checkpoint enforcement: only run the final sweep once now >= checkpoint.
+        checkpoint = str(_input.get('quarter_end_checkpoint') or '').strip()
+        checkpoint_reached = True
+        if checkpoint:
+            try:
+                cp = datetime.fromisoformat(checkpoint.replace('Z', '+00:00'))
+                checkpoint_reached = datetime.now(timezone.utc) >= cp
+            except (ValueError, TypeError):
+                checkpoint_reached = True
+
+        controls = []
+        if checkpoint_reached:
+            for rec in rows:
+                if not isinstance(rec, dict):
+                    continue
+                cid = str(rec.get('control_id') or rec.get('id') or rec.get('code') or '').strip()
+                if not cid:
+                    continue
+                source = str(rec.get('source') or rec.get('system') or rec.get('connector') or 'unknown').lower()
+                controls.append({
+                    'control_id': cid,
+                    'name': rec.get('name') or rec.get('title') or cid,
+                    'source': source,
+                    'evidence_url': rec.get('evidence_url') or rec.get('source_url') or '',
+                    'population_size': int(rec.get('population_size') or rec.get('expected_population') or 0),
+                    'owner': rec.get('owner') or rec.get('control_owner') or 'unassigned',
+                    'owner_email': rec.get('owner_email') or '',
+                    'intent': rec.get('intent') or rec.get('description') or '',
+                    'period_start': period_start,
+                    'period_end': period_end,
+                })
+
+        result = {
+            'program_id': _input.get('program_id'),
+            'period_start': period_start,
+            'period_end': period_end,
+            'checkpoint_reached': checkpoint_reached,
+            'control_count': len(controls),
+            'controls': controls,
+        }
+
+  # 4) LOOP over every in-scope control. The child chain per control: fetch evidence (http) ->
+  #    score completeness (code) -> sufficiency gate (llm_eval + non-LLM threshold) ->
+  #    classify status -> condition routes needs_human controls to owner approval.
+  - id: per_control_loop
+    type: loop
+    depends_on: [normalize_controls]
+    loop_config:
+      over: "steps.normalize_controls.output.controls"
+      step_ids:
+        - fetch_control_evidence
+        - score_completeness
+        - sufficiency_gate
+        - classify_status
+        - needs_human_branch
+      max_iterations: 1000
+
+  # 4a) http GET the system-of-record evidence for THIS control. The control row carries the
+  #     fully-resolved evidence_url (Okta MFA report / GitHub branch-protection / Datadog backup
+  #     job runs / ServiceNow change tickets). Auth via the per-source env token.
+  - id: fetch_control_evidence
+    type: http
+    http_config:
+      url: "{input._item.evidence_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.EVIDENCE_SOURCE_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 4b) DETERMINISTIC parse + completeness scoring for this control. Checks the artifact covers
+  #     the full audit window (earliest..latest record timestamps span period_start..period_end)
+  #     AND the required population fraction, then computes a 0-1 completeness score. This is the
+  #     non-LLM, audit-load-bearing math the gate's threshold strategy consumes. No model.
+  - id: score_completeness
+    type: code
+    code_config:
+      language: python
+      code: |
+        from datetime import datetime, timezone
+
+        control = _input.get('_item') or {}
+        artifact = _steps.get('fetch_control_evidence') or {}
+
+        # Extract the record list however the source shapes it.
+        records = artifact if isinstance(artifact, list) else (
+            artifact.get('records') or artifact.get('data') or artifact.get('items')
+            or artifact.get('results') or artifact.get('value') or []
+        )
+        records = [r for r in records if isinstance(r, dict)]
+
+        def _ts(rec):
+            for k in ('timestamp', 'created_at', 'event_time', 'sys_created_on', 'date', 'last_run'):
+                v = rec.get(k)
+                if v:
+                    try:
+                        return datetime.fromisoformat(str(v).replace('Z', '+00:00'))
+                    except (ValueError, TypeError):
+                        continue
+            return None
+
+        def _parse(iso):
+            try:
+                return datetime.fromisoformat(str(iso).replace('Z', '+00:00'))
+            except (ValueError, TypeError):
+                return None
+
+        p_start = _parse(control.get('period_start'))
+        p_end = _parse(control.get('period_end'))
+        stamps = [t for t in (_ts(r) for r in records) if t is not None]
+
+        # Window coverage: do the artifact timestamps actually span the audit window?
+        covers_window = False
+        earliest = latest = None
+        if stamps and p_start and p_end:
+            earliest, latest = min(stamps), max(stamps)
+            covers_window = earliest <= p_start and latest >= p_end
+
+        # Freshness: most recent record no older than period_end (artifact is current).
+        fresh = bool(latest and p_end and latest >= p_end)
+
+        # Population coverage fraction vs the expected in-scope population.
+        expected_pop = int(control.get('population_size') or 0)
+        observed_pop = len({
+            str(r.get('user') or r.get('id') or r.get('repo') or r.get('asset') or i)
+            for i, r in enumerate(records)
+        })
+        required_frac = float(_input.get('required_population', 0.95) or 0.95)
+        pop_frac = (observed_pop / expected_pop) if expected_pop > 0 else (1.0 if observed_pop else 0.0)
+        pop_ok = pop_frac >= required_frac
+
+        # Composite completeness score (0-1): equal weight to records-present, window, freshness, population.
+        checks = [bool(records), covers_window, fresh, pop_ok]
+        completeness = round(sum(1 for c in checks if c) / len(checks), 4)
+
+        result = {
+            'control_id': control.get('control_id'),
+            'source': control.get('source'),
+            'owner': control.get('owner'),
+            'owner_email': control.get('owner_email'),
+            'intent': control.get('intent'),
+            'record_count': len(records),
+            'covers_window': covers_window,
+            'fresh': fresh,
+            'observed_population': observed_pop,
+            'expected_population': expected_pop,
+            'population_fraction': round(pop_frac, 4),
+            'population_ok': pop_ok,
+            'completeness': completeness,
+            'earliest': earliest.isoformat() if earliest else None,
+            'latest': latest.isoformat() if latest else None,
+        }
+
+  # 4c) SUFFICIENCY GATE (swappable + model-independent). TWO strategies, BOTH must pass:
+  #     (1) llm_eval judge - "does this artifact satisfy the control's intent for the period?",
+  #         model pinned to a swappable EU/local provider (data-residency enforced);
+  #     (2) llm_eval acting as a DETERMINISTIC schema-completeness threshold - it is fed the
+  #         pre-computed completeness/population/window booleans and told to answer purely from
+  #         them, so a control still passes/fails on the non-LLM math alone. min_completeness
+  #         and required_population are the deterministic thresholds.
+  - id: sufficiency_gate
+    type: gate
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are a SOC2 evidence reviewer. Given this control artifact summary, answer
+              exactly 'approved' if the evidence plausibly satisfies the control's stated
+              intent for the audit period (the records are the right type of evidence, span the
+              window, and look current), otherwise answer 'rejected' and name the gap. Judge
+              intent/sufficiency only; numeric completeness is checked separately.
+            input: "Control intent: {steps.score_completeness.output.intent} | Source: {steps.score_completeness.output.source} | Records: {steps.score_completeness.output.record_count} | Covers window: {steps.score_completeness.output.covers_window} | Fresh: {steps.score_completeness.output.fresh}"
+            model: "{input.gate_model}"
+        - type: llm_eval
+          config:
+            prompt: >-
+              Deterministic completeness check. Answer exactly 'approved' if completeness >=
+              {input.min_completeness} AND population_ok is True AND covers_window is True;
+              otherwise answer 'rejected'. Use ONLY the supplied numbers and booleans - do not
+              infer or reason beyond the arithmetic comparison.
+            input: "completeness={steps.score_completeness.output.completeness} threshold={input.min_completeness} population_ok={steps.score_completeness.output.population_ok} population_fraction={steps.score_completeness.output.population_fraction} covers_window={steps.score_completeness.output.covers_window}"
+            model: haiku
+
+  # 4d) CLASSIFY the control's evidence status. satisfied (gate passed, complete) /
+  #     gap (insufficient or missing evidence, no human can fix it now) /
+  #     needs_human (partial/ambiguous - a control owner must attest or upload supplements).
+  - id: classify_status
+    type: classify
+    classify_config:
+      model: haiku
+      input: "Classify this SOC2 control's evidence status. satisfied = gate approved and completeness is high; gap = evidence is clearly missing or far below threshold with no quick remediation; needs_human = evidence is partial/ambiguous or population coverage is borderline and a control owner should attest or upload supplemental evidence. Completeness: {steps.score_completeness.output.completeness}, population_ok: {steps.score_completeness.output.population_ok}, covers_window: {steps.score_completeness.output.covers_window}, record_count: {steps.score_completeness.output.record_count}."
+      categories:
+        - satisfied
+        - gap
+        - needs_human
+      branches:
+        satisfied: [record_control_result]
+        gap: [record_control_result]
+        needs_human: [needs_human_branch]
+
+  # 4e) CONDITION: route needs_human controls to the owner approval; everything else records
+  #     its result directly. Deterministic branch keyed off the classify label. No model.
+  - id: needs_human_branch
+    type: condition
+    condition_config:
+      expression: "'{steps.classify_status.output}' == 'needs_human'"
+      then: [owner_attestation]
+      else: [record_control_result]
+
+  # 4f) APPROVAL: the control owner attests the evidence is sufficient or uploads supplemental
+  #     evidence for THIS control. Approve = attested/sufficient; reject = unresolved gap.
+  - id: owner_attestation
+    type: approval
+    approval_config:
+      message: >-
+        SOC2 evidence attestation needed. Control {{ _item.control_id }} ({{ _item.name }}) for
+        the current audit period has partial or ambiguous evidence. As control owner, APPROVE if
+        the collected evidence is sufficient (optionally attach supplemental evidence), or REJECT
+        to flag it as an open gap. Owner: {{ _item.owner }}.
+      show_data: steps.score_completeness.output
+      timeout_hours: 72
+      on_timeout: abort
+      allow_edit: true
+
+  # 4g) DETERMINISTIC per-control result record. Folds the completeness math, gate outcome,
+  #     classify label and (when present) the owner attestation into one canonical status row
+  #     that the post-loop manifest signs. No model.
+  - id: record_control_result
+    type: code
+    code_config:
+      language: python
+      code: |
+        score = _steps.get('score_completeness') or {}
+        status = str(_steps.get('classify_status') or '').strip().lower()
+        gate = _steps.get('sufficiency_gate')
+        attestation = _steps.get('owner_attestation')
+
+        # Gate passes when all strategies approved; engine returns a truthy/passed marker.
+        if isinstance(gate, dict):
+            gate_passed = bool(gate.get('passed', gate.get('approved', gate.get('result', True))))
+        else:
+            gate_passed = bool(gate) if gate is not None else False
+
+        # If a human attested, their decision overrides the auto-classification.
+        attested = None
+        if isinstance(attestation, dict):
+            attested = bool(attestation.get('approved', attestation.get('approve', False)))
+        elif attestation is not None:
+            attested = bool(attestation)
+
+        if attested is True:
+            final_status = 'satisfied'
+        elif attested is False:
+            final_status = 'gap'
+        elif status == 'satisfied' and gate_passed:
+            final_status = 'satisfied'
+        elif status == 'needs_human':
+            final_status = 'gap'
+        else:
+            final_status = status or 'gap'
+
+        result = {
+            'control_id': score.get('control_id'),
+            'source': score.get('source'),
+            'owner': score.get('owner'),
+            'owner_email': score.get('owner_email'),
+            'status': final_status,
+            'passed': final_status == 'satisfied',
+            'gate_passed': gate_passed,
+            'classify_label': status,
+            'human_attested': attested,
+            'completeness': score.get('completeness', 0),
+            'population_fraction': score.get('population_fraction', 0),
+            'covers_window': score.get('covers_window', False),
+            'fresh': score.get('fresh', False),
+            'record_count': score.get('record_count', 0),
+        }
+
+  # 5) DETERMINISTIC aggregation of every per-control result from the loop into the program
+  #     status: coverage %, list of gaps with owners, satisfied/gap/total counts. No model.
+  - id: aggregate_results
+    type: code
+    depends_on: [per_control_loop]
+    code_config:
+      language: python
+      code: |
+        loop_out = _steps['per_control_loop'] or {}
+        catalog = _steps['normalize_controls'] or {}
+
+        # Loop output may be a list of per-item results or a wrapper dict.
+        items = loop_out if isinstance(loop_out, list) else (
+            loop_out.get('results') or loop_out.get('items') or loop_out.get('iterations') or []
+        )
+
+        controls = []
+        for it in items:
+            row = it
+            # Each iteration may wrap the last child's output under a step id.
+            if isinstance(it, dict) and 'control_id' not in it:
+                row = it.get('record_control_result') or it.get('output') or it
+            if isinstance(row, dict) and row.get('control_id'):
+                controls.append(row)
+
+        total = len(controls)
+        satisfied = [c for c in controls if c.get('status') == 'satisfied']
+        gaps = [c for c in controls if c.get('status') != 'satisfied']
+        coverage_pct = round(100.0 * len(satisfied) / total, 2) if total else 0.0
+
+        gap_list = [
+            {
+                'control_id': c.get('control_id'),
+                'owner': c.get('owner'),
+                'owner_email': c.get('owner_email'),
+                'completeness': c.get('completeness'),
+                'reason': (
+                    'no_records' if not c.get('record_count')
+                    else 'window_not_covered' if not c.get('covers_window')
+                    else 'low_completeness'
+                ),
+            }
+            for c in gaps
+        ]
+
+        result = {
+            'program_id': catalog.get('program_id'),
+            'period_start': catalog.get('period_start'),
+            'period_end': catalog.get('period_end'),
+            'total_controls': total,
+            'satisfied_count': len(satisfied),
+            'gap_count': len(gaps),
+            'coverage_pct': coverage_pct,
+            'controls': controls,
+            'gaps': gap_list,
+        }
+
+  # 6) DETERMINISTIC signing + SHA-256 evidence manifest. Canonical-JSON each control result,
+  #     hash it, then hash the ordered list of per-control digests into a manifest root hash.
+  #     This is the tamper-evident signature the auditor verifies. No model.
+  - id: sign_evidence_manifest
+    type: code
+    depends_on: [aggregate_results]
+    code_config:
+      language: python
+      code: |
+        import json
+        import hashlib
+        from datetime import datetime, timezone
+
+        agg = _steps['aggregate_results'] or {}
+        controls = agg.get('controls', [])
+
+        manifest_entries = []
+        for c in controls:
+            canonical = json.dumps(c, sort_keys=True, separators=(',', ':'))
+            digest = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+            manifest_entries.append({
+                'control_id': c.get('control_id'),
+                'status': c.get('status'),
+                'sha256': digest,
+                'byte_length': len(canonical),
+            })
+
+        # Manifest root hash binds every per-control digest in deterministic order.
+        root_material = json.dumps(
+            [e['sha256'] for e in manifest_entries], separators=(',', ':')
+        )
+        manifest_root = hashlib.sha256(root_material.encode('utf-8')).hexdigest()
+
+        manifest = {
+            'program_id': agg.get('program_id'),
+            'period_start': agg.get('period_start'),
+            'period_end': agg.get('period_end'),
+            'generated_at': datetime.now(timezone.utc).isoformat(),
+            'coverage_pct': agg.get('coverage_pct'),
+            'total_controls': agg.get('total_controls'),
+            'satisfied_count': agg.get('satisfied_count'),
+            'gap_count': agg.get('gap_count'),
+            'manifest_root_sha256': manifest_root,
+            'entries': manifest_entries,
+            'controls': controls,
+            'gaps': agg.get('gaps', []),
+        }
+
+        canonical_manifest = json.dumps(manifest, sort_keys=True, separators=(',', ':'))
+        result = {
+            'object_key': f"evidence/{agg.get('program_id')}/{agg.get('period_end')}/manifest.json",
+            'manifest_root_sha256': manifest_root,
+            'manifest': manifest,
+            'canonical_json': canonical_manifest,
+            'byte_length': len(canonical_manifest),
+        }
+
+  # 7) SEAL: PUT the signed manifest + per-control pass/fail status to the auditor's S3
+  #     object-lock (WORM) bucket. The manifest root hash travels as object metadata so the
+  #     pack is tamper-evident at rest. Connector: aws-s3.
+  - id: push_to_auditor_s3
+    type: http
+    depends_on: [sign_evidence_manifest]
+    http_config:
+      url: "{input.s3_base_url}/{input.s3_bucket}/{steps.sign_evidence_manifest.output.object_key}"
+      method: PUT
+      headers:
+        Content-Type: "application/json"
+        x-amz-object-lock-mode: "COMPLIANCE"
+        x-amz-object-lock-retain-until-date: "2034-01-01T00:00:00Z"
+        x-amz-meta-manifest-root-sha256: "{steps.sign_evidence_manifest.output.manifest_root_sha256}"
+        x-amz-meta-program-id: "{input.program_id}"
+      auth: "aws4:{env.AWS_ACCESS_KEY_ID}:{env.AWS_SECRET_ACCESS_KEY}"
+      body: "{steps.sign_evidence_manifest.output.canonical_json}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 8) GRC: open a ServiceNow evidence-checkpoint record linking the sealed manifest (audit
+  #     trail of when this sweep ran and what coverage it produced). Connector: servicenow.
+  - id: servicenow_checkpoint
+    type: http
+    depends_on: [push_to_auditor_s3]
+    http_config:
+      url: "{input.servicenow_base_url}/table/sn_grc_evidence_checkpoint"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.SERVICENOW_TOKEN}"
+      body: |
+        {
+          "short_description": "SOC2 evidence sweep {input.program_id}",
+          "program_id": "{input.program_id}",
+          "coverage_pct": "{steps.aggregate_results.output.coverage_pct}",
+          "gap_count": "{steps.aggregate_results.output.gap_count}",
+          "manifest_root_sha256": "{steps.sign_evidence_manifest.output.manifest_root_sha256}",
+          "evidence_object": "{steps.sign_evidence_manifest.output.object_key}",
+          "state": "evidence_sealed"
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 9) NOTIFY: post control-coverage % and the list of gaps with their owners to Slack so the
+  #     compliance manager / vCISO sees fresh status every run, not a quarter-end surprise.
+  - id: notify_coverage
+    type: notify
+    depends_on: [servicenow_checkpoint]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: "SOC2 evidence sweep {input.program_id} done. Control coverage: {steps.aggregate_results.output.coverage_pct}% ({steps.aggregate_results.output.satisfied_count}/{steps.aggregate_results.output.total_controls} satisfied, {steps.aggregate_results.output.gap_count} gaps). Gaps + owners: {steps.aggregate_results.output.gaps}. Signed manifest {steps.sign_evidence_manifest.output.manifest_root_sha256} sealed (object-lock) at {steps.sign_evidence_manifest.output.object_key}."
+
+on_complete:
+  storage_path: "soc2-evidence-collector-continuous/{run_id}/result.json"

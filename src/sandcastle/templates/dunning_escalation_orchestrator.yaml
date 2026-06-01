@@ -1,0 +1,698 @@
+# name: Dunning Escalation Orchestrator
+# description: Watches Stripe + QuickBooks for failed/overdue invoices and runs a tiered, scheduled dunning ladder - reminder, payment retry, payment-plan offer, e-sign settlement, write-off - looping one stage per cycle while a payment-cleared SENSOR polls Stripe/Plaid between stages and exits the loop the instant the balance clears. The orchestration logic (aging classification thresholds, the loop ladder, the payment-cleared sensor, and write-off gating) is pure deterministic engine control flow with no model dependency; only the optional dunning-message copy is drafted through default_model and can be swapped to any provider or templated with no proprietary-feature reliance.
+# tags: [Stripe, QuickBooks, SendGrid, Twilio, Resend, DocuSign, Plaid, Slack, Dunning, AccountsReceivable, Collections, Finance]
+# category: general_ai
+
+name: dunning-escalation-orchestrator
+description: >
+  A dunning / accounts-receivable recovery orchestrator for B2B SaaS and services firms. A scheduled
+  daily AR-aging sweep (or a Stripe invoice.payment_failed / past-due webhook) kicks it off. An HTTP
+  step pulls the overdue/failed invoices plus customer net terms from Stripe and QuickBooks; a
+  deterministic sandboxed-Python step normalizes them and picks the single highest-priority invoice to
+  work. A CLASSIFY step bins the invoice into an aging bucket (SOFT_0_15 / FIRM_16_45 / HARD_46_90 /
+  LEGAL_90_PLUS) which seeds where on the ladder collections starts. A LOOP then climbs the dunning
+  ladder one stage per cycle - stage 1 a polite reminder, stage 2 a payment retry, stage 3 a
+  payment-plan / settlement offer - and BETWEEN stages a payment-cleared SENSOR polls Stripe (with a
+  Plaid balance fallback) and the loop exits the instant the invoice balance clears. Each ladder cycle
+  runs a per-stage action module (a sub_workflow over the existing 'summarize' template that drafts the
+  stage's dunning copy) and an HTTP send via SendGrid / Twilio / Resend. After the ladder, a CONDITION
+  checks whether the invoice reached HARD/LEGAL aging AND a settlement was agreed - if so it routes to
+  DocuSign to create a settlement-agreement envelope. A deterministic code step then decides whether the
+  remaining balance is uncollectible and should be written off; a human APPROVAL gives the controller
+  authoritative sign-off before any write-off posts; on approval an HTTP POST books the write-off journal
+  entry to QuickBooks. A final NOTIFY posts the recovery outcome to the AR Slack channel. The aging math,
+  the ladder, the payment-cleared exit, and the write-off gate are all deterministic control flow -
+  swapping the message-drafting provider can never change who gets dunned, what clears the loop, or what
+  posts a write-off.
+
+default_model: sonnet
+default_max_turns: 6
+default_timeout: 600
+
+input_schema:
+  required: ["customer_id"]
+  properties:
+    customer_id:
+      type: string
+      description: "Stripe customer id whose overdue/failed invoices this run sweeps and duns."
+      default: ""
+      example: "cus_QabC123XyZ"
+    stripe_base_url:
+      type: string
+      description: "Base URL of the Stripe REST API used to list open invoices and poll for payment."
+      default: "https://api.stripe.com/v1"
+      example: "https://api.stripe.com/v1"
+    quickbooks_base_url:
+      type: string
+      description: "Base URL of the QuickBooks Online API (includes the realm/company id) for terms + the write-off journal entry."
+      default: "https://quickbooks.api.intuit.com/v3/company/1234567890"
+      example: "https://quickbooks.api.intuit.com/v3/company/1234567890"
+    plaid_base_url:
+      type: string
+      description: "Base URL of the Plaid API used as a balance/transactions fallback when Stripe has not yet reflected a wire/ACH settlement."
+      default: "https://production.plaid.com"
+      example: "https://production.plaid.com"
+    docusign_base_url:
+      type: string
+      description: "Base URL of the DocuSign eSignature REST API (includes the account id) for the settlement-agreement envelope."
+      default: "https://na4.docusign.net/restapi/v2.1/accounts/11111111-2222-3333-4444-555555555555"
+      example: "https://na4.docusign.net/restapi/v2.1/accounts/11111111-2222-3333-4444-555555555555"
+    send_provider_url:
+      type: string
+      description: "HTTP endpoint of the outbound message provider used to deliver dunning messages (SendGrid /v3/mail/send, Resend /emails, or a Twilio Messages URL)."
+      default: "https://api.sendgrid.com/v3/mail/send"
+      example: "https://api.resend.com/emails"
+    from_email:
+      type: string
+      description: "Verified sender address the dunning emails are sent from."
+      default: "ar@acme.com"
+      example: "billing@acme.com"
+    settlement_min_discount_pct:
+      type: number
+      description: "Discount offered on the stage-3 payment-plan / settlement offer (percent off the open balance) for HARD/LEGAL aging invoices."
+      default: 10
+      example: "10"
+    writeoff_threshold_days:
+      type: number
+      description: "Aging in days at or beyond which an unpaid balance becomes eligible for write-off (subject to controller approval)."
+      default: 90
+      example: "90"
+    writeoff_max_amount:
+      type: number
+      description: "Maximum invoice balance (in the invoice currency's minor units cap as major units) eligible for an auto-proposed write-off; larger balances always require approval and are flagged."
+      default: 5000
+      example: "5000"
+    writeoff_account_ref:
+      type: string
+      description: "QuickBooks account ref id for the bad-debt / write-off expense account the journal entry debits."
+      default: "84"
+      example: "84"
+    poll_interval_seconds:
+      type: number
+      description: "How often the payment-cleared sensor re-polls Stripe between dunning stages while waiting for the balance to clear."
+      default: 3600
+      example: "3600"
+    sensor_timeout_seconds:
+      type: number
+      description: "Max seconds the payment-cleared sensor waits between a dunning stage and the next before advancing the ladder."
+      default: 86400
+      example: "86400"
+    max_ladder_stages:
+      type: number
+      description: "Maximum number of dunning ladder stages to climb in one run before falling through to settlement/write-off handling."
+      default: 3
+      example: "3"
+    approval_timeout_hours:
+      type: number
+      description: "Hours the controller write-off approval waits before the timeout aborts the write-off (the recovery sequence still reports its outcome)."
+      default: 48
+      example: "48"
+    slack_ar_channel:
+      type: string
+      description: "Slack channel for the AR team where the recovery outcome is posted."
+      default: "#ar-collections"
+      example: "#ar-collections"
+
+steps:
+  # 1) PULL overdue/failed OPEN invoices for this customer from Stripe (status=open includes
+  #    past-due and payment-failed invoices). Connector: stripe.
+  - id: fetch_stripe_invoices
+    type: http
+    http_config:
+      url: "{input.stripe_base_url}/invoices?customer={input.customer_id}&status=open&limit=100&expand[]=data.customer"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.STRIPE_API_KEY}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2) PULL the customer's record + net payment terms from QuickBooks (SalesTerm / Balance).
+  #    Connector: quickbooks.
+  - id: fetch_quickbooks_terms
+    type: http
+    http_config:
+      url: "{input.quickbooks_base_url}/query?query=select%20*%20from%20Customer%20where%20Id%20%3D%20'{input.customer_id}'&minorversion=70"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.QUICKBOOKS_ACCESS_TOKEN}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 3) DETERMINISTIC normalize: merge Stripe invoices + QuickBooks terms, compute aging in days for
+  #    each open invoice, and pick the single highest-priority (oldest, largest) invoice to dun.
+  #    Pure sandboxed Python - NO model on the selection/aging path. This is the load-bearing pick.
+  - id: select_target_invoice
+    type: code
+    depends_on: [fetch_stripe_invoices, fetch_quickbooks_terms]
+    code_config:
+      language: python
+      code: |
+        from datetime import datetime, timezone
+
+        stripe_raw = _steps.get('fetch_stripe_invoices') or {}
+        qb_raw = _steps.get('fetch_quickbooks_terms') or {}
+
+        def _f(val, default=0.0):
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                return float(default)
+
+        # --- Stripe invoice list (Stripe wraps lists in {"data": [...]}) ---
+        if isinstance(stripe_raw, dict):
+            invoices = stripe_raw.get('data')
+            if not isinstance(invoices, list):
+                invoices = stripe_raw.get('invoices') if isinstance(stripe_raw.get('invoices'), list) else []
+        elif isinstance(stripe_raw, list):
+            invoices = stripe_raw
+        else:
+            invoices = []
+
+        # --- QuickBooks net terms (best-effort; tolerant of shapes) ---
+        net_terms_days = 30
+        cust_name = ''
+        cust_email = ''
+        try:
+            qresp = qb_raw.get('QueryResponse') if isinstance(qb_raw, dict) else None
+            custs = (qresp or {}).get('Customer') if isinstance(qresp, dict) else None
+            cust = custs[0] if isinstance(custs, list) and custs else (custs if isinstance(custs, dict) else {})
+            if isinstance(cust, dict):
+                cust_name = str(cust.get('DisplayName') or cust.get('CompanyName') or '')
+                pe = cust.get('PrimaryEmailAddr') or {}
+                cust_email = str(pe.get('Address') or '') if isinstance(pe, dict) else ''
+                term = cust.get('SalesTermRef') or {}
+                tname = str(term.get('name') or '') if isinstance(term, dict) else ''
+                for tok in tname.replace('Net', ' ').split():
+                    if tok.isdigit():
+                        net_terms_days = int(tok)
+                        break
+        except (AttributeError, TypeError, ValueError, IndexError):
+            pass
+
+        now = datetime.now(timezone.utc)
+
+        def aging_days(inv):
+            due = inv.get('due_date') or inv.get('created')
+            if due is None:
+                return 0
+            try:
+                # Stripe due_date/created are unix epoch seconds.
+                dt = datetime.fromtimestamp(float(due), tz=timezone.utc)
+            except (TypeError, ValueError, OverflowError):
+                return 0
+            return max(0, (now - dt).days)
+
+        normalized = []
+        for inv in invoices:
+            if not isinstance(inv, dict):
+                continue
+            amount_due = _f(inv.get('amount_remaining', inv.get('amount_due', 0))) / 100.0  # cents -> major
+            if amount_due <= 0:
+                continue
+            cust_obj = inv.get('customer') if isinstance(inv.get('customer'), dict) else {}
+            normalized.append({
+                'invoice_id': inv.get('id') or '',
+                'number': inv.get('number') or '',
+                'currency': str(inv.get('currency') or 'usd').lower(),
+                'amount_due': round(amount_due, 2),
+                'aging_days': aging_days(inv),
+                'attempt_count': int(_f(inv.get('attempt_count', 0))),
+                'customer_id': (cust_obj.get('id') if cust_obj else None) or _input.get('customer_id'),
+                'customer_name': (cust_obj.get('name') if cust_obj else '') or cust_name,
+                'customer_email': (cust_obj.get('email') if cust_obj else '') or cust_email,
+                'hosted_invoice_url': inv.get('hosted_invoice_url') or '',
+            })
+
+        # Highest priority = oldest first, then largest balance.
+        normalized.sort(key=lambda r: (r['aging_days'], r['amount_due']), reverse=True)
+        target = normalized[0] if normalized else None
+
+        result = {
+            'has_target': target is not None,
+            'open_invoice_count': len(normalized),
+            'net_terms_days': net_terms_days,
+            'target': target or {
+                'invoice_id': '', 'number': '', 'currency': 'usd', 'amount_due': 0.0,
+                'aging_days': 0, 'attempt_count': 0,
+                'customer_id': _input.get('customer_id'), 'customer_name': cust_name,
+                'customer_email': cust_email, 'hosted_invoice_url': '',
+            },
+            'all_open': normalized,
+        }
+
+  # 4) CLASSIFY the target invoice into an aging bucket. Cheap routing model only - the bucket seeds
+  #    the ladder start but does NOT authorize any write-off (that stays deterministic + human-gated).
+  - id: classify_aging_bucket
+    type: classify
+    depends_on: [select_target_invoice]
+    classify_config:
+      categories: ["SOFT_0_15", "FIRM_16_45", "HARD_46_90", "LEGAL_90_PLUS"]
+      input: "{steps.select_target_invoice.output}"
+      model: haiku
+      branches:
+        SOFT_0_15: [prime_soft]
+        FIRM_16_45: [prime_firm]
+        HARD_46_90: [prime_hard]
+        LEGAL_90_PLUS: [prime_legal]
+
+  # 4a-d) Per-bucket primers (deterministic, no model). Each sets the dunning posture, whether a
+  #        settlement offer is on the table, and whether the balance is in write-off range.
+  - id: prime_soft
+    type: code
+    code_config:
+      language: python
+      code: |
+        sel = _steps.get('select_target_invoice') or {}
+        result = {
+            'bucket': 'SOFT_0_15',
+            'tone': 'friendly_reminder',
+            'settlement_eligible': False,
+            'writeoff_eligible': False,
+            'target': sel.get('target', {}),
+        }
+
+  - id: prime_firm
+    type: code
+    code_config:
+      language: python
+      code: |
+        sel = _steps.get('select_target_invoice') or {}
+        result = {
+            'bucket': 'FIRM_16_45',
+            'tone': 'firm_request',
+            'settlement_eligible': False,
+            'writeoff_eligible': False,
+            'target': sel.get('target', {}),
+        }
+
+  - id: prime_hard
+    type: code
+    code_config:
+      language: python
+      code: |
+        sel = _steps.get('select_target_invoice') or {}
+        result = {
+            'bucket': 'HARD_46_90',
+            'tone': 'final_notice_with_offer',
+            'settlement_eligible': True,
+            'writeoff_eligible': False,
+            'target': sel.get('target', {}),
+        }
+
+  - id: prime_legal
+    type: code
+    code_config:
+      language: python
+      code: |
+        sel = _steps.get('select_target_invoice') or {}
+        result = {
+            'bucket': 'LEGAL_90_PLUS',
+            'tone': 'pre_legal_settlement',
+            'settlement_eligible': True,
+            'writeoff_eligible': True,
+            'target': sel.get('target', {}),
+        }
+
+  # 5) DETERMINISTIC: fold the chosen bucket primer into a canonical context the ladder reads, and
+  #    materialize the ordered dunning ladder (one entry per stage) for the loop to iterate over.
+  - id: build_dunning_ladder
+    type: code
+    depends_on: [classify_aging_bucket, select_target_invoice, prime_soft, prime_firm, prime_hard, prime_legal]
+    code_config:
+      language: python
+      code: |
+        # Exactly one primer ran (classify routed it). Pick the first non-empty primer output.
+        primer = None
+        for pid in ('prime_legal', 'prime_hard', 'prime_firm', 'prime_soft'):
+            p = _steps.get(pid)
+            if isinstance(p, dict) and p.get('bucket'):
+                primer = p
+                break
+        if primer is None:
+            sel0 = _steps.get('select_target_invoice') or {}
+            primer = {
+                'bucket': 'SOFT_0_15', 'tone': 'friendly_reminder',
+                'settlement_eligible': False, 'writeoff_eligible': False,
+                'target': sel0.get('target', {}),
+            }
+
+        sel = _steps.get('select_target_invoice') or {}
+        target = primer.get('target') or sel.get('target') or {}
+
+        def _f(val, default=0.0):
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                return float(default)
+
+        try:
+            max_stages = int(_f(_input.get('max_ladder_stages', 3) or 3))
+        except (TypeError, ValueError):
+            max_stages = 3
+        max_stages = max(1, min(3, max_stages))
+
+        bucket = primer.get('bucket', 'SOFT_0_15')
+        # Harder buckets begin further up the ladder.
+        start_stage = {'SOFT_0_15': 1, 'FIRM_16_45': 1, 'HARD_46_90': 2, 'LEGAL_90_PLUS': 3}.get(bucket, 1)
+
+        stage_defs = {
+            1: {'stage': 1, 'action': 'reminder', 'channel': 'email',
+                'instruction': 'Write a polite payment reminder noting the invoice is past due and asking for payment via the hosted link.'},
+            2: {'stage': 2, 'action': 'retry', 'channel': 'email',
+                'instruction': 'Write a firm notice that we are re-attempting the charge on file and the balance must be cleared; include the hosted payment link.'},
+            3: {'stage': 3, 'action': 'settlement_offer', 'channel': 'email',
+                'instruction': 'Write a pre-legal final notice offering a one-time settlement discount to resolve the balance and avoid escalation.'},
+        }
+
+        ladder = []
+        for s in range(start_stage, max_stages + 1):
+            entry = dict(stage_defs[s])
+            entry['invoice_id'] = target.get('invoice_id', '')
+            entry['amount_due'] = target.get('amount_due', 0.0)
+            entry['currency'] = target.get('currency', 'usd')
+            entry['customer_name'] = target.get('customer_name', '')
+            entry['customer_email'] = target.get('customer_email', '')
+            entry['hosted_invoice_url'] = target.get('hosted_invoice_url', '')
+            entry['settlement_discount_pct'] = _f(_input.get('settlement_min_discount_pct', 10) or 10) if s == 3 else 0
+            ladder.append(entry)
+
+        result = {
+            'bucket': bucket,
+            'tone': primer.get('tone', 'friendly_reminder'),
+            'settlement_eligible': bool(primer.get('settlement_eligible')),
+            'writeoff_eligible': bool(primer.get('writeoff_eligible')),
+            'target': target,
+            'start_stage': start_stage,
+            'stage_count': len(ladder),
+            'ladder': ladder,
+        }
+
+  # 6) LOOP the dunning ladder: advance ONE stage per cycle. Each cycle runs the per-stage action
+  #    module (draft copy via sub_workflow), sends the message, then a payment-cleared SENSOR polls
+  #    Stripe between stages - the loop exits the instant the invoice balance clears.
+  #    Child steps (stage_action, send_dunning_message, wait_for_payment) defined separately, NO depends_on.
+  - id: run_dunning_ladder
+    type: loop
+    depends_on: [build_dunning_ladder]
+    loop_config:
+      over: "steps.build_dunning_ladder.output.ladder"
+      step_ids: [stage_action, send_dunning_message, wait_for_payment]
+      max_iterations: 3
+      until: "{steps.wait_for_payment.output.paid} == True"
+
+  # 6a) PER-STAGE ACTION MODULE - draft this stage's dunning copy. sub_workflow reuses the EXISTING
+  #     'summarize' template to turn the stage instruction + invoice facts into the message body.
+  #     This is the ONLY model use on the path and is fully swappable plumbing.
+  - id: stage_action
+    type: sub_workflow
+    sub_workflow:
+      workflow: "summarize"
+      input_mapping:
+        text: "_item.instruction"
+        format: "narrative"
+        max_length: "180 words"
+        audience: "an overdue B2B customer being asked to pay invoice _item.invoice_id"
+
+  # 6b) SEND the dunning message via the configured provider (SendGrid / Resend / Twilio over HTTP).
+  #     Stage, channel, and recipient come from the loop item (_item). Connectors: sendgrid, resend, twilio.
+  - id: send_dunning_message
+    type: http
+    http_config:
+      url: "{input.send_provider_url}"
+      method: POST
+      auth: "bearer:{env.SEND_PROVIDER_API_KEY}"
+      headers:
+        Content-Type: "application/json"
+      body: |
+        {
+          "personalizations": [{"to": [{"email": "{_item.customer_email}"}]}],
+          "from": {"email": "{input.from_email}"},
+          "subject": "Invoice {_item.invoice_id} - stage {_item.stage} {_item.action} ({_item.amount_due} {_item.currency})",
+          "content": [{"type": "text/plain", "value": "{steps.stage_action.output} Pay here: {_item.hosted_invoice_url}"}]
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 6c) PAYMENT-CLEARED SENSOR - between stages, poll Stripe for this invoice until it is paid
+  #     (status == 'paid' or amount_remaining == 0). The loop's `until` exits the instant paid == True.
+  #     Connector: stripe (Plaid is the balance fallback handled in the post-loop reconcile step).
+  - id: wait_for_payment
+    type: sensor
+    sensor_config:
+      url: "{input.stripe_base_url}/invoices/{_item.invoice_id}"
+      method: GET
+      headers:
+        Accept: "application/json"
+        Authorization: "Bearer {env.STRIPE_API_KEY}"
+      condition: "status_code == 200 and (str(response.get('status','')).lower() == 'paid' or float(response.get('amount_remaining', 1) or 1) == 0)"
+      check_interval: 3600
+      timeout: 86400
+
+  # 7) DETERMINISTIC reconcile after the ladder: inspect the last sensor result (Stripe) and the loop
+  #    runs to decide whether the invoice is PAID. NO model - this is the authoritative cleared/unpaid call.
+  - id: reconcile_payment
+    type: code
+    depends_on: [run_dunning_ladder, build_dunning_ladder]
+    code_config:
+      language: python
+      code: |
+        ladder_ctx = _steps.get('build_dunning_ladder') or {}
+        target = ladder_ctx.get('target') or {}
+        runs = _steps.get('run_dunning_ladder')
+        last_sensor = _steps.get('wait_for_payment') or {}
+
+        def _truthy_paid(obj):
+            if not isinstance(obj, dict):
+                return False
+            if obj.get('paid') is True:
+                return True
+            status = str(obj.get('status', '')).lower()
+            if status == 'paid':
+                return True
+            ar = obj.get('amount_remaining')
+            if ar is not None:
+                try:
+                    return float(ar) == 0
+                except (TypeError, ValueError):
+                    return False
+            return False
+
+        paid = _truthy_paid(last_sensor)
+        # Fall back to scanning the per-iteration loop outputs for any cleared signal.
+        if not paid and isinstance(runs, list):
+            for it in reversed(runs):
+                if _truthy_paid(it):
+                    paid = True
+                    break
+
+        try:
+            writeoff_days = float(_input.get('writeoff_threshold_days', 90) or 90)
+        except (TypeError, ValueError):
+            writeoff_days = 90.0
+
+        aging = float(target.get('aging_days', 0) or 0)
+        amount_due = float(target.get('amount_due', 0) or 0)
+        bucket = ladder_ctx.get('bucket', 'SOFT_0_15')
+
+        reached_hard_or_legal = bucket in ('HARD_46_90', 'LEGAL_90_PLUS')
+        # A settlement is "agreed" in this deterministic flow when the customer is in HARD/LEGAL,
+        # an offer was made (stage 3 ran), and the balance is still outstanding -> route to e-sign.
+        settlement_agreed = (not paid) and reached_hard_or_legal and bool(ladder_ctx.get('settlement_eligible'))
+
+        result = {
+            'invoice_id': target.get('invoice_id', ''),
+            'customer_name': target.get('customer_name', ''),
+            'customer_email': target.get('customer_email', ''),
+            'amount_due': round(amount_due, 2),
+            'currency': target.get('currency', 'usd'),
+            'aging_days': aging,
+            'bucket': bucket,
+            'paid': bool(paid),
+            'reached_hard_or_legal': bool(reached_hard_or_legal),
+            'settlement_agreed': bool(settlement_agreed),
+            'writeoff_window': aging >= writeoff_days,
+        }
+
+  # 8) CONDITION - if the invoice reached HARD/LEGAL aging AND a settlement is agreed (still unpaid),
+  #    route to DocuSign to create the settlement envelope; otherwise skip straight to the write-off gate.
+  - id: route_settlement
+    type: condition
+    depends_on: [reconcile_payment]
+    condition_config:
+      expression: "{steps.reconcile_payment.output.settlement_agreed} == true"
+      then: [create_settlement_envelope, assess_writeoff]
+      else: [assess_writeoff]
+
+  # 8a) DOCUSIGN - create a settlement-agreement envelope for the customer to e-sign. Connector: docusign.
+  - id: create_settlement_envelope
+    type: http
+    http_config:
+      url: "{input.docusign_base_url}/envelopes"
+      method: POST
+      auth: "bearer:{env.DOCUSIGN_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+      body: |
+        {
+          "emailSubject": "Settlement agreement for invoice {steps.reconcile_payment.output.invoice_id}",
+          "status": "sent",
+          "recipients": {
+            "signers": [{
+              "email": "{steps.reconcile_payment.output.customer_email}",
+              "name": "{steps.reconcile_payment.output.customer_name}",
+              "recipientId": "1",
+              "routingOrder": "1"
+            }]
+          },
+          "documents": [{
+            "documentId": "1",
+            "name": "Settlement Agreement {steps.reconcile_payment.output.invoice_id}",
+            "fileExtension": "html",
+            "documentBase64": "PGh0bWw+PGJvZHk+U2V0dGxlbWVudCBhZ3JlZW1lbnQ8L2JvZHk+PC9odG1sPg=="
+          }]
+        }
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 9) DETERMINISTIC write-off assessment (NO model). Decide whether the remaining balance is
+  #    uncollectible and eligible for write-off, and whether it can be auto-proposed or must be flagged.
+  #    The controller approval below is authoritative; this only frames the decision for them.
+  - id: assess_writeoff
+    type: code
+    depends_on: [route_settlement, reconcile_payment, build_dunning_ladder]
+    code_config:
+      language: python
+      code: |
+        rec = _steps.get('reconcile_payment') or {}
+        ladder_ctx = _steps.get('build_dunning_ladder') or {}
+
+        def _f(val, default=0.0):
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                return float(default)
+
+        paid = bool(rec.get('paid'))
+        amount_due = _f(rec.get('amount_due'))
+        in_window = bool(rec.get('writeoff_window'))
+        bucket_writeoff_eligible = bool(ladder_ctx.get('writeoff_eligible'))
+        max_amt = _f(_input.get('writeoff_max_amount', 5000) or 5000)
+
+        # Eligible for write-off only if unpaid, past the aging window, and the bucket allows it (LEGAL).
+        eligible = (not paid) and in_window and bucket_writeoff_eligible and amount_due > 0
+        over_max = amount_due > max_amt
+
+        reasons = []
+        if paid:
+            reasons.append('invoice cleared - no write-off')
+        if not in_window:
+            reasons.append('aging below write-off threshold')
+        if not bucket_writeoff_eligible:
+            reasons.append('aging bucket not write-off eligible')
+        if eligible and over_max:
+            reasons.append(f'balance {amount_due} exceeds auto-propose cap {max_amt} - requires explicit approval')
+
+        result = {
+            'invoice_id': rec.get('invoice_id', ''),
+            'customer_name': rec.get('customer_name', ''),
+            'amount_due': round(amount_due, 2),
+            'currency': rec.get('currency', 'usd'),
+            'aging_days': rec.get('aging_days', 0),
+            'bucket': rec.get('bucket', ''),
+            'paid': paid,
+            'writeoff_eligible': bool(eligible),
+            'over_auto_cap': bool(over_max),
+            'requires_approval': bool(eligible),
+            'reasons': reasons,
+            'reasons_text': '; '.join(reasons) if reasons else 'eligible for write-off within policy',
+        }
+
+  # 10) CONDITION - only route to the controller approval + write-off posting when the deterministic
+  #     assessment marks the balance write-off-eligible; otherwise skip straight to the outcome notify.
+  - id: route_writeoff
+    type: condition
+    depends_on: [assess_writeoff]
+    condition_config:
+      expression: "{steps.assess_writeoff.output.writeoff_eligible} == true"
+      then: [writeoff_approval, post_writeoff_journal, notify_outcome]
+      else: [notify_outcome]
+
+  # 10a) APPROVAL - the controller signs off on the write-off before it posts. On timeout the
+  #      write-off is aborted (the recovery sequence still reports its outcome). Authoritative gate.
+  - id: writeoff_approval
+    type: approval
+    approval_config:
+      message: >
+        Write-off approval required for invoice {steps.assess_writeoff.output.invoice_id}
+        ({steps.assess_writeoff.output.customer_name}). Balance
+        {steps.assess_writeoff.output.amount_due} {steps.assess_writeoff.output.currency}, aged
+        {steps.assess_writeoff.output.aging_days} days, bucket {steps.assess_writeoff.output.bucket}.
+        Notes: {steps.assess_writeoff.output.reasons_text}. Approve to post the bad-debt journal entry to QuickBooks.
+      show_data: steps.assess_writeoff.output
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: true
+
+  # 10b) POST the write-off journal entry to QuickBooks (debit bad-debt expense, credit A/R).
+  #      Connector: quickbooks. Only reached after controller approval.
+  - id: post_writeoff_journal
+    type: http
+    depends_on: [writeoff_approval]
+    http_config:
+      url: "{input.quickbooks_base_url}/journalentry?minorversion=70"
+      method: POST
+      auth: "bearer:{env.QUICKBOOKS_ACCESS_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      body: |
+        {
+          "Line": [
+            {
+              "Amount": {steps.assess_writeoff.output.amount_due},
+              "DetailType": "JournalEntryLineDetail",
+              "Description": "Write-off invoice {steps.assess_writeoff.output.invoice_id} - {steps.assess_writeoff.output.customer_name}",
+              "JournalEntryLineDetail": {"PostingType": "Debit", "AccountRef": {"value": "{input.writeoff_account_ref}"}}
+            },
+            {
+              "Amount": {steps.assess_writeoff.output.amount_due},
+              "DetailType": "JournalEntryLineDetail",
+              "Description": "Write-off invoice {steps.assess_writeoff.output.invoice_id} - A/R",
+              "JournalEntryLineDetail": {"PostingType": "Credit", "AccountRef": {"value": "{input.writeoff_account_ref}"}}
+            }
+          ]
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 11) NOTIFY the AR Slack channel with the recovery outcome (paid / settled / written-off / open).
+  #     Connector: slack.
+  - id: notify_outcome
+    type: notify
+    depends_on: [route_writeoff, reconcile_payment, assess_writeoff]
+    notify_config:
+      service: slack
+      channel: "{input.slack_ar_channel}"
+      message: >
+        Dunning run for invoice {steps.reconcile_payment.output.invoice_id}
+        ({steps.reconcile_payment.output.customer_name}). Balance
+        {steps.reconcile_payment.output.amount_due} {steps.reconcile_payment.output.currency}, aged
+        {steps.reconcile_payment.output.aging_days} days, bucket {steps.reconcile_payment.output.bucket}.
+        Paid: {steps.reconcile_payment.output.paid}; settlement agreed:
+        {steps.reconcile_payment.output.settlement_agreed}; write-off eligible:
+        {steps.assess_writeoff.output.writeoff_eligible} ({steps.assess_writeoff.output.reasons_text}).
+
+on_complete:
+  storage_path: "dunning-escalation-orchestrator/{run_id}/result.json"

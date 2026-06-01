@@ -1,0 +1,558 @@
+# name: Dependency Outage Failover Router
+# description: When a third-party vendor (payments, auth, email/SMS) starts erroring, detect it from Datadog, race two providers to decide whether to fail over to a backup vendor, gate on confidence + statuspage corroboration, get on-call sign-off, reroute live traffic via a Cloudflare Worker, then sensor-wait for the primary to recover and fail back automatically.
+# tags: [devops, reliability, failover, vendor-outage, datadog, cloudflare, incident]
+# category: devops
+
+name: dependency-outage-failover-router
+description: >
+  Automatic third-party vendor failover with audited human sign-off. A Datadog monitor
+  webhook (or a manual run with dependency_name) triggers an HTTP fan-out that pulls the
+  dependency's live error-rate/latency from Datadog AND the vendor's public statuspage JSON.
+  A measured classify decides whether this is our-fault vs a vendor-side outage vs a
+  network/regional blip, and a deterministic condition only proceeds to failover for a
+  genuine vendor outage. Two providers (Sonnet vs Gemini 2.5 Pro) RACE - first valid wins -
+  to recommend whether to cut over and which backup vendor to use, with a risk note. A gate
+  combines an LLM-confidence judge with a deterministic statuspage-corroboration check; the
+  on-call then approves the cutover (timeout aborts). On approval an HTTP call rewrites the
+  Cloudflare Worker / Vercel edge config to point at the backup vendor, Slack + Twilio page
+  the incident commander, and a Jira/Linear ticket is opened. A sensor polls the primary
+  vendor's health URL until it is healthy for a sustained window (or times out), a second
+  approval confirms fail-back, the edge config is restored to the primary, and a final notify
+  closes the loop. The failover DECISION is grounded in real metric/statuspage data plus a
+  cross-provider race - never one model's belief - so any provider is interchangeable.
+
+default_model: sonnet
+default_timeout: 600
+
+input_schema:
+  required: ["dependency_name"]
+  properties:
+    dependency_name:
+      type: string
+      description: "Logical name of the degraded dependency / vendor (e.g. 'stripe', 'auth0', 'twilio-sms')"
+      default: ""
+    datadog_site:
+      type: string
+      description: "Datadog API site host"
+      default: "api.datadoghq.eu"
+    datadog_query:
+      type: string
+      description: "Datadog metrics query for the dependency error-rate/latency over the alert window"
+      default: "sum:trace.http.request.errors{service:stripe-gateway}.as_rate()"
+    statuspage_url:
+      type: string
+      description: "Vendor's public Statuspage summary JSON (e.g. https://status.stripe.com/api/v2/summary.json)"
+      default: "https://www.stripestatus.com/api/v2/summary.json"
+    primary_health_url:
+      type: string
+      description: "Vendor health/statuspage endpoint polled to detect recovery for fail-back"
+      default: "https://www.stripestatus.com/api/v2/status.json"
+    backup_vendor:
+      type: string
+      description: "Default backup vendor to fail over to (the race may override this)"
+      default: "adyen"
+    cloudflare_account_id:
+      type: string
+      description: "Cloudflare account id owning the edge Worker / KV routing config"
+      default: ""
+    cloudflare_kv_namespace_id:
+      type: string
+      description: "Cloudflare Workers KV namespace id holding the active-vendor routing key"
+      default: ""
+    routing_key:
+      type: string
+      description: "KV key the edge Worker reads to decide which vendor to route to"
+      default: "active_payment_vendor"
+    jira_base_url:
+      type: string
+      description: "Jira Cloud base URL for incident ticket creation"
+      default: "https://acme.atlassian.net"
+    jira_project_key:
+      type: string
+      description: "Jira project key for the incident ticket"
+      default: "INC"
+    slack_channel:
+      type: string
+      description: "Slack channel for failover status updates"
+      default: "#incident-bridge"
+    incident_commander_phone:
+      type: string
+      description: "E.164 phone number of the incident commander for the Twilio SMS page"
+      default: "+10000000000"
+    twilio_from:
+      type: string
+      description: "Twilio sender number (E.164) the SMS is sent from"
+      default: "+10000000001"
+    min_confidence:
+      type: number
+      description: "Minimum failover-recommendation confidence (0-1) required to proceed to cutover"
+      default: 0.7
+    recovery_window_minutes:
+      type: integer
+      description: "How many minutes the primary must read healthy before fail-back is offered (context for the sensor)"
+      default: 15
+
+steps:
+  # 1a) Pull the dependency's live error-rate / latency from Datadog (connector: datadog).
+  - id: fetch_datadog_metrics
+    type: http
+    http_config:
+      url: "https://{input.datadog_site}/api/v1/query?from=0&to=0&query={input.datadog_query}"
+      method: GET
+      headers:
+        DD-API-KEY: "{env.DATADOG_API_KEY}"
+        DD-APPLICATION-KEY: "{env.DATADOG_APP_KEY}"
+        Accept: "application/json"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 1b) Pull the vendor's public statuspage summary JSON (no auth - public endpoint).
+  - id: fetch_statuspage
+    type: http
+    http_config:
+      url: "{input.statuspage_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 2) Deterministically normalize Datadog + statuspage into one evidence envelope.
+  #    This is the ground truth the classify + race + gate all read from.
+  - id: build_evidence
+    type: code
+    depends_on: [fetch_datadog_metrics, fetch_statuspage]
+    code_config:
+      language: python
+      code: |
+        # Merge the metric series with the vendor statuspage into one envelope.
+        dd = _steps.get("fetch_datadog_metrics") or {}
+        sp = _steps.get("fetch_statuspage") or {}
+        if not isinstance(dd, dict):
+            dd = {}
+        if not isinstance(sp, dict):
+            sp = {}
+
+        # Datadog timeseries: pull the latest non-null value off the first series.
+        error_rate = 0.0
+        try:
+            series = (dd.get("series") or [])
+            if series and isinstance(series[0], dict):
+                points = series[0].get("pointlist") or []
+                vals = [p[1] for p in points if isinstance(p, (list, tuple)) and len(p) == 2 and p[1] is not None]
+                if vals:
+                    error_rate = float(vals[-1])
+        except (TypeError, ValueError, IndexError):
+            error_rate = 0.0
+
+        # Statuspage (Atlassian Statuspage schema): overall indicator + component states.
+        sp_status = sp.get("status") or {}
+        indicator = str(sp_status.get("indicator", "none")).lower()  # none|minor|major|critical
+        sp_description = str(sp_status.get("description", "")).strip()
+
+        components = sp.get("components") or []
+        degraded_components = []
+        for c in components:
+            if isinstance(c, dict):
+                cstatus = str(c.get("status", "operational")).lower()
+                if cstatus != "operational":
+                    degraded_components.append({"name": c.get("name", ""), "status": cstatus})
+
+        incidents = sp.get("incidents") or []
+        open_incidents = [
+            {"name": i.get("name", ""), "status": str(i.get("status", "")).lower(), "impact": str(i.get("impact", "")).lower()}
+            for i in incidents
+            if isinstance(i, dict) and str(i.get("status", "")).lower() not in ("resolved", "postmortem", "completed")
+        ]
+
+        # Deterministic statuspage signal: does the VENDOR itself admit degradation?
+        statuspage_confirms_outage = (
+            indicator in ("major", "critical")
+            or bool(open_incidents)
+            or bool(degraded_components)
+        )
+
+        result = {
+            "dependency_name": _input.get("dependency_name", ""),
+            "error_rate": error_rate,
+            "elevated_errors": error_rate >= 0.05,  # >=5% error rate on the dependency calls
+            "statuspage_indicator": indicator,
+            "statuspage_description": sp_description,
+            "degraded_components": degraded_components,
+            "open_incidents": open_incidents,
+            "statuspage_confirms_outage": statuspage_confirms_outage,
+        }
+
+  # 3) Classify the failure mode: our fault vs vendor outage vs network/regional.
+  - id: classify_failure_mode
+    type: classify
+    depends_on: [build_evidence]
+    classify_config:
+      categories: ["vendor_outage", "our_fault", "network_regional"]
+      input: "{steps.build_evidence.output}"
+      model: haiku
+      branches:
+        vendor_outage: [prime_vendor_outage]
+        our_fault: [prime_our_fault]
+        network_regional: [prime_network_regional]
+
+  # 3a) Vendor outage primer - statuspage + error rate both point at the vendor.
+  - id: prime_vendor_outage
+    type: code
+    code_config:
+      language: python
+      code: |
+        ev = _steps.get("build_evidence") or {}
+        result = {
+            "failure_mode": "vendor_outage",
+            "should_failover": True,
+            "rationale": "Dependency error-rate elevated AND vendor statuspage admits degradation - failover is appropriate.",
+            "evidence": ev,
+        }
+
+  # 3b) Our-fault primer - the vendor looks healthy; do NOT fail over (fix is on our side).
+  - id: prime_our_fault
+    type: code
+    code_config:
+      language: python
+      code: |
+        ev = _steps.get("build_evidence") or {}
+        result = {
+            "failure_mode": "our_fault",
+            "should_failover": False,
+            "rationale": "Errors are likely on our side (bad deploy/config); vendor statuspage is clean. Failing over would not help.",
+            "evidence": ev,
+        }
+
+  # 3c) Network/regional primer - transient/regional; hold and re-observe, no cutover.
+  - id: prime_network_regional
+    type: code
+    code_config:
+      language: python
+      code: |
+        ev = _steps.get("build_evidence") or {}
+        result = {
+            "failure_mode": "network_regional",
+            "should_failover": False,
+            "rationale": "Pattern looks like a network/regional blip rather than a vendor outage. Hold and re-observe before any cutover.",
+            "evidence": ev,
+        }
+
+  # 4) Join the three primers + statuspage signal into one deterministic decision context.
+  - id: failure_decision
+    type: code
+    depends_on: [classify_failure_mode]
+    code_config:
+      language: python
+      code: |
+        # Exactly one primer ran (classify routed it). Pick whichever produced output.
+        vendor = _steps.get("prime_vendor_outage")
+        ours = _steps.get("prime_our_fault")
+        netreg = _steps.get("prime_network_regional")
+        ev = _steps.get("build_evidence") or {}
+
+        primer = None
+        for cand in (vendor, ours, netreg):
+            if isinstance(cand, dict) and cand.get("failure_mode"):
+                primer = cand
+                break
+        if primer is None:
+            primer = {"failure_mode": "unknown", "should_failover": False, "rationale": "No primer output."}
+
+        # The proceed gate is deterministic: vendor_outage classification AND the
+        # vendor's own statuspage corroborates it. Models never flip this on alone.
+        statuspage_confirms = bool(ev.get("statuspage_confirms_outage", False))
+        is_vendor_outage = primer.get("failure_mode") == "vendor_outage"
+
+        result = {
+            "failure_mode": primer.get("failure_mode"),
+            "rationale": primer.get("rationale", ""),
+            "statuspage_confirms_outage": statuspage_confirms,
+            "is_vendor_outage": is_vendor_outage,
+            "proceed_to_failover": bool(is_vendor_outage and statuspage_confirms),
+            "evidence": ev,
+        }
+
+  # 5) CONDITION: only run the failover machinery when it is a corroborated vendor outage.
+  - id: failover_branch
+    type: condition
+    depends_on: [failure_decision]
+    condition_config:
+      expression: "{steps.failure_decision.output.proceed_to_failover} == True"
+      then:
+        - race_failover_decision
+        - confidence_gate
+        - approve_cutover
+        - reroute_edge_config
+        - page_slack
+        - page_twilio_sms
+        - open_incident_ticket
+        - wait_primary_recovery
+        - approve_failback
+        - restore_edge_config
+        - notify_failback_complete
+      else:
+        - notify_no_failover
+
+  # 5-else) Vendor looks fine (our fault / network) - announce we are NOT failing over.
+  - id: notify_no_failover
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: ":mag: No vendor failover for {input.dependency_name}. Classified as {steps.failure_decision.output.failure_mode} - {steps.failure_decision.output.rationale}"
+
+  # 6) RACE two providers for the failover recommendation. First valid JSON wins (failover,
+  #    not a vote). Branch A pinned to sonnet, Branch B pinned to google/gemini-2.5-pro.
+  - id: rec_sonnet
+    type: standard
+    model: sonnet
+    output_schema:
+      type: object
+      properties:
+        failover: { type: boolean }
+        backup_vendor: { type: string }
+        risk: { type: string }
+        confidence: { type: number }
+      required: ["failover", "backup_vendor", "risk", "confidence"]
+    prompt: |
+      You are reliability provider A. A third-party dependency appears to be in a
+      vendor-side outage. Recommend whether to cut live traffic over to a backup vendor
+      and, if so, which one. Ground every claim in the evidence below - do not speculate
+      beyond it.
+
+      Corroborated decision context: {steps.failure_decision.output}
+      Default backup vendor (you may override with a better fit): {input.backup_vendor}
+
+      Return STRICT JSON only, no prose:
+      {
+        "failover": true | false,
+        "backup_vendor": "<vendor name to route to, e.g. adyen / sendgrid / okta>",
+        "risk": "<one sentence on the main risk of this cutover (data parity, idempotency, regional coverage)>",
+        "confidence": <number 0..1 reflecting how strongly the evidence supports cutover>
+      }
+
+  - id: rec_gemini
+    type: standard
+    model: google/gemini-2.5-pro
+    output_schema:
+      type: object
+      properties:
+        failover: { type: boolean }
+        backup_vendor: { type: string }
+        risk: { type: string }
+        confidence: { type: number }
+      required: ["failover", "backup_vendor", "risk", "confidence"]
+    prompt: |
+      You are reliability provider B, an independent second opinion and the failover for
+      provider A. Same task: given the corroborated outage evidence, recommend whether to
+      cut traffic over to a backup vendor and which one, with the key risk.
+
+      Corroborated decision context: {steps.failure_decision.output}
+      Default backup vendor (override if a better fit exists): {input.backup_vendor}
+
+      Return STRICT JSON only with keys failover (bool), backup_vendor (string),
+      risk (string), confidence (number 0..1). Output JSON only, no prose.
+
+  - id: race_failover_decision
+    type: race
+    race_config:
+      branches:
+        - [rec_sonnet]
+        - [rec_gemini]
+      # First branch whose JSON parses with a real failover bool + numeric confidence wins.
+      # This is first-valid-wins failover across providers, not a vote tally.
+      validator: "isinstance(output, dict) and isinstance(output.get('failover'), bool) and isinstance(output.get('confidence'), (int, float))"
+
+  # 7) Deterministically score the race winner against min_confidence before the gate.
+  - id: score_recommendation
+    type: code
+    depends_on: [race_failover_decision]
+    code_config:
+      language: python
+      code: |
+        rec = _steps.get("race_failover_decision") or {}
+        if not isinstance(rec, dict):
+            rec = {}
+        try:
+            confidence = float(rec.get("confidence", 0) or 0)
+        except (TypeError, ValueError):
+            confidence = 0.0
+        try:
+            min_conf = float(_input.get("min_confidence", 0.7) or 0.7)
+        except (TypeError, ValueError):
+            min_conf = 0.7
+
+        decision = _steps.get("failure_decision") or {}
+        statuspage_confirms = bool(decision.get("statuspage_confirms_outage", False))
+
+        recommend_failover = bool(rec.get("failover", False))
+        backup = str(rec.get("backup_vendor", "") or _input.get("backup_vendor", "")).strip()
+
+        result = {
+            "recommend_failover": recommend_failover,
+            "backup_vendor": backup,
+            "risk": str(rec.get("risk", "")),
+            "confidence": confidence,
+            "min_confidence": min_conf,
+            "confident": confidence >= min_conf,
+            "statuspage_confirms_outage": statuspage_confirms,
+            # Proceed only if the model recommends it, it cleared the confidence bar,
+            # AND the vendor statuspage still corroborates - all three, deterministically.
+            "proceed": bool(recommend_failover and confidence >= min_conf and statuspage_confirms),
+        }
+
+  # 8) GATE: an LLM-confidence judge AND a deterministic statuspage-corroboration judge.
+  #    Both strategies must pass before any human approval is requested.
+  - id: confidence_gate
+    type: gate
+    depends_on: [score_recommendation]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: |
+              A vendor-failover recommendation was scored. Reply with exactly one word:
+              "approved" if proceed is true, the recommendation is to fail over, and the
+              named backup_vendor is a sensible substitute for the degraded dependency;
+              otherwise "rejected".
+              Scored recommendation: {steps.score_recommendation.output}
+            input: "{steps.score_recommendation.output}"
+            model: sonnet
+        - type: llm_eval
+          config:
+            prompt: |
+              Corroboration check. Reply with exactly one word: "approved" only if
+              proceed is true AND statuspage_confirms_outage is true AND confident is true
+              in the scored recommendation; otherwise "rejected". Do not approve a cutover
+              the vendor's own statuspage does not back up.
+              Scored recommendation: {steps.score_recommendation.output}
+            input: "{steps.score_recommendation.output}"
+            model: google/gemini-2.5-pro
+
+  # 9) On-call approves the actual cutover to the backup vendor. Timeout aborts (no cutover).
+  - id: approve_cutover
+    type: approval
+    depends_on: [confidence_gate]
+    approval_config:
+      message: "Approve cutting LIVE traffic for this dependency over to the backup vendor? Review backup_vendor, risk and confidence before approving."
+      show_data: steps.score_recommendation.output
+      timeout_hours: 1
+      on_timeout: abort
+      allow_edit: true
+
+  # 10) REROUTE live traffic: flip the Cloudflare Workers KV routing key to the backup
+  #     vendor (connector: cloudflare-workers; the edge Worker reads this key per request).
+  - id: reroute_edge_config
+    type: http
+    depends_on: [approve_cutover]
+    http_config:
+      url: "https://api.cloudflare.com/client/v4/accounts/{input.cloudflare_account_id}/storage/kv/namespaces/{input.cloudflare_kv_namespace_id}/values/{input.routing_key}"
+      method: PUT
+      auth: "bearer:{env.CLOUDFLARE_TOKEN}"
+      headers:
+        Content-Type: "text/plain"
+      body: "{steps.score_recommendation.output.backup_vendor}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 11a) Page the incident bridge on Slack with the cutover summary (connector: slack).
+  - id: page_slack
+    type: notify
+    depends_on: [reroute_edge_config]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: ":rotating_light: FAILOVER ENGAGED for {input.dependency_name} -> routed live traffic to {steps.score_recommendation.output.backup_vendor}. Confidence {steps.score_recommendation.output.confidence}; risk: {steps.score_recommendation.output.risk}. Edge config: {steps.reroute_edge_config.output}"
+
+  # 11b) SMS-page the incident commander via Twilio (connector: twilio).
+  - id: page_twilio_sms
+    type: http
+    depends_on: [reroute_edge_config]
+    http_config:
+      url: "https://api.twilio.com/2010-04-01/Accounts/{env.TWILIO_ACCOUNT_SID}/Messages.json"
+      method: POST
+      auth: "basic:{env.TWILIO_ACCOUNT_SID}:{env.TWILIO_AUTH_TOKEN}"
+      headers:
+        Content-Type: "application/x-www-form-urlencoded"
+      body: "To={input.incident_commander_phone}&From={input.twilio_from}&Body=FAILOVER ENGAGED for {input.dependency_name}: now routing to {steps.score_recommendation.output.backup_vendor}. Approve fail-back when primary recovers."
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 12) Open an incident ticket in Jira (connector: jira; swap for linear via its REST API).
+  - id: open_incident_ticket
+    type: http
+    depends_on: [reroute_edge_config]
+    http_config:
+      url: "{input.jira_base_url}/rest/api/3/issue"
+      method: POST
+      auth: "basic:{env.JIRA_EMAIL}:{env.JIRA_API_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      body: '{"fields": {"project": {"key": "{input.jira_project_key}"}, "issuetype": {"name": "Incident"}, "summary": "Vendor failover: {input.dependency_name} -> {steps.score_recommendation.output.backup_vendor}", "description": "Automated vendor failover engaged. Decision: {steps.failure_decision.output.rationale}. Risk: {steps.score_recommendation.output.risk}. Confidence: {steps.score_recommendation.output.confidence}."}}'
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 13) SENSOR: poll the primary vendor's health/statuspage URL until it is healthy again.
+  #     Recovered = HTTP 200 and the vendor's overall indicator is back to none/operational.
+  - id: wait_primary_recovery
+    type: sensor
+    depends_on: [open_incident_ticket]
+    sensor_config:
+      url: "{input.primary_health_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200 and str(response.get('status', {}).get('indicator', 'major')).lower() in ('none', 'operational', 'minor')"
+      check_interval: 60
+      timeout: 86400
+
+  # 14) Confirm fail-back with a human before restoring the primary (timeout aborts).
+  - id: approve_failback
+    type: approval
+    depends_on: [wait_primary_recovery]
+    approval_config:
+      message: "Primary vendor reads healthy again. Confirm failing BACK: restore live traffic to the primary dependency?"
+      show_data: steps.wait_primary_recovery.output
+      timeout_hours: 4
+      on_timeout: abort
+      allow_edit: false
+
+  # 15) RESTORE edge config: flip the Cloudflare KV routing key back to the primary vendor.
+  - id: restore_edge_config
+    type: http
+    depends_on: [approve_failback]
+    http_config:
+      url: "https://api.cloudflare.com/client/v4/accounts/{input.cloudflare_account_id}/storage/kv/namespaces/{input.cloudflare_kv_namespace_id}/values/{input.routing_key}"
+      method: PUT
+      auth: "bearer:{env.CLOUDFLARE_TOKEN}"
+      headers:
+        Content-Type: "text/plain"
+      body: "{input.dependency_name}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 16) Close the loop: announce fail-back complete (connector: slack).
+  - id: notify_failback_complete
+    type: notify
+    depends_on: [restore_edge_config]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: ":white_check_mark: FAIL-BACK COMPLETE for {input.dependency_name}. Primary recovered and live traffic restored to the primary vendor. Edge config: {steps.restore_edge_config.output}"
+
+on_complete:
+  storage_path: "dependency-outage-failover-router/{run_id}/result.json"

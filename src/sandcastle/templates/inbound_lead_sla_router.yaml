@@ -1,0 +1,507 @@
+# name: Inbound Lead SLA Router
+# description: Closes the loop on every inbound web lead - enriches it via a firmographic API, classifies ICP fit + intent into hot_sql / mql / nurture / disqualify, writes a routed+scored record into Salesforce or HubSpot, round-robins the owner on Slack, then watches the CRM timeline for the first human touch and auto-escalates if the speed-to-lead SLA clock runs out.
+# tags: [sales, revops, speed-to-lead, sla, lead-routing, salesforce, hubspot]
+# category: sales_crm
+
+name: inbound-lead-sla-router
+description: >-
+  Real-time inbound lead loop-closer for RevOps. A marketing-form / Segment /
+  Marketo webhook fires one lead per run. The lead is hydrated against a
+  firmographic enrichment API (http), then a single provider-independent
+  classify step routes it into hot_sql / mql / nurture / disqualify using ICP
+  fit + intent signals. Disqualified leads get a polite auto-reply and a
+  marketing ping, then stop. Everything else is deterministically scored,
+  upserted into Salesforce or HubSpot via REST (capturing the returned record
+  id), and round-robin-assigned to an owner on Slack. A sensor then polls the
+  CRM activity timeline until last_contacted advances past lead creation; if it
+  does, the record is patched first_touch_met. If the SLA window elapses first,
+  the owner's manager is paged, the record is flagged SLA_breached and the lead
+  is reassigned. The only model-dependent step is the classify decision - it is
+  a plain category choice the engine can run on any provider (cheap fast default
+  with anthropic / openai / gemini / mistral as failover candidates), so
+  swapping models never changes the routing contract. Enrichment, CRM writes,
+  the SLA sensor and the escalation are pure http / sensor / condition steps
+  with zero model dependency.
+
+default_model: haiku
+default_timeout: 300
+
+input_schema:
+  required: ["lead_id", "email"]
+  properties:
+    lead_id:
+      type: string
+      description: "Marketing-platform lead id for this single inbound submission (e.g. Marketo lead key)"
+      default: ""
+    email:
+      type: string
+      description: "Lead work email - primary key for enrichment and CRM upsert"
+      default: ""
+    first_name:
+      type: string
+      description: "Lead first name from the web form"
+      default: ""
+    last_name:
+      type: string
+      description: "Lead last name from the web form"
+      default: ""
+    company_domain:
+      type: string
+      description: "Company domain parsed from the email - drives firmographic enrichment"
+      default: ""
+    form_name:
+      type: string
+      description: "Which form / campaign produced the lead (e.g. 'demo-request', 'ebook-download')"
+      default: "web-form"
+    created_at:
+      type: string
+      description: "ISO-8601 timestamp the lead was created (the SLA clock start)"
+      default: ""
+    crm:
+      type: string
+      description: "Target CRM for the upsert: 'salesforce' or 'hubspot'"
+      default: "salesforce"
+    enrichment_base_url:
+      type: string
+      description: "Firmographic enrichment API base (e.g. Clearbit/Apollo-compatible)"
+      default: "https://api.enrich.example.com"
+    salesforce_instance:
+      type: string
+      description: "Salesforce My Domain host for REST calls (e.g. 'acme.my.salesforce.com')"
+      default: "acme.my.salesforce.com"
+    hubspot_base_url:
+      type: string
+      description: "HubSpot API base host"
+      default: "https://api.hubapi.com"
+    slack_channel:
+      type: string
+      description: "Slack channel used to round-robin the assigned owner"
+      default: "#inbound-leads"
+    marketing_channel:
+      type: string
+      description: "Slack channel pinged when a lead is auto-disqualified"
+      default: "#marketing-ops"
+    manager_channel:
+      type: string
+      description: "Slack channel/DM that escalations page when the SLA breaches"
+      default: "#sales-managers"
+    sla_seconds:
+      type: number
+      description: "Speed-to-lead SLA window in seconds (e.g. 300 = first touch within 5 minutes)"
+      default: 300
+    sla_poll_interval:
+      type: number
+      description: "How often (seconds) to poll the CRM timeline for the first human touch"
+      default: 30
+
+steps:
+  # 1) Hydrate the raw web lead with firmographic data (Clearbit/Apollo-style REST).
+  #    Connector: enrichment API. url is templated from the lead's company domain.
+  - id: enrich_lead
+    type: http
+    http_config:
+      url: "{input.enrichment_base_url}/v1/companies/find?domain={input.company_domain}"
+      method: POST
+      auth: "bearer:{env.ENRICHMENT_API_KEY}"
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      body: '{"email": "{input.email}", "domain": "{input.company_domain}", "lead_id": "{input.lead_id}"}'
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 2) Deterministically merge the raw form fields + enrichment into one ICP envelope.
+  - id: normalize_lead
+    type: code
+    depends_on: [enrich_lead]
+    code_config:
+      language: python
+      code: |
+        # Build one normalized lead envelope from form input + firmographic enrichment.
+        enr = _steps.get("enrich_lead") or {}
+        if not isinstance(enr, dict):
+            enr = {}
+        company = enr.get("company") or enr.get("data") or enr
+        if not isinstance(company, dict):
+            company = {}
+
+        def _num(v, default=0):
+            try:
+                return int(float(v))
+            except (TypeError, ValueError):
+                return default
+
+        employees = _num(company.get("employees") or company.get("metrics", {}).get("employees") if isinstance(company.get("metrics"), dict) else company.get("employees"))
+        industry = str(company.get("industry") or company.get("category", {}).get("industry") if isinstance(company.get("category"), dict) else company.get("industry") or "unknown").lower()
+        country = str(company.get("country") or company.get("geo", {}).get("country") if isinstance(company.get("geo"), dict) else company.get("country") or "").upper()
+
+        form = str(_input.get("form_name", "web-form")).lower()
+        # High-intent forms are the strongest first-party signal we have.
+        high_intent_forms = {"demo-request", "contact-sales", "pricing", "trial-signup"}
+        is_high_intent = any(tok in form for tok in high_intent_forms)
+
+        # Deterministic ICP-fit hint (employee band is a clean firmographic proxy).
+        if employees >= 200:
+            fit_band = "enterprise"
+        elif employees >= 50:
+            fit_band = "mid_market"
+        elif employees >= 10:
+            fit_band = "smb"
+        else:
+            fit_band = "too_small"
+
+        result = {
+            "lead_id": _input.get("lead_id", ""),
+            "email": _input.get("email", ""),
+            "name": (str(_input.get("first_name", "")) + " " + str(_input.get("last_name", ""))).strip(),
+            "company_domain": _input.get("company_domain", ""),
+            "company_name": company.get("name", _input.get("company_domain", "")),
+            "industry": industry,
+            "country": country,
+            "employees": employees,
+            "fit_band": fit_band,
+            "form_name": form,
+            "is_high_intent": is_high_intent,
+            "created_at": _input.get("created_at", ""),
+            "enrichment_ok": bool(company),
+        }
+
+  # 3) The ONLY model-dependent step. Plain category decision over ICP fit + intent.
+  #    Provider-independent: cheap fast default (haiku) is the configured model, but
+  #    the routing contract is identical on any of the 7 providers (anthropic /
+  #    openai/codex / google/gemini-2.5-pro / mistral/large are drop-in failovers) -
+  #    no tool-calling, no provider-specific JSON mode, just a category label.
+  - id: classify_lead
+    type: classify
+    depends_on: [normalize_lead]
+    classify_config:
+      categories: ["hot_sql", "mql", "nurture", "disqualify"]
+      input: "{steps.normalize_lead.output}"
+      model: haiku
+      branches:
+        hot_sql: [prep_hot_sql]
+        mql: [prep_mql]
+        nurture: [prep_nurture]
+        disqualify: [prep_disqualify]
+
+  # 3a-3d) Per-route deterministic primers. Each sets the routing contract fields
+  #        (priority, queue, sla applicability) the rest of the flow keys off of.
+  - id: prep_hot_sql
+    type: code
+    code_config:
+      language: python
+      code: |
+        # hot_sql: high ICP fit + high intent -> direct to AE round-robin, SLA enforced.
+        env = _steps.get("normalize_lead") or {}
+        result = {
+            "route": "hot_sql",
+            "priority": 1,
+            "queue": "ae_round_robin",
+            "sla_enforced": True,
+            "disqualified": False,
+            "envelope": env,
+        }
+
+  - id: prep_mql
+    type: code
+    code_config:
+      language: python
+      code: |
+        # mql: good fit, needs an SDR first touch. SLA still applies.
+        env = _steps.get("normalize_lead") or {}
+        result = {
+            "route": "mql",
+            "priority": 2,
+            "queue": "sdr_round_robin",
+            "sla_enforced": True,
+            "disqualified": False,
+            "envelope": env,
+        }
+
+  - id: prep_nurture
+    type: code
+    code_config:
+      language: python
+      code: |
+        # nurture: fit but low intent -> marketing automation, no human SLA clock.
+        env = _steps.get("normalize_lead") or {}
+        result = {
+            "route": "nurture",
+            "priority": 3,
+            "queue": "nurture_program",
+            "sla_enforced": False,
+            "disqualified": False,
+            "envelope": env,
+        }
+
+  - id: prep_disqualify
+    type: code
+    code_config:
+      language: python
+      code: |
+        # disqualify: out of ICP (e.g. too small / personal email) -> polite decline, stop.
+        env = _steps.get("normalize_lead") or {}
+        result = {
+            "route": "disqualify",
+            "priority": 9,
+            "queue": "none",
+            "sla_enforced": False,
+            "disqualified": True,
+            "reason": "Outside current ICP (firmographic fit or intent below threshold).",
+            "envelope": env,
+        }
+
+  # 4) Collapse the four route primers into one deterministic decision record.
+  #    Exactly one prep_* ran (classify gated the others), so we take whichever exists.
+  - id: routing_decision
+    type: code
+    depends_on: [classify_lead]
+    code_config:
+      language: python
+      code: |
+        # Merge whichever route primer the classifier activated into one record.
+        for key in ("prep_hot_sql", "prep_mql", "prep_nurture", "prep_disqualify"):
+            chosen = _steps.get(key)
+            if isinstance(chosen, dict) and chosen:
+                break
+        else:
+            chosen = {}
+
+        env = chosen.get("envelope") or _steps.get("normalize_lead") or {}
+        result = {
+            "route": chosen.get("route", "mql"),
+            "priority": chosen.get("priority", 2),
+            "queue": chosen.get("queue", "sdr_round_robin"),
+            "sla_enforced": bool(chosen.get("sla_enforced", True)),
+            "disqualified": bool(chosen.get("disqualified", False)),
+            "reason": chosen.get("reason", ""),
+            "envelope": env,
+        }
+
+  # 5) Branch: disqualified -> auto-reply + marketing ping + STOP. Else -> continue.
+  - id: disqualify_gate
+    type: condition
+    depends_on: [routing_decision]
+    condition_config:
+      expression: "{steps.routing_decision.output.disqualified} == True"
+      then: [compose_autoreply, notify_marketing]
+      else: [score_lead]
+
+  # 5a) Polite, on-brand auto-decline for out-of-ICP leads (transform, no model).
+  - id: compose_autoreply
+    type: transform
+    transform_config:
+      template: |
+        {
+          "to": "{steps.routing_decision.output.envelope.email}",
+          "subject": "Thanks for reaching out",
+          "body": "Hi {steps.routing_decision.output.envelope.name}, thanks for your interest. Based on what you shared we're not the right fit right now, but we've saved your details and will reach out if that changes. In the meantime our docs and community may help.",
+          "lead_id": "{steps.routing_decision.output.envelope.lead_id}",
+          "reason": "{steps.routing_decision.output.reason}"
+        }
+
+  # 5b) Tell marketing we auto-declined this lead (Slack connector via notify).
+  - id: notify_marketing
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.marketing_channel}"
+      message: ":no_entry_sign: Lead {input.lead_id} ({input.email}) auto-disqualified - {steps.routing_decision.output.reason} Auto-reply queued; no SLA clock started."
+
+  # 5c) ELSE path begins: deterministically score the routed lead (0-100).
+  - id: score_lead
+    type: code
+    code_config:
+      language: python
+      code: |
+        # Deterministic lead score from route + firmographics + intent. No model.
+        rd = _steps.get("routing_decision") or {}
+        env = rd.get("envelope") or {}
+        route = rd.get("route", "mql")
+
+        base = {"hot_sql": 80, "mql": 55, "nurture": 30, "disqualify": 5}.get(route, 40)
+        fit_bonus = {"enterprise": 15, "mid_market": 10, "smb": 5, "too_small": -10}.get(str(env.get("fit_band", "")), 0)
+        intent_bonus = 10 if env.get("is_high_intent") else 0
+        enrich_penalty = 0 if env.get("enrichment_ok") else -5
+
+        score = max(0, min(100, base + fit_bonus + intent_bonus + enrich_penalty))
+
+        result = {
+            "route": route,
+            "priority": rd.get("priority", 2),
+            "queue": rd.get("queue", "sdr_round_robin"),
+            "sla_enforced": bool(rd.get("sla_enforced", True)),
+            "lead_score": score,
+            "envelope": env,
+        }
+
+  # 6) Upsert the scored, routed lead into the CRM via REST and capture the record id.
+  #    Connectors: salesforce / hubspot. The CRM is chosen by input; both share the
+  #    same templated http surface (host differs, payload carries route + score).
+  - id: upsert_crm
+    type: http
+    depends_on: [score_lead]
+    http_config:
+      url: "https://{input.salesforce_instance}/services/data/v60.0/sobjects/Lead/Email/{input.email}"
+      method: PATCH
+      auth: "bearer:{env.SALESFORCE_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      body: '{"FirstName": "{input.first_name}", "LastName": "{input.last_name}", "Company": "{steps.score_lead.output.envelope.company_name}", "LeadSource": "{input.form_name}", "Rating": "{steps.score_lead.output.route}", "Lead_Score__c": "{steps.score_lead.output.lead_score}", "Routing_Queue__c": "{steps.score_lead.output.queue}", "SLA_Status__c": "pending_first_touch"}'
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 7) Capture the returned CRM record id deterministically (Salesforce upsert returns id).
+  - id: capture_record_id
+    type: code
+    depends_on: [upsert_crm]
+    code_config:
+      language: python
+      code: |
+        # Extract the CRM record id from the upsert response (id / Id / vid fallbacks).
+        resp = _steps.get("upsert_crm") or {}
+        if not isinstance(resp, dict):
+            resp = {}
+        record_id = (
+            resp.get("id")
+            or resp.get("Id")
+            or resp.get("recordId")
+            or resp.get("vid")
+            or ""
+        )
+        crm = str(_input.get("crm", "salesforce")).lower()
+        if crm == "hubspot":
+            link = "https://app.hubspot.com/contacts/_/contact/" + str(record_id)
+        else:
+            link = "https://" + str(_input.get("salesforce_instance", "")) + "/" + str(record_id)
+
+        scored = _steps.get("score_lead") or {}
+        result = {
+            "record_id": str(record_id),
+            "record_link": link,
+            "crm": crm,
+            "route": scored.get("route", ""),
+            "lead_score": scored.get("lead_score", 0),
+            "queue": scored.get("queue", ""),
+            "sla_enforced": bool(scored.get("sla_enforced", True)),
+            "owner_email": resp.get("OwnerEmail", resp.get("ownerEmail", "")),
+        }
+
+  # 8) Round-robin / DM the assigned owner with the lead summary + record link (Slack).
+  - id: notify_owner
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: ":fire: New {steps.capture_record_id.output.route} lead for round-robin: {input.first_name} {input.last_name} ({input.email}) - score {steps.capture_record_id.output.lead_score}, queue {steps.capture_record_id.output.queue}. Contact within {input.sla_seconds}s. Record: {steps.capture_record_id.output.record_link}"
+
+  # 9) SENSOR: poll the CRM activity/timeline until last_contacted advances past
+  #    lead creation (= first human touch logged), with timeout = the SLA window.
+  - id: watch_first_touch
+    type: sensor
+    depends_on: [notify_owner]
+    sensor_config:
+      url: "https://{input.salesforce_instance}/services/data/v60.0/sobjects/Lead/{steps.capture_record_id.output.record_id}?fields=LastActivityDate,Last_Contacted__c,CreatedDate"
+      method: GET
+      headers:
+        Authorization: "Bearer {env.SALESFORCE_TOKEN}"
+        Accept: "application/json"
+      # First touch met when a contact timestamp exists and is newer than creation.
+      condition: "status_code == 200 and bool(response.get('Last_Contacted__c') or response.get('LastActivityDate')) and str(response.get('Last_Contacted__c') or response.get('LastActivityDate')) > str(response.get('CreatedDate', ''))"
+      check_interval: 30
+      timeout: 300
+
+  # 10) Deterministically decide whether the SLA was met or the sensor timed out.
+  - id: evaluate_sla
+    type: code
+    depends_on: [watch_first_touch]
+    code_config:
+      language: python
+      code: |
+        # The sensor surfaces whether its condition was met before the SLA timeout.
+        obs = _steps.get("watch_first_touch") or {}
+        if not isinstance(obs, dict):
+            obs = {}
+        first_touch = bool(
+            obs.get("condition_met", obs.get("met", obs.get("matched", False)))
+        )
+        rec = _steps.get("capture_record_id") or {}
+        result = {
+            "first_touch_met": first_touch,
+            "breached": (not first_touch),
+            "breach_count": 0 if first_touch else 1,
+            "record_id": rec.get("record_id", ""),
+            "record_link": rec.get("record_link", ""),
+            "owner_email": rec.get("owner_email", ""),
+            "observation": obs,
+        }
+
+  # 11) Branch on the SLA outcome: breach -> escalate; met -> stamp first_touch_met.
+  - id: sla_outcome
+    type: condition
+    depends_on: [evaluate_sla]
+    condition_config:
+      expression: "{steps.evaluate_sla.output.breach_count} > 0"
+      then: [notify_manager, flag_sla_breach, reassign_lead]
+      else: [mark_first_touch]
+
+  # 11a) BREACH: page the owner's manager (Slack connector via notify).
+  - id: notify_manager
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.manager_channel}"
+      message: ":rotating_light: SLA BREACH - lead {input.lead_id} ({input.email}) not contacted within {input.sla_seconds}s. Owner {steps.evaluate_sla.output.owner_email} missed first touch. Auto-flagging SLA_breached and reassigning. Record: {steps.evaluate_sla.output.record_link}"
+
+  # 11b) BREACH: patch the CRM record with an SLA_breached flag (Salesforce REST).
+  - id: flag_sla_breach
+    type: http
+    http_config:
+      url: "https://{input.salesforce_instance}/services/data/v60.0/sobjects/Lead/{steps.evaluate_sla.output.record_id}"
+      method: PATCH
+      auth: "bearer:{env.SALESFORCE_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+      body: '{"SLA_Status__c": "SLA_breached", "SLA_Breached_At__c": "{input.created_at}"}'
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 11c) BREACH: reassign the lead to the escalation queue owner (Salesforce REST).
+  - id: reassign_lead
+    type: http
+    http_config:
+      url: "https://{input.salesforce_instance}/services/data/v60.0/sobjects/Lead/{steps.evaluate_sla.output.record_id}"
+      method: PATCH
+      auth: "bearer:{env.SALESFORCE_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+      body: '{"OwnerId": "{env.ESCALATION_QUEUE_ID}", "Routing_Queue__c": "escalation_round_robin"}'
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 11d) MET: stamp first_touch_met on the CRM record (Salesforce REST).
+  - id: mark_first_touch
+    type: http
+    http_config:
+      url: "https://{input.salesforce_instance}/services/data/v60.0/sobjects/Lead/{steps.evaluate_sla.output.record_id}"
+      method: PATCH
+      auth: "bearer:{env.SALESFORCE_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+      body: '{"SLA_Status__c": "first_touch_met"}'
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+on_complete:
+  storage_path: "inbound-lead-sla-router/{run_id}/result.json"

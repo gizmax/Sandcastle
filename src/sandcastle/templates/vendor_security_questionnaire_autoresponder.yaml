@@ -1,0 +1,597 @@
+# name: Vendor Security Questionnaire Autoresponder
+# description: Auto-answers inbound third-party security questionnaires (SIG / CAIQ / custom) by retrieving answers from your real control-evidence and policy store, racing two providers to draft each grounded answer, and gating low-confidence answers to a human before returning the completed questionnaire.
+# tags: [GDrive, Pinecone, Qdrant, Snowflake, Slack, S3, SIG, CAIQ, TPRM, GRC, RAG, Security]
+# category: hr_legal
+
+name: vendor-security-questionnaire-autoresponder
+description: >-
+  Inbound security-questionnaire autoresponder for the answering side of third-party risk
+  (TPRM / security-GRC). A new SIG / CAIQ / custom questionnaire lands in a watched GDrive
+  intake folder (or is assigned via a TPRM webhook); the workflow downloads it (http), PARSES
+  it into a structured question list (parse), then LOOPS each question. For every question it
+  semantically RETRIEVES grounding context from the policy/evidence store (Pinecone or Qdrant)
+  plus live config facts from a Snowflake control table (http), then RACES two different
+  providers to draft a citation-backed answer against the SAME retrieved context - first valid
+  grounded answer wins, giving automatic failover and zero provider lock-in. A confidence GATE
+  (swappable LLM judge) plus a DETERMINISTIC citation-presence check decide whether the answer
+  is trustworthy; flagged answers branch (condition) to a human analyst APPROVAL that edits only
+  the low-confidence answers. Answers are rendered back into the original questionnaire format
+  (transform), a tamper-evident audit log (question / answer / citation / model / reviewer) is
+  built in pure Python (code), the completed file is PUT to S3 and back to intake (http), and a
+  Slack summary reports X auto-answered vs Y human-reviewed (notify). Answers are grounded in
+  your retrieved evidence (RAG), not a model's parametric knowledge, so swapping providers does
+  not change the facts; retrieval, citation-check, audit log, and rendering are model-independent.
+
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 1200
+
+input_schema:
+  required: ["questionnaire_file_url", "questionnaire_id"]
+  properties:
+    questionnaire_id:
+      type: string
+      description: "Unique id for this inbound questionnaire (from the TPRM tool or the intake filename)."
+      example: "VSQ-2026-ACME-001"
+    questionnaire_file_url:
+      type: string
+      description: "Direct download URL for the dropped questionnaire file (GDrive file media endpoint or the TPRM-tool asset URL)."
+      default: "https://www.googleapis.com/drive/v3/files/FILE_ID?alt=media"
+      example: "https://www.googleapis.com/drive/v3/files/1AbCdEfGhIjK?alt=media"
+    customer_name:
+      type: string
+      description: "Name of the customer who sent the questionnaire (used in the audit log and Slack summary)."
+      default: "the requesting customer"
+      example: "Acme Corp Procurement"
+    vector_store_url:
+      type: string
+      description: "Semantic-retrieval endpoint for the policy/control-evidence store (Pinecone query API or a Qdrant points/search endpoint)."
+      default: "https://your-index-xxxx.svc.us-east-1.pinecone.io/query"
+      example: "https://acme-grc-abcd.svc.us-east-1.pinecone.io/query"
+    snowflake_sql_url:
+      type: string
+      description: "Snowflake SQL REST endpoint used to read live config facts from the control table (e.g. CONTROLS.LIVE_CONFIG)."
+      default: "https://your-account.snowflakecomputing.com/api/v2/statements"
+      example: "https://acme-account.snowflakecomputing.com/api/v2/statements"
+    confidence_threshold:
+      type: number
+      description: "Minimum LLM-judged confidence (0.0-1.0) below which an answer is flagged for human review."
+      default: 0.75
+      example: "0.75"
+    s3_base_url:
+      type: string
+      description: "S3 (or S3-compatible) REST base URL for the completed-questionnaire bucket."
+      default: "https://s3.eu-central-1.amazonaws.com"
+      example: "https://s3.eu-central-1.amazonaws.com"
+    s3_bucket:
+      type: string
+      description: "Bucket that stores the completed questionnaire + audit log."
+      default: "vendor-questionnaires-completed"
+      example: "acme-vendor-questionnaires-completed"
+    intake_callback_url:
+      type: string
+      description: "TPRM-tool / intake callback URL the completed questionnaire is PUT back to."
+      default: "https://tprm.your-org.com/api/v1/questionnaires"
+      example: "https://tprm.acme.com/api/v1/questionnaires"
+    slack_channel:
+      type: string
+      description: "Slack channel for the completion summary."
+      default: "#security-questionnaires"
+      example: "#security-questionnaires"
+
+steps:
+  # 1) DOWNLOAD the dropped questionnaire file from the watched GDrive intake folder
+  #    (or the TPRM-tool asset URL). Connector: gdrive. Deterministic fetch, no model.
+  - id: download_questionnaire
+    type: http
+    http_config:
+      url: "{input.questionnaire_file_url}"
+      method: GET
+      headers:
+        Accept: "*/*"
+      auth: "bearer:{env.GDRIVE_ACCESS_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2) PARSE the file (PDF / XLSX SIG / CAIQ workbook) into markdown so the question list
+  #    can be extracted structurally. OCR auto-detects scanned/legacy questionnaires.
+  - id: parse_questionnaire
+    type: parse
+    depends_on: [download_questionnaire]
+    prompt: "{steps.download_questionnaire.output}"
+    parse_config:
+      output: markdown
+      pages: null
+      ocr: true
+      ocr_engine: auto
+
+  # 3) EXTRACT a clean, structured question list from the parsed text. The model only
+  #    structures the questionnaire here; the load-bearing answers come from retrieval below.
+  - id: extract_questions
+    type: standard
+    depends_on: [parse_questionnaire]
+    prompt: |
+      You are parsing an inbound third-party security questionnaire (SIG, CAIQ, or a custom
+      vendor-security spreadsheet). From the document text below, extract EVERY distinct
+      question/control item as a flat list. Preserve the original control id / question number
+      and section so the answer can be rendered back into the source template.
+
+      Document text:
+      {steps.parse_questionnaire.output.text}
+
+      Return STRICT JSON only, no prose:
+      {
+        "questions": [
+          {
+            "qid": "<original control id or question number, e.g. 'CCM-01' or '4.2'>",
+            "section": "<section / domain name, e.g. 'Access Control'>",
+            "text": "<the full question text>",
+            "answer_type": "<one of: yes_no | yes_no_with_detail | freeform | attachment>"
+          }
+        ]
+      }
+    output_schema:
+      type: object
+      properties:
+        questions:
+          type: array
+          items:
+            type: object
+            properties:
+              qid: { type: string }
+              section: { type: string }
+              text: { type: string }
+              answer_type: { type: string }
+
+  # 4) LOOP over every extracted question. For each question the body retrieves grounding
+  #    context, races two providers to draft an answer, judges + citation-checks it, branches
+  #    flagged answers to a human, and records the per-question result deterministically.
+  - id: answer_each_question
+    type: loop
+    depends_on: [extract_questions]
+    loop_config:
+      over: "steps.extract_questions.output.questions"
+      step_ids:
+        - retrieve_evidence
+        - retrieve_live_config
+        - draft_race
+        - judge_gate
+        - citation_check
+        - flag_branch
+        - analyst_review
+        - record_answer
+      max_iterations: 500
+
+  # 4a) SEMANTIC RETRIEVE from the policy / control-evidence store (Pinecone or Qdrant).
+  #     The question text is the query; top-k policy/evidence chunks come back with source ids.
+  #     Connectors: pinecone, qdrant. This is the RAG grounding - facts come from here, not the model.
+  - id: retrieve_evidence
+    type: http
+    http_config:
+      url: "{input.vector_store_url}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.VECTOR_STORE_API_KEY}"
+      body: |
+        {
+          "namespace": "control-evidence",
+          "topK": 6,
+          "includeMetadata": true,
+          "inputs": { "text": "{{ _item.text }}" }
+        }
+      value_map:
+        matches: "matches"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 4b) LIVE CONFIG FACTS from a Snowflake control table. Some answers (encryption at rest,
+  #     MFA enforced, log retention days) must reflect CURRENT config, not a stale policy doc.
+  #     Connector: snowflake. Deterministic fact lookup, no model.
+  - id: retrieve_live_config
+    type: http
+    http_config:
+      url: "{input.snowflake_sql_url}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.SNOWFLAKE_TOKEN}"
+      body: |
+        {
+          "statement": "SELECT control_id, config_key, config_value, last_verified_at FROM CONTROLS.LIVE_CONFIG WHERE section ILIKE ? ORDER BY last_verified_at DESC LIMIT 25",
+          "bindings": { "1": { "type": "TEXT", "value": "%{{ _item.section }}%" } },
+          "timeout": 60
+        }
+      value_map:
+        rows: "data"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 4c) RACE two DIFFERENT providers to draft the answer against the SAME retrieved context.
+  #     First valid, grounded, citation-bearing answer wins (failover, NOT a vote). Branch A
+  #     and Branch B are defined separately with NO depends_on; the validator enforces that the
+  #     winning draft is non-empty AND carries at least one source citation.
+  - id: draft_race
+    type: race
+    race_config:
+      branches:
+        - [draft_provider_a]
+        - [draft_provider_b]
+      validator: "len(str(output).strip()) > 20 and ('source' in str(output).lower() or 'CTRL' in str(output) or 'policy' in str(output).lower())"
+
+  - id: draft_provider_a
+    type: standard
+    model: sonnet
+    prompt: |
+      You are answering ONE item of a third-party security questionnaire on behalf of the
+      vendor. Answer ONLY from the retrieved evidence and live-config facts below. If the
+      evidence does not support an answer, say so and set confidence low - do NOT invent
+      controls. Every factual claim MUST cite a source id from the retrieved evidence or a
+      Snowflake config_key.
+
+      Question (qid {{ _item.qid }}, section {{ _item.section }}, type {{ _item.answer_type }}):
+      {{ _item.text }}
+
+      Retrieved policy / control evidence (top matches):
+      {{ _steps['retrieve_evidence'] }}
+
+      Live config facts from the control table:
+      {{ _steps['retrieve_live_config'] }}
+
+      Return STRICT JSON only:
+      {
+        "answer": "<concise, accurate answer in the questionnaire's expected style>",
+        "sources": ["<evidence source id or config_key>", "..."],
+        "self_confidence": <float 0.0-1.0, low if evidence is thin or absent>,
+        "provider": "sonnet"
+      }
+
+  - id: draft_provider_b
+    type: standard
+    model: google/gemini-2.5-pro
+    prompt: |
+      You are provider B (the failover) answering ONE item of a third-party security
+      questionnaire on behalf of the vendor. Answer ONLY from the retrieved evidence and
+      live-config facts below. Do NOT use outside/parametric knowledge about the vendor's
+      controls. Every factual claim MUST cite a source id from the retrieved evidence or a
+      Snowflake config_key. If evidence is missing, say so and set confidence low.
+
+      Question (qid {{ _item.qid }}, section {{ _item.section }}, type {{ _item.answer_type }}):
+      {{ _item.text }}
+
+      Retrieved policy / control evidence (top matches):
+      {{ _steps['retrieve_evidence'] }}
+
+      Live config facts from the control table:
+      {{ _steps['retrieve_live_config'] }}
+
+      Return STRICT JSON only:
+      {
+        "answer": "<concise, accurate answer in the questionnaire's expected style>",
+        "sources": ["<evidence source id or config_key>", "..."],
+        "self_confidence": <float 0.0-1.0, low if evidence is thin or absent>,
+        "provider": "gemini-2.5-pro"
+      }
+
+  # 4d) CONFIDENCE GATE - a swappable LLM judge scores whether the drafted answer is fully
+  #     grounded in the retrieved evidence and free of hallucinated controls. The judge is the
+  #     ONLY model in the QC path and can be swapped to any provider. Pairs with the
+  #     deterministic citation-presence check below.
+  - id: judge_gate
+    type: gate
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: |
+              You are a security-questionnaire answer auditor. Given the QUESTION, the
+              RETRIEVED EVIDENCE, and the DRAFTED ANSWER, judge whether the answer is fully
+              supported by the evidence and cites real sources. Answer exactly "approved" if
+              every claim is grounded in the retrieved evidence/config and at least one source
+              is cited; otherwise answer "rejected" and name the unsupported claim.
+
+              Question: {{ _item.text }}
+              Retrieved evidence: {{ _steps['retrieve_evidence'] }}
+              Live config: {{ _steps['retrieve_live_config'] }}
+              Drafted answer: {steps.draft_race.output}
+            input: "{steps.draft_race.output}"
+            model: mistral/large
+
+  # 4e) DETERMINISTIC citation-presence + confidence check. No model. Parses the winning draft,
+  #     verifies it actually cites >=1 source and meets the confidence threshold, and decides
+  #     whether this answer must be flagged for a human. This is the model-independent half of QC.
+  - id: citation_check
+    type: code
+    code_config:
+      language: python
+      code: |
+        import json
+
+        item = _input.get('_item') or {}
+        draft = _steps.get('draft_race')
+        gate = _steps.get('judge_gate')
+
+        # The winning race draft may arrive as a dict or a JSON string - normalize it.
+        if isinstance(draft, str):
+            try:
+                draft = json.loads(draft)
+            except (ValueError, TypeError):
+                draft = {'answer': draft, 'sources': [], 'self_confidence': 0.0}
+        if not isinstance(draft, dict):
+            draft = {'answer': str(draft or ''), 'sources': [], 'self_confidence': 0.0}
+
+        answer_text = str(draft.get('answer', '')).strip()
+        sources = draft.get('sources') or []
+        if not isinstance(sources, list):
+            sources = [sources]
+        sources = [str(s).strip() for s in sources if str(s).strip()]
+
+        try:
+            self_conf = float(draft.get('self_confidence', 0.0))
+        except (TypeError, ValueError):
+            self_conf = 0.0
+
+        threshold = float(_input.get('confidence_threshold', 0.75) or 0.75)
+
+        # The LLM judge "approved"/"rejected" is advisory; the citation check is mandatory.
+        gate_passed = 'approved' in str(gate or '').lower() and 'rejected' not in str(gate or '').lower()
+
+        has_citation = len(sources) > 0
+        meets_confidence = self_conf >= threshold
+        # An answer is trustworthy only if it cites a source AND clears confidence AND the
+        # judge approved. Anything else is flagged to a human - never auto-returned silently.
+        flagged = not (has_citation and meets_confidence and gate_passed)
+
+        result = {
+            'qid': item.get('qid'),
+            'section': item.get('section'),
+            'question': item.get('text'),
+            'answer_type': item.get('answer_type'),
+            'answer': answer_text,
+            'sources': sources,
+            'self_confidence': round(self_conf, 3),
+            'has_citation': has_citation,
+            'meets_confidence': meets_confidence,
+            'judge_passed': gate_passed,
+            'provider': draft.get('provider', 'unknown'),
+            'flagged': flagged,
+        }
+
+  # 4f) CONDITION - if this answer was flagged (no citation / low confidence / judge rejected),
+  #     route it to a human analyst review; otherwise skip straight to the per-question record.
+  - id: flag_branch
+    type: condition
+    condition_config:
+      expression: "{steps.citation_check.output.flagged} == true"
+      then: [analyst_review, record_answer]
+      else: [record_answer]
+
+  # 4g) APPROVAL - the security-GRC analyst reviews/edits ONLY the low-confidence answers.
+  #     Grounded, high-confidence answers never reach a human, keeping throughput high.
+  - id: analyst_review
+    type: approval
+    approval_config:
+      message: >
+        Low-confidence questionnaire answer needs review. The retrieved evidence did not
+        fully support this draft (missing citation, low confidence, or judge rejected).
+        Edit the answer to match your controls, then approve. Question and draft:
+        {{ _steps['citation_check'] }}
+      show_data: steps.citation_check.output
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: true
+
+  # 4h) RECORD - deterministic per-question result row capturing the final answer, its source
+  #     citations, the provider that drafted it, and whether a human reviewed it. No model.
+  - id: record_answer
+    type: code
+    code_config:
+      language: python
+      code: |
+        check = _steps.get('citation_check') or {}
+        review = _steps.get('analyst_review')  # present only for flagged answers
+
+        flagged = bool(check.get('flagged'))
+        final_answer = check.get('answer', '')
+        reviewer = None
+        human_reviewed = False
+
+        # If a human edited the answer, the approval output overrides the drafted text.
+        if isinstance(review, dict):
+            human_reviewed = True
+            reviewer = review.get('approver') or review.get('reviewer') or 'security_analyst'
+            edited = review.get('edited_data') or review.get('data') or review.get('answer')
+            if isinstance(edited, dict) and edited.get('answer'):
+                final_answer = str(edited.get('answer'))
+            elif isinstance(edited, str) and edited.strip():
+                final_answer = edited.strip()
+
+        result = {
+            'qid': check.get('qid'),
+            'section': check.get('section'),
+            'question': check.get('question'),
+            'answer_type': check.get('answer_type'),
+            'answer': final_answer,
+            'sources': check.get('sources', []),
+            'self_confidence': check.get('self_confidence'),
+            'provider': check.get('provider'),
+            'auto_answered': not flagged,
+            'human_reviewed': human_reviewed,
+            'reviewer': reviewer,
+        }
+
+  # 5) AGGREGATE the loop output into one answer set + counts. Deterministic, no model.
+  - id: aggregate_answers
+    type: code
+    depends_on: [answer_each_question]
+    code_config:
+      language: python
+      code: |
+        rows = _steps.get('answer_each_question') or []
+        if isinstance(rows, dict):
+            rows = rows.get('results') or rows.get('items') or list(rows.values())
+        if not isinstance(rows, list):
+            rows = [rows]
+        rows = [r for r in rows if isinstance(r, dict)]
+
+        total = len(rows)
+        auto = sum(1 for r in rows if r.get('auto_answered'))
+        reviewed = sum(1 for r in rows if r.get('human_reviewed'))
+        no_evidence = sum(1 for r in rows if not r.get('sources'))
+
+        result = {
+            'questionnaire_id': _input.get('questionnaire_id'),
+            'customer_name': _input.get('customer_name', 'the requesting customer'),
+            'total_questions': total,
+            'auto_answered': auto,
+            'human_reviewed': reviewed,
+            'unanswered_no_evidence': no_evidence,
+            'answers': rows,
+        }
+
+  # 6) RENDER the answers back into the original questionnaire format/template so the customer
+  #    receives a completed file in their own structure (SIG/CAIQ/custom). Deterministic template.
+  - id: render_completed
+    type: transform
+    depends_on: [aggregate_answers]
+    transform_config:
+      template: |
+        {
+          "questionnaire_id": "{input.questionnaire_id}",
+          "customer": "{input.customer_name}",
+          "status": "completed",
+          "summary": {
+            "total_questions": {steps.aggregate_answers.output.total_questions},
+            "auto_answered": {steps.aggregate_answers.output.auto_answered},
+            "human_reviewed": {steps.aggregate_answers.output.human_reviewed}
+          },
+          "responses": {steps.aggregate_answers.output.answers}
+        }
+
+  # 7) AUDIT LOG - tamper-evident record for every question: question, final answer, source
+  #    citation, model/provider used, and reviewer. SHA-256 over the canonical record so the
+  #    completed questionnaire is provably the one that was reviewed. Deterministic, no model.
+  - id: build_audit_log
+    type: code
+    depends_on: [aggregate_answers, render_completed]
+    code_config:
+      language: python
+      code: |
+        import json
+        import hashlib
+        from datetime import datetime, timezone
+
+        agg = _steps.get('aggregate_answers') or {}
+        rendered = _steps.get('render_completed')
+        answers = agg.get('answers', [])
+
+        audit_entries = []
+        for a in answers:
+            audit_entries.append({
+                'qid': a.get('qid'),
+                'section': a.get('section'),
+                'question': a.get('question'),
+                'answer': a.get('answer'),
+                'source_citations': a.get('sources', []),
+                'model_used': a.get('provider'),
+                'auto_answered': bool(a.get('auto_answered')),
+                'human_reviewed': bool(a.get('human_reviewed')),
+                'reviewer': a.get('reviewer'),
+            })
+
+        audit_log = {
+            'questionnaire_id': agg.get('questionnaire_id'),
+            'customer_name': agg.get('customer_name'),
+            'generated_at': datetime.now(timezone.utc).isoformat(),
+            'totals': {
+                'total_questions': agg.get('total_questions', 0),
+                'auto_answered': agg.get('auto_answered', 0),
+                'human_reviewed': agg.get('human_reviewed', 0),
+                'unanswered_no_evidence': agg.get('unanswered_no_evidence', 0),
+            },
+            'entries': audit_entries,
+        }
+
+        # Canonical (sorted-key) serialization so the integrity hash is reproducible.
+        canonical = json.dumps(audit_log, sort_keys=True, separators=(',', ':'))
+        digest = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+
+        # The completed questionnaire payload (rendered transform may be a string or dict).
+        if isinstance(rendered, str):
+            completed_body = rendered
+        else:
+            completed_body = json.dumps(rendered, separators=(',', ':'))
+
+        result = {
+            'object_key': f"completed/{agg.get('questionnaire_id')}/questionnaire.json",
+            'audit_object_key': f"completed/{agg.get('questionnaire_id')}/audit-log.json",
+            'sha256': digest,
+            'audit_log': audit_log,
+            'audit_canonical_json': canonical,
+            'completed_questionnaire_json': completed_body,
+        }
+
+  # 8) PUT the completed questionnaire to S3. Connector: aws-s3. SHA-256 travels as object
+  #    metadata so the stored file is tamper-evident at rest. Deterministic write.
+  - id: put_to_s3
+    type: http
+    depends_on: [build_audit_log]
+    http_config:
+      url: "{input.s3_base_url}/{input.s3_bucket}/{steps.build_audit_log.output.object_key}"
+      method: PUT
+      headers:
+        Content-Type: "application/json"
+        x-amz-meta-sha256: "{steps.build_audit_log.output.sha256}"
+        x-amz-meta-questionnaire-id: "{input.questionnaire_id}"
+      auth: "aws4:{env.AWS_ACCESS_KEY_ID}:{env.AWS_SECRET_ACCESS_KEY}"
+      body: "{steps.build_audit_log.output.completed_questionnaire_json}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 9) PUT the completed questionnaire back to the TPRM tool / intake callback so the customer-
+  #    facing record is closed out. Connector: gdrive/TPRM intake. Deterministic write.
+  - id: put_to_intake
+    type: http
+    depends_on: [put_to_s3]
+    http_config:
+      url: "{input.intake_callback_url}/{input.questionnaire_id}"
+      method: PUT
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.TPRM_API_TOKEN}"
+      body: |
+        {
+          "questionnaire_id": "{input.questionnaire_id}",
+          "status": "completed",
+          "evidence_sha256": "{steps.build_audit_log.output.sha256}",
+          "s3_object_key": "{steps.build_audit_log.output.object_key}",
+          "responses": {steps.render_completed.output}
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 10) NOTIFY the security-GRC team in Slack: questionnaire complete, how many were auto-answered
+  #     vs human-reviewed, and the integrity hash of the sealed file. Connector: slack.
+  - id: notify_complete
+    type: notify
+    depends_on: [put_to_intake, build_audit_log]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: "Security questionnaire {input.questionnaire_id} for {input.customer_name} is COMPLETE. Auto-answered: {steps.aggregate_answers.output.auto_answered} / {steps.aggregate_answers.output.total_questions} | Human-reviewed: {steps.aggregate_answers.output.human_reviewed} | No-evidence gaps: {steps.aggregate_answers.output.unanswered_no_evidence} | Integrity sha256 {steps.build_audit_log.output.sha256} sealed at {steps.build_audit_log.output.object_key}."
+
+on_complete:
+  storage_path: "vendor-security-questionnaire-autoresponder/{run_id}/result.json"

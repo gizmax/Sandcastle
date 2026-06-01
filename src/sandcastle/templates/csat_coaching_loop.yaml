@@ -1,0 +1,538 @@
+# name: CSAT Coaching Loop
+# description: Turns every detractor CSAT/NPS survey into grounded, fair coaching or product feedback - pulls the full ticket transcript, root-causes agent vs product vs policy, races multiple providers to draft an evidence-cited coaching note, gates it behind a cross-provider fairness judge plus a team-lead approval, then delivers privately and aggregates weekly trends
+# tags: [support, csat, coaching, qa, fairness, failover]
+# category: support
+
+name: csat-coaching-loop
+description: >-
+  On each new low CSAT/NPS survey, this workflow grounds the customer verbatim against
+  the ACTUAL ticket transcript, root-causes whether the miss was agent behavior, response
+  time, a product defect, a policy limitation, or a false-negative survey, then routes
+  deterministically. Product / policy misses fan out to a feedback-intake sub-workflow and
+  file or link an issue in Linear / Jira / Notion. Agent-handling misses RACE two independent
+  providers (Sonnet vs Gemini 2.5 Pro) to draft a specific, transcript-cited coaching note -
+  first valid draft wins for failover. That draft must clear a cross-provider fairness gate
+  (two judges on DIFFERENT providers checking it cites exact moments, carries no personal
+  judgments, and is balanced with positives) AND a team-lead approval before it ever reaches
+  the agent. Approved notes are posted privately and logged to the Postgres QA record, and a
+  weekly loop aggregates per-agent and per-theme trends into a Slack manager digest plus a
+  SendGrid recap to the agent. Routing, scoring and aggregation are deterministic code /
+  classify / transform - the model only ever drafts and judges, and every generative step is
+  provider-swappable.
+
+default_model: sonnet
+default_timeout: 600
+
+input_schema:
+  required: ["survey_id", "ticket_id"]
+  properties:
+    survey_id:
+      type: string
+      description: "CSAT/NPS survey response id that crossed the detractor threshold"
+      default: ""
+    ticket_id:
+      type: string
+      description: "Ticket / conversation id the survey is attached to (Zendesk ticket or Intercom conversation)"
+      default: ""
+    survey_source:
+      type: string
+      description: "Survey + transcript source system: 'zendesk' or 'intercom'"
+      default: "zendesk"
+    zendesk_subdomain:
+      type: string
+      description: "Zendesk subdomain (https://<subdomain>.zendesk.com) used when survey_source == zendesk"
+      default: "acme"
+    detractor_threshold:
+      type: number
+      description: "Scores at or below this value are treated as detractors (CSAT 1-5 scale: 3; NPS 0-10 scale: 6)"
+      default: 3
+    issue_tracker:
+      type: string
+      description: "Where product/policy feedback is filed: 'linear', 'jira', or 'notion'"
+      default: "linear"
+    issue_tracker_url:
+      type: string
+      description: "Base API URL of the issue tracker (Linear GraphQL, Jira REST, or Notion API) used to create/link a feedback issue"
+      default: "https://api.linear.app/graphql"
+    qa_api_url:
+      type: string
+      description: "Internal QA service URL that writes the coaching record to Postgres and pings the agent privately"
+      default: "https://qa.internal.acme.com/api/coaching-records"
+    weekly_metrics_url:
+      type: string
+      description: "Internal analytics URL returning this week's resolved coaching records per agent/theme for aggregation"
+      default: "https://qa.internal.acme.com/api/coaching-records/weekly"
+    agent_email:
+      type: string
+      description: "Email of the agent who owned the ticket - SendGrid recap recipient"
+      default: ""
+    manager_slack_channel:
+      type: string
+      description: "Slack channel for the weekly manager coaching digest"
+      default: "#support-coaching"
+
+steps:
+  # 1) HTTP - fetch the survey response + the FULL ticket transcript it is attached to.
+  #    Templated for Zendesk (default); the same id maps onto Intercom when survey_source
+  #    is switched. Connectors: zendesk, intercom.
+  - id: fetch_survey
+    type: http
+    http_config:
+      url: "https://{input.zendesk_subdomain}.zendesk.com/api/v2/satisfaction_ratings/{input.survey_id}.json"
+      method: GET
+      auth: "bearer:{env.ZENDESK_TOKEN}"
+      headers:
+        Accept: "application/json"
+        X-Survey-Source: "{input.survey_source}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  - id: fetch_transcript
+    type: http
+    http_config:
+      url: "https://{input.zendesk_subdomain}.zendesk.com/api/v2/tickets/{input.ticket_id}/comments.json?include=users&page[size]=100"
+      method: GET
+      auth: "bearer:{env.ZENDESK_TOKEN}"
+      headers:
+        Accept: "application/json"
+        X-Survey-Source: "{input.survey_source}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2) CODE - deterministically ground the verbatim against the real transcript and decide
+  #    if the score actually clears the detractor threshold. No model here.
+  - id: ground_verbatim
+    type: code
+    depends_on: [fetch_survey, fetch_transcript]
+    code_config:
+      language: python
+      code: |
+        # Normalize the survey + transcript into one grounded coaching envelope.
+        survey = _steps.get("fetch_survey") or {}
+        tr = _steps.get("fetch_transcript") or {}
+        if not isinstance(survey, dict):
+            survey = {}
+        if not isinstance(tr, dict):
+            tr = {}
+
+        rating = survey.get("satisfaction_rating") or survey.get("rating") or survey
+        if not isinstance(rating, dict):
+            rating = {}
+
+        # CSAT scores arrive as 'good'/'bad' or numeric; normalize to a 1-5 number.
+        raw_score = rating.get("score")
+        numeric = rating.get("value", rating.get("nps_score"))
+        score_map = {"bad": 1, "good": 5, "offered": 3}
+        try:
+            score = float(numeric) if numeric is not None else float(score_map.get(str(raw_score).lower(), 3))
+        except (TypeError, ValueError):
+            score = 3.0
+
+        verbatim = str(rating.get("comment", rating.get("reason", "")) or "").strip()
+
+        # Flatten the transcript comments into an ordered, citable list.
+        comments = tr.get("comments")
+        if not isinstance(comments, list):
+            comments = tr.get("conversation_parts", []) if isinstance(tr.get("conversation_parts"), list) else []
+        moments = []
+        for i, c in enumerate(comments):
+            if not isinstance(c, dict):
+                continue
+            author = c.get("author_id", c.get("author", {}))
+            author_id = author.get("id") if isinstance(author, dict) else author
+            moments.append({
+                "idx": i,
+                "author_id": author_id,
+                "created_at": c.get("created_at", ""),
+                "public": bool(c.get("public", True)),
+                "body": str(c.get("body", c.get("plain_body", "")) or "")[:2000],
+            })
+
+        try:
+            threshold = float(_input.get("detractor_threshold", 3) or 3)
+        except (TypeError, ValueError):
+            threshold = 3.0
+
+        is_detractor = score <= threshold
+        agent_msgs = [m for m in moments if m["public"]]
+
+        result = {
+            "survey_id": _input.get("survey_id", ""),
+            "ticket_id": _input.get("ticket_id", ""),
+            "score": score,
+            "detractor_threshold": threshold,
+            "is_detractor": is_detractor,
+            "verbatim": verbatim,
+            "transcript_moments": moments,
+            "agent_turn_count": len(agent_msgs),
+            "has_transcript": bool(moments),
+        }
+
+  # 3) CLASSIFY - root-cause the miss into exactly one bucket and route to a per-bucket primer.
+  #    Provider-swappable; pinned to haiku here for cheap, fast routing.
+  - id: root_cause
+    type: classify
+    depends_on: [ground_verbatim]
+    classify_config:
+      categories: ["agent_handling", "response_time", "product_defect", "policy_limitation", "false_negative_survey"]
+      input: "{steps.ground_verbatim.output}"
+      model: haiku
+      branches:
+        agent_handling: [prime_agent]
+        response_time: [prime_agent]
+        product_defect: [prime_product]
+        policy_limitation: [prime_product]
+        false_negative_survey: [prime_dismiss]
+
+  # 3a) Agent-handling / response-time -> this is coachable. Mark for the coaching path.
+  - id: prime_agent
+    type: code
+    code_config:
+      language: python
+      code: |
+        # Coachable miss: the agent's handling or responsiveness drove the low score.
+        env = _steps.get("ground_verbatim") or {}
+        result = {
+            "bucket_class": "agent",
+            "coachable": True,
+            "file_issue": False,
+            "envelope": env,
+        }
+
+  # 3b) Product-defect / policy-limitation -> not the agent's fault. File product/process feedback.
+  - id: prime_product
+    type: code
+    code_config:
+      language: python
+      code: |
+        # Systemic miss: a product defect or a policy limitation, not agent behavior.
+        env = _steps.get("ground_verbatim") or {}
+        result = {
+            "bucket_class": "product_or_policy",
+            "coachable": False,
+            "file_issue": True,
+            "envelope": env,
+        }
+
+  # 3c) False-negative survey (wrong agent, mis-tagged, spam) -> dismiss, nothing reaches a person.
+  - id: prime_dismiss
+    type: code
+    code_config:
+      language: python
+      code: |
+        # The survey itself is a false negative - do not coach, do not file.
+        env = _steps.get("ground_verbatim") or {}
+        result = {
+            "bucket_class": "dismissed",
+            "coachable": False,
+            "file_issue": False,
+            "envelope": env,
+        }
+
+  # 4) CODE - deterministically collapse whichever primer ran into one routing decision.
+  - id: route_decision
+    type: code
+    depends_on: [root_cause]
+    code_config:
+      language: python
+      code: |
+        # Exactly one primer ran (classify routed it). Collect whichever is present.
+        agent = _steps.get("prime_agent")
+        product = _steps.get("prime_product")
+        dismiss = _steps.get("prime_dismiss")
+        primer = agent or product or dismiss or {}
+        if not isinstance(primer, dict):
+            primer = {}
+        result = {
+            "bucket_class": primer.get("bucket_class", "dismissed"),
+            "coachable": bool(primer.get("coachable", False)),
+            "file_issue": bool(primer.get("file_issue", False)),
+            "envelope": primer.get("envelope", {}),
+        }
+
+  # 5) CONDITION - branch on the deterministic routing decision (no model in the decision).
+  #    file_issue -> product/policy path; else -> coaching path.
+  - id: route_branch
+    type: condition
+    depends_on: [route_decision]
+    condition_config:
+      expression: "{steps.route_decision.output.file_issue} == True"
+      then: [feedback_intake, file_product_issue]
+      else: [draft_sonnet, draft_gemini, coaching_race, fairness_gate, leadlevel_approval, deliver_coaching]
+
+  # 6) SUB_WORKFLOW - feedback-intake: dedupe the verbatim against existing themes and produce
+  #    a concise, durable intake note for the records register. Reuses the EXISTING 'summarize'
+  #    template. Connectors (downstream): linear / jira / notion.
+  - id: feedback_intake
+    type: sub_workflow
+    sub_workflow:
+      workflow: "summarize"
+      input_mapping:
+        text: "steps.route_decision.output"
+        format: "executive"
+        max_length: "250 words"
+
+  # 7) HTTP - create or link a product / policy issue in the configured tracker
+  #    (Linear GraphQL by default; swap issue_tracker_url for Jira REST or Notion API).
+  #    Connectors: linear, jira, notion.
+  - id: file_product_issue
+    type: http
+    depends_on: [feedback_intake]
+    http_config:
+      url: "{input.issue_tracker_url}"
+      method: POST
+      auth: "bearer:{env.ISSUE_TRACKER_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+        X-Issue-Tracker: "{input.issue_tracker}"
+      body: |
+        {
+          "tracker": "{input.issue_tracker}",
+          "source": "csat-coaching-loop",
+          "ticket_id": "{input.ticket_id}",
+          "survey_id": "{input.survey_id}",
+          "bucket": "{steps.route_decision.output.bucket_class}",
+          "title": "CSAT detractor feedback ({steps.route_decision.output.bucket_class}) - ticket {input.ticket_id}",
+          "intake_summary": "{steps.feedback_intake.output}",
+          "dedupe_hint": "{steps.route_decision.output.envelope}"
+        }
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 8) RACE - draft the coaching note across TWO providers. First VALID draft wins (failover,
+  #    not a vote). Branch A pinned to sonnet, Branch B pinned to google/gemini-2.5-pro so a
+  #    single provider can never block coaching. Branch steps defined separately, NO depends_on.
+  - id: draft_sonnet
+    type: standard
+    model: sonnet
+    output_schema:
+      type: object
+      properties:
+        coaching_note: { type: string }
+        cited_moments: { type: array, items: { type: integer } }
+        positives: { type: array, items: { type: string } }
+      required: ["coaching_note", "cited_moments", "positives"]
+    prompt: |
+      You are a fair, specific support QA coach. Draft a PRIVATE coaching note for the agent
+      who owned this ticket, grounded ONLY in the actual transcript.
+
+      Grounded envelope (score, verbatim, transcript moments by idx):
+      {steps.route_decision.output}
+
+      Hard rules:
+      - Cite EXACT transcript moments by their "idx" - put those indices in "cited_moments".
+      - Describe behaviors and quote/paraphrase specific lines, NEVER personal judgments
+        about the agent's character or intelligence.
+      - Include at least one genuine POSITIVE the agent did, in "positives".
+      - Be concrete and actionable: what to do differently next time, tied to a cited moment.
+
+      Return STRICT JSON only:
+      {
+        "coaching_note": "<the private note, 120-220 words, balanced and specific>",
+        "cited_moments": [<transcript idx integers actually referenced>],
+        "positives": ["<at least one specific positive>"]
+      }
+      Output JSON only, no prose.
+
+  - id: draft_gemini
+    type: standard
+    model: google/gemini-2.5-pro
+    output_schema:
+      type: object
+      properties:
+        coaching_note: { type: string }
+        cited_moments: { type: array, items: { type: integer } }
+        positives: { type: array, items: { type: string } }
+      required: ["coaching_note", "cited_moments", "positives"]
+    prompt: |
+      You are a second, independent support QA coach (different provider for failover).
+      Draft a PRIVATE coaching note grounded ONLY in the real transcript.
+
+      Grounded envelope:
+      {steps.route_decision.output}
+
+      Same hard rules: cite exact transcript "idx" moments in "cited_moments", no personal
+      judgments, at least one genuine positive, concrete next-time actions.
+
+      Return STRICT JSON only with keys coaching_note, cited_moments (array of ints),
+      positives (array of strings). Output JSON only, no prose.
+
+  - id: coaching_race
+    type: race
+    race_config:
+      branches:
+        - [draft_sonnet]
+        - [draft_gemini]
+      # First branch whose draft parses with a non-empty note, at least one cited transcript
+      # moment, and at least one positive wins. Deterministic first-valid-wins, NOT a tally.
+      validator: "isinstance(output, dict) and bool(str(output.get('coaching_note','')).strip()) and len(output.get('cited_moments') or []) >= 1 and len(output.get('positives') or []) >= 1"
+
+  # 9) GATE - fairness / tone gate. TWO judges on DIFFERENT providers (cross-provider check to
+  #    reduce single-model bias) must BOTH pass, plus a human team-lead strategy. ALL must pass.
+  - id: fairness_gate
+    type: gate
+    depends_on: [coaching_race]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: |
+              You are a fairness auditor. Reply with exactly one word: "approved" if the
+              coaching note (a) cites at least one exact transcript moment, (b) contains NO
+              personal judgments about the agent's character, and (c) includes at least one
+              genuine positive; otherwise reply "rejected".
+              Coaching note: {steps.coaching_race.output}
+            input: "{steps.coaching_race.output}"
+            model: sonnet
+        - type: llm_eval
+          config:
+            prompt: |
+              Independent cross-provider tone check. Reply with exactly one word: "approved"
+              if the note is specific, evidence-cited and balanced with positives and free of
+              personal attacks; "rejected" otherwise.
+              Coaching note: {steps.coaching_race.output}
+            input: "{steps.coaching_race.output}"
+            model: google/gemini-2.5-pro
+        - type: human
+          config:
+            message: "Fairness gate passed automatically. Does this coaching note read as fair, specific and balanced before it goes to the team lead?"
+            timeout_hours: 24
+            on_timeout: abort
+
+  # 10) APPROVAL - the team lead signs off on the exact note before it reaches the agent.
+  - id: leadlevel_approval
+    type: approval
+    depends_on: [fairness_gate]
+    approval_config:
+      message: "Approve this private coaching note before it is shared with the agent. Review the cited transcript moments and the positives."
+      show_data: steps.coaching_race.output
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: true
+
+  # 11) HTTP - post the approved note to the agent privately AND log it to the Postgres QA
+  #     record via the internal QA service. Connectors: postgresql (behind qa_api_url).
+  - id: deliver_coaching
+    type: http
+    depends_on: [leadlevel_approval]
+    http_config:
+      url: "{input.qa_api_url}"
+      method: POST
+      auth: "bearer:{env.QA_SERVICE_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      body: |
+        {
+          "survey_id": "{input.survey_id}",
+          "ticket_id": "{input.ticket_id}",
+          "agent_email": "{input.agent_email}",
+          "bucket": "{steps.route_decision.output.bucket_class}",
+          "score": "{steps.ground_verbatim.output.score}",
+          "coaching_note": "{steps.coaching_race.output}",
+          "delivery": "private",
+          "persist": "postgres"
+        }
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
+
+  # 12) HTTP - weekly: pull this week's resolved coaching records (per agent / per theme) so
+  #     the loop has something to aggregate. Connectors: postgresql (behind weekly_metrics_url).
+  - id: fetch_weekly_records
+    type: http
+    depends_on: [route_branch]
+    http_config:
+      url: "{input.weekly_metrics_url}?window=7d"
+      method: GET
+      auth: "bearer:{env.QA_SERVICE_TOKEN}"
+      headers:
+        Accept: "application/json"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 13) LOOP - aggregate per-agent / per-theme trends over each weekly record bucket.
+  - id: weekly_aggregate
+    type: loop
+    depends_on: [fetch_weekly_records]
+    loop_config:
+      over: "steps.fetch_weekly_records.output"
+      step_ids: [tally_bucket]
+      max_iterations: 500
+
+  # 13a) Loop child - tally one record bucket into a per-agent / per-theme trend row.
+  - id: tally_bucket
+    type: code
+    code_config:
+      language: python
+      code: |
+        # Aggregate one weekly record bucket (loop item) into a trend row. Deterministic.
+        item = _input.get("_item") or {}
+        if not isinstance(item, dict):
+            item = {}
+        records = item.get("records")
+        if not isinstance(records, list):
+            records = [item]
+
+        per_agent = {}
+        per_theme = {}
+        for r in records:
+            if not isinstance(r, dict):
+                continue
+            agent = str(r.get("agent_email", r.get("agent", "unknown")))
+            theme = str(r.get("bucket", r.get("theme", "unknown")))
+            per_agent[agent] = per_agent.get(agent, 0) + 1
+            per_theme[theme] = per_theme.get(theme, 0) + 1
+
+        result = {
+            "agent": str(item.get("agent_email", item.get("agent", "unknown"))),
+            "theme": str(item.get("bucket", item.get("theme", "unknown"))),
+            "record_count": len(records),
+            "per_agent": per_agent,
+            "per_theme": per_theme,
+        }
+
+  # 14) TRANSFORM - shape the aggregated trend rows into a single digest payload (Jinja/JSON).
+  - id: build_digest
+    type: transform
+    depends_on: [weekly_aggregate]
+    transform_config:
+      template: |
+        {
+          "period": "last_7_days",
+          "ticket_id": "{input.ticket_id}",
+          "trend_rows": {steps.weekly_aggregate.output},
+          "headline": "Weekly support coaching digest - per-agent and per-theme CSAT trends"
+        }
+
+  # 15) NOTIFY - Slack weekly coaching digest to managers. Connector: slack.
+  - id: notify_managers
+    type: notify
+    depends_on: [build_digest]
+    notify_config:
+      service: slack
+      channel: "{input.manager_slack_channel}"
+      message: ":bar_chart: Weekly CSAT coaching digest is ready. Per-agent and per-theme trends: {steps.build_digest.output}"
+
+  # 16) NOTIFY - SendGrid recap to the agent (gmail service stands in for the SendGrid mail
+  #     channel). Connector: sendgrid.
+  - id: notify_agent
+    type: notify
+    depends_on: [build_digest]
+    notify_config:
+      service: gmail
+      channel: "{input.agent_email}"
+      message: "Your weekly CSAT coaching recap: {steps.build_digest.output}. Reply to your team lead with any questions."
+
+on_complete:
+  storage_path: "csat-coaching-loop/{run_id}/result.json"

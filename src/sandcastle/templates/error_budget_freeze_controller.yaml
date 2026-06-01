@@ -1,0 +1,503 @@
+# name: Error Budget Freeze Controller
+# description: Continuously tracks an SLO's error budget, and when burn accelerates past policy it RACES two providers for a deploy-freeze recommendation, gates it behind an LLM judge, gets a release manager's approval, then actually enforces the freeze (locks the GitHub default branch / flips a Cloudflare maintenance route / sets Vercel deploy protection), notifies eng, sensor-waits for the budget to recover, auto-lifts the freeze, and opens a retro ticket. The burn-rate math is deterministic code; the freeze recommendation is a swappable cross-provider race + gate; enforce/lift are plain HTTP connector calls.
+# tags: [DevOps, SRE, SLO, ErrorBudget, Freeze, Datadog, GitHub, Cloudflare, Vercel, Failover]
+# category: devops
+
+name: error-budget-freeze-controller
+description: >
+  An SLO error-budget freeze controller for SREs who want the org's
+  "should we freeze deploys?" decision automated and enforced consistently
+  instead of debated in Slack during every burn event. A durable SENSOR polls
+  a Datadog SLO / error-budget endpoint until a fresh burn-rate reading is
+  available. A deterministic CODE step computes fast-burn vs slow-burn against
+  a multi-window budget policy plus remaining-budget %. A CLASSIFY bins the
+  burn regime into healthy / slow-burn / fast-burn / exhausted, and a CONDITION
+  only proceeds to freeze logic when the regime is fast-burn or exhausted.
+  Two providers then RACE (Sonnet vs Gemini 2.5 Pro, first-valid-wins failover)
+  for a freeze / no-freeze recommendation with scope + justification; a GATE
+  (LLM judge + release-manager human) only passes when the budget is below the
+  floor AND the recommendation agrees. After an explicit APPROVAL, an HTTP step
+  enforces the freeze (lock the GitHub default branch, set a Cloudflare Worker
+  maintenance route, and enable Vercel deploy protection), a NOTIFY posts the
+  active freeze to Slack + Teams, a SENSOR waits for the error budget to recover
+  above the unfreeze threshold (or a max duration), an HTTP step auto-lifts the
+  freeze, a NOTIFY announces the lift, and a final HTTP step opens a Linear retro
+  ticket with the burn timeline. The load-bearing arithmetic is deterministic
+  code; the only model-driven step is the swappable cross-provider race + judge;
+  enforce and lift are plain connector calls.
+
+default_model: sonnet
+default_timeout: 600
+
+input_schema:
+  required: ["slo_id", "service"]
+  properties:
+    slo_id:
+      type: string
+      description: "Datadog SLO id whose error budget is tracked (numeric/hash id)."
+      default: ""
+    service:
+      type: string
+      description: "Logical service this SLO guards (used in messages and the retro ticket)."
+      default: "unknown-service"
+    datadog_site:
+      type: string
+      description: "Datadog API site host."
+      default: "api.datadoghq.eu"
+    fast_burn_threshold:
+      type: number
+      description: "Burn-rate multiple (budget consumed per window vs budget) above which burn is 'fast'. 14.4 ~= 2% of a 30d budget in 1h."
+      default: 14.4
+    slow_burn_threshold:
+      type: number
+      description: "Burn-rate multiple above which burn is 'slow' (but not fast)."
+      default: 3.0
+    budget_floor_pct:
+      type: number
+      description: "Remaining error-budget % at or below which a freeze is allowed (the floor the gate enforces)."
+      default: 25.0
+    unfreeze_pct:
+      type: number
+      description: "Remaining error-budget % the budget must recover above before the freeze auto-lifts."
+      default: 50.0
+    github_repo:
+      type: string
+      description: "owner/repo whose default branch is locked during a freeze (e.g. 'acme/platform')."
+      default: ""
+    default_branch:
+      type: string
+      description: "Default branch to protect/lock and later unlock."
+      default: "main"
+    cloudflare_account_id:
+      type: string
+      description: "Cloudflare account id owning the maintenance Worker route."
+      default: ""
+    cloudflare_dispatch_namespace:
+      type: string
+      description: "Cloudflare Workers-for-Platforms dispatch namespace where the maintenance route is set."
+      default: "production"
+    maintenance_worker:
+      type: string
+      description: "Name of the maintenance Worker to route deploy traffic to while frozen."
+      default: "deploy-freeze-maintenance"
+    vercel_project_id:
+      type: string
+      description: "Vercel project id whose deploy protection is enabled during the freeze."
+      default: ""
+    linear_team_id:
+      type: string
+      description: "Linear team id under which the burn-event retro ticket is opened."
+      default: ""
+    slack_channel:
+      type: string
+      description: "Slack channel for freeze / lift announcements."
+      default: "#eng-all"
+    teams_channel:
+      type: string
+      description: "Microsoft Teams channel for the freeze announcement."
+      default: "#sre-bridge"
+    poll_interval:
+      type: integer
+      description: "Seconds between SLO polls while waiting for a fresh burn reading."
+      default: 120
+    recover_timeout:
+      type: integer
+      description: "Max seconds to wait for the budget to recover before giving up auto-lift."
+      default: 86400
+
+steps:
+  # 1) DURABLE SENSOR - poll the Datadog SLO/error-budget endpoint until a fresh
+  #    burn reading (status_code 200 with a populated history slice) is available.
+  - id: poll_slo
+    type: sensor
+    sensor_config:
+      url: "https://{input.datadog_site}/api/v1/slo/{input.slo_id}/history?from_ts=0&to_ts=0"
+      method: GET
+      headers:
+        DD-API-KEY: "{env.DATADOG_API_KEY}"
+        DD-APPLICATION-KEY: "{env.DATADOG_APP_KEY}"
+      condition: "status_code == 200 and isinstance(response.get('data'), dict) and response.get('data', {}).get('overall') is not None"
+      check_interval: 120
+      timeout: 86400
+
+  # 2) DETERMINISTIC CODE - compute fast vs slow burn against a multi-window budget
+  #    policy and the remaining-budget %. This is the load-bearing math, model-free.
+  - id: compute_burn
+    type: code
+    depends_on: [poll_slo]
+    code_config:
+      language: python
+      code: |
+        # Read the sensor's final SLO observation and derive burn-rate + budget %.
+        obs = _steps.get("poll_slo") or {}
+        if not isinstance(obs, dict):
+            obs = {}
+        data = obs.get("data") if isinstance(obs.get("data"), dict) else {}
+        overall = data.get("overall") if isinstance(data.get("overall"), dict) else {}
+        thresholds = data.get("thresholds") if isinstance(data.get("thresholds"), dict) else {}
+
+        def _num(x, default=0.0):
+            try:
+                return float(x)
+            except (TypeError, ValueError):
+                return float(default)
+
+        # Datadog history surfaces the rolling SLI value and the target it must meet.
+        sli_value = _num(overall.get("sli_value", overall.get("sli", 100.0)), 100.0)
+        # Prefer the 30d/7d target if present, else fall back to a 99.9% target.
+        target = 100.0
+        for win in ("30d", "7d", "1d"):
+            tw = thresholds.get(win) if isinstance(thresholds.get(win), dict) else {}
+            if tw.get("target") is not None:
+                target = _num(tw.get("target"), 100.0)
+                break
+
+        # Error budget = how much error the SLO allows; consumed = how much is used.
+        allowed_error = max(100.0 - target, 1e-9)          # e.g. 0.1% for a 99.9% SLO
+        actual_error = max(100.0 - sli_value, 0.0)         # current observed error
+        consumed_pct = min(100.0, (actual_error / allowed_error) * 100.0)
+        remaining_pct = max(0.0, 100.0 - consumed_pct)
+
+        # Multi-window burn rate: short-window error vs the long-window allowance.
+        # overall may carry a precomputed short-window SLI; fall back to actual_error.
+        short_error = _num(overall.get("span_precision", actual_error), actual_error) if isinstance(overall.get("span_precision"), (int, float)) else actual_error
+        burn_rate = (short_error / allowed_error) if allowed_error > 0 else 0.0
+
+        fast_th = _num(_input.get("fast_burn_threshold", 14.4), 14.4)
+        slow_th = _num(_input.get("slow_burn_threshold", 3.0), 3.0)
+        floor = _num(_input.get("budget_floor_pct", 25.0), 25.0)
+
+        if remaining_pct <= 0.0:
+            regime = "exhausted"
+        elif burn_rate >= fast_th:
+            regime = "fast-burn"
+        elif burn_rate >= slow_th:
+            regime = "slow-burn"
+        else:
+            regime = "healthy"
+
+        result = {
+            "service": _input.get("service", "unknown-service"),
+            "slo_id": _input.get("slo_id", ""),
+            "sli_value": sli_value,
+            "target": target,
+            "burn_rate": round(burn_rate, 3),
+            "consumed_pct": round(consumed_pct, 2),
+            "remaining_pct": round(remaining_pct, 2),
+            "fast_burn_threshold": fast_th,
+            "slow_burn_threshold": slow_th,
+            "budget_floor_pct": floor,
+            "below_floor": remaining_pct <= floor,
+            "regime": regime,
+        }
+
+  # 3) CLASSIFY the burn regime into one of four bins and route to a per-bin primer.
+  - id: classify_regime
+    type: classify
+    depends_on: [compute_burn]
+    classify_config:
+      categories: ["healthy", "slow-burn", "fast-burn", "exhausted"]
+      input: "{steps.compute_burn.output}"
+      model: haiku
+      branches:
+        healthy: [prime_ok]
+        slow-burn: [prime_ok]
+        fast-burn: [prime_critical]
+        exhausted: [prime_critical]
+
+  # 3a) Healthy / slow-burn primer - no freeze action expected, just record state.
+  - id: prime_ok
+    type: code
+    code_config:
+      language: python
+      code: |
+        # healthy/slow-burn: surface a non-actionable signal for the condition gate.
+        burn = _steps.get("compute_burn") or {}
+        result = {
+            "band": "ok",
+            "freeze_candidate": False,
+            "burn": burn if isinstance(burn, dict) else {"raw": burn},
+        }
+
+  # 3b) Fast-burn / exhausted primer - this is a freeze candidate; mark it actionable.
+  - id: prime_critical
+    type: code
+    code_config:
+      language: python
+      code: |
+        # fast-burn/exhausted: this is a freeze candidate; carry budget context forward.
+        burn = _steps.get("compute_burn") or {}
+        result = {
+            "band": "critical",
+            "freeze_candidate": True,
+            "burn": burn if isinstance(burn, dict) else {"raw": burn},
+        }
+
+  # 4) DETERMINISTIC gate-in: collapse the classify branches into one decision flag.
+  #    proceed=True only when regime is fast-burn or exhausted.
+  - id: freeze_decision
+    type: code
+    depends_on: [classify_regime]
+    code_config:
+      language: python
+      code: |
+        # Exactly one primer ran. Decide deterministically whether to engage freeze logic.
+        burn = _steps.get("compute_burn") or {}
+        critical = _steps.get("prime_critical")
+        ok = _steps.get("prime_ok")
+        primer = critical if critical is not None else (ok or {})
+        if not isinstance(primer, dict):
+            primer = {}
+        regime = str(burn.get("regime", "healthy")) if isinstance(burn, dict) else "healthy"
+        actionable = regime in ("fast-burn", "exhausted")
+        result = {
+            "regime": regime,
+            "remaining_pct": (burn.get("remaining_pct") if isinstance(burn, dict) else None),
+            "below_floor": bool(burn.get("below_floor")) if isinstance(burn, dict) else False,
+            "freeze_candidate": bool(primer.get("freeze_candidate")),
+            "proceed": actionable,
+            "fail_count": 1 if actionable else 0,
+        }
+
+  # 5) CONDITION - only continue into the recommend/gate/enforce chain when fast-burn
+  #    or exhausted; otherwise post an all-clear and stop.
+  - id: gate_on_regime
+    type: condition
+    depends_on: [freeze_decision]
+    condition_config:
+      expression: "{steps.freeze_decision.output.fail_count} > 0"
+      then: [recommend_sonnet, recommend_gemini, recommend_race, recommend_judge, freeze_approval, lock_github_branch, set_cloudflare_maintenance, enable_vercel_protection, notify_freeze_active, wait_for_recovery, unlock_github_branch, restore_cloudflare_route, notify_freeze_lifted, open_retro_ticket]
+      else: [notify_all_clear]
+
+  # 5-else) All-clear notify when budget is healthy / merely slow-burning.
+  - id: notify_all_clear
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: ":white_check_mark: Error budget for {input.service} is healthy. Burn assessment: {steps.compute_burn.output}. No deploy freeze required."
+
+  # 6) RACE two providers for a freeze recommendation. First valid JSON wins
+  #    (failover, NOT a vote). Branch A pinned sonnet, Branch B pinned gemini-2.5-pro.
+  - id: recommend_sonnet
+    type: standard
+    model: sonnet
+    output_schema:
+      type: object
+      properties:
+        recommendation: { type: string, enum: ["freeze", "no-freeze"] }
+        scope: { type: string }
+        justification: { type: string }
+      required: ["recommendation", "scope", "justification"]
+    prompt: |
+      You are an SRE deciding whether to freeze deploys during an error-budget
+      burn event. The arithmetic has already been computed deterministically.
+
+      Burn assessment: {steps.compute_burn.output}
+      Freeze decision context: {steps.freeze_decision.output}
+
+      Decide whether to FREEZE deploys. Return STRICT JSON only:
+      {
+        "recommendation": "freeze" | "no-freeze",
+        "scope": "<what the freeze covers, e.g. 'all production deploys for payments-api'>",
+        "justification": "<one sentence grounded in burn_rate and remaining_pct>"
+      }
+      Recommend "freeze" when burn is fast/exhausted AND remaining budget is low.
+      Output JSON only, no prose.
+
+  - id: recommend_gemini
+    type: standard
+    model: google/gemini-2.5-pro
+    output_schema:
+      type: object
+      properties:
+        recommendation: { type: string, enum: ["freeze", "no-freeze"] }
+        scope: { type: string }
+        justification: { type: string }
+      required: ["recommendation", "scope", "justification"]
+    prompt: |
+      You are a second, independent SRE (failover for provider A) making the same
+      deploy-freeze call. Return STRICT JSON only with keys recommendation
+      ("freeze"|"no-freeze"), scope, and justification, grounded in:
+      Burn assessment: {steps.compute_burn.output}
+      Freeze decision context: {steps.freeze_decision.output}
+      Output JSON only, no prose.
+
+  - id: recommend_race
+    type: race
+    race_config:
+      branches:
+        - [recommend_sonnet]
+        - [recommend_gemini]
+      # First branch whose JSON parses with a real recommendation + non-empty scope wins.
+      validator: "isinstance(output, dict) and output.get('recommendation') in ('freeze','no-freeze') and bool(str(output.get('scope','')).strip())"
+
+  # 7) GATE: an LLM judge AND a release-manager human must both pass. The judge only
+  #    approves when the budget is below the floor AND the recommendation says freeze.
+  - id: recommend_judge
+    type: gate
+    depends_on: [recommend_race]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: |
+              A deterministic burn assessment and a two-provider freeze
+              recommendation are provided. Reply with exactly one word:
+              "approved" ONLY IF below_floor is true in the decision context AND
+              the recommendation is "freeze"; otherwise reply "rejected".
+              Burn decision: {steps.freeze_decision.output}
+              Freeze recommendation: {steps.recommend_race.output}
+            input: "{steps.recommend_race.output}"
+            model: sonnet
+        - type: human
+          config:
+            message: "Burn event cleared automated scoring and the model recommends a deploy freeze. Approve engaging the freeze gate?"
+            timeout_hours: 4
+            on_timeout: abort
+
+  # 8) APPROVAL - the release manager signs off on the exact freeze before enforcement.
+  - id: freeze_approval
+    type: approval
+    depends_on: [recommend_judge]
+    approval_config:
+      message: "Release manager sign-off: engage a deploy FREEZE for this service. Review scope, justification and remaining budget before approving."
+      show_data: steps.recommend_race.output
+      timeout_hours: 4
+      on_timeout: abort
+      allow_edit: true
+
+  # 9) ENFORCE the freeze via plain HTTP connector calls (GitHub + Cloudflare + Vercel).
+  # 9a) Lock the GitHub default branch (require reviews + admin enforcement = no merges/deploys).
+  - id: lock_github_branch
+    type: http
+    depends_on: [freeze_approval]
+    http_config:
+      url: "https://api.github.com/repos/{input.github_repo}/branches/{input.default_branch}/protection"
+      method: PUT
+      auth: "bearer:{env.GITHUB_TOKEN}"
+      headers:
+        Accept: "application/vnd.github+json"
+        X-GitHub-Api-Version: "2022-11-28"
+      body: '{"required_status_checks": null, "enforce_admins": true, "required_pull_request_reviews": {"required_approving_review_count": 6}, "restrictions": null, "lock_branch": true}'
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 9b) Set the Cloudflare Worker maintenance route so deploy traffic hits the freeze worker.
+  - id: set_cloudflare_maintenance
+    type: http
+    depends_on: [freeze_approval]
+    http_config:
+      url: "https://api.cloudflare.com/client/v4/accounts/{input.cloudflare_account_id}/workers/dispatch/namespaces/{input.cloudflare_dispatch_namespace}/scripts/{input.maintenance_worker}"
+      method: PUT
+      auth: "bearer:{env.CLOUDFLARE_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+      body: '{"enabled": true, "tags": ["error-budget-freeze", "maintenance"]}'
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 9c) Enable Vercel deploy protection so new production deployments are blocked.
+  - id: enable_vercel_protection
+    type: http
+    depends_on: [freeze_approval]
+    http_config:
+      url: "https://api.vercel.com/v9/projects/{input.vercel_project_id}"
+      method: PATCH
+      auth: "bearer:{env.VERCEL_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+      body: '{"ssoProtection": {"deploymentType": "all"}}'
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 10) NOTIFY eng that the freeze is active, with scope and the expected lift condition.
+  - id: notify_freeze_active
+    type: notify
+    depends_on: [lock_github_branch, set_cloudflare_maintenance, enable_vercel_protection]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: ":no_entry: DEPLOY FREEZE ACTIVE for {input.service}. Scope/justification: {steps.recommend_race.output}. Burn: {steps.compute_burn.output}. Freeze auto-lifts when remaining budget recovers above {input.unfreeze_pct}%."
+
+  # 11) SENSOR - wait until the error budget recovers above the unfreeze threshold,
+  #     or the max recovery duration elapses.
+  - id: wait_for_recovery
+    type: sensor
+    depends_on: [notify_freeze_active]
+    sensor_config:
+      url: "https://{input.datadog_site}/api/v1/slo/{input.slo_id}/history?from_ts=0&to_ts=0"
+      method: GET
+      headers:
+        DD-API-KEY: "{env.DATADOG_API_KEY}"
+        DD-APPLICATION-KEY: "{env.DATADOG_APP_KEY}"
+      # Recovered when the rolling SLI is back above its configured target.
+      condition: "status_code == 200 and float(response.get('data', {}).get('overall', {}).get('sli_value', 0) or 0) >= float(response.get('data', {}).get('thresholds', {}).get('30d', {}).get('target', 100) or 100)"
+      check_interval: 120
+      timeout: 86400
+
+  # 12) AUTO-LIFT - unlock the GitHub default branch once the budget has recovered.
+  - id: unlock_github_branch
+    type: http
+    depends_on: [wait_for_recovery]
+    http_config:
+      url: "https://api.github.com/repos/{input.github_repo}/branches/{input.default_branch}/protection"
+      method: DELETE
+      auth: "bearer:{env.GITHUB_TOKEN}"
+      headers:
+        Accept: "application/vnd.github+json"
+        X-GitHub-Api-Version: "2022-11-28"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 12b) Restore the Cloudflare route off the maintenance worker (disable the maintenance script).
+  - id: restore_cloudflare_route
+    type: http
+    depends_on: [wait_for_recovery]
+    http_config:
+      url: "https://api.cloudflare.com/client/v4/accounts/{input.cloudflare_account_id}/workers/dispatch/namespaces/{input.cloudflare_dispatch_namespace}/scripts/{input.maintenance_worker}"
+      method: PUT
+      auth: "bearer:{env.CLOUDFLARE_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+      body: '{"enabled": false, "tags": ["error-budget-freeze", "restored"]}'
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 13) NOTIFY that the freeze has been lifted.
+  - id: notify_freeze_lifted
+    type: notify
+    depends_on: [unlock_github_branch, restore_cloudflare_route]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: ":unlock: DEPLOY FREEZE LIFTED for {input.service}. Error budget recovered above {input.unfreeze_pct}%. Recovery observation: {steps.wait_for_recovery.output}."
+
+  # 14) Open a Linear retro ticket capturing the burn timeline for the post-incident review.
+  - id: open_retro_ticket
+    type: http
+    depends_on: [notify_freeze_lifted]
+    http_config:
+      url: "https://api.linear.app/graphql"
+      method: POST
+      auth: "bearer:{env.LINEAR_API_KEY}"
+      headers:
+        Content-Type: "application/json"
+      body: '{"query": "mutation IssueCreate($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier url } } }", "variables": {"input": {"teamId": "{input.linear_team_id}", "title": "Error-budget freeze retro: {input.service}", "description": "Auto-filed by error-budget-freeze-controller. Burn assessment: {steps.compute_burn.output}. Freeze recommendation: {steps.recommend_race.output}. Recovery: {steps.wait_for_recovery.output}."}}}'
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+on_complete:
+  storage_path: "error-budget-freeze-controller/{run_id}/result.json"

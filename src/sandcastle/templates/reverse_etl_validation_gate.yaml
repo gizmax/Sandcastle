@@ -1,0 +1,551 @@
+# name: Reverse ETL Validation Gate
+# description: Activates warehouse-modeled segment data back into SaaS systems of record, but routes every batch through a deterministic validation gate plus dual-provider field-mapping review so bad or low-confidence records are quarantined instead of synced. Pull the segment delta from Snowflake, run schema + business-rule validation in sandboxed Python (email/phone/enum/required/dedupe), reconcile ambiguous warehouse->CRM mappings via a two-provider agreement (only mappings both providers agree on are auto-applied), enforce valid-rate / quarantine / mapping-confidence thresholds in a gate, then upsert into Salesforce + HubSpot - or hold for a human - and write the quarantine to a Supabase audit table. The sync/quarantine decision is model-independent by construction.
+# tags: [ReverseETL, Census, Hightouch, Snowflake, Salesforce, HubSpot, Supabase, Slack, DataQuality, ValidationGate, data]
+# category: data
+
+name: reverse-etl-validation-gate
+description: >-
+  A reverse-ETL activation guardrail for data + marketing-ops teams who have been burned by
+  syncing malformed records into Salesforce / HubSpot and corrupting the CRM. Triggered when a
+  modeled segment table changes (new rows) or on a cron after the dbt model refreshes, it pulls
+  the segment delta from Snowflake, then runs a DETERMINISTIC sandboxed-Python step that applies
+  schema + business-rule validation - email/phone format, enum membership, required fields, and
+  dedupe keys - and splits the batch into VALID vs QUARANTINE with a machine reason on every
+  dropped row. Record validity is decided entirely by code, not a model, so the safety gate is
+  provider-agnostic. Two providers (sonnet and google/gemini-2.5-pro) then INDEPENDENTLY propose
+  the warehouse->CRM field mapping for any ambiguous columns; a race gives first-valid-wins
+  failover for liveness, and a deterministic code tally keeps ONLY the mappings both providers
+  agree on (anything else is flagged ambiguous) so no single provider can silently push a bad
+  mapping and any provider is swappable. A multi-strategy gate enforces min valid-rate %, max
+  quarantine %, and mapping-confidence; if the batch fails the thresholds it STOPS. A condition
+  then branches: gate passed -> upsert the valid rows into Salesforce + HubSpot via the connector;
+  gate failed -> a human approval to confirm or reject the batch. The quarantined rows + reasons
+  are written back to a Supabase audit table, and a Slack notify posts the synced / quarantined /
+  blocked summary. Connectors: Snowflake, Salesforce, HubSpot, Supabase via tool steps; Slack via notify.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 900
+
+input_schema:
+  required: ["segment_table"]
+  properties:
+    segment_table:
+      type: string
+      description: "Fully-qualified warehouse table/view of the modeled segment to activate (database.schema.table)."
+      default: "ANALYTICS.MARTS.SEGMENT_HIGH_VALUE_TRIAL"
+      example: "ANALYTICS.MARTS.SEGMENT_HIGH_VALUE_TRIAL"
+    warehouse_database:
+      type: string
+      description: "Snowflake database the segment delta is read from."
+      default: "ANALYTICS"
+      example: "ANALYTICS"
+    warehouse_schema:
+      type: string
+      description: "Snowflake schema the segment delta is read from."
+      default: "MARTS"
+      example: "MARTS"
+    delta_since:
+      type: string
+      description: "Only pull rows whose _modeled_at is at/after this ISO timestamp (the last successful sync watermark). Use the epoch to backfill."
+      default: "1970-01-01T00:00:00Z"
+      example: "2026-06-01T00:00:00Z"
+    batch_limit:
+      type: number
+      description: "Max rows pulled per activation batch (keeps a single sync bounded)."
+      default: 1000
+      example: "1000"
+    required_fields:
+      type: string
+      description: "Comma-separated columns that MUST be present and non-empty for a row to be valid (dropped to quarantine otherwise)."
+      default: "email,external_id,lifecycle_stage"
+      example: "email,external_id,lifecycle_stage"
+    dedupe_key:
+      type: string
+      description: "Column used as the idempotency / dedupe key; duplicate values within the batch are quarantined after the first."
+      default: "external_id"
+      example: "email"
+    allowed_lifecycle_stages:
+      type: string
+      description: "Comma-separated enum of valid lifecycle_stage values; a row outside this set is quarantined (enum-membership rule)."
+      default: "lead,marketingqualifiedlead,salesqualifiedlead,opportunity,customer"
+      example: "lead,mql,sql,customer"
+    min_valid_rate_pct:
+      type: number
+      description: "Gate threshold: minimum percentage of the batch that must pass validation, else the whole batch is blocked."
+      default: 90
+      example: "95"
+    max_quarantine_rate_pct:
+      type: number
+      description: "Gate threshold: maximum percentage of the batch allowed to land in quarantine before the batch is blocked."
+      default: 10
+      example: "5"
+    min_mapping_confidence_pct:
+      type: number
+      description: "Gate threshold: minimum percentage of ambiguous columns whose mapping BOTH providers agreed on; below this the batch is held for review."
+      default: 80
+      example: "100"
+    salesforce_sobject:
+      type: string
+      description: "Salesforce SObject the valid rows are upserted into (Lead, Contact, Account)."
+      default: "Contact"
+      example: "Lead"
+    supabase_audit_table:
+      type: string
+      description: "Supabase / Postgres table that the quarantined rows + reasons are written to for the audit trail."
+      default: "reverse_etl_quarantine"
+      example: "reverse_etl_quarantine"
+    slack_channel:
+      type: string
+      description: "Slack channel for the synced / quarantined / blocked activation summary."
+      default: "#reverse-etl-syncs"
+      example: "#data-activation"
+
+steps:
+  # 1) PULL the segment delta from Snowflake (the modeled audience to activate). Tool step on the
+  #    snowflake connector; rows newer than the watermark only, bounded by batch_limit.
+  - id: pull_segment_delta
+    type: tool
+    tool_config:
+      tool: "snowflake"
+      function: "execute_query"
+      arguments:
+        - sql: "SELECT * FROM {input.segment_table} WHERE _modeled_at >= '{input.delta_since}' ORDER BY _modeled_at ASC LIMIT {input.batch_limit}"
+          database: "{input.warehouse_database}"
+          schema: "{input.warehouse_schema}"
+          limit: "{input.batch_limit}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2) DETERMINISTIC schema + business-rule validation. The load-bearing safety decision, NO model:
+  #    required-field presence, email/phone format, lifecycle_stage enum membership, and dedupe on
+  #    the dedupe_key. Splits the batch into valid vs quarantine with a machine reason per dropped row.
+  - id: validate_and_split
+    type: code
+    depends_on: [pull_segment_delta]
+    code_config:
+      language: python
+      code: |
+        import re
+
+        raw = _steps['pull_segment_delta'] or {}
+        # Snowflake connector may return {"rows":[...]} / {"data":[...]} / {"results":[...]} or a bare list.
+        if isinstance(raw, list):
+            rows = raw
+        else:
+            rows = (raw.get('rows') or raw.get('data') or raw.get('results')
+                    or raw.get('records') or [])
+
+        def _csv(key, default):
+            val = _input.get(key)
+            if not val:
+                val = default
+            return [p.strip() for p in str(val).split(',') if p.strip()]
+
+        required_fields = _csv('required_fields', 'email,external_id,lifecycle_stage')
+        allowed_stages = {s.lower() for s in _csv('allowed_lifecycle_stages',
+                          'lead,marketingqualifiedlead,salesqualifiedlead,opportunity,customer')}
+        dedupe_key = (_input.get('dedupe_key') or 'external_id').strip()
+
+        EMAIL_RE = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
+        # E.164-ish: optional +, 7..15 digits, allow separators we strip first.
+        PHONE_RE = r"^\+?\d{7,15}$"
+
+        def _norm_key(d):
+            return {str(k).strip().lower(): v for k, v in d.items()} if isinstance(d, dict) else {}
+
+        def _get(d, name):
+            return d.get(str(name).strip().lower())
+
+        valid_rows = []
+        quarantine_rows = []
+        seen_dedupe = set()
+
+        for idx, rec in enumerate(rows):
+            if not isinstance(rec, dict):
+                quarantine_rows.append({'row_index': idx, 'record': rec,
+                                        'reasons': ['row is not an object']})
+                continue
+            r = _norm_key(rec)
+            reasons = []
+
+            # --- required-field presence ---
+            for f in required_fields:
+                v = _get(r, f)
+                if v is None or str(v).strip() == '':
+                    reasons.append(f"missing required field '{f}'")
+
+            # --- email format ---
+            email = _get(r, 'email')
+            if email is not None and str(email).strip() != '' and not re.match(EMAIL_RE, str(email).strip()):
+                reasons.append(f"invalid email format '{email}'")
+
+            # --- phone format (only when present; phone is usually optional) ---
+            phone = _get(r, 'phone') or _get(r, 'phone_number')
+            if phone is not None and str(phone).strip() != '':
+                digits = re.sub(r"[ \-().]", "", str(phone).strip())
+                if not re.match(PHONE_RE, digits):
+                    reasons.append(f"invalid phone format '{phone}'")
+
+            # --- enum membership on lifecycle_stage ---
+            stage = _get(r, 'lifecycle_stage')
+            if stage is not None and str(stage).strip() != '' and str(stage).strip().lower() not in allowed_stages:
+                reasons.append(f"lifecycle_stage '{stage}' not in allowed enum")
+
+            # --- dedupe on the idempotency key (first occurrence wins) ---
+            dk = _get(r, dedupe_key)
+            if dk is not None and str(dk).strip() != '':
+                dkn = str(dk).strip().lower()
+                if dkn in seen_dedupe:
+                    reasons.append(f"duplicate {dedupe_key} '{dk}' within batch")
+                else:
+                    seen_dedupe.add(dkn)
+
+            if reasons:
+                quarantine_rows.append({'row_index': idx, 'record': rec, 'reasons': reasons})
+            else:
+                valid_rows.append(rec)
+
+        total = len(rows)
+        valid_count = len(valid_rows)
+        quarantine_count = len(quarantine_rows)
+        valid_rate = round((valid_count / total) * 100, 2) if total else 0.0
+        quarantine_rate = round((quarantine_count / total) * 100, 2) if total else 0.0
+
+        # The set of source columns present in valid rows; ambiguous ones (not an obvious CRM
+        # field) are handed to the two-provider mapping reconciliation downstream.
+        OBVIOUS = {'email', 'firstname', 'first_name', 'lastname', 'last_name', 'phone',
+                   'phone_number', 'company', 'external_id', 'lifecycle_stage'}
+        sample = valid_rows[0] if valid_rows else (rows[0] if rows else {})
+        columns = sorted({str(k).strip() for k in (sample.keys() if isinstance(sample, dict) else [])})
+        ambiguous_columns = [c for c in columns if c.strip().lower() not in OBVIOUS]
+
+        result = {
+            'segment_table': _input.get('segment_table'),
+            'total': total,
+            'valid_count': valid_count,
+            'quarantine_count': quarantine_count,
+            'valid_rate_pct': valid_rate,
+            'quarantine_rate_pct': quarantine_rate,
+            'columns': columns,
+            'ambiguous_columns': ambiguous_columns,
+            'valid_rows': valid_rows,
+            'quarantine_rows': quarantine_rows,
+        }
+
+  # ---- Two-provider field-mapping proposals. Each provider INDEPENDENTLY proposes the
+  #      warehouse->CRM mapping + transformation for the ambiguous columns. Pinned to DIFFERENT
+  #      providers; their outputs feed (a) a race for liveness and (b) a deterministic agreement
+  #      tally. No mapping is auto-applied unless BOTH providers agree on it. ----
+  - id: mapping_sonnet
+    type: standard
+    model: sonnet
+    prompt: |
+      You are a reverse-ETL field-mapping assistant. For each AMBIGUOUS warehouse column below,
+      propose the single best target CRM field (Salesforce/HubSpot) and a one-word transform
+      (none|lowercase|trim|to_iso_date|to_e164). Return STRICT JSON only, an object keyed by the
+      warehouse column name, each value {"crm_field": "...", "transform": "..."}. No prose, no
+      markdown. If you cannot confidently map a column, omit it.
+      Ambiguous columns: {steps.validate_and_split.output.ambiguous_columns}
+      Target SObject: {input.salesforce_sobject}. Example valid row: {steps.validate_and_split.output.columns}
+
+  - id: mapping_gemini
+    type: standard
+    model: google/gemini-2.5-pro
+    prompt: |
+      You are a reverse-ETL field-mapping assistant. For each AMBIGUOUS warehouse column below,
+      propose the single best target CRM field (Salesforce/HubSpot) and a one-word transform
+      (none|lowercase|trim|to_iso_date|to_e164). Return STRICT JSON only, an object keyed by the
+      warehouse column name, each value {"crm_field": "...", "transform": "..."}. No prose, no
+      markdown. If you cannot confidently map a column, omit it.
+      Ambiguous columns: {steps.validate_and_split.output.ambiguous_columns}
+      Target SObject: {input.salesforce_sobject}. Example valid row: {steps.validate_and_split.output.columns}
+
+  # 3a) RACE - first-valid-wins failover so a live mapping proposal always exists even if one
+  #     provider is down. This is liveness only; agreement (below) decides what is auto-applied.
+  - id: mapping_proposal
+    type: race
+    depends_on: [validate_and_split]
+    race_config:
+      branches:
+        - [mapping_sonnet]
+        - [mapping_gemini]
+      validator: "len(str(output).strip()) > 0"
+
+  # 3b) DETERMINISTIC agreement tally - the model-independence guarantee for mappings. Keeps ONLY
+  #     the column mappings where BOTH providers proposed the SAME crm_field + transform; every
+  #     other column is flagged ambiguous and NOT auto-applied. Computes mapping_confidence_pct =
+  #     agreed columns / total ambiguous columns. No single provider can push a mapping alone.
+  - id: reconcile_mapping
+    type: code
+    depends_on: [validate_and_split, mapping_sonnet, mapping_gemini, mapping_proposal]
+    code_config:
+      language: python
+      code: |
+        import json
+
+        amb = (_steps['validate_and_split'] or {}).get('ambiguous_columns', []) or []
+
+        def _parse_map(raw):
+            if isinstance(raw, dict):
+                return raw
+            s = str(raw or '').strip()
+            if not s:
+                return {}
+            # Tolerate fenced code blocks / leading prose: grab the outermost JSON object.
+            start = s.find('{')
+            end = s.rfind('}')
+            if start != -1 and end != -1 and end > start:
+                s = s[start:end + 1]
+            try:
+                obj = json.loads(s)
+                return obj if isinstance(obj, dict) else {}
+            except (ValueError, TypeError):
+                return {}
+
+        m_a = _parse_map(_steps['mapping_sonnet'])
+        m_b = _parse_map(_steps['mapping_gemini'])
+
+        def _norm_entry(v):
+            if isinstance(v, dict):
+                return (str(v.get('crm_field', '')).strip().lower(),
+                        str(v.get('transform', 'none')).strip().lower() or 'none')
+            # A provider may answer with a bare target field string.
+            return (str(v).strip().lower(), 'none')
+
+        agreed = {}
+        flagged = []
+        for col in amb:
+            a = m_a.get(col)
+            b = m_b.get(col)
+            if a is None or b is None:
+                flagged.append({'column': col, 'reason': 'only one provider mapped it'})
+                continue
+            na, nb = _norm_entry(a), _norm_entry(b)
+            if na == nb and na[0]:
+                agreed[col] = {'crm_field': na[0], 'transform': na[1]}
+            else:
+                flagged.append({'column': col,
+                                'reason': 'providers disagreed',
+                                'sonnet': na, 'gemini': nb})
+
+        total_amb = len(amb)
+        if total_amb == 0:
+            # Nothing ambiguous to map -> mapping is trivially fully-confident.
+            mapping_confidence = 100.0
+        else:
+            mapping_confidence = round((len(agreed) / total_amb) * 100, 2)
+
+        result = {
+            'ambiguous_total': total_amb,
+            'agreed_count': len(agreed),
+            'flagged_count': len(flagged),
+            'mapping_confidence_pct': mapping_confidence,
+            'agreed_mappings': agreed,
+            'flagged_columns': flagged,
+        }
+
+  # 4a) DETERMINISTIC gate brief - fold the validation rates + mapping confidence + the gate
+  #     thresholds into ONE consistent record + a pass/fail verdict so the gate and humans reason
+  #     over the same numbers. Still no model on the safety path.
+  - id: build_gate_brief
+    type: code
+    depends_on: [validate_and_split, reconcile_mapping]
+    code_config:
+      language: python
+      code: |
+        vs = _steps['validate_and_split'] or {}
+        mp = _steps['reconcile_mapping'] or {}
+
+        min_valid = float(_input.get('min_valid_rate_pct', 90) or 90)
+        max_quar = float(_input.get('max_quarantine_rate_pct', 10) or 10)
+        min_conf = float(_input.get('min_mapping_confidence_pct', 80) or 80)
+
+        valid_rate = float(vs.get('valid_rate_pct', 0) or 0)
+        quar_rate = float(vs.get('quarantine_rate_pct', 0) or 0)
+        conf = float(mp.get('mapping_confidence_pct', 0) or 0)
+        total = int(vs.get('total', 0) or 0)
+
+        breaches = []
+        if total == 0:
+            breaches.append('empty batch - nothing to activate')
+        if valid_rate < min_valid:
+            breaches.append(f"valid_rate {valid_rate}% below floor {min_valid}%")
+        if quar_rate > max_quar:
+            breaches.append(f"quarantine_rate {quar_rate}% above ceiling {max_quar}%")
+        if conf < min_conf:
+            breaches.append(f"mapping_confidence {conf}% below floor {min_conf}%")
+
+        thresholds_pass = len(breaches) == 0
+
+        summary = (f"batch of {total}: valid {vs.get('valid_count', 0)} ({valid_rate}%), "
+                   f"quarantined {vs.get('quarantine_count', 0)} ({quar_rate}%), "
+                   f"mapping_confidence {conf}% over {mp.get('ambiguous_total', 0)} ambiguous cols "
+                   f"({mp.get('agreed_count', 0)} agreed). thresholds_pass={thresholds_pass}.")
+
+        result = {
+            'thresholds_pass': thresholds_pass,
+            'breaches': breaches,
+            'breaches_text': '; '.join(breaches) if breaches else 'all thresholds met',
+            'valid_rate_pct': valid_rate,
+            'quarantine_rate_pct': quar_rate,
+            'mapping_confidence_pct': conf,
+            'min_valid_rate_pct': min_valid,
+            'max_quarantine_rate_pct': max_quar,
+            'min_mapping_confidence_pct': min_conf,
+            'valid_count': int(vs.get('valid_count', 0) or 0),
+            'quarantine_count': int(vs.get('quarantine_count', 0) or 0),
+            'total': total,
+            'summary': summary,
+        }
+
+  # 4b) GATE - multi-strategy. An llm_eval strategy verifies the brief is internally consistent
+  #     (it cannot fabricate a pass - the deterministic thresholds_pass flag is authoritative), and
+  #     a human strategy is the activation sign-off that sees the exact valid-rate / quarantine /
+  #     mapping-confidence numbers vs their thresholds. ALL strategies must pass to clear the batch.
+  - id: quality_gate
+    type: gate
+    depends_on: [build_gate_brief]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are a data-quality control. Answer exactly 'approved' ONLY IF this batch brief
+              is internally consistent AND thresholds_pass is true - i.e. there are NO entries in
+              'breaches', valid_rate_pct >= min_valid_rate_pct, quarantine_rate_pct <=
+              max_quarantine_rate_pct, and mapping_confidence_pct >= min_mapping_confidence_pct.
+              Otherwise answer 'rejected' and name the breached threshold. You are only validating
+              the numbers against the thresholds; you are NOT authorizing the sync.
+            input: "{steps.build_gate_brief.output}"
+            model: haiku
+        - type: human
+          config:
+            message: >-
+              Reverse-ETL activation sign-off. {steps.build_gate_brief.output.summary} Thresholds -
+              min valid-rate {steps.build_gate_brief.output.min_valid_rate_pct}%, max quarantine
+              {steps.build_gate_brief.output.max_quarantine_rate_pct}%, min mapping-confidence
+              {steps.build_gate_brief.output.min_mapping_confidence_pct}%. Breaches:
+              {steps.build_gate_brief.output.breaches_text}. Approve to sync the valid rows into
+              Salesforce + HubSpot; reject to block this batch.
+            timeout_hours: 24
+            on_timeout: reject
+
+  # 5a) DETERMINISTIC gate outcome - reads the gate result into a clean boolean. A threshold breach
+  #     forces a block regardless of what the gate returned (deterministic numbers are authoritative).
+  - id: record_gate_decision
+    type: code
+    depends_on: [quality_gate, build_gate_brief]
+    code_config:
+      language: python
+      code: |
+        gate_out = _steps['quality_gate'] or {}
+        brief = _steps['build_gate_brief'] or {}
+
+        if isinstance(gate_out, dict):
+            passed = bool(gate_out.get('passed', gate_out.get('approved', False)))
+        else:
+            passed = str(gate_out).strip().lower() in ('approved', 'true', 'pass', 'passed')
+
+        # Hard deterministic override: a threshold breach can never sync.
+        if not brief.get('thresholds_pass'):
+            passed = False
+
+        reasons = list(brief.get('breaches') or [])
+        if not passed and not reasons:
+            reasons.append('approver rejected the batch or the sign-off timed out')
+
+        result = {
+            'sync_approved': passed,
+            'reasons': reasons,
+            'reasons_text': '; '.join(reasons) if reasons else 'cleared for sync',
+            'valid_count': brief.get('valid_count'),
+            'quarantine_count': brief.get('quarantine_count'),
+            'summary': brief.get('summary'),
+        }
+
+  # 5b) BRANCH on the deterministic decision. Approved -> upsert valid rows into Salesforce +
+  #     HubSpot. Failed -> human approval to confirm or reject the held batch (no CRM mutation
+  #     until a person decides). Either way the quarantine audit + Slack summary run afterward.
+  - id: route_decision
+    type: condition
+    depends_on: [record_gate_decision]
+    condition_config:
+      expression: "{steps.record_gate_decision.output.sync_approved} == true"
+      then: [upsert_salesforce, upsert_hubspot]
+      else: [confirm_held_batch]
+
+  # ---- APPROVED PATH: upsert the valid rows into the CRM systems of record via the connectors. ----
+  - id: upsert_salesforce
+    type: tool
+    tool_config:
+      tool: "salesforce"
+      function: "create_record"
+      arguments:
+        - sobject: "{input.salesforce_sobject}"
+          data: "{steps.validate_and_split.output.valid_rows}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  - id: upsert_hubspot
+    type: tool
+    depends_on: [upsert_salesforce]
+    tool_config:
+      tool: "hubspot"
+      function: "create_contact"
+      arguments:
+        - email: "{steps.validate_and_split.output.valid_rows}"
+          company: "{input.segment_table}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # ---- FAILED PATH: hold the batch for a human to confirm or reject. No CRM writes here. ----
+  - id: confirm_held_batch
+    type: approval
+    approval_config:
+      message: >-
+        Reverse-ETL batch HELD by the validation gate. {steps.record_gate_decision.output.summary}
+        Breaches: {steps.record_gate_decision.output.reasons_text}. Approve to override and let an
+        operator manually resync the valid rows, or reject to keep the batch blocked. Quarantined
+        rows are being written to the audit table regardless of your decision.
+      show_data: steps.build_gate_brief.output
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: true
+
+  # 6) AUDIT - write the quarantined rows + reasons back to the Supabase/Postgres audit table.
+  #    Runs on both branches (every batch leaves a quarantine trail). Tool step on supabase.insert.
+  - id: write_quarantine_audit
+    type: tool
+    depends_on: [route_decision]
+    tool_config:
+      tool: "supabase"
+      function: "insert"
+      arguments:
+        - table: "{input.supabase_audit_table}"
+          records: "{steps.validate_and_split.output.quarantine_rows}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 7) NOTIFY - post the synced / quarantined / blocked summary to Slack.
+  - id: notify_summary
+    type: notify
+    depends_on: [write_quarantine_audit, record_gate_decision]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: >-
+        Reverse-ETL activation for {input.segment_table}: sync_approved={steps.record_gate_decision.output.sync_approved}.
+        {steps.build_gate_brief.output.summary} Quarantine written to
+        {input.supabase_audit_table}. {steps.record_gate_decision.output.reasons_text}.
+
+on_complete:
+  storage_path: "reverse-etl-validation-gate/{run_id}/result.json"

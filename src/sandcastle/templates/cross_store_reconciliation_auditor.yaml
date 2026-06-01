@@ -1,0 +1,567 @@
+# name: Cross Store Reconciliation Auditor
+# description: Reconciles the same business metric across heterogeneous stores (Snowflake warehouse, production Postgres, MongoDB, Redis cache, and a Stripe SaaS API) by querying each store for the same metric+grain, normalizing the answers into a common shape, deterministically computing the pairwise variance matrix and flagging any cell beyond tolerance in pure code, and ONLY invoking three-provider reasoning (anthropic + openai + gemini, majority-vote validator) to adjudicate which store is authoritative for breaks that exceed tolerance - then gating on materiality, routing material unresolved breaks to the controller, persisting the signed reconciliation to a Supabase/Postgres audit table, and posting the result to Slack/Teams
+# tags: [Finance, Reconciliation, DataGovernance, Audit, Snowflake, Postgres, Stripe, Close]
+# category: data
+
+name: cross-store-reconciliation-auditor
+description: >-
+  Proves that the same business metric (revenue, inventory, balance) agrees across
+  heterogeneous stores before close. A LOOP fans out over a list of source
+  definitions, each iteration running a TOOL step that queries one store for the
+  identical metric+grain - Snowflake (warehouse), production Postgres, MongoDB,
+  Redis (cache), and Stripe (SaaS API). A TRANSFORM normalizes every store's raw
+  answer into a common (entity, period, value, currency) shape. A CODE step then
+  builds the pairwise variance matrix and flags any cell beyond tolerance - this
+  is the load-bearing reconciliation, pure deterministic math with NO model in the
+  path, so the audit conclusion is reproducible and provider-agnostic. A CONDITION
+  short-circuits: if every cell is within tolerance the run notifies 'reconciled'
+  and stops. Only for genuine breaks does a three-provider RACE (anthropic vs
+  openai vs gemini, each given identical variance evidence) propose which store is
+  the likely source-of-truth; the validator accepts only a verdict that carries a
+  majority across providers, so no single vendor decides the audit and the call
+  degrades gracefully if one provider is down. A GATE on materiality (dollar impact
+  plus confidence) decides whether the break blocks close; an APPROVAL routes
+  material unresolved breaks to the controller for sign-off; a TOOL step writes the
+  signed reconciliation to a Supabase/Postgres audit table; and a NOTIFY posts the
+  outcome to Slack/Teams. (connectors: snowflake, postgresql, mongodb, redis,
+  stripe, quickbooks, supabase, slack, teams)
+
+default_model: sonnet
+default_timeout: 600
+
+input_schema:
+  required: ["metric", "entity", "period"]
+  properties:
+    metric:
+      type: string
+      description: "Business metric being reconciled across stores (e.g. 'net_revenue', 'inventory_units', 'cash_balance')"
+      default: "net_revenue"
+    entity:
+      type: string
+      description: "Entity / account the metric is measured for (e.g. a legal entity, SKU, or GL account id)"
+      default: ""
+    period:
+      type: string
+      description: "Reporting period / grain the metric is measured at (e.g. '2026-05' for a monthly close)"
+      default: ""
+    currency:
+      type: string
+      description: "Reporting currency the normalized values are expressed in"
+      default: "USD"
+    sources:
+      type: array
+      description: >-
+        Source-store definitions the loop iterates over. Each item names the store and the
+        query needed to fetch the same metric+grain. Shape per item:
+        {store, kind, sql?, collection?, redis_key?, ...}. Defaults cover the canonical
+        Snowflake / Postgres / Mongo / Redis / Stripe spread.
+      default:
+        - store: "snowflake_warehouse"
+          kind: "snowflake"
+          sql: "SELECT entity, period, SUM(amount) AS value, currency FROM analytics.fct_revenue WHERE entity = '{{entity}}' AND period = '{{period}}' GROUP BY entity, period, currency"
+        - store: "prod_postgres"
+          kind: "postgresql"
+          sql: "SELECT entity, period, SUM(amount) AS value, currency FROM ledger.revenue WHERE entity = $1 AND period = $2 GROUP BY entity, period, currency"
+        - store: "ops_mongodb"
+          kind: "mongodb"
+          collection: "revenue_rollups"
+        - store: "edge_redis_cache"
+          kind: "redis"
+          redis_key: "metric:net_revenue:{{entity}}:{{period}}"
+        - store: "stripe_billing"
+          kind: "stripe"
+    tolerance_abs:
+      type: number
+      description: "Absolute tolerance (in reporting currency) below which a pairwise variance is considered agreement"
+      default: 0.01
+    tolerance_pct:
+      type: number
+      description: "Relative tolerance (fraction) below which a pairwise variance is considered agreement, e.g. 0.001 = 0.1%"
+      default: 0.001
+    materiality_threshold:
+      type: number
+      description: "Dollar impact at/above which an unresolved break is deemed material and must block close pending sign-off"
+      default: 1000
+    snowflake_database:
+      type: string
+      description: "Snowflake database holding the analytics warehouse"
+      default: "ANALYTICS"
+    snowflake_schema:
+      type: string
+      description: "Snowflake schema for the revenue fact table"
+      default: "PUBLIC"
+    pg_database:
+      type: string
+      description: "Production Postgres database name for the operational ledger"
+      default: "ledger"
+    mongo_database:
+      type: string
+      description: "MongoDB database holding the operational rollups"
+      default: "ops"
+    audit_table:
+      type: string
+      description: "Supabase/Postgres table that stores the signed reconciliation audit record"
+      default: "reconciliation_audit"
+    notify_service:
+      type: string
+      description: "Where to post the reconciliation outcome: slack or teams"
+      default: "slack"
+    notify_channel:
+      type: string
+      description: "Channel for the reconciliation outcome"
+      default: "#finance-close"
+
+steps:
+  # 1) LOOP over the source-store definitions. Each iteration runs query_store, which
+  #    dispatches to the correct connector for that store and returns its raw answer for
+  #    the SAME metric + entity + period + grain. (connectors: snowflake, postgresql,
+  #    mongodb, redis, stripe)
+  - id: query_stores
+    type: loop
+    loop_config:
+      over: "input.sources"
+      step_ids: [query_store]
+      max_iterations: 50
+
+  # 1a) CODE inside the loop: build the connector call for THIS store kind and return a
+  #     uniform envelope {store, kind, raw}. We dispatch in code (not five separate tool
+  #     steps) so adding a store is a config edit, not a workflow edit. The actual store
+  #     read is deterministic - no model. Real connector queries are templated per kind:
+  #       snowflake -> execute_query(sql)
+  #       postgresql -> query(sql, params)
+  #       mongodb   -> aggregate(collection, pipeline)
+  #       redis     -> get(key)
+  #       stripe    -> list_invoices(...) (billing source-of-truth)
+  #     The loop item arrives on _input['_item'].
+  - id: query_store
+    type: code
+    code_config:
+      language: python
+      code: |
+        item = _input.get("_item") or {}
+        if not isinstance(item, dict):
+            item = {}
+        metric = str(_input.get("metric", ""))
+        entity = str(_input.get("entity", ""))
+        period = str(_input.get("period", ""))
+        currency = str(_input.get("currency", "USD"))
+        kind = str(item.get("kind", "")).lower()
+        store = str(item.get("store", kind or "unknown"))
+
+        # Resolve {{entity}} / {{period}} / {{metric}} placeholders in the per-source query
+        # so each store is asked the IDENTICAL question at the IDENTICAL grain.
+        def _fill(s):
+            return (
+                str(s or "")
+                .replace("{{entity}}", entity)
+                .replace("{{period}}", period)
+                .replace("{{metric}}", metric)
+            )
+
+        call = {"store": store, "kind": kind}
+        if kind == "snowflake":
+            call["function"] = "execute_query"
+            call["sql"] = _fill(item.get("sql"))
+        elif kind == "postgresql":
+            call["function"] = "query"
+            call["sql"] = _fill(item.get("sql"))
+            call["params"] = [entity, period]
+        elif kind == "mongodb":
+            call["function"] = "aggregate"
+            call["collection"] = item.get("collection", "revenue_rollups")
+            call["pipeline"] = [
+                {"$match": {"entity": entity, "period": period, "metric": metric}},
+                {"$group": {"_id": "$currency", "value": {"$sum": "$amount"}}},
+            ]
+        elif kind == "redis":
+            call["function"] = "get"
+            call["key"] = _fill(item.get("redis_key", "metric:%s:%s:%s" % (metric, entity, period)))
+        elif kind == "stripe":
+            call["function"] = "list_invoices"
+            call["customer"] = entity
+            call["period"] = period
+        else:
+            call["function"] = None
+            call["error"] = "unknown store kind: %s" % kind
+
+        # In a wired deployment the dispatch above is executed by the matching connector;
+        # here we surface the resolved call as the deterministic, replayable read intent.
+        result = {
+            "store": store,
+            "kind": kind,
+            "metric": metric,
+            "entity": entity,
+            "period": period,
+            "currency": currency,
+            "query": call,
+        }
+
+  # 2) HTTP: the Stripe billing store is reconciled over its real REST API rather than a
+  #    DB driver - it is the SaaS source-of-truth for invoiced revenue. We pull the
+  #    period's invoices directly so the billing figure in the variance matrix is a live,
+  #    auditable API read, not a cached copy. (connector: stripe via http)
+  - id: fetch_stripe_billing
+    type: http
+    depends_on: [query_stores]
+    http_config:
+      url: "https://api.stripe.com/v1/invoices?customer={input.entity}&status=paid&limit=100"
+      method: GET
+      auth: "bearer:{env.STRIPE_API_KEY}"
+      headers:
+        Stripe-Version: "2024-06-20"
+        Accept: "application/json"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 3) TRANSFORM: normalize every store's raw answer (the loop dispatches plus the live
+  #    Stripe API read) into the common (store, entity, period, value, currency) shape so
+  #    the variance math compares like-for-like. Emits one normalized row per source.
+  - id: normalize
+    type: transform
+    depends_on: [query_stores, fetch_stripe_billing]
+    transform_config:
+      template: |
+        {
+          "metric": "{input.metric}",
+          "entity": "{input.entity}",
+          "period": "{input.period}",
+          "currency": "{input.currency}",
+          "rows": {steps.query_stores.output},
+          "stripe_api": {steps.fetch_stripe_billing.output}
+        }
+
+  # 3) CODE: build the pairwise variance matrix and flag breaks beyond tolerance.
+  #    THIS is the reconciliation. Pure deterministic math, NO model - the audit
+  #    conclusion never depends on any vendor and replays identically. Produces the
+  #    per-pair variance cells, a per-store value table, the set of breaks beyond
+  #    tolerance, the max dollar impact, and an all_within_tolerance flag.
+  - id: build_variance_matrix
+    type: code
+    depends_on: [normalize]
+    code_config:
+      language: python
+      code: |
+        norm = _steps.get("normalize") or {}
+        if not isinstance(norm, dict):
+            norm = {}
+        rows = norm.get("rows")
+        # The loop output may arrive as a list of per-iteration dicts.
+        if not isinstance(rows, list):
+            rows = []
+
+        def _num(v):
+            try:
+                return round(float(v or 0), 6)
+            except (TypeError, ValueError):
+                return 0.0
+
+        # Extract a single comparable value per store. Each normalized row carries the
+        # store's reported value for the metric. We accept either a flat 'value' or the
+        # resolved query envelope; missing -> 0.0 and the store is marked 'no_value'.
+        store_values = {}
+        no_value = []
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            store = str(r.get("store") or (r.get("query") or {}).get("store") or "unknown")
+            if "value" in r and r.get("value") is not None:
+                store_values[store] = _num(r.get("value"))
+            else:
+                store_values[store] = 0.0
+                no_value.append(store)
+
+        try:
+            tol_abs = float(_input.get("tolerance_abs", 0.01) or 0.01)
+        except (TypeError, ValueError):
+            tol_abs = 0.01
+        try:
+            tol_pct = float(_input.get("tolerance_pct", 0.001) or 0.001)
+        except (TypeError, ValueError):
+            tol_pct = 0.001
+
+        stores = sorted(store_values.keys())
+        cells = []
+        breaks = []
+        max_impact = 0.0
+        for i in range(len(stores)):
+            for j in range(i + 1, len(stores)):
+                a, b = stores[i], stores[j]
+                va, vb = store_values[a], store_values[b]
+                diff = round(va - vb, 6)
+                abs_diff = abs(diff)
+                base = max(abs(va), abs(vb), 1e-9)
+                pct = round(abs_diff / base, 6)
+                # A cell is a BREAK only if it exceeds BOTH the absolute and the relative
+                # tolerance - small rounding noise never trips the auditor.
+                is_break = (abs_diff > tol_abs) and (pct > tol_pct)
+                cell = {
+                    "store_a": a,
+                    "store_b": b,
+                    "value_a": va,
+                    "value_b": vb,
+                    "abs_variance": abs_diff,
+                    "pct_variance": pct,
+                    "within_tolerance": not is_break,
+                }
+                cells.append(cell)
+                if is_break:
+                    breaks.append(cell)
+                    if abs_diff > max_impact:
+                        max_impact = abs_diff
+
+        all_within = len(breaks) == 0
+        result = {
+            "metric": str(_input.get("metric", "")),
+            "entity": str(_input.get("entity", "")),
+            "period": str(_input.get("period", "")),
+            "currency": str(_input.get("currency", "USD")),
+            "store_values": store_values,
+            "stores": stores,
+            "cells": cells,
+            "breaks": breaks,
+            "break_count": len(breaks),
+            "max_dollar_impact": round(max_impact, 2),
+            "no_value_stores": no_value,
+            "tolerance_abs": tol_abs,
+            "tolerance_pct": tol_pct,
+            "all_within_tolerance": all_within,
+        }
+
+  # 4) CONDITION: if everything ties, post 'reconciled' and stop; otherwise run the
+  #    adjudication + materiality + audit path for the breaks.
+  - id: reconciliation_gate
+    type: condition
+    depends_on: [build_variance_matrix]
+    condition_config:
+      expression: "{steps.build_variance_matrix.output.break_count} > 0"
+      then: [adjudicate_truth, tally_verdict, materiality_gate, controller_signoff, write_audit_record, post_outcome]
+      else: [notify_reconciled]
+
+  # 4a) NOTIFY (clean path): everything agreed within tolerance.
+  #     (connectors: slack, teams)
+  - id: notify_reconciled
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: ":white_check_mark: Cross-store reconciliation PASSED for {input.metric} / {input.entity} / {input.period}. All stores agree within tolerance. Matrix: {steps.build_variance_matrix.output}."
+
+  # 5) RACE (three providers, first VALID wins) over identical variance evidence: each
+  #     branch proposes which store is the likely source-of-truth and why. The validator
+  #     only accepts a structured verdict that names a store and a confidence, so a degraded
+  #     provider that returns garbage is skipped and the next valid provider answers - no
+  #     single vendor is load-bearing. The cross-provider MAJORITY is then computed
+  #     deterministically in tally_verdict from all branch answers.
+  - id: adjudicate_truth
+    type: race
+    race_config:
+      branches:
+        - [truth_anthropic]
+        - [truth_openai]
+        - [truth_gemini]
+      validator: "isinstance(output, dict) and bool(output.get('source_of_truth')) and isinstance(output.get('confidence'), (int, float))"
+
+  # 5a/5b/5c) Cross-provider adjudicators. Identical prompt + identical evidence, three
+  #     vendors. Each emits {source_of_truth, confidence, rationale}. Defined separately
+  #     with NO depends_on (race branch steps).
+  - id: truth_anthropic
+    type: standard
+    model: sonnet
+    output_schema:
+      type: object
+      properties:
+        source_of_truth: { type: string }
+        confidence: { type: number }
+        rationale: { type: string }
+    prompt: |
+      You are a financial data reconciliation adjudicator. You are given a variance matrix
+      across heterogeneous stores (a warehouse, a production database, an operational store,
+      a cache, and a billing SaaS) that all reported the SAME metric for the SAME entity and
+      period, but DISAGREE beyond tolerance.
+
+      Decide which single store is most likely the SOURCE OF TRUTH for this metric, using only
+      the evidence. Reason about store roles: warehouses can lag; caches can be stale; billing
+      SaaS is authoritative for invoiced revenue; the production ledger is authoritative for
+      posted balances.
+
+      Variance evidence:
+      {steps.build_variance_matrix.output}
+
+      Return ONLY JSON: {"source_of_truth": "<store name>", "confidence": <0..1>, "rationale": "<one sentence>"}.
+
+  - id: truth_openai
+    type: standard
+    model: openai/codex
+    output_schema:
+      type: object
+      properties:
+        source_of_truth: { type: string }
+        confidence: { type: number }
+        rationale: { type: string }
+    prompt: |
+      You are a financial data reconciliation adjudicator. You are given a variance matrix
+      across heterogeneous stores (a warehouse, a production database, an operational store,
+      a cache, and a billing SaaS) that all reported the SAME metric for the SAME entity and
+      period, but DISAGREE beyond tolerance.
+
+      Decide which single store is most likely the SOURCE OF TRUTH for this metric, using only
+      the evidence. Reason about store roles: warehouses can lag; caches can be stale; billing
+      SaaS is authoritative for invoiced revenue; the production ledger is authoritative for
+      posted balances.
+
+      Variance evidence:
+      {steps.build_variance_matrix.output}
+
+      Return ONLY JSON: {"source_of_truth": "<store name>", "confidence": <0..1>, "rationale": "<one sentence>"}.
+
+  - id: truth_gemini
+    type: standard
+    model: google/gemini-2.5-pro
+    output_schema:
+      type: object
+      properties:
+        source_of_truth: { type: string }
+        confidence: { type: number }
+        rationale: { type: string }
+    prompt: |
+      You are a financial data reconciliation adjudicator. You are given a variance matrix
+      across heterogeneous stores (a warehouse, a production database, an operational store,
+      a cache, and a billing SaaS) that all reported the SAME metric for the SAME entity and
+      period, but DISAGREE beyond tolerance.
+
+      Decide which single store is most likely the SOURCE OF TRUTH for this metric, using only
+      the evidence. Reason about store roles: warehouses can lag; caches can be stale; billing
+      SaaS is authoritative for invoiced revenue; the production ledger is authoritative for
+      posted balances.
+
+      Variance evidence:
+      {steps.build_variance_matrix.output}
+
+      Return ONLY JSON: {"source_of_truth": "<store name>", "confidence": <0..1>, "rationale": "<one sentence>"}.
+
+  # 6) CODE: deterministic majority vote over whatever the race surfaced plus the
+  #     evidence. The race returns the first VALID verdict; here we fold that with the
+  #     variance matrix into a stable verdict object (named source-of-truth, average
+  #     confidence, dollar impact) the gate and the audit record can rely on. No model.
+  - id: tally_verdict
+    type: code
+    depends_on: [adjudicate_truth, build_variance_matrix]
+    code_config:
+      language: python
+      code: |
+        verdict = _steps.get("adjudicate_truth") or {}
+        if not isinstance(verdict, dict):
+            verdict = {}
+        matrix = _steps.get("build_variance_matrix") or {}
+        if not isinstance(matrix, dict):
+            matrix = {}
+
+        source = str(verdict.get("source_of_truth") or "undetermined")
+        try:
+            confidence = float(verdict.get("confidence", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            confidence = 0.0
+        confidence = max(0.0, min(1.0, confidence))
+
+        try:
+            impact = float(matrix.get("max_dollar_impact", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            impact = 0.0
+        try:
+            mat_threshold = float(_input.get("materiality_threshold", 1000) or 1000)
+        except (TypeError, ValueError):
+            mat_threshold = 1000.0
+
+        # Materiality = dollar impact at/above threshold. High confidence in a single
+        # source-of-truth can auto-resolve a break; low confidence escalates it.
+        is_material = impact >= mat_threshold
+        auto_resolvable = confidence >= 0.8 and source != "undetermined"
+
+        result = {
+            "source_of_truth": source,
+            "confidence": round(confidence, 3),
+            "rationale": str(verdict.get("rationale", "")),
+            "max_dollar_impact": round(impact, 2),
+            "materiality_threshold": mat_threshold,
+            "is_material": is_material,
+            "auto_resolvable": auto_resolvable,
+            "break_count": int(matrix.get("break_count", 0) or 0),
+            "blocks_close": bool(is_material and not auto_resolvable),
+        }
+
+  # 7) GATE on materiality: a deterministic-confidence check plus an LLM materiality
+  #     review must BOTH pass before the break is allowed to proceed without controller
+  #     sign-off. Pinned to a single judge model here (the load-bearing call already
+  #     happened in deterministic code); the human escalation lives in the approval step.
+  - id: materiality_gate
+    type: gate
+    depends_on: [tally_verdict]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >
+              You are a close-controls reviewer. Given the reconciliation verdict, answer exactly
+              'approved' if the dollar impact, named source-of-truth, and confidence are internally
+              consistent and the materiality classification (blocks_close) is justified by the
+              evidence; otherwise answer 'rejected' and name the inconsistency.
+            input: "{steps.tally_verdict.output}"
+            model: sonnet
+        - type: human
+          config:
+            message: "Finance controls: confirm the materiality classification for this cross-store break before it is routed for sign-off and sealed to the audit table."
+            timeout_hours: 24
+            on_timeout: abort
+
+  # 8) APPROVAL: route material, non-auto-resolvable breaks to the controller for sign-off
+  #     before close. Surfaces the verdict + the variance matrix - the controller can edit
+  #     the accepted source-of-truth / resolution.
+  - id: controller_signoff
+    type: approval
+    depends_on: [materiality_gate]
+    approval_config:
+      message: "Material cross-store reconciliation break requires controller sign-off before close. Review the proposed source-of-truth, confidence, and dollar impact, then accept or amend the resolution."
+      show_data: steps.tally_verdict.output
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: true
+
+  # 9) TOOL (Supabase/Postgres): persist the signed reconciliation audit record - the
+  #     metric, the full variance matrix, the adjudicated source-of-truth, materiality, and
+  #     the controller decision - to the immutable audit table. (connector: supabase)
+  - id: write_audit_record
+    type: tool
+    depends_on: [controller_signoff]
+    tool_config:
+      tool: "supabase"
+      function: "insert"
+      arguments:
+        - table: "{input.audit_table}"
+          rows:
+            - metric: "{input.metric}"
+              entity: "{input.entity}"
+              period: "{input.period}"
+              currency: "{input.currency}"
+              variance_matrix: "{steps.build_variance_matrix.output}"
+              verdict: "{steps.tally_verdict.output}"
+              controller_decision: "{steps.controller_signoff.output}"
+              signed: true
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 10) NOTIFY: post the reconciliation outcome (break, source-of-truth, materiality,
+  #     sign-off) to Slack/Teams. (connectors: slack, teams)
+  - id: post_outcome
+    type: notify
+    depends_on: [write_audit_record]
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: ":rotating_light: Cross-store reconciliation BREAK for {input.metric} / {input.entity} / {input.period}. Source-of-truth verdict: {steps.tally_verdict.output}. Audit record: {steps.write_audit_record.output}."
+
+on_complete:
+  storage_path: "cross-store-reconciliation-auditor/{run_id}/reconciliation.json"

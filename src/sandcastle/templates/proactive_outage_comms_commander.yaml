@@ -1,0 +1,620 @@
+# name: Proactive Outage Comms Commander
+# description: When PagerDuty/Datadog opens a Sev1/Sev2 on a customer-facing service, resolve the blast radius from Postgres/HubSpot, segment impacted accounts by tier + comms entitlement, race providers to draft tier-appropriate proactive status updates, gate for accuracy/tone, get one Incident Commander sign-off, then fan-out-notify customers across SendGrid email / Twilio SMS / status page and pre-arm Zendesk with macros.
+# tags: [support, incident, proactive-comms, outage, pagerduty, datadog, sendgrid, twilio, zendesk, status-page]
+# category: support
+
+name: proactive-outage-comms-commander
+description: >-
+  Proactive customer outage communications, end to end. A PagerDuty/Datadog sensor
+  awaits an incident that has actually crossed Sev2-or-worse on a customer-facing
+  service (the severity gate is read deterministically from the incident payload, not
+  guessed). An HTTP fan-out then resolves the blast radius - which accounts sit on the
+  affected component/region - by querying Postgres (PostgREST) and HubSpot. Code
+  normalizes the two sources into one impacted-accounts list; a classify routes accounts
+  by tier and contractual comms entitlement (enterprise_named_contact / pro / self_serve),
+  and a deterministic code step builds the per-segment work order. Drafting runs as a
+  cross-provider RACE (Sonnet vs Gemini 2.5 Pro, first-valid-wins failover) so a single
+  model vendor outage or a slow API never blocks customer comms. A two-judge GATE on
+  DIFFERENT providers enforces accuracy + tone (no root-cause speculation, no ETA promises
+  beyond incident facts, brand voice), then a single Incident Commander APPROVES the master
+  message set. A LOOP iterates the impacted segments to build per-channel send jobs; HTTP
+  steps deliver SendGrid email to entitled contacts, Twilio SMS to enterprise on-call, and
+  post to the status page, and a final HTTP call creates/appends a Zendesk macro so inbound
+  tickets get a consistent linked response. A Slack notify closes the loop with
+  who-was-notified counts. Every load-bearing decision is deterministic code or a
+  cross-provider race/gate, and delivery is vendor-neutral HTTP, so no step depends on one
+  provider's proprietary capability.
+
+default_model: sonnet
+default_timeout: 600
+
+input_schema:
+  required: ["incident_id"]
+  properties:
+    incident_id:
+      type: string
+      description: "PagerDuty/Datadog incident id that opened on a customer-facing service"
+      default: ""
+    pagerduty_base_url:
+      type: string
+      description: "PagerDuty REST API base URL"
+      default: "https://api.pagerduty.com"
+    affected_component:
+      type: string
+      description: "Logical component / service the incident is on (used to resolve blast radius), e.g. 'checkout-api'"
+      default: "checkout-api"
+    affected_region:
+      type: string
+      description: "Affected region/cell for the blast-radius query, e.g. 'eu-west-1'"
+      default: "eu-west-1"
+    accounts_endpoint:
+      type: string
+      description: "PostgREST base URL over the accounts Postgres DB (connector: postgresql)"
+      default: "https://data.internal/api/v1"
+    hubspot_base_url:
+      type: string
+      description: "HubSpot CRM API base URL for enriching entitled named contacts (connector: hubspot)"
+      default: "https://api.hubapi.com"
+    status_page_id:
+      type: string
+      description: "Statuspage.io page id used to post the public component update"
+      default: ""
+    status_component_id:
+      type: string
+      description: "Statuspage.io component id for the affected service"
+      default: ""
+    sendgrid_template_id:
+      type: string
+      description: "SendGrid dynamic template id for the proactive status email (connector: sendgrid)"
+      default: ""
+    sendgrid_from_email:
+      type: string
+      description: "Verified SendGrid sender address for customer status emails"
+      default: "status@acme.com"
+    twilio_from:
+      type: string
+      description: "Twilio sender number (E.164) for enterprise on-call SMS (connector: twilio)"
+      default: "+10000000001"
+    zendesk_subdomain:
+      type: string
+      description: "Zendesk subdomain for the support macro (connector: zendesk)"
+      default: "acme"
+    status_page_url:
+      type: string
+      description: "Public status page URL linked in every customer message"
+      default: "https://status.acme.com"
+    slack_channel:
+      type: string
+      description: "Slack incident channel for the who-was-notified summary (connector: slack)"
+      default: "#incident-bridge"
+
+steps:
+  # 1) SENSOR: await the incident reaching Sev2-or-worse on a customer-facing service.
+  #    Polls the PagerDuty incident (connector: pagerduty; swap url for Datadog's
+  #    /api/v2/incidents/{id}). Recovered/ready = the payload reports severity >= Sev2
+  #    on a customer-facing service. Read deterministically from the JSON, not guessed.
+  - id: await_incident
+    type: sensor
+    sensor_config:
+      url: "{input.pagerduty_base_url}/incidents/{input.incident_id}"
+      method: GET
+      headers:
+        Authorization: "Token token={env.PAGERDUTY_API_TOKEN}"
+        Accept: "application/json"
+      condition: "status_code == 200 and str(response.get('incident', {}).get('priority', {}).get('summary', response.get('incident', {}).get('urgency', '')).lower()) in ('sev1', 'sev2', 'p1', 'p2', 'high') and bool(response.get('incident', {}).get('service', {}).get('summary'))"
+      check_interval: 30
+      timeout: 86400
+
+  # 2a) BLAST RADIUS - Postgres: accounts whose subscription rides the affected
+  #     component/region (connector: postgresql via PostgREST).
+  - id: query_postgres_accounts
+    type: http
+    depends_on: [await_incident]
+    http_config:
+      url: "{input.accounts_endpoint}/accounts?select=account_id,name,tier,comms_entitlement,primary_email,oncall_phone,locale,component,region&component=eq.{input.affected_component}&region=eq.{input.affected_region}&active=eq.true"
+      method: GET
+      headers:
+        Accept: "application/json"
+        Prefer: "count=exact"
+      auth: "bearer:{env.POSTGREST_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2b) BLAST RADIUS - HubSpot: pull named-contact comms preferences for entitled
+  #     accounts on the same component (connector: hubspot). Best-effort enrichment.
+  - id: query_hubspot_contacts
+    type: http
+    depends_on: [await_incident]
+    http_config:
+      url: "{input.hubspot_base_url}/crm/v3/objects/companies/search"
+      method: POST
+      auth: "bearer:{env.HUBSPOT_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      body: |
+        {
+          "filterGroups": [{"filters": [
+            {"propertyName": "affected_component", "operator": "EQ", "value": "{input.affected_component}"},
+            {"propertyName": "comms_entitlement", "operator": "IN", "values": ["enterprise_named_contact"]}
+          ]}],
+          "properties": ["account_id", "name", "tier", "comms_entitlement", "named_contact_email", "oncall_phone", "locale"],
+          "limit": 200
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 3) Deterministically merge Postgres + HubSpot into ONE impacted-accounts list.
+  #    HubSpot named-contact data overrides/enriches the Postgres row when present.
+  #    This is the ground truth the classify + drafting + loop all read from.
+  - id: build_impacted_accounts
+    type: code
+    depends_on: [query_postgres_accounts, query_hubspot_contacts]
+    code_config:
+      language: python
+      code: |
+        pg = _steps.get("query_postgres_accounts") or {}
+        hs = _steps.get("query_hubspot_contacts") or {}
+
+        # PostgREST returns a bare list, or some gateways wrap it in {"rows":[...]}.
+        if isinstance(pg, dict):
+            pg_rows = pg.get("rows") if isinstance(pg.get("rows"), list) else []
+        elif isinstance(pg, list):
+            pg_rows = pg
+        else:
+            pg_rows = []
+
+        # HubSpot search response: {"results":[{"properties":{...}}, ...]}
+        hs_rows = []
+        if isinstance(hs, dict):
+            for r in (hs.get("results") or []):
+                props = r.get("properties") if isinstance(r, dict) else None
+                if isinstance(props, dict):
+                    hs_rows.append(props)
+
+        VALID_TIERS = ("enterprise_named_contact", "pro", "self_serve")
+
+        def norm_entitlement(row):
+            ent = str(row.get("comms_entitlement", "") or "").strip().lower()
+            if ent in VALID_TIERS:
+                return ent
+            tier = str(row.get("tier", "") or "").strip().lower()
+            if tier in ("enterprise", "enterprise_named_contact"):
+                return "enterprise_named_contact"
+            if tier in ("pro", "business", "team"):
+                return "pro"
+            return "self_serve"
+
+        # Index HubSpot enrichment by account_id.
+        hs_by_acct = {}
+        for hr in hs_rows:
+            acct = str(hr.get("account_id", "") or "").strip()
+            if acct:
+                hs_by_acct[acct] = hr
+
+        accounts = []
+        seen = set()
+        for row in pg_rows:
+            if not isinstance(row, dict):
+                continue
+            acct = str(row.get("account_id", "") or "").strip()
+            if not acct or acct in seen:
+                continue
+            seen.add(acct)
+            enrich = hs_by_acct.get(acct, {})
+            email = str(enrich.get("named_contact_email") or row.get("primary_email") or "").strip()
+            phone = str(enrich.get("oncall_phone") or row.get("oncall_phone") or "").strip()
+            accounts.append({
+                "account_id": acct,
+                "name": str(row.get("name", "") or enrich.get("name", "")).strip(),
+                "comms_entitlement": norm_entitlement(enrich or row),
+                "email": email,
+                "oncall_phone": phone,
+                "locale": str(row.get("locale") or enrich.get("locale") or "en").strip() or "en",
+            })
+
+        by_tier = {t: 0 for t in VALID_TIERS}
+        for a in accounts:
+            by_tier[a["comms_entitlement"]] = by_tier.get(a["comms_entitlement"], 0) + 1
+
+        result = {
+            "component": _input.get("affected_component", ""),
+            "region": _input.get("affected_region", ""),
+            "accounts": accounts,
+            "total_impacted": len(accounts),
+            "counts_by_entitlement": by_tier,
+        }
+
+  # 4) CLASSIFY the overall impacted population to route messaging emphasis by the
+  #    dominant entitlement tier. The downstream primers read build_impacted_accounts
+  #    via _steps (code), so no model decides who gets notified - only the framing.
+  - id: classify_segment_profile
+    type: classify
+    depends_on: [build_impacted_accounts]
+    classify_config:
+      categories: ["enterprise_named_contact", "pro", "self_serve"]
+      input: "{steps.build_impacted_accounts.output}"
+      model: haiku
+      branches:
+        enterprise_named_contact: [prime_enterprise]
+        pro: [prime_pro]
+        self_serve: [prime_self_serve]
+
+  # 4a) Enterprise primer - white-glove, named-contact + on-call SMS emphasis.
+  - id: prime_enterprise
+    type: code
+    code_config:
+      language: python
+      code: |
+        ev = _steps.get("build_impacted_accounts") or {}
+        result = {
+            "dominant_tier": "enterprise_named_contact",
+            "tone": "white-glove, accountable, concrete next-update time",
+            "channels": ["email", "sms", "status_page"],
+            "evidence": ev,
+        }
+
+  # 4b) Pro primer - direct email + status page, no SMS.
+  - id: prime_pro
+    type: code
+    code_config:
+      language: python
+      code: |
+        ev = _steps.get("build_impacted_accounts") or {}
+        result = {
+            "dominant_tier": "pro",
+            "tone": "clear, reassuring, action-oriented",
+            "channels": ["email", "status_page"],
+            "evidence": ev,
+        }
+
+  # 4c) Self-serve primer - status page first, lightweight email.
+  - id: prime_self_serve
+    type: code
+    code_config:
+      language: python
+      code: |
+        ev = _steps.get("build_impacted_accounts") or {}
+        result = {
+            "dominant_tier": "self_serve",
+            "tone": "brief, transparent, link to status page",
+            "channels": ["status_page", "email"],
+            "evidence": ev,
+        }
+
+  # 5) Join whichever primer ran + the incident facts into one drafting brief that the
+  #    race providers read. Deterministic - exactly one primer produced output.
+  - id: drafting_brief
+    type: code
+    depends_on: [classify_segment_profile]
+    code_config:
+      language: python
+      code: |
+        ent = _steps.get("prime_enterprise")
+        pro = _steps.get("prime_pro")
+        ss = _steps.get("prime_self_serve")
+        ev = _steps.get("build_impacted_accounts") or {}
+
+        primer = None
+        for cand in (ent, pro, ss):
+            if isinstance(cand, dict) and cand.get("dominant_tier"):
+                primer = cand
+                break
+        if primer is None:
+            primer = {
+                "dominant_tier": "pro",
+                "tone": "clear, reassuring, action-oriented",
+                "channels": ["email", "status_page"],
+                "evidence": ev,
+            }
+
+        result = {
+            "component": _input.get("affected_component", ""),
+            "region": _input.get("affected_region", ""),
+            "incident_id": _input.get("incident_id", ""),
+            "status_page_url": _input.get("status_page_url", ""),
+            "dominant_tier": primer.get("dominant_tier"),
+            "tone": primer.get("tone", ""),
+            "channels": primer.get("channels", []),
+            "counts_by_entitlement": ev.get("counts_by_entitlement", {}),
+            "total_impacted": ev.get("total_impacted", 0),
+        }
+
+  # 6) RACE two providers to draft the per-segment status messages CONCURRENTLY.
+  #    First branch whose JSON parses with all three tier messages wins - this is
+  #    first-valid-wins failover across vendors, NOT a vote. Branch A = sonnet,
+  #    Branch B = google/gemini-2.5-pro, so one vendor's outage never blocks comms.
+  - id: draft_sonnet
+    type: standard
+    model: sonnet
+    output_schema:
+      type: object
+      properties:
+        enterprise_named_contact: { type: object }
+        pro: { type: object }
+        self_serve: { type: object }
+      required: ["enterprise_named_contact", "pro", "self_serve"]
+    prompt: |
+      You are proactive-comms drafter A. An incident is open on a customer-facing
+      service and we must tell impacted customers BEFORE they discover it themselves -
+      without overpromising. Draft tier-appropriate proactive status updates.
+
+      Drafting brief (incident facts + dominant tier + tone): {steps.drafting_brief.output}
+
+      HARD RULES (a downstream gate will reject violations):
+      - NO root-cause speculation. Only state that the service is degraded/down.
+      - NO ETA promises beyond what the incident facts support. Say "next update by <time window>" not "fixed by".
+      - NO blame, no minimizing ("small number"), brand voice = calm, candid, human.
+      - Always link the status page: {steps.drafting_brief.output}
+
+      Return STRICT JSON only, no prose, with one object per tier:
+      {
+        "enterprise_named_contact": {"subject": "...", "email_body": "...", "sms_body": "<160 chars>", "status_page_body": "..."},
+        "pro": {"subject": "...", "email_body": "...", "status_page_body": "..."},
+        "self_serve": {"subject": "...", "email_body": "...", "status_page_body": "..."}
+      }
+
+  - id: draft_gemini
+    type: standard
+    model: google/gemini-2.5-pro
+    output_schema:
+      type: object
+      properties:
+        enterprise_named_contact: { type: object }
+        pro: { type: object }
+        self_serve: { type: object }
+      required: ["enterprise_named_contact", "pro", "self_serve"]
+    prompt: |
+      You are proactive-comms drafter B, an independent second provider and the failover
+      for drafter A. Same task: draft tier-appropriate proactive status updates for an
+      open incident on a customer-facing service, without overpromising.
+
+      Drafting brief: {steps.drafting_brief.output}
+
+      HARD RULES (a downstream gate will reject violations):
+      - NO root-cause speculation; NO ETA promises beyond incident facts; NO blame.
+      - Brand voice = calm, candid, human. Always link the status page.
+
+      Return STRICT JSON only with keys enterprise_named_contact, pro, self_serve, each
+      an object with subject/email_body/status_page_body (enterprise also sms_body, <=160
+      chars). Output JSON only, no prose.
+
+  - id: race_draft_messages
+    type: race
+    race_config:
+      branches:
+        - [draft_sonnet]
+        - [draft_gemini]
+      # First branch whose JSON carries all three tier message objects wins.
+      # First-valid-wins failover across providers, not a vote tally.
+      validator: "isinstance(output, dict) and all(isinstance(output.get(k), dict) and output.get(k) for k in ('enterprise_named_contact', 'pro', 'self_serve'))"
+
+  # 7) Normalize the race winner into a stable master message set the gate/approval/loop use.
+  - id: master_message_set
+    type: code
+    depends_on: [race_draft_messages]
+    code_config:
+      language: python
+      code: |
+        draft = _steps.get("race_draft_messages") or {}
+        if not isinstance(draft, dict):
+            draft = {}
+        brief = _steps.get("drafting_brief") or {}
+
+        def seg(key):
+            s = draft.get(key)
+            return s if isinstance(s, dict) else {}
+
+        messages = {
+            "enterprise_named_contact": seg("enterprise_named_contact"),
+            "pro": seg("pro"),
+            "self_serve": seg("self_serve"),
+        }
+        complete = all(bool(messages[k].get("email_body")) for k in messages)
+
+        result = {
+            "incident_id": _input.get("incident_id", ""),
+            "component": brief.get("component", ""),
+            "status_page_url": _input.get("status_page_url", ""),
+            "messages": messages,
+            "complete": complete,
+        }
+
+  # 8) GATE: TWO judges on DIFFERENT providers. Both must pass (no quorum). Judge 1
+  #    (sonnet) = accuracy: no root-cause speculation, no over-promised ETA. Judge 2
+  #    (gemini) = tone/brand voice. A swappable gate, separate from the drafting race.
+  - id: accuracy_tone_gate
+    type: gate
+    depends_on: [master_message_set]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: |
+              Accuracy judge. Reply with exactly one word: "approved" only if EVERY tier
+              message (enterprise_named_contact, pro, self_serve) is factually safe -
+              i.e. it does NOT speculate about root cause, does NOT promise a fix/restore
+              ETA beyond a "next update by" window, does NOT state numbers it cannot know,
+              and links the status page. Otherwise reply "rejected".
+              Master message set: {steps.master_message_set.output}
+            input: "{steps.master_message_set.output}"
+            model: sonnet
+        - type: llm_eval
+          config:
+            prompt: |
+              Tone / brand-voice judge. Reply with exactly one word: "approved" only if
+              every tier message is calm, candid, human, non-minimizing and non-blaming,
+              and the message_set is complete. Otherwise reply "rejected".
+              Master message set: {steps.master_message_set.output}
+            input: "{steps.master_message_set.output}"
+            model: google/gemini-2.5-pro
+
+  # 9) Single Incident Commander sign-off on the master message set. Timeout aborts the
+  #    send - we never auto-blast customer comms without one human approval.
+  - id: ic_signoff
+    type: approval
+    depends_on: [accuracy_tone_gate]
+    approval_config:
+      message: "Incident Commander: approve this master message set for proactive customer comms? Review all three tier messages for accuracy and tone before approving. Approval triggers email/SMS/status-page fan-out."
+      show_data: steps.master_message_set.output
+      timeout_hours: 1
+      on_timeout: abort
+      allow_edit: true
+
+  # 10) LOOP the impacted-account segments to build a per-account send job carrying the
+  #     right channel + tier template. Child reads the loop item via _input['_item'].
+  - id: build_send_jobs
+    type: loop
+    depends_on: [ic_signoff]
+    loop_config:
+      over: "steps.build_impacted_accounts.output.accounts"
+      step_ids: [account_send_job]
+      max_iterations: 5000
+
+  # 10a) Per-account: resolve channel set + the tier message for this account. NO model.
+  - id: account_send_job
+    type: code
+    code_config:
+      language: python
+      code: |
+        acct = _input.get("_item") or {}
+        mset = _steps.get("master_message_set") or {}
+        messages = mset.get("messages", {}) if isinstance(mset, dict) else {}
+
+        ent = str(acct.get("comms_entitlement", "self_serve") or "self_serve")
+        msg = messages.get(ent) if isinstance(messages.get(ent), dict) else {}
+
+        # Channel policy by entitlement: enterprise gets SMS too; all get email +
+        # status page is global. Only emit channels we actually have a target for.
+        channels = []
+        if str(acct.get("email", "")).strip():
+            channels.append("email")
+        if ent == "enterprise_named_contact" and str(acct.get("oncall_phone", "")).strip():
+            channels.append("sms")
+
+        result = {
+            "account_id": acct.get("account_id", ""),
+            "entitlement": ent,
+            "email": str(acct.get("email", "")).strip(),
+            "oncall_phone": str(acct.get("oncall_phone", "")).strip(),
+            "channels": channels,
+            "subject": str(msg.get("subject", "Service status update")),
+            "email_body": str(msg.get("email_body", "")),
+            "sms_body": str(msg.get("sms_body", "")),
+        }
+
+  # 11) SEND - SendGrid email to all entitled contacts (connector: sendgrid). The
+  #     dynamic-template send pulls the approved bodies from the master message set.
+  - id: send_email_sendgrid
+    type: http
+    depends_on: [build_send_jobs]
+    http_config:
+      url: "https://api.sendgrid.com/v3/mail/send"
+      method: POST
+      auth: "bearer:{env.SENDGRID_API_KEY}"
+      headers:
+        Content-Type: "application/json"
+      body: |
+        {
+          "from": {"email": "{input.sendgrid_from_email}", "name": "Acme Status"},
+          "template_id": "{input.sendgrid_template_id}",
+          "personalizations": [
+            {"to": [{"email": "{input.sendgrid_from_email}"}],
+             "dynamic_template_data": {
+               "incident_id": "{input.incident_id}",
+               "component": "{input.affected_component}",
+               "status_page_url": "{input.status_page_url}",
+               "send_jobs": "{steps.build_send_jobs.output}"
+             }}
+          ]
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 12) SEND - Twilio SMS to enterprise on-call numbers (connector: twilio).
+  - id: send_sms_twilio
+    type: http
+    depends_on: [build_send_jobs]
+    http_config:
+      url: "https://api.twilio.com/2010-04-01/Accounts/{env.TWILIO_ACCOUNT_SID}/Messages.json"
+      method: POST
+      auth: "basic:{env.TWILIO_ACCOUNT_SID}:{env.TWILIO_AUTH_TOKEN}"
+      headers:
+        Content-Type: "application/x-www-form-urlencoded"
+      body: "From={input.twilio_from}&Body=Proactive status update for {input.affected_component}: we are aware of a service issue and actively working it. Live updates: {input.status_page_url}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 13) POST the public component update to the status page (Statuspage.io / Atlassian).
+  - id: post_status_page
+    type: http
+    depends_on: [build_send_jobs]
+    http_config:
+      url: "https://api.statuspage.io/v1/pages/{input.status_page_id}/incidents"
+      method: POST
+      auth: "bearer:{env.STATUSPAGE_API_KEY}"
+      headers:
+        Content-Type: "application/json"
+      body: |
+        {
+          "incident": {
+            "name": "Degraded service: {input.affected_component}",
+            "status": "investigating",
+            "impact_override": "major",
+            "body": "We are investigating a service issue affecting {input.affected_component} in {input.affected_region}. We will post the next update shortly.",
+            "component_ids": ["{input.status_component_id}"],
+            "components": {"{input.status_component_id}": "major_outage"},
+            "deliver_notifications": true
+          }
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 14) Pre-arm support: create/append a Zendesk macro so inbound tickets get a
+  #     consistent, status-page-linked response (connector: zendesk).
+  - id: upsert_zendesk_macro
+    type: http
+    depends_on: [send_email_sendgrid, send_sms_twilio, post_status_page]
+    http_config:
+      url: "https://{input.zendesk_subdomain}.zendesk.com/api/v2/macros.json"
+      method: POST
+      auth: "basic:{env.ZENDESK_EMAIL}:{env.ZENDESK_API_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+      body: |
+        {
+          "macro": {
+            "title": "Outage {input.incident_id} - {input.affected_component}",
+            "actions": [
+              {"field": "comment_value", "value": "Thanks for reaching out. We are aware of a service issue affecting {input.affected_component} and are actively working on it. Live updates: {input.status_page_url}. We proactively notified impacted accounts and will follow up here as the situation develops."},
+              {"field": "status", "value": "open"},
+              {"field": "priority", "value": "high"}
+            ]
+          }
+        }
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 15) Close the loop on Slack with who-was-notified counts (connector: slack).
+  - id: notify_incident_channel
+    type: notify
+    depends_on: [upsert_zendesk_macro]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: ":mega: Proactive comms sent for incident {input.incident_id} on {input.affected_component} ({input.affected_region}). Impacted accounts: {steps.build_impacted_accounts.output.total_impacted}; by entitlement: {steps.build_impacted_accounts.output.counts_by_entitlement}. Email: {steps.send_email_sendgrid.output}; SMS: {steps.send_sms_twilio.output}; status page: {steps.post_status_page.output}; Zendesk macro armed: {steps.upsert_zendesk_macro.output}."
+
+on_complete:
+  storage_path: "proactive-outage-comms-commander/{run_id}/result.json"
