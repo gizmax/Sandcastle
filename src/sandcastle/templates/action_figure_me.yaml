@@ -1,0 +1,384 @@
+# name: Action Figure Me
+# description: Drop a selfie, pick a vibe, get a photoreal boxed action-figure of YOU - blister pack, themed accessories, box copy - plus a transparent die-cut figurine sticker for chat. A vision judge checks the face is really yours and re-rolls any shot that misses. Switchable nano-banana / gpt-image-2 backend.
+# tags: [Viral, Toy, Action-Figure, Selfie, Social-Media, AI-Studio, Meme]
+# category: creative
+
+name: action-figure-me
+description: >
+  Turn one selfie into a collectible. The real face photo is passed as a reference
+  image to the generator (nano-banana Gemini or OpenAI gpt-image-2), so the figure
+  keeps YOUR likeness while the prompt drives the toy styling: a photoreal boxed
+  action figure in a blister pack with themed accessories and box copy, plus an
+  optional transparent figurine sticker for Discord/Telegram. A vision judge scores
+  identity faithfulness and packaging quality against the original selfie; any shot
+  that misses is regenerated once with an improved prompt. Pick a vibe - everything
+  else is derived.
+default_model: sonnet
+default_timeout: 300
+
+input_schema:
+  required: ["photo"]
+  properties:
+    photo:
+      type: string
+      format: file-path
+      description: "Path to a clear selfie - passed as a reference image so the figure keeps your face"
+      example: "/path/to/selfie.png"
+    person_name:
+      type: string
+      description: "Name printed on the box (e.g. ALEX). Leave blank for a generic hero name."
+      default: ""
+    vibe:
+      type: string
+      enum: ["dev", "gym", "founder", "gamer", "artist", "custom"]
+      description: "Theme that drives accessories, outfit and box title. Use custom to supply your own accessories."
+      default: "dev"
+    tagline:
+      type: string
+      description: "Optional box subtitle / catchphrase. Blank lets the art director invent one."
+      default: ""
+    accessories:
+      type: string
+      description: "Only used when vibe=custom: comma-separated props to mold into the blister pack."
+      default: ""
+    include_sticker:
+      type: boolean
+      description: "Also render a transparent die-cut figurine sticker for chat apps"
+      default: true
+    image_backend:
+      type: string
+      enum: ["nano-banana", "openai"]
+      description: "Image generator: nano-banana (Gemini 3 Pro Image, supports transparent stickers) or openai (gpt-image-2, sticker falls back to a clean cut-out background). Both use the selfie as a reference."
+      default: "nano-banana"
+    min_score:
+      type: number
+      description: "Minimum acceptable overall quality score (1-10). Shots below this are regenerated once."
+      default: 7.0
+
+steps:
+  # ============================================================
+  # 1. CONCEPT - selfie + vibe -> 2 ready-to-render image prompts
+  #    (collapses art-direction and prompt-engineering into one step)
+  # ============================================================
+  - id: "concept"
+    prompt: |
+      You are an elite toy designer and packaging art director. From a single selfie
+      you design a collectible action figure of that exact person and write the dense
+      image-generation prompts to render it.
+
+      Person name on box: {input.person_name}
+      Vibe: {input.vibe}
+      Tagline (blank = invent one): {input.tagline}
+      Include transparent figurine sticker: {input.include_sticker}
+
+      The person's selfie is passed to the image generator as a reference image, so do
+      NOT describe their face in detail - just instruct the model to keep the SAME face,
+      hairstyle and skin tone as the reference, sculpted into a stylized-but-recognizable
+      action figure. Design the toy around the vibe below.
+
+      ## Vibe guide (accessories, outfit, box identity)
+      {% if input.vibe == "dev" %}
+      Developer: hoodie + tee, lanyard. Accessories molded in the blister: laptop with
+      stickers, mechanical keyboard, coffee mug, rubber duck, "Ship It" pin. Box title
+      energy: DEV HERO. Color: terminal-green and graphite.
+      {% elif input.vibe == "gym" %}
+      Gym / fitness: tank top, joggers, lifting straps. Accessories: dumbbell, shaker
+      bottle, gym towel, protein tub, smartwatch. Box title energy: BEAST MODE. Color:
+      black, red and chrome.
+      {% elif input.vibe == "founder" %}
+      Startup founder: blazer over a tee, sneakers. Accessories: tiny laptop, coffee
+      cup, pitch-deck card, hockey-stick growth chart, conference badge. Box title
+      energy: FOUNDER EDITION. Color: clean white and electric blue.
+      {% elif input.vibe == "gamer" %}
+      Gamer: graphic hoodie, headset around neck. Accessories: game controller, RGB
+      keyboard, energy-drink can, gaming chair, glowing mousepad. Box title energy:
+      PLAYER ONE. Color: black with neon purple/cyan RGB.
+      {% elif input.vibe == "artist" %}
+      Creator / artist: apron or denim jacket, beanie. Accessories: drawing tablet +
+      stylus, paintbrush, color-swatch palette, headphones, camera. Box title energy:
+      CREATOR SERIES. Color: cream and warm coral.
+      {% else %}
+      Custom build. Use these accessories molded in the blister: {input.accessories}.
+      Pick an outfit and a single bold box color that fit those props. Invent a punchy
+      box title in the same spirit as DEV HERO / BEAST MODE.
+      {% endif %}
+
+      ## Shots to produce
+      Always produce shot "boxed". {% if input.include_sticker %}Also produce shot "sticker".{% endif %}
+
+      "boxed" (aspect 4:5): a photoreal retail action figure SEALED in a blister pack,
+      shot like a product photo on a neutral surface. The clear plastic bubble holds the
+      figure (full body, heroic pose) plus the themed accessories in their own molded
+      slots. The cardboard backer shows the box TITLE, the person's name {% if input.person_name %}("{input.person_name}"){% endif %},
+      the tagline, a brand strip, and small "Series 1 / Collect them all" flourishes.
+      Crisp packaging typography, soft even retail lighting, slight plastic specular
+      highlights, shallow depth of field on the backer.
+
+      {% if input.include_sticker %}
+      "sticker" (aspect 1:1): the SAME figure as a die-cut figurine sticker - full body,
+      friendly 3/4 pose, soft drop shadow, thin white die-cut border.
+      {% if input.image_backend == "openai" %}On a clean flat solid background so it is
+      easy to cut out (transparency not available on this backend).{% else %}On a fully
+      transparent background (alpha), ready to drop into a chat app.{% endif %}
+      {% endif %}
+
+      For each shot write a single dense paragraph (110-170 words) ready to feed an image
+      model. End every prompt with negative guidance: avoid distorted or extra fingers,
+      melted faces, gibberish text on the box, watermarks, multiple figures, broken
+      packaging, oversaturation.
+
+      Return JSON: { "box_title", "tagline_final",
+      "shots": [ { "shot_id", "prompt", "aspect" } ] } with exactly
+      {% if input.include_sticker %}2{% else %}1{% endif %} shot(s).
+    output_schema:
+      type: object
+      properties:
+        box_title: { type: string }
+        tagline_final: { type: string }
+        shots:
+          type: array
+          items:
+            type: object
+            properties:
+              shot_id: { type: string }
+              prompt: { type: string }
+              aspect: { type: string }
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
+
+  # ============================================================
+  # 2. BACKEND ROUTER - nano-banana (default) vs openai gpt-image-2
+  # ============================================================
+  - id: "backend-router"
+    depends_on: ["concept"]
+    type: condition
+    condition_config:
+      expression: "'{input.image_backend}' == 'openai'"
+      then: ["generate-openai"]
+      else: ["generate-nano"]
+
+  - id: "generate-nano"
+    depends_on: ["backend-router"]
+    type: tool
+    parallel_over: "steps.concept.output.shots"
+    tool_config:
+      tool: "nano-banana"
+      function: "generate"
+      arguments:
+        - "{input._item.prompt}"
+        - model: "pro"
+          aspect: "{input._item.aspect}"
+          size: "2K"
+          reference_images: ["{input.photo}"]
+          output: "{input._item.shot_id}"
+          output_dir: "/tmp/action-figure/{run_id}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  - id: "generate-openai"
+    depends_on: ["backend-router"]
+    type: tool
+    parallel_over: "steps.concept.output.shots"
+    tool_config:
+      tool: "openai"
+      function: "generate_image"
+      arguments:
+        - "{input._item.prompt}"
+        - model: "gpt-image-2"
+          aspect: "{input._item.aspect}"
+          quality: "high"
+          reference_images: ["{input.photo}"]
+          output: "{input._item.shot_id}"
+          output_dir: "/tmp/action-figure/{run_id}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # ============================================================
+  # 3. COLLECT - unify whichever backend ran into a flat list
+  # ============================================================
+  - id: "collect-images"
+    depends_on: ["generate-nano", "generate-openai"]
+    type: llm
+    prompt: |
+      Build a flat list of generated images. Exactly one of the two generator outputs
+      below is populated (only the selected backend ran); the other is empty/null.
+
+      nano-banana output: {steps.generate-nano.output}
+      openai output: {steps.generate-openai.output}
+      Shot plan (for aspect per shot): {steps.concept.output.shots}
+
+      Each generator result has a "files" array of written file paths. Produce a JSON
+      object { "images": [ { "shot_id", "file", "aspect" } ] } - one entry per generated
+      file. Derive shot_id from the filename (the part before the extension) and match
+      its aspect from the shot plan.
+    output_schema:
+      type: object
+      properties:
+        images:
+          type: array
+          items:
+            type: object
+            properties:
+              shot_id: { type: string }
+              file: { type: string }
+              aspect: { type: string }
+
+  # ============================================================
+  # 4. QUALITY JUDGE - vision model checks it is really YOU
+  # ============================================================
+  - id: "quality-judge"
+    depends_on: ["collect-images"]
+    type: tool
+    parallel_over: "steps.collect-images.output.images"
+    tool_config:
+      tool: "gemini"
+      function: "analyze_image"
+      arguments:
+        - |
+          You are an action-figure quality judge. The FIRST image is a generated toy
+          shot; the SECOND is the original selfie of the real person. Score the generated
+          shot 1-10 on: identity_accuracy (the figure's face clearly reads as the SAME
+          person as the selfie - the single most important axis), toy_realism (looks like
+          a real molded plastic collectible, not a flat drawing), packaging_quality (for
+          the boxed shot: clean blister pack, legible non-gibberish box text; for a
+          sticker: clean die-cut), accessory_fit (props match the vibe), overall_score
+          (1-10, weight identity_accuracy heavily). List concrete issues and
+          fix_suggestions if anything is weak.
+          Return ONLY JSON: { "shot_id": "REPLACE_SHOT", "identity_accuracy", "toy_realism",
+          "packaging_quality", "accessory_fit", "overall_score", "issues": [],
+          "fix_suggestions": [] }
+        - images: ["{input._item.file}", "{input.photo}"]
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # ============================================================
+  # 5. AGGREGATE + SELF-HEALING (one bounded regeneration pass)
+  # ============================================================
+  - id: "quality-aggregate"
+    depends_on: ["quality-judge", "collect-images", "concept"]
+    prompt: |
+      Aggregate the per-image quality scores.
+
+      Judge results: {steps.quality-judge.output}
+      Images: {steps.collect-images.output}
+      Shot prompts: {steps.concept.output.shots}
+      Minimum acceptable score: {input.min_score}
+
+      For each image, read its overall_score (inside the judge "result"). An image FAILS
+      if overall_score < {input.min_score}. For every failed image, pair it with its
+      original prompt (match by shot_id) and the judge's fix_suggestions.
+
+      Return JSON: { "pass_count", "fail_count", "avg_score",
+      "failed": [ { "shot_id", "original_prompt", "aspect", "fix_suggestions": [] } ] }
+    output_schema:
+      type: object
+      properties:
+        pass_count: { type: integer }
+        fail_count: { type: integer }
+        avg_score: { type: number }
+        failed:
+          type: array
+          items:
+            type: object
+            properties:
+              shot_id: { type: string }
+              original_prompt: { type: string }
+              aspect: { type: string }
+              fix_suggestions: { type: array, items: { type: string } }
+
+  - id: "quality-check"
+    depends_on: ["quality-aggregate"]
+    type: condition
+    condition_config:
+      expression: "{steps.quality-aggregate.output.fail_count} > 0"
+      then: ["compose-fixes"]
+      else: []
+
+  - id: "compose-fixes"
+    depends_on: ["quality-check"]
+    type: llm
+    parallel_over: "steps.quality-aggregate.output.failed"
+    prompt: |
+      A generated action-figure shot failed quality control. Rewrite its image prompt to
+      fix the issues while keeping the same toy and box intent. The selfie reference is
+      passed separately, so emphasize keeping the SAME face as the reference and fixing
+      the flagged weaknesses (often identity drift or gibberish box text).
+
+      Original prompt: {input._item.original_prompt}
+      Fix suggestions: {input._item.fix_suggestions}
+
+      Return JSON: { "shot_id": "{input._item.shot_id}", "prompt": "<improved prompt>", "aspect": "{input._item.aspect}" }
+    output_schema:
+      type: object
+      properties:
+        shot_id: { type: string }
+        prompt: { type: string }
+        aspect: { type: string }
+
+  - id: "regenerate"
+    depends_on: ["compose-fixes"]
+    type: tool
+    parallel_over: "steps.compose-fixes.output"
+    tool_config:
+      tool: "nano-banana"
+      function: "generate"
+      arguments:
+        - "{input._item.prompt}"
+        - model: "pro"
+          aspect: "{input._item.aspect}"
+          size: "2K"
+          reference_images: ["{input.photo}"]
+          output: "{input._item.shot_id}-v2"
+          output_dir: "/tmp/action-figure/{run_id}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # ============================================================
+  # 6. DELIVER
+  # ============================================================
+  - id: "deliver"
+    depends_on: ["quality-aggregate", "regenerate", "concept"]
+    prompt: |
+      Compile the Action Figure Me delivery package.
+
+      Person: {input.person_name} | Vibe: {input.vibe} | Backend: {input.image_backend}
+      Box title: {steps.concept.output.box_title} | Tagline: {steps.concept.output.tagline_final}
+
+      Images + scores: {steps.collect-images.output} / {steps.quality-judge.output}
+      Quality summary: {steps.quality-aggregate.output}
+      Regenerated (if any): {steps.regenerate.output}
+
+      Produce clean markdown with:
+      1. Summary: box title, tagline, average quality score, pass/fail count, vibe, backend
+      2. Image catalog: for each final image - path, what it is (boxed / sticker), quality
+         score, and identity_accuracy. Prefer the regenerated "-v2" file when a shot was fixed.
+      3. A ready-to-post brag caption for the boxed shot (first person, playful, names the
+         box title) plus 5 hashtags.
+    output_schema:
+      type: object
+      properties:
+        summary: { type: string }
+        brag_caption: { type: string }
+        hashtags: { type: array, items: { type: string } }
+        images:
+          type: array
+          items:
+            type: object
+            properties:
+              file: { type: string }
+              kind: { type: string }
+              score: { type: number }
+              identity_accuracy: { type: number }
+
+on_complete:
+  storage_path: "action-figure-me/{run_id}/deliverables.json"
