@@ -1,0 +1,389 @@
+# name: Glow-Up Restore
+# description: Restore an old or damaged photo - repair scratches, denoise, sharpen and optionally colorize - while a vision judge proves the real face was kept, not invented. Out comes the best restored photo plus a ready-to-post before/after card with a "no invented faces" badge. Switchable nano-banana / gpt-image-2 backend.
+# tags: [Viral, Photo-Restoration, Colorize, Before-After, Family, AI-Studio, Nostalgia]
+# category: creative
+
+name: glow-up-restore
+description: >
+  Bring an old photo back to life. The damaged original is passed as a reference image
+  to the generator (nano-banana Gemini or OpenAI gpt-image-2), which repairs scratches,
+  tears, fading, noise and blur and - when asked - colorizes it naturally, all while
+  keeping the SAME face. A Gemini vision judge scores identity faithfulness against the
+  original (the trust axis: no invented or altered faces), restoration quality and
+  colorization plausibility; weak variants are regenerated once. The best result is
+  delivered alongside an optional shareable before/after card.
+default_model: sonnet
+default_timeout: 300
+
+input_schema:
+  required: ["photo"]
+  properties:
+    photo:
+      type: string
+      format: file-path
+      description: "Path to the old/damaged photo - passed as a reference image so the real face is kept"
+      example: "/path/to/old-photo.png"
+    colorize:
+      type: boolean
+      description: "Colorize a black-and-white or sepia photo naturally. Set false to keep monochrome and only repair."
+      default: true
+    variants:
+      type: integer
+      description: "How many restoration candidates to generate (the judge picks the best)"
+      default: 2
+    aspect:
+      type: string
+      description: "Output aspect ratio (set to match the original framing)"
+      default: "4:5"
+    make_card:
+      type: boolean
+      description: "Also render a shareable before/after card from the original and the best restore"
+      default: true
+    image_backend:
+      type: string
+      enum: ["nano-banana", "openai"]
+      description: "Image generator: nano-banana (Gemini 3 Pro Image) or openai (gpt-image-2). Both use the original as a reference."
+      default: "nano-banana"
+    min_score:
+      type: number
+      description: "Minimum acceptable overall quality score (1-10). Variants below this are regenerated once."
+      default: 7.0
+
+steps:
+  # ============================================================
+  # 1. ASSESS - vision model reads the damage off the real photo
+  # ============================================================
+  - id: "assess"
+    type: tool
+    tool_config:
+      tool: "gemini"
+      function: "analyze_image"
+      arguments:
+        - |
+          You are a photo-restoration assessor. Look at this old photo and report what
+          needs fixing. Detect: is it black-and-white / sepia / color; visible damage
+          (scratches, tears, creases, spots, water damage, missing corners); fading or
+          low contrast; noise/grain; blur or low resolution; and roughly the era. Note
+          how many people and any faces that must be preserved exactly.
+          Return ONLY JSON: { "is_monochrome": true/false, "damage": [], "fading": "none/mild/severe",
+          "noise": "none/mild/severe", "sharpness": "ok/soft/blurry", "era": "<guess>",
+          "faces": <count>, "restoration_notes": "<one paragraph brief>" }
+        - images: ["{input.photo}"]
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
+
+  # ============================================================
+  # 2. COMPOSE PROMPTS - one restoration edit prompt per variant
+  # ============================================================
+  - id: "compose-prompts"
+    depends_on: ["assess"]
+    type: llm
+    prompt: |
+      You are an expert photo-restoration prompt engineer. The damaged original is passed
+      to the model as a reference image, so write prompts that EDIT/RESTORE that exact
+      photo - do not reinvent the scene or the people.
+
+      Restoration assessment: {steps.assess.output}
+      Colorize: {input.colorize}
+      Number of variants: {input.variants}
+
+      Write exactly {input.variants} restoration prompts. Each must instruct the model to:
+      - Repair the specific damage found (scratches, tears, spots, missing areas) by clean
+        inpainting that matches surrounding texture
+      - Reduce noise/grain and recover natural sharpness without over-smoothing skin
+      - Rebalance exposure and contrast, fix fading and color casts
+      - {% if input.colorize %}Colorize naturally and period-accurately with believable skin tones, fabric and background colors{% else %}Keep the original monochrome tone, only repairing and enhancing{% endif %}
+      - CRITICAL: keep the SAME identity - do not invent, beautify, age, or alter any
+        facial features, expressions, or the number of people. Preserve era-accurate
+        clothing, hair and background.
+      Vary the variants subtly: e.g. one conservative/faithful, one with slightly fuller
+      contrast and {% if input.colorize %}richer color{% else %}tonal depth{% endif %}.
+      Each prompt is a single dense paragraph (100-150 words). End with negative guidance:
+      avoid changing facial identity, adding or removing people, plastic skin, modern
+      retouching look, oversharpening halos, invented background objects, watermarks, text.
+
+      Return JSON: { "shots": [ { "shot_id": "restore-1", "prompt": "<prompt>", "aspect": "{input.aspect}" }, ... ] }
+      with exactly {input.variants} items, shot_id numbered restore-1, restore-2, ...
+    output_schema:
+      type: object
+      properties:
+        shots:
+          type: array
+          items:
+            type: object
+            properties:
+              shot_id: { type: string }
+              prompt: { type: string }
+              aspect: { type: string }
+
+  # ============================================================
+  # 3. BACKEND ROUTER - nano-banana (default) vs openai gpt-image-2
+  # ============================================================
+  - id: "backend-router"
+    depends_on: ["compose-prompts"]
+    type: condition
+    condition_config:
+      expression: "'{input.image_backend}' == 'openai'"
+      then: ["generate-openai"]
+      else: ["generate-nano"]
+
+  - id: "generate-nano"
+    depends_on: ["backend-router"]
+    type: tool
+    parallel_over: "steps.compose-prompts.output.shots"
+    tool_config:
+      tool: "nano-banana"
+      function: "generate"
+      arguments:
+        - "{input._item.prompt}"
+        - model: "pro"
+          aspect: "{input._item.aspect}"
+          size: "2K"
+          reference_images: ["{input.photo}"]
+          output: "{input._item.shot_id}"
+          output_dir: "/tmp/glow-up/{run_id}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  - id: "generate-openai"
+    depends_on: ["backend-router"]
+    type: tool
+    parallel_over: "steps.compose-prompts.output.shots"
+    tool_config:
+      tool: "openai"
+      function: "generate_image"
+      arguments:
+        - "{input._item.prompt}"
+        - model: "gpt-image-2"
+          aspect: "{input._item.aspect}"
+          quality: "high"
+          reference_images: ["{input.photo}"]
+          output: "{input._item.shot_id}"
+          output_dir: "/tmp/glow-up/{run_id}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # ============================================================
+  # 4. COLLECT - unify whichever backend ran into a flat list
+  # ============================================================
+  - id: "collect-images"
+    depends_on: ["generate-nano", "generate-openai"]
+    type: llm
+    prompt: |
+      Build a flat list of generated images. Exactly one of the two generator outputs
+      below is populated (only the selected backend ran); the other is empty/null.
+
+      nano-banana output: {steps.generate-nano.output}
+      openai output: {steps.generate-openai.output}
+      Shot plan (for aspect per variant): {steps.compose-prompts.output.shots}
+
+      Each generator result has a "files" array of written file paths. Produce a JSON
+      object { "images": [ { "shot_id", "file", "aspect" } ] } - one entry per generated
+      file. Derive shot_id from the filename (the part before the extension).
+    output_schema:
+      type: object
+      properties:
+        images:
+          type: array
+          items:
+            type: object
+            properties:
+              shot_id: { type: string }
+              file: { type: string }
+              aspect: { type: string }
+
+  # ============================================================
+  # 5. QUALITY JUDGE - identity is the trust axis
+  # ============================================================
+  - id: "quality-judge"
+    depends_on: ["collect-images"]
+    type: tool
+    parallel_over: "steps.collect-images.output.images"
+    tool_config:
+      tool: "gemini"
+      function: "analyze_image"
+      arguments:
+        - |
+          You are a photo-restoration quality judge. The FIRST image is a restored result;
+          the SECOND is the original damaged photo. Score 1-10 on: identity_accuracy (the
+          people are clearly the SAME, with NO invented, beautified, or altered faces -
+          this is the single most important axis; if a face looks like a different person,
+          score this low), restoration_quality (damage actually repaired, noise reduced,
+          natural sharpness), colorization_plausibility (if colorized: believable,
+          period-accurate, no neon casts; if monochrome: score 10), naturalness (not
+          over-retouched or plastic). Compute overall_score (1-10, weight identity_accuracy
+          heavily). List concrete issues and fix_suggestions.
+          Return ONLY JSON: { "shot_id": "REPLACE_SHOT", "identity_accuracy", "restoration_quality",
+          "colorization_plausibility", "naturalness", "overall_score", "issues": [],
+          "fix_suggestions": [] }
+        - images: ["{input._item.file}", "{input.photo}"]
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # ============================================================
+  # 6. AGGREGATE + SELF-HEALING (one bounded regeneration pass)
+  # ============================================================
+  - id: "quality-aggregate"
+    depends_on: ["quality-judge", "collect-images", "compose-prompts"]
+    prompt: |
+      Aggregate the per-variant quality scores.
+
+      Judge results: {steps.quality-judge.output}
+      Images: {steps.collect-images.output}
+      Original prompts: {steps.compose-prompts.output.shots}
+      Minimum acceptable score: {input.min_score}
+
+      For each image, read its overall_score (inside the judge "result"). An image FAILS
+      if overall_score < {input.min_score}. For every failed image, pair it with its
+      original prompt (match by shot_id) and the judge's fix_suggestions. Also pick the
+      single best image overall (highest overall_score, tie-break on identity_accuracy)
+      and return its file as best_file.
+
+      Return JSON: { "pass_count", "fail_count", "avg_score", "best_file", "best_score",
+      "failed": [ { "shot_id", "original_prompt", "aspect", "fix_suggestions": [] } ] }
+    output_schema:
+      type: object
+      properties:
+        pass_count: { type: integer }
+        fail_count: { type: integer }
+        avg_score: { type: number }
+        best_file: { type: string }
+        best_score: { type: number }
+        failed:
+          type: array
+          items:
+            type: object
+            properties:
+              shot_id: { type: string }
+              original_prompt: { type: string }
+              aspect: { type: string }
+              fix_suggestions: { type: array, items: { type: string } }
+
+  - id: "quality-check"
+    depends_on: ["quality-aggregate"]
+    type: condition
+    condition_config:
+      expression: "{steps.quality-aggregate.output.fail_count} > 0"
+      then: ["compose-fixes"]
+      else: []
+
+  - id: "compose-fixes"
+    depends_on: ["quality-check"]
+    type: llm
+    parallel_over: "steps.quality-aggregate.output.failed"
+    prompt: |
+      A restored variant failed quality control. Rewrite its restoration prompt to fix the
+      issues while keeping the same intent. The original photo is passed separately, so
+      emphasize keeping the SAME identity (no invented faces) and fixing the flagged
+      weaknesses.
+
+      Original prompt: {input._item.original_prompt}
+      Fix suggestions: {input._item.fix_suggestions}
+
+      Return JSON: { "shot_id": "{input._item.shot_id}", "prompt": "<improved prompt>", "aspect": "{input._item.aspect}" }
+    output_schema:
+      type: object
+      properties:
+        shot_id: { type: string }
+        prompt: { type: string }
+        aspect: { type: string }
+
+  - id: "regenerate"
+    depends_on: ["compose-fixes"]
+    type: tool
+    parallel_over: "steps.compose-fixes.output"
+    tool_config:
+      tool: "nano-banana"
+      function: "generate"
+      arguments:
+        - "{input._item.prompt}"
+        - model: "pro"
+          aspect: "{input._item.aspect}"
+          size: "2K"
+          reference_images: ["{input.photo}"]
+          output: "{input._item.shot_id}-v2"
+          output_dir: "/tmp/glow-up/{run_id}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # ============================================================
+  # 7. BEFORE/AFTER CARD - optional shareable diptych
+  # ============================================================
+  - id: "card-check"
+    depends_on: ["quality-aggregate", "regenerate"]
+    type: condition
+    condition_config:
+      expression: "'{input.make_card}' == 'True'"
+      then: ["render-card"]
+      else: []
+
+  - id: "render-card"
+    depends_on: ["card-check"]
+    type: tool
+    tool_config:
+      tool: "nano-banana"
+      function: "generate"
+      arguments:
+        - |
+          Create a single clean before/after card. The FIRST reference image is the
+          damaged ORIGINAL; the SECOND reference is the RESTORED version. Place them
+          side by side, equal size: left half labeled "BEFORE" showing the first
+          reference unchanged, right half labeled "AFTER" showing the second reference
+          unchanged. Thin neutral divider, small caption strip at the bottom reading
+          "Restored - no invented faces". Keep both photos faithful; do not re-edit or
+          alter either face. Clean modern layout, soft neutral background.
+        - model: "pro"
+          aspect: "1:1"
+          size: "2K"
+          reference_images: ["{input.photo}", "{steps.quality-aggregate.output.best_file}"]
+          output: "before-after-card"
+          output_dir: "/tmp/glow-up/{run_id}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # ============================================================
+  # 8. DELIVER
+  # ============================================================
+  - id: "deliver"
+    depends_on: ["quality-aggregate", "regenerate", "render-card"]
+    prompt: |
+      Compile the Glow-Up Restore delivery package.
+
+      Backend: {input.image_backend} | Colorized: {input.colorize}
+
+      Variants + scores: {steps.collect-images.output} / {steps.quality-judge.output}
+      Quality summary: {steps.quality-aggregate.output}
+      Regenerated (if any): {steps.regenerate.output}
+      Before/after card (if any): {steps.render-card.output}
+
+      Produce clean markdown with:
+      1. Summary: best restore score, identity_accuracy of the best, variants tried,
+         pass/fail count, whether colorized, backend. State plainly whether the real face
+         was preserved (the "no invented faces" guarantee held or not).
+      2. Final files: the best restored photo path (prefer a "-v2" file if it was the
+         regenerated best), and the before/after card path if produced.
+      3. A short, warm, ready-to-post caption for the before/after card plus 5 hashtags.
+    output_schema:
+      type: object
+      properties:
+        summary: { type: string }
+        caption: { type: string }
+        hashtags: { type: array, items: { type: string } }
+        best_restored_file: { type: string }
+        before_after_card: { type: string }
+        identity_preserved: { type: boolean }
+
+on_complete:
+  storage_path: "glow-up-restore/{run_id}/deliverables.json"

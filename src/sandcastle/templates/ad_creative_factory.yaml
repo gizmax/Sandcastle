@@ -1,0 +1,406 @@
+# name: Ad Creative Factory
+# description: Drop one product photo plus your offer and get a batch of scroll-stopping, on-brand Meta/TikTok ad variants - each a product-faithful image paired with primary text and 3 headlines, scored by a vision judge for thumb-stop power and policy safety, then ranked into a ready-to-launch ad library. Switchable nano-banana / gpt-image-2 backend.
+# tags: [Marketing, Ads, Meta, TikTok, Performance, E-Commerce, AI-Studio]
+# category: marketing
+
+name: ad-creative-factory
+description: >
+  Turn one product photo and an offer into a launch-ready batch of paid-social creatives.
+  An angle strategist invents distinct marketing angles, then each becomes a product-
+  faithful ad image (the real product photo is passed as a reference to nano-banana or
+  gpt-image-2) plus primary text and three headlines. A Gemini vision judge scores every
+  ad for product accuracy, thumb-stop power, policy safety and copy space; weak ads are
+  regenerated once. Everything is ranked into a leaderboard you can push straight into
+  Ads Manager.
+default_model: sonnet
+default_timeout: 360
+
+input_schema:
+  required: ["product_photo"]
+  properties:
+    product_photo:
+      type: string
+      format: file-path
+      description: "Path to the product photo - passed as a reference image to keep the product faithful"
+      example: "/path/to/product.png"
+    product_name:
+      type: string
+      description: "Product name (helps angles and copy)"
+      default: ""
+    offer:
+      type: string
+      description: "The promo / value prop to push (e.g. '30% off launch week, free shipping')"
+      default: ""
+    brand_voice:
+      type: string
+      description: "Tone of the copy (e.g. 'playful and bold', 'premium and minimal')"
+      default: "clear, confident, benefit-led"
+    platform:
+      type: string
+      enum: ["meta", "tiktok", "both"]
+      description: "Target platform - drives aspect ratio and creative style"
+      default: "meta"
+    count:
+      type: integer
+      description: "How many ad variants to produce (each is a distinct angle). 6-8 is a good test batch; push to 24 for a full sprint."
+      default: 8
+    image_backend:
+      type: string
+      enum: ["nano-banana", "openai"]
+      description: "Image generator: nano-banana (Gemini 3 Pro Image) or openai (gpt-image-2). Both use the product photo as a reference."
+      default: "nano-banana"
+    min_score:
+      type: number
+      description: "Minimum acceptable overall quality score (1-10). Ads below this are regenerated once."
+      default: 7.0
+
+steps:
+  # ============================================================
+  # 1. ANGLE STRATEGIST - distinct marketing angles up front
+  # ============================================================
+  - id: "strategize"
+    prompt: |
+      You are a senior performance-marketing strategist. Design {input.count} DISTINCT ad
+      angles for one product, each targeting a different buyer motivation. The product
+      photo is passed to the image generator as a reference, so you do NOT describe the
+      product's appearance - focus on the angle, who it speaks to, and the creative hook.
+
+      Product: {input.product_name}
+      Offer: {input.offer}
+      Brand voice: {input.brand_voice}
+      Platform: {input.platform}
+
+      Use a varied mix of proven angles across the batch: problem/solution, social proof,
+      before/after transformation, scarcity/FOMO, price-anchor / value, founder or origin
+      story, authentic UGC testimonial, feature spotlight, comparison, aspirational
+      lifestyle. No two ads should share the same angle + audience pairing.
+
+      For each ad return: ad_id (ad-1, ad-2, ...), angle (the strategy name), audience
+      (who it targets), target_emotion, hook_thesis (the single idea the ad lands),
+      scene_description (the visual concept that makes the thumb stop - vary scenes,
+      props, people, context), aspect ({% if input.platform == "tiktok" %}9:16{% elif input.platform == "both" %}alternate 9:16 and 4:5{% else %}4:5 or 1:1{% endif %}).
+
+      Return JSON: { "ads": [ { "ad_id", "angle", "audience", "target_emotion",
+      "hook_thesis", "scene_description", "aspect" } ] } with exactly {input.count} items.
+    output_schema:
+      type: object
+      properties:
+        ads:
+          type: array
+          items:
+            type: object
+            properties:
+              ad_id: { type: string }
+              angle: { type: string }
+              audience: { type: string }
+              target_emotion: { type: string }
+              hook_thesis: { type: string }
+              scene_description: { type: string }
+              aspect: { type: string }
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
+
+  # ============================================================
+  # 2. COMPOSE - image prompt + ad copy per variant
+  # ============================================================
+  - id: "compose-prompts"
+    depends_on: ["strategize"]
+    type: llm
+    parallel_over: "steps.strategize.output.ads"
+    prompt: |
+      You are an elite direct-response creative. Produce BOTH the image prompt and the ad
+      copy for one ad. The product photo is passed to the model as a reference image, so
+      DO NOT redescribe the product - drive the scene, styling and thumb-stop composition.
+
+      Ad: {input._item.ad_id}
+      Angle: {input._item.angle} | Audience: {input._item.audience}
+      Emotion: {input._item.target_emotion} | Hook thesis: {input._item.hook_thesis}
+      Scene: {input._item.scene_description}
+      Offer to weave into copy: {input.offer}
+      Brand voice: {input.brand_voice}
+
+      Image prompt requirements (single dense paragraph, 110-170 words):
+      - Scroll-stopping composition with a clear focal point and strong contrast in the
+        first frame; the product faithful to the reference in shape, colors and label
+      - Deliberate NEGATIVE SPACE where headline/text could overlay later (do not render
+        any text in the image itself)
+      - Specify lens, lighting, color grade, depth of field and platform-native feel
+      - End with negative guidance: avoid rendered text/watermarks/logos, AI gloss,
+        plastic skin, distorted product, extra products, oversaturation
+
+      Copy requirements (match brand voice, ad policy safe - no unverifiable claims,
+      no "guaranteed", no health/financial promises):
+      - primary_text: 1-3 punchy sentences for the angle, weaving in the offer
+      - headlines: exactly 3 short headline options (<= 40 chars each)
+      - cta: one of Shop Now / Learn More / Get Offer / Sign Up
+
+      Return JSON: { "ad_id": "{input._item.ad_id}", "prompt": "<image prompt>",
+      "aspect": "{input._item.aspect}", "primary_text": "<text>",
+      "headlines": ["", "", ""], "cta": "<cta>" }
+    output_schema:
+      type: object
+      properties:
+        ad_id: { type: string }
+        prompt: { type: string }
+        aspect: { type: string }
+        primary_text: { type: string }
+        headlines: { type: array, items: { type: string } }
+        cta: { type: string }
+
+  # ============================================================
+  # 3. BACKEND ROUTER - nano-banana (default) vs openai gpt-image-2
+  # ============================================================
+  - id: "backend-router"
+    depends_on: ["compose-prompts"]
+    type: condition
+    condition_config:
+      expression: "'{input.image_backend}' == 'openai'"
+      then: ["generate-openai"]
+      else: ["generate-nano"]
+
+  - id: "generate-nano"
+    depends_on: ["backend-router"]
+    type: tool
+    parallel_over: "steps.compose-prompts.output"
+    tool_config:
+      tool: "nano-banana"
+      function: "generate"
+      arguments:
+        - "{input._item.prompt}"
+        - model: "pro"
+          aspect: "{input._item.aspect}"
+          size: "2K"
+          reference_images: ["{input.product_photo}"]
+          output: "{input._item.ad_id}"
+          output_dir: "/tmp/ad-factory/{run_id}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  - id: "generate-openai"
+    depends_on: ["backend-router"]
+    type: tool
+    parallel_over: "steps.compose-prompts.output"
+    tool_config:
+      tool: "openai"
+      function: "generate_image"
+      arguments:
+        - "{input._item.prompt}"
+        - model: "gpt-image-2"
+          aspect: "{input._item.aspect}"
+          quality: "high"
+          reference_images: ["{input.product_photo}"]
+          output: "{input._item.ad_id}"
+          output_dir: "/tmp/ad-factory/{run_id}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # ============================================================
+  # 4. COLLECT - unify whichever backend ran, keep the copy
+  # ============================================================
+  - id: "collect-images"
+    depends_on: ["generate-nano", "generate-openai"]
+    type: llm
+    prompt: |
+      Build a flat list of generated ads. Exactly one of the two generator outputs below
+      is populated (only the selected backend ran); the other is empty/null.
+
+      nano-banana output: {steps.generate-nano.output}
+      openai output: {steps.generate-openai.output}
+      Ad copy + plan: {steps.compose-prompts.output}
+
+      Each generator result has a "files" array of written file paths. Produce a JSON
+      object { "ads": [ { "ad_id", "file", "aspect", "angle_copy": { primary_text,
+      headlines, cta } } ] } - one entry per generated file. Derive ad_id from the
+      filename (the part before the extension) and attach the matching copy.
+    output_schema:
+      type: object
+      properties:
+        ads:
+          type: array
+          items:
+            type: object
+            properties:
+              ad_id: { type: string }
+              file: { type: string }
+              aspect: { type: string }
+              angle_copy:
+                type: object
+                properties:
+                  primary_text: { type: string }
+                  headlines: { type: array, items: { type: string } }
+                  cta: { type: string }
+
+  # ============================================================
+  # 5. QUALITY JUDGE - product accuracy + thumb-stop + policy
+  # ============================================================
+  - id: "quality-judge"
+    depends_on: ["collect-images"]
+    type: tool
+    parallel_over: "steps.collect-images.output.ads"
+    tool_config:
+      tool: "gemini"
+      function: "analyze_image"
+      arguments:
+        - |
+          You are a paid-social creative judge. The FIRST image is a generated ad; the
+          SECOND is the original product reference. Score the ad 1-10 on: product_accuracy
+          (matches the reference shape, colors, label, proportions), thumb_stop (scroll-
+          stopping power in the first frame - contrast, focal clarity, intrigue),
+          policy_safety (no prohibited or misleading imagery, no rendered text claims, no
+          sensitive content - 10 = clearly safe), copy_space (clear negative space to
+          overlay a headline), platform_fit. Compute overall_score (1-10). List concrete
+          issues and fix_suggestions if anything is weak.
+          Return ONLY JSON: { "ad_id": "REPLACE_SHOT", "product_accuracy", "thumb_stop",
+          "policy_safety", "copy_space", "platform_fit", "overall_score", "issues": [],
+          "fix_suggestions": [] }
+        - images: ["{input._item.file}", "{input.product_photo}"]
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # ============================================================
+  # 6. AGGREGATE + SELF-HEALING (one bounded regeneration pass)
+  # ============================================================
+  - id: "quality-aggregate"
+    depends_on: ["quality-judge", "collect-images", "compose-prompts"]
+    prompt: |
+      Aggregate the per-ad quality scores.
+
+      Judge results: {steps.quality-judge.output}
+      Ads: {steps.collect-images.output}
+      Original prompts: {steps.compose-prompts.output}
+      Minimum acceptable score: {input.min_score}
+
+      For each ad, read its overall_score (inside the judge "result"). An ad FAILS if
+      overall_score < {input.min_score}. For every failed ad, pair it with its original
+      image prompt (match by ad_id) and the judge's fix_suggestions.
+
+      Return JSON: { "pass_count", "fail_count", "avg_score",
+      "failed": [ { "ad_id", "original_prompt", "aspect", "fix_suggestions": [] } ] }
+    output_schema:
+      type: object
+      properties:
+        pass_count: { type: integer }
+        fail_count: { type: integer }
+        avg_score: { type: number }
+        failed:
+          type: array
+          items:
+            type: object
+            properties:
+              ad_id: { type: string }
+              original_prompt: { type: string }
+              aspect: { type: string }
+              fix_suggestions: { type: array, items: { type: string } }
+
+  - id: "quality-check"
+    depends_on: ["quality-aggregate"]
+    type: condition
+    condition_config:
+      expression: "{steps.quality-aggregate.output.fail_count} > 0"
+      then: ["compose-fixes"]
+      else: []
+
+  - id: "compose-fixes"
+    depends_on: ["quality-check"]
+    type: llm
+    parallel_over: "steps.quality-aggregate.output.failed"
+    prompt: |
+      A generated ad failed quality control. Rewrite its image prompt to fix the issues
+      while keeping the same angle and scene intent. The product reference is passed
+      separately, so focus on fixing the flagged weaknesses (often product drift, weak
+      thumb-stop, or no copy space).
+
+      Original prompt: {input._item.original_prompt}
+      Fix suggestions: {input._item.fix_suggestions}
+
+      Return JSON: { "ad_id": "{input._item.ad_id}", "prompt": "<improved prompt>", "aspect": "{input._item.aspect}" }
+    output_schema:
+      type: object
+      properties:
+        ad_id: { type: string }
+        prompt: { type: string }
+        aspect: { type: string }
+
+  - id: "regenerate"
+    depends_on: ["compose-fixes"]
+    type: tool
+    parallel_over: "steps.compose-fixes.output"
+    tool_config:
+      tool: "nano-banana"
+      function: "generate"
+      arguments:
+        - "{input._item.prompt}"
+        - model: "pro"
+          aspect: "{input._item.aspect}"
+          size: "2K"
+          reference_images: ["{input.product_photo}"]
+          output: "{input._item.ad_id}-v2"
+          output_dir: "/tmp/ad-factory/{run_id}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # ============================================================
+  # 7. RANK + DELIVER - leaderboard ready for Ads Manager
+  # ============================================================
+  - id: "deliver"
+    depends_on: ["quality-aggregate", "regenerate", "collect-images", "quality-judge"]
+    prompt: |
+      Compile and RANK the Ad Creative Factory delivery package into a launch-ready
+      leaderboard.
+
+      Product: {input.product_name} | Offer: {input.offer} | Platform: {input.platform}
+      Backend: {input.image_backend}
+
+      Ads + copy: {steps.collect-images.output}
+      Judge scores: {steps.quality-judge.output}
+      Quality summary: {steps.quality-aggregate.output}
+      Regenerated (if any): {steps.regenerate.output}
+
+      For each ad, combine the vision judge scores (product_accuracy, thumb_stop,
+      policy_safety, copy_space) into a launch_score and a one-line rationale. Rank all
+      ads from best to worst by launch_score (break ties on thumb_stop, then product
+      accuracy). Prefer the regenerated "-v2" file when an ad was fixed.
+
+      Produce clean markdown with:
+      1. Summary: ads delivered, average quality, pass/fail count, platform, backend
+      2. Leaderboard: ranked table - rank, ad_id, angle, launch_score, file path, the CTA,
+         and the single best headline. Flag any ad with policy_safety < 8 as "review".
+      3. Top 3 picks to launch first, each with its primary_text and all 3 headlines.
+    output_schema:
+      type: object
+      properties:
+        summary: { type: string }
+        leaderboard:
+          type: array
+          items:
+            type: object
+            properties:
+              rank: { type: integer }
+              ad_id: { type: string }
+              angle: { type: string }
+              launch_score: { type: number }
+              file: { type: string }
+              best_headline: { type: string }
+              cta: { type: string }
+              policy_flag: { type: string }
+        top_picks:
+          type: array
+          items:
+            type: object
+            properties:
+              ad_id: { type: string }
+              primary_text: { type: string }
+              headlines: { type: array, items: { type: string } }
+
+on_complete:
+  storage_path: "ad-creative-factory/{run_id}/deliverables.json"
