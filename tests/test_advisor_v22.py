@@ -266,7 +266,7 @@ class TestGetAdvisorConfig:
         cfg = _get_advisor_config()
         assert cfg["api_key_env"] == "OPENAI_API_KEY"
         assert "openai" in cfg["api_url"]
-        assert cfg["model"] == "gpt-4o"
+        assert cfg["model"] == "gpt-5.2"
 
     @patch.dict(os.environ, {"SANDCASTLE_ADVISOR_PROVIDER": "ollama"}, clear=True)
     def test_ollama_provider(self):

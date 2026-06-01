@@ -216,7 +216,7 @@ class TestGetAdvisorConfig:
              patch("sandcastle.config.settings", SETTINGS_NO_RESIDENCY):
             config = _get_advisor_config()
             assert "openai.com" in config["api_url"]
-            assert config["model"] == "gpt-4o"
+            assert config["model"] == "gpt-5.2"
 
     def test_model_override(self):
         with patch.dict("os.environ", {

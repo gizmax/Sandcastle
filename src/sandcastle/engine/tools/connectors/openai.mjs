@@ -35,7 +35,7 @@ async function api(path, method = "POST", body = null) {
   } finally { clearTimeout(timer); }
 }
 
-export async function chat_completion(messages, model = "gpt-4o", options = "{}") {
+export async function chat_completion(messages, model = "gpt-5.2", options = "{}") {
   const parsed = typeof messages === "string" ? JSON.parse(messages) : messages;
   const opts = typeof options === "string" ? JSON.parse(options) : options;
   const data = await api("/chat/completions", "POST", {
@@ -62,7 +62,8 @@ export async function create_embedding(input, model = "text-embedding-3-small") 
   };
 }
 
-// Map a common aspect ratio to a gpt-image-1 supported size.
+// Map a common aspect ratio to a size (all gpt-image-2 valid: divisible by 16,
+// aspect within 1:3..3:1).
 const ASPECT_TO_SIZE = {
   "1:1": "1024x1024",
   "4:5": "1024x1536",
@@ -80,9 +81,9 @@ const MIME_BY_EXT = {
   png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp",
 };
 
-// Rough per-image cost estimate for gpt-image-1 by quality.
+// Rough per-image cost estimate for the gpt-image-* family by quality.
 function estimateImageCost(model, quality, n) {
-  if (model !== "gpt-image-1") return 0.04 * n; // dall-e-3 standard ~$0.04
+  if (!model.startsWith("gpt-image")) return 0.04 * n; // dall-e-3 standard ~$0.04
   const perImage = quality === "high" ? 0.17 : quality === "low" ? 0.02 : 0.07;
   return perImage * n;
 }
@@ -105,21 +106,22 @@ function writeImage(b64, opts, index) {
 }
 
 /**
- * Generate one or more images. Defaults to gpt-image-1.
+ * Generate one or more images. Defaults to gpt-image-2 (4K-capable, ~99% text
+ * accuracy, reasoning-powered; gpt-image-1 / dall-e-3 still selectable via model).
  * If options.reference_images is provided, uses the /images/edits endpoint
  * (multipart) so the product photo(s) steer the result - the path for faithful
  * product UGC. Otherwise uses /images/generations. Images are written to disk
  * and the returned shape matches the nano-banana connector ({ ok, files, ... }).
  *
- * options: model (default gpt-image-1), size or aspect, quality (low|medium|high),
- *   n, output, output_dir, reference_images (string[]).
+ * options: model (default gpt-image-2), size or aspect, quality (low|medium|high),
+ *   n, output, output_dir, reference_images (string[], up to 16).
  */
 export async function generate_image(prompt, options = "{}") {
   if (!prompt || typeof prompt !== "string") {
     throw new Error("prompt is required and must be a string");
   }
   const opts = typeof options === "string" ? JSON.parse(options) : options;
-  const model = opts.model || "gpt-image-1";
+  const model = opts.model || "gpt-image-2";
   const size = resolveSize(opts);
   const n = opts.n || 1;
   const refs = Array.isArray(opts.reference_images) ? opts.reference_images : [];
@@ -131,7 +133,7 @@ export async function generate_image(prompt, options = "{}") {
     if (refs.length > 0) {
       // Reference-image editing - multipart form-data.
       const form = new FormData();
-      form.append("model", "gpt-image-1");
+      form.append("model", model);
       form.append("prompt", prompt);
       form.append("n", String(n));
       form.append("size", size);
@@ -153,8 +155,8 @@ export async function generate_image(prompt, options = "{}") {
         model, prompt, n, size,
         ...(opts.quality ? { quality: opts.quality } : {}),
       };
-      // gpt-image-1 always returns b64_json; dall-e-* needs it requested.
-      if (model !== "gpt-image-1") body.response_format = "b64_json";
+      // The gpt-image-* family always returns b64_json; dall-e-* needs it asked for.
+      if (!model.startsWith("gpt-image")) body.response_format = "b64_json";
       resp = await fetch(`${BASE}/images/generations`, {
         method: "POST",
         headers: { Authorization: `Bearer ${API_KEY}`, "Content-Type": "application/json" },
@@ -197,11 +199,11 @@ function imageBlock(ref) {
 
 /**
  * Vision analysis / judging. Sends one or more images plus a text prompt to a
- * vision model (default gpt-4o) and returns the model's answer. Lets a workflow
+ * vision model (default gpt-5.2) and returns the model's answer. Lets a workflow
  * actually SEE generated images - e.g. score a UGC shot against the original
  * product reference. Returns parsed JSON when the model replies with JSON.
  *
- * options: model (default gpt-4o), images (string[] of local paths or URLs),
+ * options: model (default gpt-5.2), images (string[] of local paths or URLs),
  *   max_tokens, json (hint the model to return JSON).
  */
 export async function analyze_image(prompt, options = "{}") {
@@ -220,7 +222,7 @@ export async function analyze_image(prompt, options = "{}") {
       method: "POST",
       headers: { Authorization: `Bearer ${API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: opts.model || "gpt-4o",
+        model: opts.model || "gpt-5.2",
         max_tokens: opts.max_tokens || 1024,
         messages: [{ role: "user", content }],
       }),

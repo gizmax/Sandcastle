@@ -1653,7 +1653,7 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
             ToolFunction(
                 name="generate_image",
                 description=(
-                    "Generate image(s) with gpt-image-1 (default) or dall-e-3. "
+                    "Generate image(s) with gpt-image-2 (default) or dall-e-3. "
                     "Writes files to disk and returns their paths. Pass "
                     "reference_images for faithful product/UGC editing."
                 ),
@@ -1664,7 +1664,7 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                         "options": {
                             "type": "object",
                             "description": (
-                                "model (gpt-image-1/dall-e-3), size or aspect "
+                                "model (gpt-image-2/dall-e-3), size or aspect "
                                 "(1:1/4:5/9:16/16:9), quality (low/medium/high), n, "
                                 "output, output_dir, reference_images (string[])"
                             ),
@@ -1677,7 +1677,7 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                 name="analyze_image",
                 description=(
                     "Vision analysis/judging - send image(s) + a prompt to a vision "
-                    "model (default gpt-4o) and get the answer. Use to score generated "
+                    "model (default gpt-5.2) and get the answer. Use to score generated "
                     "images against a reference. Returns JSON when the model replies JSON."
                 ),
                 parameters={
@@ -1688,7 +1688,7 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                             "type": "object",
                             "description": (
                                 "images (string[] of local paths or URLs), "
-                                "model (default gpt-4o), max_tokens"
+                                "model (default gpt-5.2), max_tokens"
                             ),
                         },
                     },
@@ -2313,7 +2313,7 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                             "type": "object",
                             "description": (
                                 "images (string[] of local paths or URLs), "
-                                "model (default gemini-2.5-flash), max_output_tokens"
+                                "model (default gemini-3.5-flash), max_output_tokens"
                             ),
                         },
                     },
@@ -3342,7 +3342,7 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                     "properties": {
                         "trace_id": {"type": "string", "description": "Parent trace ID"},
                         "name": {"type": "string", "description": "Generation name"},
-                        "model": {"type": "string", "description": "Model name (e.g. gpt-4o)"},
+                        "model": {"type": "string", "description": "Model name (e.g. gpt-5.2)"},
                         "input": {"type": "object", "description": "Input messages/prompt"},
                         "output": {"type": "object", "description": "Model output"},
                         "usage": {
