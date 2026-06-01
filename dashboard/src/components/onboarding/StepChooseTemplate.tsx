@@ -6,6 +6,7 @@ import {
   FileText,
   Search,
   Database,
+  Network,
   Loader2,
 } from "lucide-react";
 import { api } from "@/api/client";
@@ -63,6 +64,14 @@ const FEATURED_TEMPLATES: FeaturedTemplate[] = [
     category: "Data",
     icon: Database,
     color: "text-[#A78BFA] bg-[#A78BFA]/10",
+  },
+  {
+    name: "provider-consensus-decision-engine",
+    displayName: "Provider Consensus",
+    description: "Ask three AI providers the same question and act on their agreement. Provider-neutral by design: swap or lose a provider and the decision holds.",
+    category: "Engine",
+    icon: Network,
+    color: "text-[#2DD4BF] bg-[#2DD4BF]/10",
   },
 ];
 

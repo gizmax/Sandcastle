@@ -225,7 +225,8 @@ def _format_cli_error(exc: Exception) -> str:
     if "ConnectError" in exc_type or "ConnectionError" in exc_type:
         return (
             f"Connection failed: {exc}\n"
-            "  Is the Sandcastle server running? Start it with: sandcastle serve"
+            "  Is the Sandcastle server running? Start it with: sandcastle serve\n"
+            "  Or run without a server: sandcastle run --local <workflow.yaml>"
         )
     if "ConnectTimeout" in exc_type or "TimeoutException" in exc_type:
         return f"Connection timed out: {exc}\n  Check that the server URL is correct."
@@ -916,6 +917,130 @@ def _cmd_serve(args: argparse.Namespace) -> None:
     )
 
 
+def _run_local(workflow: str, input_data: dict[str, Any], max_cost: float | None) -> None:
+    """Execute a workflow in-process, without a running server.
+
+    Resolves *workflow* as a path to a .yaml file or as a built-in template name,
+    builds the plan, and runs it through the engine executor directly. The local
+    caller is trusted, so code/transform steps are allowed. Run-step persistence is
+    best-effort and silently skipped when no database is configured.
+    """
+    import asyncio
+    import tempfile
+    from pathlib import Path
+
+    from sandcastle.engine.dag import build_plan, parse_yaml_string
+    from sandcastle.engine.executor import execute_workflow
+    from sandcastle.engine.storage import LocalStorage
+
+    wf_path = Path(workflow)
+    try:
+        if wf_path.suffix in (".yaml", ".yml") and wf_path.exists():
+            content = wf_path.read_text()
+        else:
+            from sandcastle.templates import get_template
+
+            content, _ = get_template(workflow)
+        wf = parse_yaml_string(content)
+        plan = build_plan(wf)
+    except FileNotFoundError:
+        print(
+            f"Error: workflow '{workflow}' not found as a file or a built-in template.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    except Exception as exc:
+        print(_format_cli_error(exc), file=sys.stderr)
+        sys.exit(1)
+
+    storage = LocalStorage(tempfile.mkdtemp(prefix="sandcastle-local-"))
+    print(_color(f"Running '{wf.name}' locally (in-process, no server)...", _C.CYAN))
+
+    async def _local_async() -> Any:
+        import uuid
+
+        run_id = str(uuid.uuid4())
+        persisted = False
+        # Best-effort: set up the local DB and a parent run row so step/audit
+        # persistence works and the run shows up in the dashboard. When no DB is
+        # available this is silently skipped and the run still executes.
+        try:
+            from sandcastle.models.db import Run, RunStatus, async_session, init_db
+
+            await init_db()
+            async with async_session() as session:
+                session.add(
+                    Run(
+                        id=uuid.UUID(run_id),
+                        workflow_name=wf.name,
+                        status=RunStatus.RUNNING,
+                        input_data=input_data,
+                        max_cost_usd=max_cost,
+                    )
+                )
+                await session.commit()
+            persisted = True
+        except Exception:
+            persisted = False
+
+        wf_result = await execute_workflow(
+            workflow=wf,
+            plan=plan,
+            input_data=input_data,
+            run_id=run_id if persisted else None,
+            storage=storage,
+            max_cost_usd=max_cost,
+            admin_trusted=True,
+        )
+
+        if persisted:
+            try:
+                from sandcastle.models.db import Run, RunStatus, async_session
+
+                status_map = {
+                    "completed": RunStatus.COMPLETED,
+                    "failed": RunStatus.FAILED,
+                    "error": RunStatus.FAILED,
+                    "partial": RunStatus.PARTIAL,
+                    "cancelled": RunStatus.CANCELLED,
+                    "budget_exceeded": RunStatus.BUDGET_EXCEEDED,
+                }
+                async with async_session() as session:
+                    db_run = await session.get(Run, uuid.UUID(run_id))
+                    if db_run is not None:
+                        db_run.status = status_map.get(
+                            str(_attr(wf_result, "status", "")), RunStatus.COMPLETED
+                        )
+                        db_run.total_cost_usd = _attr(wf_result, "total_cost_usd", 0.0)
+                        db_run.output_data = _attr(wf_result, "outputs", {})
+                        db_run.error = _attr(wf_result, "error", None)
+                        await session.commit()
+            except Exception:
+                pass
+        return wf_result
+
+    try:
+        result = asyncio.run(_local_async())
+    except Exception as exc:
+        print(_format_cli_error(exc), file=sys.stderr)
+        sys.exit(1)
+
+    status = _attr(result, "status", "unknown")
+    run_id = _attr(result, "run_id", "")
+    cost = _attr(result, "total_cost_usd", 0.0)
+    error = _attr(result, "error", None)
+    outputs = _attr(result, "outputs", {}) or {}
+
+    print(f"{_status_color(str(status))}  run {run_id}  cost ${float(cost or 0.0):.4f}")
+    if error:
+        print(_color(f"Error: {error}", _C.RED), file=sys.stderr)
+    if outputs:
+        print(_color("Outputs:", _C.BOLD))
+        print(json.dumps(outputs, indent=2, default=str))
+    if str(status) in ("failed", "error", "budget_exceeded"):
+        sys.exit(2)
+
+
 def _cmd_run(args: argparse.Namespace) -> None:
     """Run a workflow via the SDK client."""
     from pathlib import Path
@@ -930,6 +1055,15 @@ def _cmd_run(args: argparse.Namespace) -> None:
     if not workflow_name or not workflow_name.strip():
         print("Error: workflow name cannot be empty.", file=sys.stderr)
         sys.exit(1)
+
+    # Local in-process execution path - no running server required.
+    if getattr(args, "local", False):
+        input_data: dict[str, Any] = {}
+        if args.input_file:
+            input_data = _load_input_file(args.input_file)
+        input_data.update(_parse_input_pairs(args.input))
+        _run_local(workflow_name, input_data, args.max_cost)
+        return
 
     client = _get_client(args)
 
@@ -4372,6 +4506,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_run.add_argument(
         "--max-cost", type=float, default=None, metavar="USD", help="Maximum cost limit in USD"
+    )
+    p_run.add_argument(
+        "--local",
+        action="store_true",
+        help="Run the workflow in-process without a server (no `sandcastle serve` needed)",
     )
     _add_connection_args(p_run)
 
