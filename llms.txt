@@ -1,0 +1,29 @@
+# Sandcastle
+
+> You write YAML. Sandcastle ships AI to production. Any model, any provider, zero lock-in. Sandcastle is an open-source, provider-neutral workflow orchestrator for AI agents: define a workflow once in YAML, and it runs on any of 7 model providers with automatic failover. The workflow is the asset; the model is swappable plumbing.
+
+Sandcastle turns a YAML file into a production AI pipeline. A workflow is a DAG of typed steps. The load-bearing decisions live in deterministic code or in cross-provider patterns (race failover, multi-provider consensus, two-judge gates), so swapping or losing a provider never changes the outcome. It ships with 165 built-in templates, 25 step types, 60+ system connectors, a vision-judge self-healing pattern for media, EU AI Act compliance mode, a SHA-256 audit chain, per-step data-residency enforcement, a React dashboard, and a CLI.
+
+Install: `pip install sandcastle-ai`. CLI: `sandcastle serve` then `sandcastle run <workflow.yaml>`.
+
+## Core concepts
+
+- [Workflow format](https://github.com/gizmax/Sandcastle/blob/main/llms-full.txt): a YAML file with `name`, `description`, `default_model`, `input_schema`, and a `steps` list. Each step has an `id`, a `type`, optional `depends_on`, and a per-type config block. See llms-full.txt for the complete step-type reference and a worked example.
+- [Providers](https://github.com/gizmax/Sandcastle): 7 model providers (anthropic, openai, google, mistral, minimax, ollama, omlx). A step runs on `default_model` unless it pins a `model:`. Provider choice is config, never code.
+- [Model-independence patterns](https://github.com/gizmax/Sandcastle/blob/main/llms-full.txt): `race` (first-valid-wins failover across providers), multi-provider consensus (N parallel votes + a deterministic code tally), two-judge gates (two `llm_eval` strategies on different providers), and deterministic `code` decisions.
+
+## Docs
+
+- [GitHub repository](https://github.com/gizmax/Sandcastle): source, README, templates under `src/sandcastle/templates/`.
+- [Step-type reference and example (llms-full.txt)](https://github.com/gizmax/Sandcastle/blob/main/llms-full.txt): the full YAML schema for all 25 step types, enough to author valid workflows.
+- [Website](https://sandcastle-ai.eu): overview and EU AI Act compliance.
+- [Live dashboard demo](https://gizmax.github.io/Sandcastle/): the workflow UI, no backend required.
+
+## Built-in template categories
+
+- [Templates directory](https://github.com/gizmax/Sandcastle/tree/main/src/sandcastle/templates): 165 ready-to-run workflows across devops/SRE, data engineering, finance/ops, security/GRC, legal/docops, sales/RevOps, support/CX, marketing, and LLMOps. Examples: closed_loop_autoremediator (alert to verified fix), provider_consensus_decision_engine (3-provider vote), three_way_match_pay_run (deterministic AP match), quote_to_cash_orchestrator (closed-won to billed), ugc_studio (image-gen with a vision judge).
+
+## Optional
+
+- [Connectors](https://github.com/gizmax/Sandcastle): 60+ integrations reachable from `http`/`tool`/`notify` steps, including slack, postgresql, snowflake, stripe, github, jira, salesforce, datadog, pagerduty, docusign, s3, qdrant, pinecone.
+- [Compliance](https://sandcastle-ai.eu/eu-ai-act/): EU AI Act mode, audit hash chain, PII redaction, data-residency routing.
