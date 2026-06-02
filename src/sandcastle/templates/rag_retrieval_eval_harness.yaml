@@ -1,0 +1,710 @@
+# name: RAG Retrieval Eval Harness
+# description: A continuous, provider-neutral eval harness that scores a LIVE RAG endpoint's retrieval AND answer quality on a schedule and alerts on quality drift. A durable sensor blocks until the next eval window, an http GET loads a versioned eval set (question + gold-passage-ids + reference-answer), and the harness LOOPS each question: it calls the RAG retrieval endpoint over http for top-k chunks and asks the answer endpoint for a grounded answer, then a DETERMINISTIC code step computes recall@k / MRR / context-precision against the gold passage ids (pure IR math, no model). A swappable llm_eval gate grades groundedness + citation-correctness on the answer-endpoint output (any of the 7 providers can back it). After the loop a deterministic code step aggregates the metric vector and diffs it against the last run's stored scores, a non-LLM threshold gate flags retrieval-quality drift (e.g. recall@5 dropped more than X), and a notify pages the owner with the regressed questions and offending chunks while the run is written to a metrics history file. Retrieval scoring is 100% deterministic IR metrics and runs with zero model providers available; the embedding/vector store and answer endpoint are reached over http so the harness evaluates ANY RAG stack.
+# tags: [RAG, retrieval-eval, recall-at-k, MRR, context-precision, groundedness, citations, drift-detection, sensor, gate, llmops, provider-neutral, observability]
+# category: llmops_ai_eng
+# connectors: slack, s3, pinecone, weaviate, qdrant, openai, anthropic
+name: rag-retrieval-eval-harness
+description: >-
+  A continuously-scheduled, provider-neutral evaluation harness that scores a LIVE RAG
+  endpoint's retrieval AND answer quality and alerts on quality drift. A durable SENSOR
+  blocks until the next eval window is due for this eval-set version (event-driven within a
+  schedule: a re-index or model swap can mark the next window due immediately). A
+  DETERMINISTIC http GET then loads the VERSIONED eval set - a frozen list of
+  {question, gold_passage_ids, reference_answer} cases - from the eval-set store, and a code
+  step normalizes each case into a loopable row carrying the retrieval URL, the answer URL,
+  the gold passage ids and the configured k. The harness LOOPS over every case: an http POST
+  calls the RAG RETRIEVAL endpoint for the top-k chunk ids, a second http POST calls the
+  ANSWER endpoint for a grounded answer + the chunk ids it cited, a DETERMINISTIC code step
+  computes recall@k, MRR and context-precision against the gold passage ids (pure IR math, NO
+  model), and a swappable llm_eval GATE grades groundedness and citation-correctness on the
+  answer output (the judge rides default_model so it is swappable across all 7 providers - pin
+  an EU/local provider for regulated corpora). A per-case code step folds the IR metrics and the
+  grader verdict into one canonical row. After the loop, a deterministic code step AGGREGATES the
+  metric vector (mean recall@k, MRR, context-precision, groundedness-pass-rate, citation-pass-rate),
+  http GETs the last run's stored scores and computes the per-metric DIFF, and a non-LLM threshold
+  GATE flags retrieval-quality DRIFT (e.g. recall@5 dropped more than the configured tolerance, or
+  groundedness pass-rate fell). A CONDITION routes a clean run to a quiet digest, or a regressed run
+  to PAGE the owner with the regressed questions and the offending chunks and PUT the new metric
+  vector to the metrics-history store so the next run diffs against it. All retrieval scoring and the
+  drift decision are 100% deterministic code + a non-LLM threshold gate and run even with zero model
+  providers available; the model is confined to the swappable groundedness/citation judge. The
+  embedding/vector store, retrieval endpoint and answer endpoint are all reached over http, so the
+  harness evaluates ANY RAG stack rather than pinning to one vendor SDK.
+default_model: sonnet
+default_max_turns: 6
+default_timeout: 1800
+input_schema:
+  required: ["eval_set_version", "eval_store_url", "retrieval_url", "answer_url"]
+  properties:
+    eval_set_version:
+      type: string
+      description: "Frozen eval-set version to score against (question + gold-passage-ids + reference-answer). Pinning a version makes runs comparable over time."
+      default: "v1"
+      example: "support-kb-2026-06-01"
+    eval_store_url:
+      type: string
+      description: "REST base URL of the versioned eval-set store that serves the frozen list of eval cases and holds the per-run metric history (S3 REST gateway / PostgREST style)."
+      default: "https://eval.internal/rag-eval"
+      example: "https://eval.internal/rag-eval"
+    retrieval_url:
+      type: string
+      description: "RAG RETRIEVAL endpoint that returns the top-k chunk ids for a query. Reached over http so the harness works against ANY vector store / retriever (Pinecone, Weaviate, Qdrant, pgvector, custom)."
+      default: "https://rag.internal/retrieve"
+      example: "https://rag.internal/v1/retrieve"
+    answer_url:
+      type: string
+      description: "RAG ANSWER endpoint that returns a grounded answer plus the chunk ids it cited for a query. Reached over http so the harness is vendor-neutral."
+      default: "https://rag.internal/answer"
+      example: "https://rag.internal/v1/answer"
+    k:
+      type: integer
+      description: "Top-k cutoff for retrieval and the IR metrics (recall@k / MRR are computed at this k). recall@5 drift uses k=5 by default."
+      default: 5
+      example: "5"
+    recall_drop_tolerance:
+      type: number
+      description: "Deterministic drift threshold (0-1). The non-LLM gate flags a regression when mean recall@k drops by MORE than this versus the last stored run."
+      default: 0.05
+      example: "0.05"
+    groundedness_drop_tolerance:
+      type: number
+      description: "Deterministic drift threshold (0-1). The non-LLM gate also flags a regression when the groundedness pass-rate drops by more than this versus the last stored run."
+      default: 0.05
+      example: "0.05"
+    min_recall:
+      type: number
+      description: "Absolute floor (0-1) for mean recall@k. Even with no prior run to diff against, the gate flags a regression if mean recall@k is below this floor."
+      default: 0.6
+      example: "0.6"
+    grader_model:
+      type: string
+      description: "Swappable groundedness + citation judge model. Any of the 7 providers can back it; for regulated corpora pin an EU/local provider (mistral/large, ollama, omlx/qwen-3). Retrieval scoring + drift work with this unavailable."
+      default: "sonnet"
+      example: "mistral/large"
+    eval_window_check_interval:
+      type: integer
+      description: "Seconds between sensor polls of the eval-set store for the next-due eval window. The sensor blocks until a window is due or a re-index/model-swap marks one due."
+      default: 3600
+      example: "3600"
+    sensor_timeout:
+      type: integer
+      description: "Sensor hard ceiling in seconds for one watch run - stop waiting for the next eval window after this long. Default 24h."
+      default: 86400
+      example: "86400"
+    slack_channel:
+      type: string
+      description: "Slack channel that receives the drift page or the clean-run digest."
+      default: "#rag-eval"
+      example: "#rag-eval-alerts"
+    pagerduty_routing_key:
+      type: string
+      description: "Optional PagerDuty Events v2 routing key to page the RAG owner on a confirmed quality regression. Leave empty to only notify Slack."
+      default: ""
+      example: "R0ABCD1234EFGH5678IJKL"
+steps:
+  # 1) DURABLE SENSOR - block until the next eval window is DUE for this eval-set version, or a
+  #    re-index / model-swap webhook has marked the next window due immediately (event-driven
+  #    within a schedule). Polls the eval-set store's window-status endpoint; until a window is
+  #    due there is nothing new to score. NO model.
+  - id: await_eval_window
+    type: sensor
+    sensor_config:
+      url: "{input.eval_store_url}/versions/{input.eval_set_version}/window?select=window_due,reindexed_since_last_run,model_swapped_since_last_run"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200 and (response.get('window_due') == True or response.get('reindexed_since_last_run') == True or response.get('model_swapped_since_last_run') == True)"
+      check_interval: 3600
+      timeout: 86400
+
+  # 2) DETERMINISTIC load of the VERSIONED eval set - the frozen list of eval cases, each with its
+  #    question, the gold passage ids retrieval SHOULD surface, and a reference answer the grader
+  #    judges groundedness against. No model.
+  - id: load_eval_set
+    type: http
+    depends_on: [await_eval_window]
+    http_config:
+      url: "{input.eval_store_url}/versions/{input.eval_set_version}/cases?expand=gold_passage_ids,reference_answer"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.EVAL_STORE_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 3) DETERMINISTIC normalization of the eval set into a flat, loopable list. Each row carries the
+  #    question, the gold passage ids (the IR ground truth), the reference answer, the resolved
+  #    retrieval + answer URLs and the configured k. No model.
+  - id: normalize_cases
+    type: code
+    depends_on: [load_eval_set]
+    code_config:
+      language: python
+      code: |
+        raw = _steps.get('load_eval_set') or {}
+        rows = raw if isinstance(raw, list) else (
+            raw.get('cases') or raw.get('data') or raw.get('items') or []
+        )
+
+        try:
+            k = int(_input.get('k') or 5)
+        except (TypeError, ValueError):
+            k = 5
+        if k < 1:
+            k = 1
+
+        retrieval_url = str(_input.get('retrieval_url') or '').strip()
+        answer_url = str(_input.get('answer_url') or '').strip()
+
+        def _ids(v):
+            # Gold ids may arrive as a list, a comma string, or list-of-dicts.
+            if isinstance(v, list):
+                out = []
+                for x in v:
+                    if isinstance(x, dict):
+                        out.append(str(x.get('id') or x.get('passage_id') or x.get('chunk_id') or '').strip())
+                    else:
+                        out.append(str(x).strip())
+                return [s for s in out if s]
+            if isinstance(v, str):
+                return [s.strip() for s in v.split(',') if s.strip()]
+            return []
+
+        cases = []
+        for i, rec in enumerate(rows):
+            if not isinstance(rec, dict):
+                continue
+            q = str(rec.get('question') or rec.get('query') or rec.get('prompt') or '').strip()
+            if not q:
+                continue
+            gold = _ids(rec.get('gold_passage_ids') or rec.get('gold_ids') or rec.get('relevant_ids') or [])
+            cases.append({
+                'case_id': str(rec.get('case_id') or rec.get('id') or f'case-{i}'),
+                'question': q,
+                'gold_passage_ids': gold,
+                'reference_answer': str(rec.get('reference_answer') or rec.get('answer') or '').strip(),
+                'retrieval_url': retrieval_url,
+                'answer_url': answer_url,
+                'k': k,
+            })
+
+        result = {
+            'eval_set_version': _input.get('eval_set_version'),
+            'k': k,
+            'case_count': len(cases),
+            'cases': cases,
+        }
+
+  # 4) LOOP over every eval case. Per-case child chain: POST retrieval endpoint for top-k chunk ids
+  #    (http) -> POST answer endpoint for a grounded answer + cited chunk ids (http) -> deterministic
+  #    IR metrics recall@k / MRR / context-precision (code) -> swappable llm_eval groundedness +
+  #    citation gate -> fold IR + grader into one per-case row (code).
+  - id: per_case_loop
+    type: loop
+    depends_on: [normalize_cases]
+    loop_config:
+      over: "steps.normalize_cases.output.cases"
+      step_ids:
+        - call_retrieval
+        - call_answer
+        - score_retrieval
+        - grade_answer
+        - record_case
+      max_iterations: 2000
+
+  # 4a) http POST the question to the RAG RETRIEVAL endpoint and read back the top-k chunk ids.
+  #     The case row carries the resolved URL and k. Provider-neutral: ANY vector store behind this
+  #     endpoint works. on_failure: skip so one dead query does not abort the whole sweep.
+  - id: call_retrieval
+    type: http
+    http_config:
+      url: "{input.retrieval_url}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.RAG_API_TOKEN}"
+      body: |
+        {
+          "query": {{ _input.get('_item', {}).get('question') | tojson }},
+          "top_k": {{ _input.get('_item', {}).get('k', 5) }},
+          "eval_set_version": {{ _input.get('eval_set_version') | tojson }}
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 4b) http POST the same question to the RAG ANSWER endpoint and read back the grounded answer
+  #     plus the chunk ids it CITED, so citation-correctness can be checked against what was actually
+  #     retrieved. on_failure: skip keeps the sweep alive on a single answer-endpoint hiccup.
+  - id: call_answer
+    type: http
+    http_config:
+      url: "{input.answer_url}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.RAG_API_TOKEN}"
+      body: |
+        {
+          "query": {{ _input.get('_item', {}).get('question') | tojson }},
+          "top_k": {{ _input.get('_item', {}).get('k', 5) }},
+          "with_citations": true,
+          "eval_set_version": {{ _input.get('eval_set_version') | tojson }}
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 4c) DETERMINISTIC IR METRICS. NO model. For THIS case, take the ordered top-k chunk ids the
+  #     retrieval endpoint returned and the gold passage ids, and compute recall@k, MRR and
+  #     context-precision. This is the audit-load-bearing retrieval math the drift gate consumes.
+  #     Reads the retrieval output, the case row, and the configured k.
+  - id: score_retrieval
+    type: code
+    code_config:
+      language: python
+      code: |
+        case = _input.get('_item') or {}
+        ret = _steps.get('call_retrieval') or {}
+
+        try:
+            k = int(case.get('k') or 5)
+        except (TypeError, ValueError):
+            k = 5
+        if k < 1:
+            k = 1
+
+        # --- normalize the retrieval payload into an ORDERED list of chunk ids -----------
+        def _extract_ids(blob):
+            if isinstance(blob, list):
+                src = blob
+            elif isinstance(blob, dict):
+                src = None
+                for key in ('chunk_ids', 'ids', 'results', 'chunks', 'passages', 'hits', 'matches', 'data'):
+                    v = blob.get(key)
+                    if isinstance(v, list):
+                        src = v
+                        break
+                if src is None:
+                    src = []
+            else:
+                src = []
+            ids = []
+            for x in src:
+                if isinstance(x, dict):
+                    ids.append(str(x.get('id') or x.get('chunk_id') or x.get('passage_id') or x.get('_id') or '').strip())
+                else:
+                    ids.append(str(x).strip())
+            return [i for i in ids if i]
+
+        retrieved = _extract_ids(ret)[:k]
+        gold = [str(g).strip() for g in (case.get('gold_passage_ids') or []) if str(g).strip()]
+        gold_set = set(gold)
+
+        # recall@k: fraction of gold passages found within the top-k retrieved.
+        if gold_set:
+            hits = sum(1 for cid in set(retrieved) if cid in gold_set)
+            recall_at_k = round(hits / len(gold_set), 4)
+        else:
+            recall_at_k = 0.0
+
+        # MRR: reciprocal rank of the FIRST gold passage in the ordered top-k (0 if none).
+        rr = 0.0
+        for rank, cid in enumerate(retrieved, start=1):
+            if cid in gold_set:
+                rr = round(1.0 / rank, 4)
+                break
+
+        # context-precision: fraction of the retrieved top-k that are actually gold (signal vs noise).
+        if retrieved:
+            relevant_retrieved = sum(1 for cid in retrieved if cid in gold_set)
+            context_precision = round(relevant_retrieved / len(retrieved), 4)
+        else:
+            context_precision = 0.0
+
+        result = {
+            'case_id': case.get('case_id'),
+            'question': case.get('question'),
+            'k': k,
+            'retrieved_ids': retrieved,
+            'gold_passage_ids': gold,
+            'recall_at_k': recall_at_k,
+            'mrr': rr,
+            'context_precision': context_precision,
+            'retrieval_ok': bool(retrieved),
+        }
+
+  # 4d) SWAPPABLE GROUNDEDNESS + CITATION GATE. A single llm_eval strategy on the answer-endpoint
+  #     output: is the answer grounded in the retrieved chunks (vs hallucinated) AND does it cite the
+  #     right chunks for its claims? The judge rides {input.grader_model} so ANY of the 7 providers
+  #     can back it (pin EU/local for regulated corpora). The grade is a SECONDARY answer-quality
+  #     signal; the load-bearing retrieval scoring and the drift decision are deterministic code +
+  #     the non-LLM threshold gate downstream, which run even when this judge is unavailable.
+  - id: grade_answer
+    type: gate
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are a RAG answer-quality judge. You are given a question, a reference answer, the
+              answer the RAG system produced, the chunk ids it CITED, and the gold passage ids that
+              should support the answer. Decide GROUNDEDNESS (is every claim supported by retrieved
+              context rather than hallucinated or contradicting the reference answer?) AND
+              CITATION-CORRECTNESS (do the cited chunk ids actually back the claims and overlap the
+              gold passages?). Answer exactly 'approved' only if the answer is BOTH grounded and
+              correctly cited; otherwise answer 'rejected' and name which failed (groundedness or
+              citation) and why.
+            input: "Question: {steps.score_retrieval.output.question} | Reference answer: {input.eval_set_version} | Gold passages: {steps.score_retrieval.output.gold_passage_ids} | Retrieved top-k: {steps.score_retrieval.output.retrieved_ids}"
+            model: "{input.grader_model}"
+
+  # 4e) DETERMINISTIC per-case record. Folds the IR metrics and the grader verdict into one canonical
+  #     row. groundedness_pass / citation_pass are derived from whether the swappable gate approved;
+  #     the retrieval metrics stand on their own with zero model involvement. No model decides the
+  #     numbers here.
+  - id: record_case
+    type: code
+    code_config:
+      language: python
+      code: |
+        sc = _steps.get('score_retrieval') or {}
+        gate = _steps.get('grade_answer')
+        ans = _steps.get('call_answer') or {}
+
+        # Did the swappable groundedness/citation gate approve this answer?
+        if isinstance(gate, dict):
+            graded_pass = bool(gate.get('passed', gate.get('approved', gate.get('result', False))))
+            gate_ran = True
+        elif gate is None:
+            graded_pass = False
+            gate_ran = False
+        else:
+            graded_pass = bool(gate)
+            gate_ran = True
+
+        result = {
+            'case_id': sc.get('case_id'),
+            'question': sc.get('question'),
+            'k': sc.get('k'),
+            'recall_at_k': float(sc.get('recall_at_k') or 0.0),
+            'mrr': float(sc.get('mrr') or 0.0),
+            'context_precision': float(sc.get('context_precision') or 0.0),
+            'retrieved_ids': sc.get('retrieved_ids') or [],
+            'gold_passage_ids': sc.get('gold_passage_ids') or [],
+            'retrieval_ok': bool(sc.get('retrieval_ok')),
+            # answer-quality signals from the swappable judge (secondary to the IR math).
+            'grader_ran': gate_ran,
+            'groundedness_pass': graded_pass,
+            'citation_pass': graded_pass,
+            'answer_ok': bool(ans),
+        }
+
+  # 5) DETERMINISTIC aggregation of every per-case record from the loop into a metric VECTOR for this
+  #    run: mean recall@k, mean MRR, mean context-precision, groundedness pass-rate and citation
+  #    pass-rate, plus the list of cases that failed retrieval or grading (with their offending
+  #    retrieved chunk ids) for the page. No model.
+  - id: aggregate_metrics
+    type: code
+    depends_on: [per_case_loop]
+    code_config:
+      language: python
+      code: |
+        loop_out = _steps.get('per_case_loop') or {}
+        meta = _steps.get('normalize_cases') or {}
+
+        items = loop_out if isinstance(loop_out, list) else (
+            loop_out.get('results') or loop_out.get('items') or loop_out.get('iterations') or []
+        )
+
+        cases = []
+        for it in items:
+            row = it
+            if isinstance(it, dict) and 'case_id' not in it:
+                row = it.get('record_case') or it.get('output') or it
+            if isinstance(row, dict) and row.get('case_id'):
+                cases.append(row)
+
+        n = len(cases)
+
+        def _mean(key):
+            if not n:
+                return 0.0
+            return round(sum(float(c.get(key) or 0.0) for c in cases) / n, 4)
+
+        def _rate(key):
+            if not n:
+                return 0.0
+            return round(sum(1 for c in cases if c.get(key)) / n, 4)
+
+        k = int(meta.get('k') or 5)
+        mean_recall = _mean('recall_at_k')
+        mean_mrr = _mean('mrr')
+        mean_context_precision = _mean('context_precision')
+        groundedness_rate = _rate('groundedness_pass')
+        citation_rate = _rate('citation_pass')
+
+        # Cases worth surfacing on a page: a gold passage was missed (recall < 1) or the answer
+        # failed the groundedness/citation grade. Carry the offending retrieved chunk ids.
+        regressed_cases = [
+            {
+                'case_id': c.get('case_id'),
+                'question': c.get('question'),
+                'recall_at_k': c.get('recall_at_k'),
+                'mrr': c.get('mrr'),
+                'context_precision': c.get('context_precision'),
+                'groundedness_pass': c.get('groundedness_pass'),
+                'citation_pass': c.get('citation_pass'),
+                'offending_chunks': c.get('retrieved_ids'),
+                'gold_passage_ids': c.get('gold_passage_ids'),
+            }
+            for c in cases
+            if (float(c.get('recall_at_k') or 0.0) < 1.0) or (not c.get('groundedness_pass')) or (not c.get('citation_pass'))
+        ]
+
+        result = {
+            'eval_set_version': meta.get('eval_set_version'),
+            'k': k,
+            'case_count': n,
+            'metric_vector': {
+                'mean_recall_at_k': mean_recall,
+                'mean_mrr': mean_mrr,
+                'mean_context_precision': mean_context_precision,
+                'groundedness_pass_rate': groundedness_rate,
+                'citation_pass_rate': citation_rate,
+            },
+            'regressed_cases': regressed_cases,
+            'cases': cases,
+        }
+
+  # 6) DETERMINISTIC http GET of the LAST stored run's metric vector for this eval-set version, so
+  #    the drift diff is measured against the previously-recorded truth, not re-derived. No model.
+  - id: load_last_scores
+    type: http
+    depends_on: [aggregate_metrics]
+    http_config:
+      url: "{input.eval_store_url}/versions/{input.eval_set_version}/runs?order=run_at.desc&limit=1&select=metric_vector,run_at"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.EVAL_STORE_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 7) DETERMINISTIC DIFF + drift flags. NO model. Subtract this run's metric vector from the last
+  #    stored run's vector, compute the per-metric drop, and set the boolean drift flags the
+  #    non-LLM threshold gate consumes: recall@k dropped more than recall_drop_tolerance, OR
+  #    groundedness pass-rate dropped more than groundedness_drop_tolerance, OR mean recall@k is
+  #    below the absolute min_recall floor. fail_count > 0 drives the page-and-persist path.
+  - id: diff_scores
+    type: code
+    depends_on: [load_last_scores]
+    code_config:
+      language: python
+      code: |
+        agg = _steps.get('aggregate_metrics') or {}
+        prev_raw = _steps.get('load_last_scores') or {}
+        cur = agg.get('metric_vector') or {}
+
+        def _num(v, d=0.0):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return d
+
+        recall_tol = abs(_num(_input.get('recall_drop_tolerance'), 0.05))
+        ground_tol = abs(_num(_input.get('groundedness_drop_tolerance'), 0.05))
+        min_recall = _num(_input.get('min_recall'), 0.6)
+
+        # --- pull the previous metric vector out of the runs payload ---------------------
+        prev_rows = prev_raw if isinstance(prev_raw, list) else (
+            prev_raw.get('data') or prev_raw.get('items') or prev_raw.get('runs') or [prev_raw]
+        )
+        prev_row = prev_rows[0] if prev_rows and isinstance(prev_rows[0], dict) else {}
+        prev_vec = prev_row.get('metric_vector') if isinstance(prev_row.get('metric_vector'), dict) else {}
+        has_prev = bool(prev_vec)
+
+        cur_recall = _num(cur.get('mean_recall_at_k'))
+        cur_ground = _num(cur.get('groundedness_pass_rate'))
+        cur_cite = _num(cur.get('citation_pass_rate'))
+        cur_mrr = _num(cur.get('mean_mrr'))
+        cur_cp = _num(cur.get('mean_context_precision'))
+
+        prev_recall = _num(prev_vec.get('mean_recall_at_k'))
+        prev_ground = _num(prev_vec.get('groundedness_pass_rate'))
+
+        # Per-metric drop vs the last run (positive = got worse). Only meaningful with a prior run.
+        recall_drop = round(max(0.0, prev_recall - cur_recall), 4) if has_prev else 0.0
+        ground_drop = round(max(0.0, prev_ground - cur_ground), 4) if has_prev else 0.0
+
+        # Deterministic drift flags.
+        recall_regressed = has_prev and (recall_drop > recall_tol)
+        ground_regressed = has_prev and (ground_drop > ground_tol)
+        below_floor = cur_recall < min_recall
+
+        drifted = bool(recall_regressed or ground_regressed or below_floor)
+
+        result = {
+            'eval_set_version': agg.get('eval_set_version'),
+            'has_prev': has_prev,
+            'current': {
+                'mean_recall_at_k': cur_recall,
+                'mean_mrr': cur_mrr,
+                'mean_context_precision': cur_cp,
+                'groundedness_pass_rate': cur_ground,
+                'citation_pass_rate': cur_cite,
+            },
+            'previous': prev_vec,
+            'recall_drop': recall_drop,
+            'groundedness_drop': ground_drop,
+            'recall_tolerance': recall_tol,
+            'groundedness_tolerance': ground_tol,
+            'min_recall': min_recall,
+            'recall_regressed': recall_regressed,
+            'groundedness_regressed': ground_regressed,
+            'below_floor': below_floor,
+            'drifted': drifted,
+            # fail_count > 0 -> a confirmed quality regression to page + persist.
+            'fail_count': 1 if drifted else 0,
+            'regressed_cases': agg.get('regressed_cases', []),
+            'case_count': agg.get('case_count', 0),
+        }
+
+  # 8) NON-LLM THRESHOLD GATE - the model-independent drift decision. A single llm_eval strategy
+  #    fed ONLY the pre-computed drops / booleans and told to answer purely from the arithmetic, so
+  #    the gate passes/fails on the deterministic IR math alone with zero real model reasoning. This
+  #    keeps the drift verdict reproducible and provider-agnostic.
+  - id: drift_gate
+    type: gate
+    depends_on: [diff_scores]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              Deterministic threshold check. Answer exactly 'approved' if drifted is True - i.e.
+              recall_regressed OR groundedness_regressed OR below_floor is True. Otherwise answer
+              exactly 'rejected'. Use ONLY the supplied booleans and numbers; do not infer or
+              reason beyond the comparison.
+            input: "drifted={steps.diff_scores.output.drifted} recall_regressed={steps.diff_scores.output.recall_regressed} groundedness_regressed={steps.diff_scores.output.groundedness_regressed} below_floor={steps.diff_scores.output.below_floor} recall_drop={steps.diff_scores.output.recall_drop} groundedness_drop={steps.diff_scores.output.groundedness_drop}"
+            model: haiku
+
+  # 9) CONDITION - route a clean run to a quiet digest, or a regressed run to PAGE the owner and
+  #    PERSIST the new metric vector to history. Deterministic branch keyed off the in-code fail_count
+  #    (not a model label) so routing survives a missing provider. No model.
+  - id: route_drift
+    type: condition
+    depends_on: [drift_gate]
+    condition_config:
+      expression: "{steps.diff_scores.output.fail_count} > 0"
+      then: [persist_run, page_owner, notify_drift]
+      else: [persist_run_clean, notify_clean]
+
+  # 9a) PERSIST (regressed) - PUT this run's metric vector + regressed cases to the metrics-history
+  #     store so the NEXT run diffs against it. Writing on every run is what makes drift detection
+  #     continuous. Connector: s3 / PostgREST. No model.
+  - id: persist_run
+    type: http
+    http_config:
+      url: "{input.eval_store_url}/versions/{input.eval_set_version}/runs"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.EVAL_STORE_TOKEN}"
+      body: |
+        {
+          "eval_set_version": {{ _input.get('eval_set_version') | tojson }},
+          "metric_vector": {{ _steps.get('diff_scores', {}).get('current', {}) | tojson }},
+          "drifted": true,
+          "regressed_case_count": {{ (_steps.get('diff_scores', {}).get('regressed_cases', []) | length) }}
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 9b) PAGE the RAG owner - open a PagerDuty incident so a silent retrieval/answer-quality regression
+  #     wakes the owner the moment it drifts, not at the next manual eval. Connector: pagerduty.
+  - id: page_owner
+    type: http
+    http_config:
+      url: "https://events.pagerduty.com/v2/enqueue"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      body: |
+        {
+          "routing_key": "{input.pagerduty_routing_key}",
+          "event_action": "trigger",
+          "dedup_key": "rag-drift-{input.eval_set_version}",
+          "payload": {
+            "summary": "RAG quality drift on eval set {input.eval_set_version}: recall_drop={{ _steps['diff_scores']['recall_drop'] }} groundedness_drop={{ _steps['diff_scores']['groundedness_drop'] }} below_floor={{ _steps['diff_scores']['below_floor'] }}",
+            "severity": "critical",
+            "source": "rag-retrieval-eval-harness",
+            "custom_details": {{ _steps['diff_scores']['regressed_cases'] }}
+          }
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 9c) NOTIFY (drift) - page the RAG channel with the regressed metric vector, the per-metric drops
+  #     and the regressed questions + offending retrieved chunks so the team sees the break in real
+  #     time. service: slack.
+  - id: notify_drift
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        :rotating_light: RAG QUALITY DRIFT on eval set {steps.diff_scores.output.eval_set_version} ({steps.diff_scores.output.case_count} cases)
+        mean recall@k : {steps.diff_scores.output.current.mean_recall_at_k} (drop {steps.diff_scores.output.recall_drop}, tol {steps.diff_scores.output.recall_tolerance})
+        groundedness  : {steps.diff_scores.output.current.groundedness_pass_rate} (drop {steps.diff_scores.output.groundedness_drop}, tol {steps.diff_scores.output.groundedness_tolerance})
+        below floor   : {steps.diff_scores.output.below_floor} (min recall {steps.diff_scores.output.min_recall})
+        MRR / context-precision: {steps.diff_scores.output.current.mean_mrr} / {steps.diff_scores.output.current.mean_context_precision}
+        Regressed questions + offending chunks: {steps.diff_scores.output.regressed_cases}
+
+  # 9d) PERSIST (clean) - still PUT the metric vector on a clean run so the history is unbroken and
+  #     the next run has a baseline to diff against. No model.
+  - id: persist_run_clean
+    type: http
+    http_config:
+      url: "{input.eval_store_url}/versions/{input.eval_set_version}/runs"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.EVAL_STORE_TOKEN}"
+      body: |
+        {
+          "eval_set_version": {{ _input.get('eval_set_version') | tojson }},
+          "metric_vector": {{ _steps.get('diff_scores', {}).get('current', {}) | tojson }},
+          "drifted": false,
+          "regressed_case_count": {{ (_steps.get('diff_scores', {}).get('regressed_cases', []) | length) }}
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 9e) NOTIFY (clean) - quiet "retrieval quality holding" digest on a clean run. No page.
+  - id: notify_clean
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        :white_check_mark: RAG eval clean on {steps.diff_scores.output.eval_set_version}.
+        mean recall@k {steps.diff_scores.output.current.mean_recall_at_k}, groundedness {steps.diff_scores.output.current.groundedness_pass_rate}, MRR {steps.diff_scores.output.current.mean_mrr} over {steps.diff_scores.output.case_count} cases. No drift, no page.
+on_complete:
+  storage_path: "rag-retrieval-eval-harness/{run_id}/result.json"

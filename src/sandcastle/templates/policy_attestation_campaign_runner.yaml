@@ -1,0 +1,589 @@
+# name: Policy Attestation Campaign Runner
+# description: Closed-loop employee policy-acknowledgement campaign (security policy, code of conduct, AUP). Pulls roster + policy version, diffs non-attesters, loops a per-user attest/deadline cycle, escalates overdue, builds a SHA-256 per-row attestation ledger, gates on a non-LLM coverage threshold + compliance officer, seals to object-lock S3, and emits an audit-evidence PDF.
+# tags: [Okta, Entra, Workday, BambooHR, S3, ServiceNow, Slack, Attestation, Policy, AUP, CodeOfConduct, Audit, Compliance, GRC]
+# category: compliance_grc
+
+name: policy-attestation-campaign-runner
+description: >-
+  Runs a closed-loop employee policy-acknowledgement campaign (security policy, code of conduct,
+  acceptable-use policy) and produces tamper-evident proof of who attested, who refused, and who
+  was auto-escalated past the deadline. A DETERMINISTIC http/sensor/code pipeline pulls the active
+  roster from the IdP/HRIS and the exact policy version to be acknowledged, runs a Python diff of
+  who has NOT attested to the current policy_version, then loops every non-attester through a
+  personalized signed attest request -> a per-user blocking sensor (their attest webhook OR their
+  individual deadline) -> a condition that records attested users and escalates deadline-missed
+  ones. Overdue users are escalated to their manager and a ticket. A deterministic step computes
+  coverage % and builds a per-user attestation ledger where every row is SHA-256 hashed, a
+  compliance-officer gate plus a NON-LLM coverage threshold (coverage >= required %) must both
+  pass, the sealed attestation pack is PUT to an object-lock (WORM) S3 bucket, and an audit-evidence
+  PDF is rendered (version, population, coverage, exceptions). The legally-binding ledger and every
+  decision are computed in deterministic code and never touch a model; the only optional model use
+  is summarizing the exceptions narrative in the report step, which is swappable across providers.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 900
+
+input_schema:
+  required: ["campaign_id", "policy_id", "policy_version"]
+  properties:
+    campaign_id:
+      type: string
+      description: "Unique id for this attestation cycle (e.g. 'ATT-2026-AUP-Q2')."
+      example: "ATT-2026-AUP-Q2"
+    policy_id:
+      type: string
+      description: "The policy being acknowledged (security_policy, code_of_conduct, aup)."
+      default: "aup"
+      example: "code_of_conduct"
+    policy_version:
+      type: string
+      description: "Exact version string that must be acknowledged. Attestations to any other version do NOT count."
+      example: "v4.2.0"
+    roster_url:
+      type: string
+      description: "IdP/HRIS REST endpoint returning the active employee population (Okta users, Microsoft Graph, Workday or BambooHR directory)."
+      default: "https://your-org.okta.com/api/v1/users?filter=status eq \"ACTIVE\"&limit=200"
+      example: "https://acme.okta.com/api/v1/users?filter=status eq \"ACTIVE\"&limit=200"
+    policy_registry_url:
+      type: string
+      description: "Policy registry REST endpoint returning policy metadata + the canonical document URL for policy_id/policy_version."
+      default: "https://policy.your-org.com/api/v1/policies"
+      example: "https://policy.acme.com/api/v1/policies"
+    attestation_ledger_url:
+      type: string
+      description: "Attestation system REST endpoint returning the existing attestation records (who already acknowledged which version)."
+      default: "https://policy.your-org.com/api/v1/attestations"
+      example: "https://policy.acme.com/api/v1/attestations"
+    attest_send_url:
+      type: string
+      description: "Endpoint that sends a personalized attest request carrying a signed, time-boxed policy link to one employee."
+      default: "https://policy.your-org.com/api/v1/attest-requests"
+      example: "https://policy.acme.com/api/v1/attest-requests"
+    attest_webhook_base_url:
+      type: string
+      description: "Per-user attest webhook base. The campaign blocks until {base}/{campaign_id}/{user} reports the signed acknowledgement (200) or the user deadline elapses."
+      default: "https://policy.your-org.com/api/v1/attest-status"
+      example: "https://policy.acme.com/api/v1/attest-status"
+    escalation_url:
+      type: string
+      description: "Endpoint that escalates an overdue employee to their manager and opens a ticket."
+      default: "https://policy.your-org.com/api/v1/escalations"
+      example: "https://policy.acme.com/api/v1/escalations"
+    required_coverage_pct:
+      type: number
+      description: "Minimum acknowledgement coverage (percent of population) required to certify the campaign. Enforced as a NON-LLM threshold in the gate."
+      default: 95
+      example: "95"
+    user_deadline_hours:
+      type: number
+      description: "Per-user attestation window in hours. After this elapses the user is auto-escalated as deadline-missed."
+      default: 72
+      example: "72"
+    s3_base_url:
+      type: string
+      description: "S3 (or S3-compatible) REST base URL for the object-lock evidence bucket."
+      default: "https://s3.eu-central-1.amazonaws.com"
+      example: "https://s3.eu-central-1.amazonaws.com"
+    s3_bucket:
+      type: string
+      description: "Object-lock (WORM) bucket that stores the tamper-evident attestation pack."
+      default: "policy-attestation-evidence"
+      example: "acme-policy-attestation-evidence"
+    slack_channel:
+      type: string
+      description: "Slack channel for the campaign certification summary."
+      default: "#compliance-attestations"
+      example: "#compliance-attestations"
+
+steps:
+  # 1) PULL the active employee roster (the attestation population) from the IdP / HRIS.
+  - id: pull_roster
+    type: http
+    http_config:
+      url: "{input.roster_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.ROSTER_API_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2) PULL the canonical policy record for policy_id + policy_version (the exact document
+  #    + signed link that must be acknowledged). Defines what "attested" legally means.
+  - id: pull_policy_version
+    type: http
+    http_config:
+      url: "{input.policy_registry_url}/{input.policy_id}/versions/{input.policy_version}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.POLICY_API_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 3) PULL the existing attestation records so we know who has ALREADY acknowledged.
+  - id: pull_existing_attestations
+    type: http
+    http_config:
+      url: "{input.attestation_ledger_url}?policy_id={input.policy_id}&policy_version={input.policy_version}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.POLICY_API_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 4) DETERMINISTIC diff: who in the active population has NOT attested to THIS policy_version.
+  #    This is the audit-load-bearing population logic. No model.
+  - id: compute_non_attesters
+    type: code
+    depends_on: [pull_roster, pull_policy_version, pull_existing_attestations]
+    code_config:
+      language: python
+      code: |
+        policy_version = str(_input.get('policy_version') or '').strip()
+        policy_id = str(_input.get('policy_id') or '').strip()
+
+        roster_raw = _steps['pull_roster'] or {}
+        attest_raw = _steps['pull_existing_attestations'] or {}
+
+        # --- Normalize roster (Okta -> list; Graph -> {"value": [...]}; HRIS -> {"employees": [...]}) ---
+        roster_list = roster_raw if isinstance(roster_raw, list) else (
+            roster_raw.get('value') or roster_raw.get('users')
+            or roster_raw.get('employees') or roster_raw.get('data') or []
+        )
+        population = []
+        for u in roster_list:
+            if not isinstance(u, dict):
+                continue
+            profile = u.get('profile', u)
+            login = str(
+                profile.get('login') or profile.get('userPrincipalName')
+                or profile.get('email') or u.get('id') or ''
+            ).strip().lower()
+            if not login:
+                continue
+            population.append({
+                'user': login,
+                'name': str(profile.get('displayName') or profile.get('firstName', '') + ' ' + profile.get('lastName', '')).strip() or login,
+                'email': str(profile.get('email') or login),
+                'manager_email': str(profile.get('managerEmail') or profile.get('manager') or '').strip().lower(),
+                'department': str(profile.get('department') or 'unassigned'),
+            })
+
+        # De-duplicate population by user login (roster pages can overlap).
+        seen = set()
+        deduped = []
+        for p in population:
+            if p['user'] in seen:
+                continue
+            seen.add(p['user'])
+            deduped.append(p)
+        population = deduped
+
+        # --- Normalize existing attestations; only those matching THIS exact version count ---
+        attest_list = attest_raw if isinstance(attest_raw, list) else (
+            attest_raw.get('attestations') or attest_raw.get('records')
+            or attest_raw.get('data') or attest_raw.get('value') or []
+        )
+        attested_users = set()
+        for a in attest_list:
+            if not isinstance(a, dict):
+                continue
+            a_user = str(a.get('user') or a.get('email') or a.get('login') or '').strip().lower()
+            a_ver = str(a.get('policy_version') or a.get('version') or '').strip()
+            a_pid = str(a.get('policy_id') or a.get('policy') or policy_id).strip()
+            a_status = str(a.get('status') or 'attested').strip().lower()
+            if a_user and a_ver == policy_version and a_pid == policy_id and a_status in ('attested', 'acknowledged', 'signed'):
+                attested_users.add(a_user)
+
+        non_attesters = [p for p in population if p['user'] not in attested_users]
+        already_attested = [p for p in population if p['user'] in attested_users]
+
+        result = {
+            'campaign_id': _input.get('campaign_id'),
+            'policy_id': policy_id,
+            'policy_version': policy_version,
+            'population_count': len(population),
+            'already_attested_count': len(already_attested),
+            'non_attester_count': len(non_attesters),
+            'population': population,
+            'already_attested': already_attested,
+            'non_attesters': non_attesters,
+        }
+
+  # 5) LOOP every non-attester through a personalized attest request -> per-user deadline
+  #    sensor -> record/escalate condition. Child steps read the current person via _item.
+  - id: attest_loop
+    type: loop
+    depends_on: [compute_non_attesters]
+    loop_config:
+      over: "steps.compute_non_attesters.output.non_attesters"
+      step_ids: [send_attest_request, await_user_attestation, route_user_outcome]
+      max_iterations: 5000
+
+  # 5a) SEND a personalized attest request with a signed, time-boxed policy link to THIS person.
+  - id: send_attest_request
+    type: http
+    http_config:
+      url: "{input.attest_send_url}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.POLICY_API_TOKEN}"
+      body: |
+        {
+          "campaign_id": "{input.campaign_id}",
+          "policy_id": "{input.policy_id}",
+          "policy_version": "{input.policy_version}",
+          "recipient": "{_item.email}",
+          "recipient_user": "{_item.user}",
+          "deadline_hours": {input.user_deadline_hours},
+          "policy_url": "{steps.pull_policy_version.output.document_url}",
+          "require_signature": true
+        }
+      value_map:
+        attest_request_id: "id"
+        signed_link: "signed_url"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 5b) BLOCK until THIS person's attest webhook reports a signed acknowledgement (200) or
+  #     their individual deadline window elapses (sensor times out -> deadline-missed).
+  - id: await_user_attestation
+    type: sensor
+    depends_on: [send_attest_request]
+    sensor_config:
+      url: "{input.attest_webhook_base_url}/{input.campaign_id}/{_item.user}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200"
+      check_interval: 300
+      timeout: 86400
+
+  # 5c) CONDITION: attested -> record; deadline-missed -> escalate. Deterministic record/escalate
+  #     decision keyed off whether the webhook confirmed a signed acknowledgement. No model.
+  - id: route_user_outcome
+    type: code
+    depends_on: [await_user_attestation]
+    code_config:
+      language: python
+      code: |
+        item = _input.get('_item') or {}
+        sensor_out = _steps['await_user_attestation'] or {}
+
+        # The sensor returns the webhook payload when it fired (200). If it timed out it returns
+        # empty / non-confirming. Treat an explicit signed acknowledgement as attested.
+        status = str(
+            (sensor_out.get('status') if isinstance(sensor_out, dict) else '') or ''
+        ).strip().lower()
+        signed = bool(sensor_out.get('signed')) if isinstance(sensor_out, dict) else False
+        attested = signed or status in ('attested', 'acknowledged', 'signed', 'ok')
+
+        outcome = 'attested' if attested else 'deadline_missed'
+        result = {
+            'user': item.get('user'),
+            'email': item.get('email'),
+            'manager_email': item.get('manager_email'),
+            'department': item.get('department'),
+            'policy_version': _input.get('policy_version'),
+            'outcome': outcome,
+            'attested': attested,
+            'signature_id': sensor_out.get('signature_id') if isinstance(sensor_out, dict) else None,
+            'attested_at': sensor_out.get('attested_at') if isinstance(sensor_out, dict) else None,
+        }
+
+  # 6) DETERMINISTIC consolidation of every per-user loop outcome into attested / overdue sets. No model.
+  - id: consolidate_outcomes
+    type: code
+    depends_on: [attest_loop, compute_non_attesters]
+    code_config:
+      language: python
+      code: |
+        loop_out = _steps['attest_loop'] or {}
+        diff = _steps['compute_non_attesters'] or {}
+
+        # Loop output may be a list of per-item results or a wrapper dict.
+        items = loop_out if isinstance(loop_out, list) else (
+            loop_out.get('results') or loop_out.get('items') or loop_out.get('outputs') or []
+        )
+
+        attested_now = []
+        overdue = []
+        for entry in items:
+            # Each entry is the route_user_outcome result (possibly wrapped).
+            rec = entry if isinstance(entry, dict) else {}
+            if 'outcome' not in rec:
+                rec = rec.get('route_user_outcome') or rec.get('output') or rec
+            if not isinstance(rec, dict):
+                continue
+            if rec.get('attested'):
+                attested_now.append(rec)
+            else:
+                overdue.append(rec)
+
+        result = {
+            'campaign_id': diff.get('campaign_id'),
+            'policy_id': diff.get('policy_id'),
+            'policy_version': diff.get('policy_version'),
+            'attested_now_count': len(attested_now),
+            'overdue_count': len(overdue),
+            'attested_now': attested_now,
+            'overdue': overdue,
+            'has_overdue': len(overdue) > 0,
+        }
+
+  # 7) BRANCH on whether anyone missed their deadline. Deterministic, no model.
+  - id: overdue_branch
+    type: condition
+    depends_on: [consolidate_outcomes]
+    condition_config:
+      expression: "{steps.consolidate_outcomes.output.has_overdue} == true"
+      then: [escalate_overdue, build_ledger]
+      else: [build_ledger]
+
+  # 7a) ESCALATE the overdue population to their managers + open tickets. Real action path.
+  - id: escalate_overdue
+    type: http
+    http_config:
+      url: "{input.escalation_url}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.POLICY_API_TOKEN}"
+      body: |
+        {
+          "campaign_id": "{input.campaign_id}",
+          "policy_id": "{input.policy_id}",
+          "policy_version": "{input.policy_version}",
+          "action": "escalate_overdue",
+          "open_ticket": true,
+          "overdue": {steps.consolidate_outcomes.output.overdue}
+        }
+      value_map:
+        escalation_batch_id: "id"
+        ticket_ids: "ticket_ids"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 8) DETERMINISTIC ledger: compute coverage % and build the per-user attestation ledger where
+  #    EVERY ROW is SHA-256 hashed (canonical, sorted-key serialization). The legally-binding
+  #    artifact. No model ever touches this.
+  - id: build_ledger
+    type: code
+    depends_on: [consolidate_outcomes, compute_non_attesters]
+    code_config:
+      language: python
+      code: |
+        import json
+        import hashlib
+        from datetime import datetime, timezone
+
+        diff = _steps['compute_non_attesters'] or {}
+        outcomes = _steps['consolidate_outcomes'] or {}
+
+        campaign_id = diff.get('campaign_id')
+        policy_id = diff.get('policy_id')
+        policy_version = diff.get('policy_version')
+        generated_at = datetime.now(timezone.utc).isoformat()
+
+        population = diff.get('population', [])
+        population_count = len(population)
+        already = diff.get('already_attested', [])
+
+        # Index this-cycle outcomes by user for ledger assembly.
+        attested_now = {r.get('user'): r for r in outcomes.get('attested_now', []) if isinstance(r, dict)}
+        overdue = {r.get('user'): r for r in outcomes.get('overdue', []) if isinstance(r, dict)}
+        already_users = {p.get('user') for p in already}
+
+        def _hash_row(row):
+            canonical = json.dumps(row, sort_keys=True, separators=(',', ':'))
+            return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+
+        ledger = []
+        attested_total = 0
+        refused_or_overdue = 0
+        for person in population:
+            user = person.get('user')
+            if user in already_users:
+                status, src = 'attested', 'prior_cycle'
+                detail = {'attested_at': None, 'signature_id': None}
+            elif user in attested_now:
+                status, src = 'attested', 'this_cycle'
+                rec = attested_now[user]
+                detail = {'attested_at': rec.get('attested_at'), 'signature_id': rec.get('signature_id')}
+            elif user in overdue:
+                status, src = 'deadline_missed', 'this_cycle'
+                detail = {'attested_at': None, 'signature_id': None}
+            else:
+                # Sent but neither confirmed nor explicitly overdue -> treat as not-attested.
+                status, src = 'not_attested', 'this_cycle'
+                detail = {'attested_at': None, 'signature_id': None}
+
+            if status == 'attested':
+                attested_total += 1
+            else:
+                refused_or_overdue += 1
+
+            row_core = {
+                'campaign_id': campaign_id,
+                'policy_id': policy_id,
+                'policy_version': policy_version,
+                'user': user,
+                'email': person.get('email'),
+                'manager_email': person.get('manager_email'),
+                'department': person.get('department'),
+                'status': status,
+                'source': src,
+                'attested_at': detail.get('attested_at'),
+                'signature_id': detail.get('signature_id'),
+            }
+            row = dict(row_core)
+            row['row_sha256'] = _hash_row(row_core)
+            ledger.append(row)
+
+        coverage_pct = round((attested_total / population_count) * 100.0, 2) if population_count else 0.0
+
+        # Hash chain over the ordered row hashes => single tamper-evident ledger digest.
+        chain = hashlib.sha256()
+        for row in ledger:
+            chain.update(row['row_sha256'].encode('utf-8'))
+        ledger_sha256 = chain.hexdigest()
+
+        pack = {
+            'campaign_id': campaign_id,
+            'policy_id': policy_id,
+            'policy_version': policy_version,
+            'generated_at': generated_at,
+            'population_count': population_count,
+            'attested_count': attested_total,
+            'exception_count': refused_or_overdue,
+            'overdue_count': outcomes.get('overdue_count', 0),
+            'coverage_pct': coverage_pct,
+            'required_coverage_pct': float(_input.get('required_coverage_pct', 95) or 95),
+            'ledger': ledger,
+            'ledger_sha256': ledger_sha256,
+        }
+        canonical_pack = json.dumps(pack, sort_keys=True, separators=(',', ':'))
+
+        result = {
+            'campaign_id': campaign_id,
+            'policy_version': policy_version,
+            'coverage_pct': coverage_pct,
+            'required_coverage_pct': float(_input.get('required_coverage_pct', 95) or 95),
+            'meets_threshold': coverage_pct >= float(_input.get('required_coverage_pct', 95) or 95),
+            'attested_count': attested_total,
+            'exception_count': refused_or_overdue,
+            'population_count': population_count,
+            'ledger_sha256': ledger_sha256,
+            'object_key': f"evidence/{campaign_id}/{policy_id}-{policy_version}-attestation-pack.json",
+            'attestation_pack': pack,
+            'canonical_json': canonical_pack,
+        }
+
+  # 9) COMPLIANCE GATE: a NON-LLM coverage threshold (coverage >= required %) AND a human
+  #    compliance-officer attester must BOTH pass before the pack is sealed. All strategies pass.
+  - id: certification_gate
+    type: gate
+    depends_on: [build_ledger]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are a deterministic threshold checker, NOT a judge of content. Answer exactly
+              'approved' if and ONLY if the field meets_threshold is true AND coverage_pct is
+              greater than or equal to required_coverage_pct AND a ledger_sha256 is present;
+              otherwise answer 'rejected' and state which numeric condition failed. Do not use
+              discretion - this is a pure arithmetic gate. Pack: {steps.build_ledger.output}
+            model: sonnet
+        - type: human
+          config:
+            message: "Compliance officer: attest that this policy-attestation pack is complete and that coverage meets the required threshold before it is sealed to the object-lock bucket."
+            timeout_hours: 48
+            on_timeout: abort
+
+  # 10) WAIT for the S3 object-lock bucket to be reachable / lock-configured before sealing.
+  - id: await_bucket_ready
+    type: sensor
+    depends_on: [certification_gate]
+    sensor_config:
+      url: "{input.s3_base_url}/{input.s3_bucket}?object-lock"
+      method: GET
+      headers:
+        Accept: "application/xml"
+      condition: "status_code == 200"
+      check_interval: 30
+      timeout: 1800
+
+  # 11) SEAL: PUT the attestation pack to S3 with object-lock (WORM) + Compliance retention.
+  #     The ledger SHA-256 travels as object metadata so the pack is tamper-evident at rest.
+  - id: seal_attestation_pack
+    type: http
+    depends_on: [await_bucket_ready]
+    http_config:
+      url: "{input.s3_base_url}/{input.s3_bucket}/{steps.build_ledger.output.object_key}"
+      method: PUT
+      headers:
+        Content-Type: "application/json"
+        x-amz-object-lock-mode: "COMPLIANCE"
+        x-amz-object-lock-retain-until-date: "2034-01-01T00:00:00Z"
+        x-amz-meta-ledger-sha256: "{steps.build_ledger.output.ledger_sha256}"
+        x-amz-meta-campaign-id: "{input.campaign_id}"
+        x-amz-meta-policy-version: "{input.policy_version}"
+      auth: "aws4:{env.AWS_ACCESS_KEY_ID}:{env.AWS_SECRET_ACCESS_KEY}"
+      body: "{steps.build_ledger.output.canonical_json}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 12) NOTIFY compliance Slack with the certification summary + ledger integrity hash.
+  - id: notify_summary
+    type: notify
+    depends_on: [seal_attestation_pack]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: "Policy attestation {input.campaign_id} ({input.policy_id} {input.policy_version}) certified. Coverage {steps.build_ledger.output.coverage_pct}% of {steps.build_ledger.output.population_count} (required {steps.build_ledger.output.required_coverage_pct}%). Attested {steps.build_ledger.output.attested_count}, exceptions {steps.build_ledger.output.exception_count}. Ledger sha256 {steps.build_ledger.output.ledger_sha256} sealed (object-lock) at {steps.build_ledger.output.object_key}."
+
+  # 13) AUDIT EVIDENCE PDF: version, population, coverage, exceptions. The ONLY (optional) model
+  #     use is summarizing the exceptions narrative; it is provider-swappable via default_model.
+  - id: audit_evidence_report
+    type: report
+    depends_on: [seal_attestation_pack]
+    report_config:
+      template: "research-report"
+      format: pdf
+      theme: professional
+      title: "Policy Attestation Evidence - {input.policy_id} {input.policy_version} - {input.campaign_id}"
+      author: "Compliance & Governance Desk"
+    prompt: >-
+      Produce an auditor-facing policy-attestation evidence report (no emojis, no marketing tone)
+      for campaign {input.campaign_id}, policy {input.policy_id} version {input.policy_version}.
+      State the acknowledged population size {steps.build_ledger.output.population_count}, the
+      attested count {steps.build_ledger.output.attested_count}, the coverage
+      {steps.build_ledger.output.coverage_pct}% against the required
+      {steps.build_ledger.output.required_coverage_pct}% threshold, and the exception count
+      {steps.build_ledger.output.exception_count}. Confirm the per-row SHA-256 attestation ledger
+      and its chained digest {steps.build_ledger.output.ledger_sha256} were sealed to an
+      object-lock (WORM) bucket at {steps.build_ledger.output.object_key}. Summarize the exceptions
+      (deadline-missed and not-attested users, by department) and the escalation actions taken.
+      Attestation pack: {steps.build_ledger.output.attestation_pack}.
+
+on_complete:
+  storage_path: "policy-attestation-campaign-runner/{run_id}/result.json"

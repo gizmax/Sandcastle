@@ -1,0 +1,508 @@
+# name: Groundedness Guardrail Gate
+# description: A reusable pre-ship runtime safety gate. Called inline (via sub_workflow) on any LLM answer plus its source set - runs cheap deterministic guards (PII regex, prompt-injection signatures, JSON/schema validity, max length), routes obviously-bad output straight to block, runs a cross-provider claim-by-claim groundedness judge, merges every verdict into a structured pass/reject with offending spans, and offers one bounded repair retry before the final block.
+# tags: [LLMOps, Guardrail, Groundedness, PII, Prompt-Injection, Safety, Hallucination]
+# category: llmops_ai_eng
+
+name: groundedness-guardrail-gate
+description: >-
+  Drop-in runtime guardrail that blocks an LLM answer unless every claim is grounded
+  in the provided sources AND it passes PII, prompt-injection, schema and length checks.
+  Cheap deterministic Python guards run first (regex PII scan, banned/injection signature
+  scan, JSON-validity, max-length). A classifier routes obviously-bad output straight to
+  block. A groundedness judge RACES two providers (Sonnet vs Gemini 2.5 Pro) for a
+  claim-by-claim verdict so the gate never trusts a single vendor's safety filter. A
+  deterministic merge computes a groundedness score and folds in all guard verdicts; a
+  two-judge gate (cross-provider llm_eval) plus a deterministic final decision pass only
+  when the answer is grounded AND every deterministic guard is clean, otherwise it returns
+  a structured rejection with reasons and offending spans, logs the block to Slack, and
+  runs ONE bounded repair attempt (re-grounding the answer against the sources) before the
+  final block. The load-bearing decisions are pure Python or cross-provider judges.
+category: llmops_ai_eng
+tags: [LLMOps, Guardrail, Groundedness, PII, Prompt-Injection, Safety, Hallucination]
+default_model: sonnet
+default_timeout: 300
+
+input_schema:
+  type: object
+  required: [answer, sources]
+  properties:
+    answer:
+      type: string
+      description: "The candidate LLM answer to be gated before it ships to the user."
+      default: ""
+    sources:
+      type: string
+      description: "The source set the answer must be grounded in (concatenated docs / retrieved chunks)."
+      default: ""
+    expect_json:
+      type: boolean
+      description: "If true, the answer must be valid JSON (output-schema/format guard is enforced)."
+      default: false
+    max_chars:
+      type: integer
+      description: "Maximum allowed answer length in characters; over this fails the length guard."
+      default: 6000
+    min_groundedness:
+      type: number
+      description: "Minimum fraction of claims (0-1) that must be supported by the sources to pass."
+      default: 0.85
+    banned_patterns:
+      type: string
+      description: "Comma-separated extra banned substrings (policy terms) to scan for, case-insensitive."
+      default: ""
+    log_webhook:
+      type: string
+      description: "HTTP endpoint that receives a structured record of every block decision (audit sink)."
+      default: "https://hooks.example.com/guardrail/audit"
+    slack_channel:
+      type: string
+      description: "Slack channel where blocked answers are logged for human review."
+      default: "#guardrail-blocks"
+
+steps:
+  # 1) DETERMINISTIC GUARDS FIRST (pure Python, provider-free, cheapest).
+  #    Regex PII scan + banned/prompt-injection signature scan + JSON/schema
+  #    validity + max-length. No model is trusted for any of this.
+  - id: deterministic_guards
+    type: code
+    code_config:
+      language: python
+      code: |
+        import re, json
+
+        answer = str(_input.get("answer", "") or "")
+        expect_json = bool(_input.get("expect_json", False))
+        try:
+            max_chars = int(_input.get("max_chars", 6000) or 6000)
+        except (TypeError, ValueError):
+            max_chars = 6000
+
+        # --- PII regex scan (deterministic, with offending spans) ---
+        pii_patterns = {
+            "email": r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}",
+            "ssn": r"\b\d{3}-\d{2}-\d{4}\b",
+            "credit_card": r"\b(?:\d[ -]*?){13,16}\b",
+            "phone": r"\b\+?\d{1,3}[ .\-]?\(?\d{2,4}\)?[ .\-]?\d{3}[ .\-]?\d{3,4}\b",
+            "ipv4": r"\b(?:\d{1,3}\.){3}\d{1,3}\b",
+            "iban": r"\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b",
+        }
+        pii_hits = []
+        for label, pat in pii_patterns.items():
+            for m in re.finditer(pat, answer):
+                pii_hits.append({"kind": label, "span": [m.start(), m.end()], "text": m.group(0)[:64]})
+
+        # --- Prompt-injection / banned-pattern signature scan ---
+        injection_signatures = [
+            "ignore previous instructions", "ignore all previous",
+            "disregard the above", "disregard previous",
+            "system prompt", "you are now", "developer mode",
+            "jailbreak", "do anything now", "reveal your prompt",
+            "print the system prompt", "override your guidelines",
+            "begin{system}", "</system>", "<|im_start|>",
+        ]
+        extra = [p.strip().lower() for p in str(_input.get("banned_patterns", "") or "").split(",") if p.strip()]
+        banned = injection_signatures + extra
+        low = answer.lower()
+        injection_hits = []
+        for sig in banned:
+            idx = low.find(sig)
+            if idx != -1:
+                injection_hits.append({"signature": sig, "span": [idx, idx + len(sig)]})
+
+        # --- Output-schema / JSON-validity guard ---
+        json_valid = True
+        json_error = ""
+        if expect_json:
+            try:
+                json.loads(answer)
+            except Exception as exc:  # noqa: BLE001 - report any parse failure
+                json_valid = False
+                json_error = str(exc)[:200]
+
+        # --- Max-length guard ---
+        length = len(answer)
+        length_ok = length <= max_chars
+
+        guards = {
+            "pii": {"clean": len(pii_hits) == 0, "hits": pii_hits},
+            "injection": {"clean": len(injection_hits) == 0, "hits": injection_hits},
+            "schema": {"clean": json_valid, "error": json_error, "expected_json": expect_json},
+            "length": {"clean": length_ok, "length": length, "max_chars": max_chars},
+        }
+        deterministic_clean = all(g["clean"] for g in guards.values())
+
+        result = {
+            "answer": answer,
+            "answer_len": length,
+            "guards": guards,
+            "deterministic_clean": deterministic_clean,
+            # An answer that already trips a hard guard is "obviously bad".
+            "obviously_bad": (not deterministic_clean) and (
+                len(pii_hits) > 0 or len(injection_hits) > 0
+            ),
+        }
+
+  # 2) CLASSIFY: route obviously-bad output straight to the block primer,
+  #    otherwise send clean-so-far output into the groundedness judge path.
+  - id: triage_guards
+    type: classify
+    depends_on: [deterministic_guards]
+    classify_config:
+      categories: ["block_now", "needs_grounding"]
+      input: "{steps.deterministic_guards.output}"
+      model: haiku
+      branches:
+        block_now: [prime_block]
+        needs_grounding: [prime_grounding]
+
+  # 2a) Obviously-bad primer: short-circuit context for the merge/decision steps.
+  - id: prime_block
+    type: code
+    code_config:
+      language: python
+      code: |
+        guards = _steps.get("deterministic_guards") or {}
+        result = {
+            "route": "block_now",
+            "reason": "Tripped a hard deterministic guard (PII or prompt-injection signature).",
+            "guards": guards.get("guards", {}),
+        }
+
+  # 2b) Clean-so-far primer: carries answer+sources forward to the judge.
+  - id: prime_grounding
+    type: code
+    code_config:
+      language: python
+      code: |
+        guards = _steps.get("deterministic_guards") or {}
+        result = {
+            "route": "needs_grounding",
+            "answer": guards.get("answer", _input.get("answer", "")),
+            "sources": _input.get("sources", ""),
+            "deterministic_clean": bool(guards.get("deterministic_clean", False)),
+        }
+
+  # 3) GROUNDEDNESS JUDGE - cross-provider RACE (first-valid-wins failover).
+  #    Two independent providers extract claims and verify each against the
+  #    supplied sources. The gate never trusts a single vendor; whichever
+  #    returns a well-formed verdict first wins. NOT a vote.
+  - id: judge_sonnet
+    type: standard
+    model: sonnet
+    depends_on: [prime_grounding]
+    output_schema:
+      type: object
+      properties:
+        claims:
+          type: array
+          items:
+            type: object
+            properties:
+              claim: { type: string }
+              supported: { type: boolean }
+              evidence: { type: string }
+        unsupported_claims:
+          type: array
+          items: { type: string }
+        total_claims: { type: integer }
+        supported_claims: { type: integer }
+      required: [claims, unsupported_claims, total_claims, supported_claims]
+    prompt: |
+      You are a strict groundedness verifier. Extract every factual claim from the
+      ANSWER, then verify each claim ONLY against the SOURCES. A claim is "supported"
+      only if the sources directly entail it - no outside knowledge, no inference
+      beyond what the text states.
+
+      ANSWER:
+      {steps.prime_grounding.output.answer}
+
+      SOURCES:
+      {steps.prime_grounding.output.sources}
+
+      Return STRICT JSON only:
+      {
+        "claims": [ {"claim": "<verbatim claim>", "supported": true|false, "evidence": "<quoted source span or empty>"} ],
+        "unsupported_claims": ["<claim text>", ...],
+        "total_claims": <int>,
+        "supported_claims": <int>
+      }
+      Output JSON only, no prose.
+
+  - id: judge_gemini
+    type: standard
+    model: google/gemini-2.5-pro
+    depends_on: [prime_grounding]
+    output_schema:
+      type: object
+      properties:
+        claims:
+          type: array
+          items:
+            type: object
+            properties:
+              claim: { type: string }
+              supported: { type: boolean }
+              evidence: { type: string }
+        unsupported_claims:
+          type: array
+          items: { type: string }
+        total_claims: { type: integer }
+        supported_claims: { type: integer }
+      required: [claims, unsupported_claims, total_claims, supported_claims]
+    prompt: |
+      You are a second, independent groundedness verifier (different vendor).
+      Extract every factual claim from the ANSWER and verify each ONLY against the
+      SOURCES. Supported means the sources directly entail it; otherwise unsupported.
+
+      ANSWER:
+      {steps.prime_grounding.output.answer}
+
+      SOURCES:
+      {steps.prime_grounding.output.sources}
+
+      Return STRICT JSON only with keys claims (list of {claim, supported, evidence}),
+      unsupported_claims (list of strings), total_claims (int), supported_claims (int).
+      Output JSON only, no prose.
+
+  - id: groundedness_race
+    type: race
+    race_config:
+      branches:
+        - [judge_sonnet]
+        - [judge_gemini]
+      # First branch whose JSON parses with a claims list and an integer total wins.
+      # Deterministic first-valid-wins failover across providers - not a tally.
+      validator: "isinstance(output, dict) and isinstance(output.get('claims'), list) and isinstance(output.get('total_claims'), int)"
+
+  # 4) DETERMINISTIC MERGE: compute a groundedness score and fold in every
+  #    guard verdict into one decision envelope (pure Python, no model).
+  - id: merge_verdicts
+    type: code
+    depends_on: [groundedness_race, deterministic_guards]
+    code_config:
+      language: python
+      code: |
+        verdict = _steps.get("groundedness_race") or {}
+        if not isinstance(verdict, dict):
+            verdict = {}
+        guards_root = _steps.get("deterministic_guards") or {}
+        guards = guards_root.get("guards", {}) if isinstance(guards_root, dict) else {}
+
+        try:
+            total = int(verdict.get("total_claims", 0) or 0)
+        except (TypeError, ValueError):
+            total = 0
+        try:
+            supported = int(verdict.get("supported_claims", 0) or 0)
+        except (TypeError, ValueError):
+            supported = 0
+        unsupported = verdict.get("unsupported_claims") or []
+        if not isinstance(unsupported, list):
+            unsupported = []
+
+        # Groundedness score: fraction of supported claims (empty answer -> 0).
+        score = (supported / total) if total > 0 else 0.0
+        score = max(0.0, min(1.0, score))
+
+        try:
+            min_g = float(_input.get("min_groundedness", 0.85) or 0.85)
+        except (TypeError, ValueError):
+            min_g = 0.85
+
+        deterministic_clean = bool(guards_root.get("deterministic_clean", False)) if isinstance(guards_root, dict) else False
+        grounded = (score >= min_g) and (len(unsupported) == 0)
+
+        # Collect offending spans from every deterministic guard.
+        offending_spans = []
+        pii = (guards.get("pii") or {}).get("hits", [])
+        inj = (guards.get("injection") or {}).get("hits", [])
+        for h in pii:
+            offending_spans.append({"guard": "pii", "kind": h.get("kind"), "span": h.get("span")})
+        for h in inj:
+            offending_spans.append({"guard": "injection", "signature": h.get("signature"), "span": h.get("span")})
+
+        reasons = []
+        if not deterministic_clean:
+            if not (guards.get("pii", {}) or {}).get("clean", True):
+                reasons.append("PII detected in answer")
+            if not (guards.get("injection", {}) or {}).get("clean", True):
+                reasons.append("Prompt-injection / banned signature detected")
+            if not (guards.get("schema", {}) or {}).get("clean", True):
+                reasons.append("Answer is not valid JSON (schema guard)")
+            if not (guards.get("length", {}) or {}).get("clean", True):
+                reasons.append("Answer exceeds max length")
+        if score < min_g:
+            reasons.append(f"Groundedness {score:.2f} below threshold {min_g:.2f}")
+        if unsupported:
+            reasons.append(f"{len(unsupported)} unsupported claim(s)")
+
+        result = {
+            "groundedness_score": round(score, 4),
+            "min_groundedness": min_g,
+            "grounded": grounded,
+            "deterministic_clean": deterministic_clean,
+            "total_claims": total,
+            "supported_claims": supported,
+            "unsupported_claims": unsupported,
+            "guards": guards,
+            "offending_spans": offending_spans,
+            "reasons": reasons,
+            # PASS only if grounded AND every deterministic guard is clean.
+            "pass": grounded and deterministic_clean,
+        }
+
+  # 5) GATE: two-judge cross-provider llm_eval. BOTH must approve. This is the
+  #    semantic backstop on top of the deterministic merge - it cannot pass an
+  #    answer the merge already failed, and it uses two different vendors so the
+  #    guardrail never rides on one provider's judgment.
+  - id: groundedness_gate
+    type: gate
+    depends_on: [merge_verdicts]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: |
+              You are gating an LLM answer for shipment. Reply with exactly one word:
+              "approved" or "rejected".
+
+              Approve ONLY if the merged verdict has pass == true (grounded AND every
+              deterministic guard clean, zero unsupported claims). Otherwise reject.
+
+              Merged verdict: {steps.merge_verdicts.output}
+            input: "{steps.merge_verdicts.output}"
+            model: sonnet
+        - type: llm_eval
+          config:
+            prompt: |
+              Independent second judge (different vendor). Reply with exactly one word:
+              "approved" or "rejected". Approve ONLY if pass == true, there are zero
+              unsupported_claims, and offending_spans is empty. Otherwise reject.
+
+              Merged verdict: {steps.merge_verdicts.output}
+            input: "{steps.merge_verdicts.output}"
+            model: google/gemini-2.5-pro
+
+  # 6) DETERMINISTIC FINAL DECISION: build the structured pass/reject record.
+  #    This is the load-bearing outcome - pure Python, never a single prompt.
+  - id: final_decision
+    type: code
+    depends_on: [groundedness_gate, merge_verdicts]
+    code_config:
+      language: python
+      code: |
+        merged = _steps.get("merge_verdicts") or {}
+        if not isinstance(merged, dict):
+            merged = {}
+        # Reaching here means the two-judge gate approved; honor the deterministic
+        # merge as the source of truth for the final, structured verdict.
+        passed = bool(merged.get("pass", False))
+        result = {
+            "decision": "pass" if passed else "block",
+            "shipped_answer": _input.get("answer", "") if passed else None,
+            "groundedness_score": merged.get("groundedness_score", 0.0),
+            "unsupported_claims": merged.get("unsupported_claims", []),
+            "offending_spans": merged.get("offending_spans", []),
+            "reasons": merged.get("reasons", []),
+            "needs_repair": (not passed),
+        }
+
+  # 7) BOUNDED REPAIR: at most ONE re-grounding pass back through the answer
+  #    step, only when the final decision blocked. Deterministic loop bound.
+  - id: repair_loop
+    type: loop
+    depends_on: [final_decision]
+    loop_config:
+      over: "steps.final_decision.output.reasons"
+      step_ids: [repair_answer, recheck_repair]
+      max_iterations: 1
+      # Stop early if the repaired answer is already grounded again.
+      until: "_steps.get('recheck_repair', {}).get('repaired_pass', False)"
+
+  # 7a) Re-ground the answer against the sources, dropping unsupported claims.
+  - id: repair_answer
+    type: standard
+    prompt: |
+      The following answer was BLOCKED by the guardrail because some claims were not
+      grounded in the sources and/or a guard tripped. Produce a corrected answer that
+      keeps ONLY claims fully supported by the SOURCES, removes every unsupported claim,
+      and strips any PII or injection content. Do not add new claims.
+
+      ORIGINAL ANSWER:
+      {input.answer}
+
+      SOURCES:
+      {input.sources}
+
+      Block reasons: {steps.final_decision.output.reasons}
+      Unsupported claims to remove: {steps.final_decision.output.unsupported_claims}
+
+      Return only the corrected answer text.
+
+  # 7b) Cheap deterministic recheck of the repaired answer (PII + injection +
+  #     length). A clean recheck satisfies the loop `until` and ends the attempt.
+  - id: recheck_repair
+    type: code
+    code_config:
+      language: python
+      code: |
+        import re
+
+        repaired = _steps.get("repair_answer")
+        repaired = str(repaired or "")
+        low = repaired.lower()
+
+        signatures = [
+            "ignore previous instructions", "ignore all previous", "disregard previous",
+            "system prompt", "jailbreak", "do anything now", "<|im_start|>",
+        ]
+        injection_clean = not any(sig in low for sig in signatures)
+
+        pii_clean = (
+            re.search(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}", repaired) is None
+            and re.search(r"\b\d{3}-\d{2}-\d{4}\b", repaired) is None
+        )
+
+        try:
+            max_chars = int(_input.get("max_chars", 6000) or 6000)
+        except (TypeError, ValueError):
+            max_chars = 6000
+        length_clean = len(repaired) <= max_chars
+
+        repaired_pass = bool(repaired) and injection_clean and pii_clean and length_clean
+        result = {
+            "repaired_answer": repaired,
+            "injection_clean": injection_clean,
+            "pii_clean": pii_clean,
+            "length_clean": length_clean,
+            "repaired_pass": repaired_pass,
+        }
+
+  # 8) AUDIT SINK: POST the full block/pass record to the audit webhook (external
+  #    system -> http with an env-ref auth header).
+  - id: audit_log
+    type: http
+    depends_on: [final_decision, repair_loop]
+    http_config:
+      url: "{input.log_webhook}"
+      method: POST
+      auth: "bearer:{env.GUARDRAIL_AUDIT_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+      body: '{"decision": "{steps.final_decision.output.decision}", "score": "{steps.final_decision.output.groundedness_score}", "reasons": "{steps.final_decision.output.reasons}", "repair": "{steps.recheck_repair.output.repaired_pass}"}'
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 9) NOTIFY: log every block to Slack for human review (Slack -> notify).
+  - id: notify_block
+    type: notify
+    depends_on: [final_decision, repair_loop]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: ":no_entry: Guardrail decision {steps.final_decision.output.decision} (groundedness {steps.final_decision.output.groundedness_score}). Reasons: {steps.final_decision.output.reasons}. Repair attempted: {steps.recheck_repair.output.repaired_pass}."
+
+on_complete:
+  storage_path: "groundedness-guardrail-gate/{run_id}/result.json"

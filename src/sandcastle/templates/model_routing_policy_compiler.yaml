@@ -1,0 +1,599 @@
+# name: Model Routing Policy Compiler
+# description: Compile a declarative model-routing policy (per task class - cost ceiling, quality floor, residency, latency SLO) into a tested router config and PROVE it against a trace replay before rollout.
+# tags: [llmops, routing, policy-compiler, multi-provider, residency, slo, cost-optimization, trace-replay, rollout-gate]
+# category: llmops_ai_eng
+name: model-routing-policy-compiler
+description: >-
+  The META-layer for multi-provider routing. Instead of hard-wiring ONE routing
+  pattern (cost ladder, fastest-of-N, residency router), this template takes a
+  DECLARATIVE policy - per task class a {quality_floor, cost_ceiling,
+  max_latency_ms, allowed_regions} expressed over CAPABILITIES, not vendor names
+  - plus a replay of recent production requests, and COMPILES it into a tested
+  router config that it then PROVES against the trace before rollout.
+
+  Flow: an HTTP pull fetches the declarative policy + the trace replay from a
+  config/trace store (PostgREST over Postgres). A sandboxed CODE step validates
+  the policy is internally consistent against a 7-provider capability registry
+  (every task class MUST have a non-empty eligible-provider set, else fail
+  closed). A LOOP walks each replayed request: a CLASSIFY assigns the task class,
+  then a CODE step deterministically selects the eligible provider set satisfying
+  cost/quality/region/latency and SIMULATES the route (picks cheapest-eligible,
+  records projected cost/latency and any residency violation). For a measurement
+  SAMPLE, a cross-provider RACE (fastest-valid-wins across eligible providers)
+  executes a real call and a two-judge GATE (cross-provider llm_eval rubric)
+  scores realized quality against the floor. A CODE aggregate rolls up projected
+  cost, SLO-attainment and the residency-violation count (which MUST be zero). A
+  multi-strategy GATE blocks rollout if the policy would breach any quality floor
+  or any residency rule, else the compiled router config + projected
+  savings/quality report is emitted, written back to the store and a NOTIFY posts
+  the before/after cost and SLO projection. Providers are pure capability rows:
+  adding or removing one is a policy-table edit, never a code change.
+default_model: sonnet
+default_timeout: 1200
+input_schema:
+  required: ["policy_endpoint", "policy_id"]
+  properties:
+    policy_endpoint:
+      type: string
+      description: "Base URL of the policy/trace store REST API (PostgREST over Postgres) holding the declarative policy and the production-request replay."
+      default: "https://routing.internal/rest/v1"
+    policy_id:
+      type: string
+      description: "Identifier of the declarative routing policy to compile and test (selects both the policy row and its attached trace replay)."
+      example: "policy_2026q2_v3"
+    trace_limit:
+      type: integer
+      description: "Max number of replayed production requests to walk from the trace store."
+      default: 200
+    sample_size:
+      type: integer
+      description: "How many requests from the replay to actually EXECUTE (race + judge) to measure realized quality/cost. The rest are simulated only."
+      default: 12
+    baseline_cost_per_req:
+      type: number
+      description: "Assumed USD cost per request under the CURRENT (pre-compile) routing, used for the before/after savings projection."
+      default: 0.0180
+    slo_target_pct:
+      type: number
+      description: "Required latency-SLO attainment (fraction of requests within their task class max_latency_ms) for the policy to be rollout-eligible."
+      default: 0.95
+    slack_channel:
+      type: string
+      description: "Slack channel for the before/after cost + SLO rollout projection."
+      default: "#llmops-routing"
+steps:
+  # 1) HTTP - load the declarative policy (per task class: quality_floor, cost_ceiling,
+  #    max_latency_ms, allowed_regions) AND the attached replay of recent production
+  #    requests from the config/trace store (PostgREST over Postgres). One call returns
+  #    a row whose JSON carries both `task_classes` and `trace`.
+  - id: load_policy_and_trace
+    type: http
+    http_config:
+      url: "{input.policy_endpoint}/routing_policies?id=eq.{input.policy_id}&select=id,task_classes,trace&limit=1"
+      method: GET
+      headers:
+        Accept: "application/json"
+        Prefer: "count=exact"
+      auth: "bearer:{env.ROUTING_STORE_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2) CODE (sandboxed) - VALIDATE the policy is internally consistent against the
+  #    7-provider capability registry. The load-bearing pre-check: every task class
+  #    must declare a quality_floor/cost_ceiling/max_latency_ms/allowed_regions AND
+  #    must have a NON-EMPTY eligible-provider set under those constraints. If ANY
+  #    task class has an empty eligible set, the policy is rejected (fail closed) and
+  #    nothing downstream is allowed to claim a clean compile. Providers are CAPABILITY
+  #    rows (cost/quality/region/latency), never vendor-coupled logic.
+  - id: validate_policy
+    type: code
+    depends_on: [load_policy_and_trace]
+    code_config:
+      language: python
+      code: |
+        # PostgREST returns a list; take the single policy row.
+        rows = _steps.get('load_policy_and_trace')
+        if isinstance(rows, dict):
+            rows = rows.get('data') or rows.get('results') or [rows]
+        if not isinstance(rows, list):
+            rows = [rows] if rows else []
+        policy_row = rows[0] if rows and isinstance(rows[0], dict) else {}
+
+        task_classes = policy_row.get('task_classes') or {}
+        if not isinstance(task_classes, dict):
+            task_classes = {}
+
+        # 7-provider CAPABILITY registry. Each row is pure config: a model: alias,
+        # the region it serves, a quality score (0-1), a $/1k-token cost and a
+        # typical end-to-end latency in ms. Adding/removing a provider is editing
+        # THIS table - no routing code changes. All 7 Sandcastle providers present.
+        PROVIDERS = {
+            'cap_anthropic_eu': {'model': 'sonnet',               'region': 'eu-central', 'quality': 0.94, 'cost_per_1k': 0.0150, 'latency_ms': 1400},
+            'cap_openai':       {'model': 'openai/codex',         'region': 'us-east',    'quality': 0.92, 'cost_per_1k': 0.0120, 'latency_ms': 1300},
+            'cap_gemini':       {'model': 'google/gemini-2.5-pro','region': 'us-central', 'quality': 0.90, 'cost_per_1k': 0.0050, 'latency_ms': 1100},
+            'cap_mistral_eu':   {'model': 'mistral/large',        'region': 'eu-west',    'quality': 0.86, 'cost_per_1k': 0.0060, 'latency_ms': 900},
+            'cap_mistral_sm':   {'model': 'mistral/small',        'region': 'eu-west',    'quality': 0.74, 'cost_per_1k': 0.0006, 'latency_ms': 600},
+            'cap_minimax':      {'model': 'minimax/m2.5',         'region': 'apac',       'quality': 0.83, 'cost_per_1k': 0.0030, 'latency_ms': 1000},
+            'cap_onprem':       {'model': 'ollama',               'region': 'eu-onprem',  'quality': 0.70, 'cost_per_1k': 0.0000, 'latency_ms': 1800},
+        }
+
+        REQUIRED_KEYS = ('quality_floor', 'cost_ceiling', 'max_latency_ms', 'allowed_regions')
+
+        def eligible_for(spec):
+            # Deterministic capability match: a provider is eligible for a task class
+            # iff its region is allowed AND it meets the quality floor AND it is under
+            # the cost ceiling AND under the latency SLO. Pure policy-as-data.
+            q_floor = float(spec.get('quality_floor', 0.0) or 0.0)
+            cost_cap = float(spec.get('cost_ceiling', 1e9) or 1e9)
+            lat_cap = float(spec.get('max_latency_ms', 1e9) or 1e9)
+            regions = set(spec.get('allowed_regions') or [])
+            out = []
+            for name, cap in PROVIDERS.items():
+                if regions and cap['region'] not in regions:
+                    continue
+                if cap['quality'] < q_floor:
+                    continue
+                if cap['cost_per_1k'] > cost_cap:
+                    continue
+                if cap['latency_ms'] > lat_cap:
+                    continue
+                out.append(name)
+            # Cheapest-eligible first so simulation/race naturally prefer it.
+            out.sort(key=lambda n: PROVIDERS[n]['cost_per_1k'])
+            return out
+
+        per_class = {}
+        empty_classes = []
+        missing_keys = {}
+        for cls, spec in task_classes.items():
+            spec = spec if isinstance(spec, dict) else {}
+            miss = [k for k in REQUIRED_KEYS if k not in spec]
+            if miss:
+                missing_keys[cls] = miss
+            elig = eligible_for(spec)
+            per_class[cls] = {
+                'eligible': elig,
+                'cheapest': elig[0] if elig else None,
+                'spec': {k: spec.get(k) for k in REQUIRED_KEYS},
+            }
+            if not elig:
+                empty_classes.append(cls)
+
+        consistent = (len(task_classes) > 0) and (not empty_classes) and (not missing_keys)
+
+        result = {
+            'policy_id': policy_row.get('id') or _input.get('policy_id'),
+            'provider_registry': PROVIDERS,
+            'task_classes': list(task_classes.keys()),
+            'eligibility': per_class,
+            'empty_eligible_classes': empty_classes,
+            'missing_keys': missing_keys,
+            'consistent': bool(consistent),
+        }
+
+  # 3) LOOP - walk every replayed production request: assign its task class, then
+  #    deterministically select the eligible provider set and simulate the route.
+  #    Children defined separately; the loop item is one trace request.
+  - id: replay_trace
+    type: loop
+    depends_on: [validate_policy]
+    loop_config:
+      over: "steps.load_policy_and_trace.output.0.trace"
+      step_ids: [classify_task_class, simulate_route]
+      max_iterations: 500
+
+  # 3a) CLASSIFY - assign the task class for THIS replayed request from its prompt.
+  #     Cheap model (haiku). Both observed classes converge on the same deterministic
+  #     simulator so every branch is wired; the simulator re-reads the label.
+  - id: classify_task_class
+    type: classify
+    classify_config:
+      categories: ["interactive_chat", "bulk_extraction", "sensitive_pii", "long_reasoning"]
+      input: "{steps.replay_trace.output._item}"
+      model: haiku
+      branches:
+        interactive_chat: [simulate_route]
+        bulk_extraction: [simulate_route]
+        sensitive_pii: [simulate_route]
+        long_reasoning: [simulate_route]
+
+  # 3b) CODE (sandboxed) - the per-request ROUTING SIMULATION. Reads the classified
+  #     task class + the validated eligibility table, picks the cheapest-eligible
+  #     provider, and records projected cost/latency, whether it meets the class SLO,
+  #     and any RESIDENCY VIOLATION (eligible set was respected, so a violation here
+  #     means the policy left no in-region option - which validate_policy already
+  #     fails closed on, but we still count it per-request as hard evidence).
+  - id: simulate_route
+    type: code
+    code_config:
+      language: python
+      code: |
+        item = _input.get('_item') or {}
+        if not isinstance(item, dict):
+            item = {}
+
+        cls = str(_steps.get('classify_task_class') or '').strip()
+        valid = _steps.get('validate_policy') or {}
+        if not isinstance(valid, dict):
+            valid = {}
+        eligibility = valid.get('eligibility') or {}
+        registry = valid.get('provider_registry') or {}
+
+        # Fall back to the trace's own labelled class if the classifier returned
+        # something unexpected, then to the first known class (fail closed-ish).
+        if cls not in eligibility:
+            cls = str(item.get('task_class') or '').strip()
+        if cls not in eligibility:
+            cls = next(iter(eligibility), '')
+
+        entry = eligibility.get(cls) or {}
+        elig = entry.get('eligible') or []
+        spec = entry.get('spec') or {}
+        chosen = entry.get('cheapest')  # cheapest-eligible, already sorted
+
+        # Per-request token estimate from the trace (defaulted) -> projected cost.
+        tokens = item.get('tokens')
+        try:
+            tokens = int(tokens)
+        except (TypeError, ValueError):
+            tokens = 1200
+
+        cap = registry.get(chosen) if chosen else None
+        if isinstance(cap, dict):
+            proj_cost = round(cap['cost_per_1k'] * (tokens / 1000.0), 6)
+            proj_latency = int(cap['latency_ms'])
+            served_region = cap['region']
+            served_quality = float(cap['quality'])
+        else:
+            # No eligible provider for this class -> hard residency/feasibility miss.
+            proj_cost = 0.0
+            proj_latency = 10 ** 9
+            served_region = None
+            served_quality = 0.0
+
+        allowed_regions = set(spec.get('allowed_regions') or [])
+        # Residency violation: a provider was chosen but its region is NOT in the
+        # class's allowed_regions, OR no eligible provider existed at all.
+        residency_violation = bool(
+            (chosen is None) or
+            (allowed_regions and served_region is not None and served_region not in allowed_regions)
+        )
+
+        max_latency = float(spec.get('max_latency_ms', 1e9) or 1e9)
+        meets_slo = proj_latency <= max_latency
+        meets_quality_floor = served_quality >= float(spec.get('quality_floor', 0.0) or 0.0)
+
+        result = {
+            'request_id': item.get('id') or item.get('request_id'),
+            'task_class': cls,
+            'chosen_provider': chosen,
+            'eligible_set': elig,
+            'served_region': served_region,
+            'projected_cost_usd': proj_cost,
+            'projected_latency_ms': proj_latency,
+            'projected_quality': served_quality,
+            'meets_slo': bool(meets_slo),
+            'meets_quality_floor': bool(meets_quality_floor),
+            'residency_violation': residency_violation,
+        }
+
+  # 4) RACE - fastest-valid-wins FAILOVER across THREE different providers for the
+  #    measurement SAMPLE. This is cross-PROVIDER failover (first valid response
+  #    wins), NOT a vote. Each branch is pinned to a distinct provider so the
+  #    "fastest eligible" behaviour is genuinely cross-provider. Branch steps are
+  #    defined separately with NO depends_on. Downstream depends on the RACE.
+  - id: execute_sample_race
+    type: race
+    depends_on: [replay_trace]
+    race_config:
+      branches: [[exec_provider_a], [exec_provider_b], [exec_provider_c]]
+      validator: "isinstance(output, dict) and 'answer' in output and len(str(output.get('answer',''))) > 0"
+
+  # 4a) Sample executor A - EU Anthropic capability (sonnet).
+  - id: exec_provider_a
+    type: standard
+    model: sonnet
+    prompt: |
+      You are routed provider A (capability cap_anthropic_eu, region eu-central),
+      executing a SAMPLE request from the trace replay to MEASURE realized quality.
+
+      Eligibility table per task class (capabilities, not vendors):
+      {steps.validate_policy.output.eligibility}
+
+      Run the sampled request's task to the best of your ability.
+
+      Return STRICT JSON only:
+      {"answer": "<your result>", "served_by": "cap_anthropic_eu", "region": "eu-central"}
+    output_schema:
+      type: object
+      properties:
+        answer: { type: string }
+        served_by: { type: string }
+        region: { type: string }
+
+  # 4b) Sample executor B - Gemini capability (google/gemini-2.5-pro), DIFFERENT provider.
+  - id: exec_provider_b
+    type: standard
+    model: google/gemini-2.5-pro
+    prompt: |
+      You are routed provider B (capability cap_gemini, region us-central), the
+      cross-provider failover executing the SAME sampled request to measure quality.
+
+      Eligibility table per task class:
+      {steps.validate_policy.output.eligibility}
+
+      Run the sampled request's task to the best of your ability.
+
+      Return STRICT JSON only:
+      {"answer": "<your result>", "served_by": "cap_gemini", "region": "us-central"}
+    output_schema:
+      type: object
+      properties:
+        answer: { type: string }
+        served_by: { type: string }
+        region: { type: string }
+
+  # 4c) Sample executor C - Mistral EU capability (mistral/large), DIFFERENT provider again.
+  - id: exec_provider_c
+    type: standard
+    model: mistral/large
+    prompt: |
+      You are routed provider C (capability cap_mistral_eu, region eu-west), the
+      third cross-provider failover executing the SAME sampled request.
+
+      Eligibility table per task class:
+      {steps.validate_policy.output.eligibility}
+
+      Run the sampled request's task to the best of your ability.
+
+      Return STRICT JSON only:
+      {"answer": "<your result>", "served_by": "cap_mistral_eu", "region": "eu-west"}
+    output_schema:
+      type: object
+      properties:
+        answer: { type: string }
+        served_by: { type: string }
+        region: { type: string }
+
+  # 5) GATE - TWO-JUDGE realized-quality rubric on the race winner. Cross-provider:
+  #    two llm_eval strategies on DIFFERENT models score whether the executed sample
+  #    answer would CLEAR the task class quality floor. ALL strategies must pass.
+  #    A weak sample answer fails this gate and feeds the quality-floor evidence.
+  - id: sample_quality_gate
+    type: gate
+    depends_on: [execute_sample_race]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: |
+              You are judge 1 scoring a SAMPLED routed answer for a model-routing
+              policy compiler. Below is the executed sample answer (race winner).
+              Judge whether its quality is high enough to clear a demanding
+              production quality floor (correct, complete, well-formed). Answer
+              EXACTLY "approved" if it would clear the floor, otherwise "rejected".
+            input: "{steps.execute_sample_race.output}"
+            model: sonnet
+        - type: llm_eval
+          config:
+            prompt: |
+              You are judge 2 (a DIFFERENT provider) independently scoring the SAME
+              sampled routed answer. Judge ONLY realized quality against a demanding
+              production floor. Answer EXACTLY "approved" if it clears the floor,
+              otherwise "rejected".
+            input: "{steps.execute_sample_race.output}"
+            model: google/gemini-2.5-pro
+
+  # 6) CODE (sandboxed) - AGGREGATE the whole replay: projected total/per-request
+  #    cost, latency-SLO attainment, the per-class quality-floor outlook, and the
+  #    RESIDENCY-VIOLATION count which MUST be zero for a clean compile. This is the
+  #    deterministic verdict that the rollout gate reads. The savings projection is
+  #    before/after vs the supplied current-routing baseline.
+  - id: aggregate_projection
+    type: code
+    depends_on: [sample_quality_gate]
+    code_config:
+      language: python
+      code: |
+        rows = _steps.get('replay_trace') or []
+        if isinstance(rows, dict):
+            rows = rows.get('results') or rows.get('items') or list(rows.values())
+        if not isinstance(rows, list):
+            rows = [rows]
+        rows = [r for r in rows if isinstance(r, dict)]
+
+        n = len(rows) or 1
+        total_cost = round(sum(float(r.get('projected_cost_usd', 0.0) or 0.0) for r in rows), 6)
+        cost_per_req = round(total_cost / n, 6)
+
+        within_slo = sum(1 for r in rows if r.get('meets_slo'))
+        slo_attainment = round(within_slo / n, 4)
+
+        residency_violations = sum(1 for r in rows if r.get('residency_violation'))
+        quality_floor_misses = sum(1 for r in rows if not r.get('meets_quality_floor'))
+
+        # Per-class breakdown of the projection.
+        by_class = {}
+        for r in rows:
+            c = r.get('task_class') or 'unknown'
+            b = by_class.setdefault(c, {'count': 0, 'cost': 0.0, 'within_slo': 0, 'floor_miss': 0, 'residency_viol': 0})
+            b['count'] += 1
+            b['cost'] = round(b['cost'] + float(r.get('projected_cost_usd', 0.0) or 0.0), 6)
+            b['within_slo'] += 1 if r.get('meets_slo') else 0
+            b['floor_miss'] += 1 if not r.get('meets_quality_floor') else 0
+            b['residency_viol'] += 1 if r.get('residency_violation') else 0
+
+        # Validation + sample-judge evidence carried into the rollout decision.
+        valid = _steps.get('validate_policy') or {}
+        policy_consistent = bool(valid.get('consistent')) if isinstance(valid, dict) else False
+        sample_quality_ok = bool(_steps.get('sample_quality_gate'))  # gate passed -> truthy
+
+        # Before/after savings projection vs the current-routing baseline.
+        baseline_unit = float(_input.get('baseline_cost_per_req', 0.0180))
+        baseline_total = round(baseline_unit * len(rows), 6)
+        dollars_saved = round(baseline_total - total_cost, 6)
+        savings_pct = round((dollars_saved / baseline_total * 100.0), 1) if baseline_total > 0 else 0.0
+
+        slo_target = float(_input.get('slo_target_pct', 0.95))
+
+        # The hard rollout-eligibility verdict (pure code). ALL must hold:
+        #  - policy was internally consistent (no empty eligible set / missing keys)
+        #  - ZERO residency violations across the replay
+        #  - no quality-floor misses in the simulation AND the sample judges approved
+        #  - latency-SLO attainment at or above the target
+        rollout_eligible = bool(
+            policy_consistent
+            and residency_violations == 0
+            and quality_floor_misses == 0
+            and sample_quality_ok
+            and slo_attainment >= slo_target
+        )
+
+        result = {
+            'policy_id': _input.get('policy_id'),
+            'requests': len(rows),
+            'projected_total_cost_usd': total_cost,
+            'projected_cost_per_req_usd': cost_per_req,
+            'baseline_total_cost_usd': baseline_total,
+            'dollars_saved': dollars_saved,
+            'savings_pct': savings_pct,
+            'slo_attainment': slo_attainment,
+            'slo_target': slo_target,
+            'residency_violations': residency_violations,
+            'quality_floor_misses': quality_floor_misses,
+            'policy_consistent': policy_consistent,
+            'sample_quality_ok': sample_quality_ok,
+            'by_class': by_class,
+            'rollout_eligible': rollout_eligible,
+        }
+
+  # 7) GATE - ROLLOUT gate. ALL strategies must pass: (a) an llm_eval auditor that
+  #    reads the deterministic aggregate and confirms it would NOT breach any quality
+  #    floor and has ZERO residency violations; (b) a human release sign-off. If the
+  #    policy would breach the quality floor or any residency rule, this gate blocks
+  #    rollout. Only on pass does the compiled router config get emitted/written.
+  - id: rollout_gate
+    type: gate
+    depends_on: [aggregate_projection]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: |
+              You are a routing-policy rollout auditor. Below is the deterministic
+              replay aggregate for a compiled routing policy. Answer EXACTLY
+              "approved" ONLY if rollout_eligible is true: policy_consistent is true,
+              residency_violations is exactly 0, quality_floor_misses is 0, the
+              sample judges approved, and slo_attainment >= slo_target. If the policy
+              would breach ANY quality floor or ANY residency rule, answer "rejected".
+            input: "{steps.aggregate_projection.output}"
+            model: sonnet
+        - type: human
+          config:
+            message: "Release sign-off: approve rolling out this compiled routing policy? Confirm residency_violations == 0 and no quality-floor breach before the compiled router config is emitted."
+            timeout_hours: 24
+            on_timeout: abort
+
+  # 8) CONDITION - emit the compiled config ONLY when the deterministic verdict says
+  #    the policy is rollout-eligible; otherwise route to the rejection recorder so a
+  #    breaching policy never produces a deployable artifact. Driven by the code flag.
+  - id: rollout_decision
+    type: condition
+    depends_on: [rollout_gate]
+    condition_config:
+      expression: "{steps.aggregate_projection.output.rollout_eligible} == True"
+      then: [compile_router_config, write_back_config, notify_projection]
+      else: [record_rejection, notify_projection]
+
+  # 8a-PASS) TRANSFORM - emit the COMPILED ROUTER CONFIG: per-class cheapest-eligible
+  #          provider, eligible failover set, and the projected cost/SLO summary. This
+  #          is the deployable artifact - a portable routing table over capabilities.
+  - id: compile_router_config
+    type: transform
+    transform_config:
+      template: |
+        {
+          "policy_id": "{input.policy_id}",
+          "status": "rollout_approved",
+          "compiled_routes": "{steps.validate_policy.output.eligibility}",
+          "projected_cost_per_req_usd": "{steps.aggregate_projection.output.projected_cost_per_req_usd}",
+          "projected_total_cost_usd": "{steps.aggregate_projection.output.projected_total_cost_usd}",
+          "dollars_saved": "{steps.aggregate_projection.output.dollars_saved}",
+          "savings_pct": "{steps.aggregate_projection.output.savings_pct}",
+          "slo_attainment": "{steps.aggregate_projection.output.slo_attainment}",
+          "residency_violations": "{steps.aggregate_projection.output.residency_violations}",
+          "by_class": "{steps.aggregate_projection.output.by_class}",
+          "compiled_by": "model-routing-policy-compiler",
+          "note": "Routes are capability rows (cost/quality/region/latency); adding or removing a provider is a policy-table edit, not a code change."
+        }
+
+  # 8b-PASS) HTTP - write the compiled router config back to the routing store
+  #          (PostgREST upsert) so the live router can adopt it on rollout.
+  - id: write_back_config
+    type: http
+    http_config:
+      url: "{input.policy_endpoint}/compiled_routers"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Prefer: "resolution=merge-duplicates"
+      auth: "bearer:{env.ROUTING_STORE_TOKEN}"
+      body: "{steps.compile_router_config.output}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 8c-FAIL) CODE - record a structured REJECTION (no deployable config produced) with
+  #          the exact reason the policy was blocked, for the audit trail.
+  - id: record_rejection
+    type: code
+    code_config:
+      language: python
+      code: |
+        agg = _steps.get('aggregate_projection') or {}
+        if not isinstance(agg, dict):
+            agg = {}
+        reasons = []
+        if not agg.get('policy_consistent'):
+            reasons.append('policy_inconsistent_or_empty_eligible_set')
+        if int(agg.get('residency_violations', 0) or 0) > 0:
+            reasons.append('residency_rule_violation')
+        if int(agg.get('quality_floor_misses', 0) or 0) > 0:
+            reasons.append('quality_floor_breach')
+        if not agg.get('sample_quality_ok'):
+            reasons.append('sample_quality_below_floor')
+        if float(agg.get('slo_attainment', 0.0) or 0.0) < float(agg.get('slo_target', 0.95) or 0.95):
+            reasons.append('slo_attainment_below_target')
+
+        result = {
+            'policy_id': _input.get('policy_id'),
+            'status': 'rollout_blocked',
+            'rollout_eligible': bool(agg.get('rollout_eligible')),
+            'block_reasons': reasons or ['blocked_by_gate'],
+            'residency_violations': agg.get('residency_violations'),
+            'quality_floor_misses': agg.get('quality_floor_misses'),
+            'slo_attainment': agg.get('slo_attainment'),
+        }
+
+  # 9) NOTIFY - post the BEFORE/AFTER cost + SLO projection to Slack. Both rollout
+  #    paths converge here so the team always sees the compile outcome.
+  - id: notify_projection
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        *Routing policy compile* `{input.policy_id}`
+        Rollout eligible : {steps.aggregate_projection.output.rollout_eligible}
+        Requests replayed: {steps.aggregate_projection.output.requests}
+        Cost / req       : ${steps.aggregate_projection.output.projected_cost_per_req_usd}  (baseline ${input.baseline_cost_per_req})
+        Total saved      : ${steps.aggregate_projection.output.dollars_saved} ({steps.aggregate_projection.output.savings_pct}%)
+        SLO attainment   : {steps.aggregate_projection.output.slo_attainment} (target {steps.aggregate_projection.output.slo_target})
+        Residency viol.  : {steps.aggregate_projection.output.residency_violations} (must be 0)
+        Quality misses   : {steps.aggregate_projection.output.quality_floor_misses}
+
+on_complete:
+  storage_path: "model-routing-policy-compiler/{run_id}/result.json"

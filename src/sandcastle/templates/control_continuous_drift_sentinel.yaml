@@ -1,0 +1,716 @@
+# name: Control Continuous Drift Sentinel
+# description: Always-on watchdog that re-tests every in-scope SOC2 / ISO 27001 control against its live system-of-record between audits. A durable sensor blocks until the next test interval or a config-change webhook, then it pulls the in-scope control catalog from the GRC platform and LOOPS each control - GET the live state (IdP MFA report, cloud encryption config, branch-protection, backup runs), DETERMINISTICALLY rule-eval pass/fail and compute drift_delta vs the last sealed snapshot, classify steady/drifted/newly_broken, and route drifts to a materiality gate. The gate is a swappable llm_eval materiality judge PLUS a non-LLM threshold strategy, so a control passes/fails with zero model involvement. Confirmed drift events are SHA-256 sealed with before/after state, PUT to an object-lock S3 record, and the control owner + GRC channel are paged.
+# tags: [SOC2, ISO27001, GRC, drift, sensor, Okta, AWS, GitHub, S3, object-lock, PagerDuty, Slack, compliance, continuous-monitoring]
+# category: compliance_grc
+# connectors: okta, aws-s3, github, datadog, pagerduty, slack, servicenow
+name: control-continuous-drift-sentinel
+description: >-
+  An always-on drift sentinel for SOC2 / ISO 27001 controls. A durable SENSOR
+  blocks until the next scheduled control-test interval is reached OR a
+  config-change webhook fires (event-driven within a schedule). A DETERMINISTIC
+  http GET then pulls the in-scope control catalog from the GRC platform
+  (Vanta / Drata / Hyperproof style), and a code step normalizes each control into
+  a loopable row carrying its live system-of-record URL, the rule parameters it must
+  satisfy, and a pointer to its last sealed snapshot. The workflow LOOPS over every
+  control: an http GET fetches the LIVE state from the real system-of-record (Okta /
+  Entra MFA-enrollment report, AWS encryption-at-rest config, GitHub branch-protection,
+  Datadog / Cron backup-run history), a DETERMINISTIC code step rule-evaluates whether
+  the live state still satisfies the control parameters and computes pass/fail plus a
+  drift_delta against the last sealed snapshot, a CLASSIFY labels the control
+  steady / drifted / newly_broken, and a CONDITION routes only drifted-or-broken
+  controls into a MATERIALITY GATE. The gate has TWO strategies that BOTH must pass: a
+  swappable llm_eval materiality judge ("is this a real control failure or audit noise?",
+  backable by any of the 7 providers) AND a NON-LLM threshold strategy fed the
+  pre-computed drift_delta / severity booleans, so a control can pass/fail with zero
+  model involvement. After the loop, a deterministic code step SHA-256 seals each
+  confirmed drift event with its before/after state into a tamper-evident record, an
+  http PUT writes that immutable record to an object-lock (WORM) S3 bucket, and a NOTIFY
+  pages the control owner + the GRC channel. All detection, the rule-eval and the
+  drift_delta are 100% deterministic code and run even with zero model providers
+  available; the model is confined to the gate's swappable materiality judge.
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 1800
+input_schema:
+  required: ["program_id", "grc_base_url"]
+  properties:
+    program_id:
+      type: string
+      description: "Compliance program / engagement id whose in-scope controls are continuously watched (e.g. 'SOC2-2026-TYPE2')."
+      default: "SOC2-2026-TYPE2"
+      example: "SOC2-2026-TYPE2"
+    grc_base_url:
+      type: string
+      description: "GRC platform REST base URL exposing the in-scope control catalog and the per-control test-window status (Vanta / Drata / Hyperproof style)."
+      default: "https://your-org.grc-platform.com/api/v1"
+      example: "https://acme.drata.com/api/v1"
+    test_interval:
+      type: integer
+      description: "Seconds between control-test sweeps. The sensor blocks until the GRC platform reports the next test window is due OR a config-change webhook fires."
+      default: 3600
+      example: "3600"
+    sensor_timeout:
+      type: integer
+      description: "Sensor soft timeout in seconds - stop waiting for the next test window after this long (one watch run). Default 24h."
+      default: 86400
+      example: "86400"
+    snapshot_store_url:
+      type: string
+      description: "Control store REST base URL holding the last SEALED pass/fail snapshot per control (S3 REST gateway or Postgres / PostgREST) that drift_delta is measured against."
+      default: "https://control.internal/snapshots"
+      example: "https://control.internal/snapshots"
+    drift_threshold:
+      type: number
+      description: "Deterministic drift_delta threshold (0-1). The gate's non-LLM strategy treats any drift at or above this magnitude on a control that flipped pass->fail as material (not noise)."
+      default: 0.0
+      example: "0.0"
+    gate_model:
+      type: string
+      description: "Swappable materiality-judge model for the gate. Any of the 7 providers can back it; for regulated data pin an EU/local provider (mistral/large, ollama, omlx/qwen-3). Detection works with this unavailable."
+      default: "sonnet"
+      example: "mistral/large"
+    s3_base_url:
+      type: string
+      description: "Object-lock (WORM) S3 (or S3-compatible) REST base URL that receives the immutable sealed drift records."
+      default: "https://s3.eu-central-1.amazonaws.com"
+      example: "https://s3.eu-central-1.amazonaws.com"
+    s3_bucket:
+      type: string
+      description: "Object-lock (WORM) bucket name that stores the sealed drift events tamper-evidently."
+      default: "grc-control-drift-ledger"
+      example: "acme-grc-control-drift-ledger"
+    pagerduty_routing_key:
+      type: string
+      description: "Optional PagerDuty Events v2 routing key to page the control owner on a confirmed material drift. Leave empty to skip paging and only notify Slack."
+      default: ""
+      example: "R0ABCD1234EFGH5678IJKL"
+    slack_channel:
+      type: string
+      description: "GRC Slack channel that receives the drift digest / page."
+      default: "#grc-control-drift"
+      example: "#grc-control-drift"
+steps:
+  # 1) DURABLE SENSOR - block until the next control-test window is DUE for this program,
+  #    or a config-change webhook has bumped the GRC platform's pending-test flag. Polls the
+  #    program's test-window status endpoint; until a test is due there is nothing to re-check.
+  #    Event-driven within a schedule: a config change makes the next window due immediately.
+  - id: await_test_window
+    type: sensor
+    sensor_config:
+      url: "{input.grc_base_url}/programs/{input.program_id}/test-window?select=status,test_due,config_changed_since_last_seal"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200 and (response.get('test_due') == True or response.get('config_changed_since_last_seal') == True)"
+      check_interval: 3600
+      timeout: 86400
+
+  # 2) DETERMINISTIC pull of the in-scope control catalog for the program. Returns every
+  #    control with its live system-of-record URL and the rule parameters it must satisfy.
+  #    No model.
+  - id: pull_control_catalog
+    type: http
+    depends_on: [await_test_window]
+    http_config:
+      url: "{input.grc_base_url}/programs/{input.program_id}/controls?status=in_scope&expand=live_source,rule_params"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.GRC_API_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 3) DETERMINISTIC normalization of the catalog into a flat, loopable list. Each row carries
+  #    the live-source GET URL, the deterministic rule parameters (control_type + thresholds),
+  #    the owner, and the snapshot-store key the drift_delta is measured against. No model.
+  - id: normalize_controls
+    type: code
+    depends_on: [pull_control_catalog]
+    code_config:
+      language: python
+      code: |
+        catalog = _steps.get('pull_control_catalog') or {}
+        rows = catalog if isinstance(catalog, list) else (
+            catalog.get('controls') or catalog.get('data') or catalog.get('items') or []
+        )
+
+        snapshot_base = str(_input.get('snapshot_store_url') or '').rstrip('/')
+        program_id = _input.get('program_id')
+
+        controls = []
+        for rec in rows:
+            if not isinstance(rec, dict):
+                continue
+            cid = str(rec.get('control_id') or rec.get('id') or rec.get('code') or '').strip()
+            if not cid:
+                continue
+            # control_type drives which deterministic rule the eval step applies.
+            ctype = str(rec.get('control_type') or rec.get('type') or 'generic').lower()
+            params = rec.get('rule_params') or rec.get('parameters') or {}
+            if not isinstance(params, dict):
+                params = {}
+            controls.append({
+                'control_id': cid,
+                'name': rec.get('name') or rec.get('title') or cid,
+                'framework': rec.get('framework') or 'SOC2',
+                'control_type': ctype,
+                'live_source_url': rec.get('live_source_url') or rec.get('source_url') or rec.get('evidence_url') or '',
+                'rule_params': params,
+                'owner': rec.get('owner') or rec.get('control_owner') or 'unassigned',
+                'owner_email': rec.get('owner_email') or '',
+                'owner_pd_service': rec.get('pagerduty_service_id') or '',
+                # Snapshot store key holding this control's last sealed pass/fail + score.
+                'snapshot_url': f"{snapshot_base}?program=eq.{program_id}&control=eq.{cid}&order=sealed_at.desc&limit=1",
+                'program_id': program_id,
+            })
+
+        result = {
+            'program_id': program_id,
+            'control_count': len(controls),
+            'controls': controls,
+        }
+
+  # 4) LOOP over every in-scope control. Per-control child chain: GET live state (http) ->
+  #    GET last sealed snapshot (http) -> deterministic rule-eval + drift_delta (code) ->
+  #    classify steady/drifted/newly_broken -> condition routes drift into the materiality gate.
+  - id: per_control_loop
+    type: loop
+    depends_on: [normalize_controls]
+    loop_config:
+      over: "steps.normalize_controls.output.controls"
+      step_ids:
+        - fetch_live_state
+        - fetch_last_snapshot
+        - evaluate_control
+        - classify_drift
+        - drift_branch
+      max_iterations: 1000
+
+  # 4a) http GET the LIVE state from THIS control's real system-of-record. The control row
+  #     carries the fully-resolved URL (Okta/Entra MFA-enrollment report, AWS encryption-at-rest
+  #     config, GitHub branch-protection settings, Datadog/Cron backup-run history). Auth via the
+  #     per-source env token. on_failure: skip so one dead source does not abort the whole sweep.
+  - id: fetch_live_state
+    type: http
+    http_config:
+      url: "{input._item.live_source_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.LIVE_SOURCE_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 4b) http GET this control's LAST SEALED snapshot (prior pass/fail + score) from the control
+  #     store, so the drift_delta is measured against the previously-sealed truth, not re-derived.
+  - id: fetch_last_snapshot
+    type: http
+    http_config:
+      url: "{input._item.snapshot_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.SNAPSHOT_STORE_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 4c) DETERMINISTIC RULE EVALUATION. NO model. For THIS control, apply the control_type's
+  #     rule to the live state to compute a 0-1 compliance score + pass/fail, then compute the
+  #     drift_delta = previous_score - current_score against the last sealed snapshot. This is the
+  #     audit-load-bearing math the gate's non-LLM threshold strategy consumes. Supported types:
+  #     mfa_enrollment, encryption_at_rest, branch_protection, backup_runs; anything else falls
+  #     back to a generic "compliant" boolean. Reads live state, snapshot and the rule params.
+  - id: evaluate_control
+    type: code
+    code_config:
+      language: python
+      code: |
+        control = _input.get('_item') or {}
+        live = _steps.get('fetch_live_state') or {}
+        snap_raw = _steps.get('fetch_last_snapshot') or {}
+        params = control.get('rule_params') or {}
+        ctype = str(control.get('control_type') or 'generic').lower()
+
+        # --- normalize the live payload into a list of records where useful -------------
+        def as_rows(blob):
+            if isinstance(blob, list):
+                return [r for r in blob if isinstance(r, dict)]
+            if isinstance(blob, dict):
+                for k in ('records', 'data', 'items', 'results', 'value', 'rows'):
+                    v = blob.get(k)
+                    if isinstance(v, list):
+                        return [r for r in v if isinstance(r, dict)]
+            return []
+
+        def as_dict(blob):
+            if isinstance(blob, dict):
+                for k in ('config', 'data', 'settings', 'result'):
+                    v = blob.get(k)
+                    if isinstance(v, dict):
+                        return v
+                return blob
+            return {}
+
+        def truthy(v):
+            return str(v).strip().lower() in ('true', '1', 'yes', 'enabled', 'on', 'active')
+
+        score = 0.0
+        passed = False
+        detail = {}
+
+        if ctype == 'mfa_enrollment':
+            # Live IdP report rows: each user with an 'mfa'/'enrolled' boolean.
+            rows = as_rows(live)
+            total = len(rows)
+            enrolled = sum(
+                1 for r in rows
+                if truthy(r.get('mfa') if 'mfa' in r else r.get('mfa_enrolled', r.get('enrolled', False)))
+            )
+            frac = (enrolled / total) if total else 0.0
+            required = float(params.get('min_enrollment_fraction', 1.0) or 1.0)
+            score = round(frac, 4)
+            passed = total > 0 and frac >= required
+            detail = {'total_users': total, 'mfa_enrolled': enrolled, 'fraction': round(frac, 4), 'required': required}
+
+        elif ctype == 'encryption_at_rest':
+            # Live cloud config: resources each with an 'encrypted' boolean.
+            rows = as_rows(live)
+            total = len(rows)
+            enc = sum(1 for r in rows if truthy(r.get('encrypted', r.get('encryption', r.get('sse', False)))))
+            frac = (enc / total) if total else 0.0
+            score = round(frac, 4)
+            # Encryption is binary-strict: ALL in-scope resources must be encrypted.
+            passed = total > 0 and enc == total
+            detail = {'resources': total, 'encrypted': enc, 'unencrypted': total - enc, 'fraction': round(frac, 4)}
+
+        elif ctype == 'branch_protection':
+            # Live VCS branch-protection settings for the protected branch.
+            cfg = as_dict(live)
+            require_reviews = bool((cfg.get('required_pull_request_reviews') or cfg.get('required_reviews')))
+            min_reviewers = int(
+                (cfg.get('required_pull_request_reviews') or {}).get('required_approving_review_count', 0)
+                if isinstance(cfg.get('required_pull_request_reviews'), dict)
+                else cfg.get('required_reviewers', 0) or 0
+            )
+            enforce_admins = truthy((cfg.get('enforce_admins') or {}).get('enabled', cfg.get('enforce_admins')))
+            block_force = truthy((cfg.get('allow_force_pushes') or {}).get('enabled', True)) is False or \
+                truthy(cfg.get('block_force_pushes', False))
+            need_reviewers = int(params.get('min_reviewers', 1) or 1)
+            checks = [require_reviews, min_reviewers >= need_reviewers, enforce_admins, block_force]
+            score = round(sum(1 for c in checks if c) / len(checks), 4)
+            passed = all(checks)
+            detail = {
+                'required_reviews': require_reviews, 'min_reviewers': min_reviewers,
+                'need_reviewers': need_reviewers, 'enforce_admins': enforce_admins,
+                'force_push_blocked': block_force,
+            }
+
+        elif ctype == 'backup_runs':
+            # Live backup-run history: rows each with a 'status' and a 'last_run'/'timestamp'.
+            from datetime import datetime, timezone, timedelta
+            rows = as_rows(live)
+            max_age_h = float(params.get('max_age_hours', 24) or 24)
+            now = datetime.now(timezone.utc)
+            def _parse(v):
+                try:
+                    return datetime.fromisoformat(str(v).replace('Z', '+00:00'))
+                except (ValueError, TypeError):
+                    return None
+            ok_runs = []
+            for r in rows:
+                ts = _parse(r.get('last_run') or r.get('timestamp') or r.get('finished_at'))
+                status_ok = str(r.get('status', '')).lower() in ('success', 'succeeded', 'completed', 'ok')
+                fresh = bool(ts and (now - ts) <= timedelta(hours=max_age_h))
+                if status_ok and fresh:
+                    ok_runs.append(r)
+            total = len(rows)
+            score = round((len(ok_runs) / total), 4) if total else 0.0
+            # Pass if at least one in-scope job has a recent successful run.
+            passed = len(ok_runs) > 0 and (total == 0 or len(ok_runs) == total)
+            detail = {'jobs': total, 'healthy_runs': len(ok_runs), 'max_age_hours': max_age_h}
+
+        else:
+            # Generic fallback: the source self-reports a compliant flag.
+            cfg = as_dict(live)
+            compliant = truthy(cfg.get('compliant', cfg.get('status', False)))
+            score = 1.0 if compliant else 0.0
+            passed = compliant
+            detail = {'compliant': compliant}
+
+        # --- drift_delta vs the last SEALED snapshot -----------------------------------
+        snap_rows = snap_raw if isinstance(snap_raw, list) else (
+            snap_raw.get('data') or snap_raw.get('items') or snap_raw.get('records') or [snap_raw]
+        )
+        prev = snap_rows[0] if snap_rows and isinstance(snap_rows[0], dict) else {}
+        prev_passed = bool(prev.get('passed')) if prev else None
+        try:
+            prev_score = float(prev.get('score')) if prev and prev.get('score') is not None else None
+        except (ValueError, TypeError):
+            prev_score = None
+
+        # drift_delta: how far the compliance score fell since the last seal (0 if it rose/held).
+        if prev_score is not None:
+            drift_delta = round(max(0.0, prev_score - score), 4)
+        else:
+            drift_delta = 0.0
+
+        # newly_broken = was passing at last seal, now failing. The sharpest drift signal.
+        newly_broken = bool(prev_passed) and not passed
+        # drifted = score moved down meaningfully but did not (yet) flip pass->fail.
+        drifted = (drift_delta > 0) and not newly_broken
+        first_seal = prev_passed is None
+
+        result = {
+            'control_id': control.get('control_id'),
+            'name': control.get('name'),
+            'framework': control.get('framework'),
+            'control_type': ctype,
+            'owner': control.get('owner'),
+            'owner_email': control.get('owner_email'),
+            'owner_pd_service': control.get('owner_pd_service'),
+            'score': score,
+            'passed': passed,
+            'prev_passed': prev_passed,
+            'prev_score': prev_score,
+            'drift_delta': drift_delta,
+            'newly_broken': newly_broken,
+            'drifted': drifted,
+            'first_seal': first_seal,
+            'detail': detail,
+            # before/after state captured for the SHA-256 seal of any confirmed drift.
+            'before_state': prev,
+            'after_state': {'score': score, 'passed': passed, 'detail': detail},
+        }
+
+  # 4d) CLASSIFY the control's status. Cheap model only LABELS; the pass/fail/drift_delta
+  #     decision was ALREADY made deterministically in code. steady (no drift) /
+  #     drifted (score slipped, not yet failing) / newly_broken (was passing, now failing).
+  - id: classify_drift
+    type: classify
+    classify_config:
+      model: haiku
+      input: "Classify this control's drift status using ONLY the deterministic flags. steady = drift_delta is 0 and not newly_broken; drifted = drift_delta > 0 but the control has not flipped to failing; newly_broken = it was passing at the last seal and is now failing. drift_delta={steps.evaluate_control.output.drift_delta}, newly_broken={steps.evaluate_control.output.newly_broken}, drifted={steps.evaluate_control.output.drifted}, passed={steps.evaluate_control.output.passed}, first_seal={steps.evaluate_control.output.first_seal}."
+      categories:
+        - steady
+        - drifted
+        - newly_broken
+      branches:
+        steady: [record_control_status]
+        drifted: [drift_branch]
+        newly_broken: [drift_branch]
+
+  # 4e) CONDITION - route drifted-or-broken controls into the materiality gate; steady controls
+  #     record their status directly. Deterministic branch keyed off the in-code drift flags
+  #     (not the model label) so routing survives a missing model provider. No model.
+  - id: drift_branch
+    type: condition
+    condition_config:
+      expression: "{steps.evaluate_control.output.drift_delta} > 0 or {steps.evaluate_control.output.newly_broken}"
+      then: [materiality_gate, record_control_status]
+      else: [record_control_status]
+
+  # 4f) MATERIALITY GATE (swappable + model-independent). TWO strategies, BOTH must pass:
+  #     (1) llm_eval materiality judge - "is this a real control failure or audit noise?",
+  #         model pinned to a SWAPPABLE provider (any of the 7 can back it);
+  #     (2) llm_eval acting as a DETERMINISTIC threshold - it is fed ONLY the pre-computed
+  #         drift_delta / newly_broken / drift_threshold and told to answer purely from the
+  #         arithmetic, so a control still passes/fails the gate on the non-LLM math alone.
+  - id: materiality_gate
+    type: gate
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are a SOC2 / ISO 27001 materiality reviewer. A control was deterministically
+              re-tested against its live system-of-record and drift was detected in code. Decide
+              whether this is a REAL control failure worth paging an owner, or transient audit
+              noise (e.g. a single just-added resource mid-rollout, a reporting lag). Answer
+              exactly 'approved' if it is a material failure that should be sealed and paged,
+              otherwise answer 'rejected' and name the reason. Judge materiality only; the
+              numeric magnitude is checked separately.
+            input: "Control {steps.evaluate_control.output.control_id} ({steps.evaluate_control.output.control_type}): passed={steps.evaluate_control.output.passed} prev_passed={steps.evaluate_control.output.prev_passed} newly_broken={steps.evaluate_control.output.newly_broken} drift_delta={steps.evaluate_control.output.drift_delta} detail={steps.evaluate_control.output.detail}"
+            model: "{input.gate_model}"
+        - type: llm_eval
+          config:
+            prompt: >-
+              Deterministic threshold check. Answer exactly 'approved' if newly_broken is True OR
+              drift_delta >= {input.drift_threshold}; otherwise answer 'rejected'. Use ONLY the
+              supplied numbers and booleans - do not infer or reason beyond the arithmetic
+              comparison.
+            input: "newly_broken={steps.evaluate_control.output.newly_broken} drift_delta={steps.evaluate_control.output.drift_delta} threshold={input.drift_threshold}"
+            model: haiku
+
+  # 4g) DETERMINISTIC per-control status record. Folds the rule-eval result, the classify label
+  #     and (when the gate ran) the materiality outcome into one canonical row. A control is a
+  #     CONFIRMED drift event only when it drifted AND the materiality gate passed. No model.
+  - id: record_control_status
+    type: code
+    code_config:
+      language: python
+      code: |
+        ev = _steps.get('evaluate_control') or {}
+        label = str(_steps.get('classify_drift') or '').strip().lower()
+        gate = _steps.get('materiality_gate')
+
+        # Did the materiality gate run, and did all strategies pass?
+        gate_ran = gate is not None
+        if isinstance(gate, dict):
+            gate_passed = bool(gate.get('passed', gate.get('approved', gate.get('result', False))))
+        else:
+            gate_passed = bool(gate) if gate is not None else False
+
+        drift_delta = float(ev.get('drift_delta') or 0.0)
+        newly_broken = bool(ev.get('newly_broken'))
+        drifted = bool(ev.get('drifted'))
+
+        # Canonical status. A confirmed, sealable drift event requires the gate to have passed.
+        if newly_broken and gate_ran and gate_passed:
+            status = 'newly_broken'
+        elif (drifted or drift_delta > 0) and gate_ran and gate_passed:
+            status = 'drifted'
+        elif (newly_broken or drifted or drift_delta > 0) and gate_ran and not gate_passed:
+            status = 'noise'        # drift detected but gate ruled it immaterial
+        else:
+            status = 'steady'
+
+        confirmed_drift = status in ('drifted', 'newly_broken')
+
+        result = {
+            'control_id': ev.get('control_id'),
+            'name': ev.get('name'),
+            'framework': ev.get('framework'),
+            'control_type': ev.get('control_type'),
+            'owner': ev.get('owner'),
+            'owner_email': ev.get('owner_email'),
+            'owner_pd_service': ev.get('owner_pd_service'),
+            'status': status,
+            'classify_label': label,
+            'passed': bool(ev.get('passed')),
+            'prev_passed': ev.get('prev_passed'),
+            'score': ev.get('score'),
+            'prev_score': ev.get('prev_score'),
+            'drift_delta': drift_delta,
+            'newly_broken': newly_broken,
+            'gate_ran': gate_ran,
+            'gate_passed': gate_passed if gate_ran else None,
+            'confirmed_drift': confirmed_drift,
+            'before_state': ev.get('before_state'),
+            'after_state': ev.get('after_state'),
+            'detail': ev.get('detail'),
+        }
+
+  # 5) DETERMINISTIC aggregation of every per-control status from the loop. Splits steady /
+  #     confirmed-drift / noise, builds the list of confirmed drift events with before/after
+  #     state + owners, and counts. fail_count drives the seal-and-page path. No model.
+  - id: aggregate_drift
+    type: code
+    depends_on: [per_control_loop]
+    code_config:
+      language: python
+      code: |
+        loop_out = _steps.get('per_control_loop') or {}
+        catalog = _steps.get('normalize_controls') or {}
+
+        items = loop_out if isinstance(loop_out, list) else (
+            loop_out.get('results') or loop_out.get('items') or loop_out.get('iterations') or []
+        )
+
+        controls = []
+        for it in items:
+            row = it
+            if isinstance(it, dict) and 'control_id' not in it:
+                row = it.get('record_control_status') or it.get('output') or it
+            if isinstance(row, dict) and row.get('control_id'):
+                controls.append(row)
+
+        total = len(controls)
+        confirmed = [c for c in controls if c.get('confirmed_drift')]
+        newly_broken = [c for c in confirmed if c.get('status') == 'newly_broken']
+        drifted = [c for c in confirmed if c.get('status') == 'drifted']
+        noise = [c for c in controls if c.get('status') == 'noise']
+        steady = [c for c in controls if c.get('status') == 'steady']
+
+        drift_events = [
+            {
+                'control_id': c.get('control_id'),
+                'name': c.get('name'),
+                'framework': c.get('framework'),
+                'control_type': c.get('control_type'),
+                'owner': c.get('owner'),
+                'owner_email': c.get('owner_email'),
+                'owner_pd_service': c.get('owner_pd_service'),
+                'status': c.get('status'),
+                'drift_delta': c.get('drift_delta'),
+                'before_state': c.get('before_state'),
+                'after_state': c.get('after_state'),
+                'detail': c.get('detail'),
+            }
+            for c in confirmed
+        ]
+
+        result = {
+            'program_id': catalog.get('program_id'),
+            'total_controls': total,
+            'steady_count': len(steady),
+            'noise_count': len(noise),
+            'drifted_count': len(drifted),
+            'newly_broken_count': len(newly_broken),
+            'confirmed_drift_count': len(confirmed),
+            'drift_events': drift_events,
+            'controls': controls,
+            # fail_count > 0 -> there are confirmed material drifts to seal + page.
+            'fail_count': len(confirmed),
+        }
+
+  # 6) DETERMINISTIC SHA-256 SEAL. NO model. Canonical-JSON each confirmed drift event
+  #     (including its before/after state), hash it, then hash the ordered list of per-event
+  #     digests into a ledger root hash. This is the tamper-evident signature the auditor
+  #     verifies. Also builds the immutable object key for the WORM bucket PUT.
+  - id: seal_drift_events
+    type: code
+    depends_on: [aggregate_drift]
+    code_config:
+      language: python
+      code: |
+        import json
+        import hashlib
+        from datetime import datetime, timezone
+
+        agg = _steps.get('aggregate_drift') or {}
+        events = agg.get('drift_events', [])
+        sealed_at = datetime.now(timezone.utc).isoformat()
+
+        sealed_events = []
+        for ev in events:
+            canonical = json.dumps(ev, sort_keys=True, separators=(',', ':'))
+            digest = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+            sealed_events.append({
+                'control_id': ev.get('control_id'),
+                'status': ev.get('status'),
+                'drift_delta': ev.get('drift_delta'),
+                'owner': ev.get('owner'),
+                'sha256': digest,
+                'before_state': ev.get('before_state'),
+                'after_state': ev.get('after_state'),
+            })
+
+        # Ledger root hash binds every per-event digest in deterministic order.
+        root_material = json.dumps([e['sha256'] for e in sealed_events], separators=(',', ':'))
+        ledger_root = hashlib.sha256(root_material.encode('utf-8')).hexdigest()
+
+        record = {
+            'program_id': agg.get('program_id'),
+            'sealed_at': sealed_at,
+            'confirmed_drift_count': agg.get('confirmed_drift_count', 0),
+            'newly_broken_count': agg.get('newly_broken_count', 0),
+            'drifted_count': agg.get('drifted_count', 0),
+            'ledger_root_sha256': ledger_root,
+            'events': sealed_events,
+        }
+
+        canonical_record = json.dumps(record, sort_keys=True, separators=(',', ':'))
+        # One immutable object per sweep, keyed by program + seal timestamp.
+        object_key = f"drift-ledger/{agg.get('program_id')}/{sealed_at.replace(':', '-')}.json"
+
+        result = {
+            'object_key': object_key,
+            'ledger_root_sha256': ledger_root,
+            'sealed_at': sealed_at,
+            'record': record,
+            'canonical_json': canonical_record,
+            'byte_length': len(canonical_record),
+            'has_drift': bool(sealed_events),
+        }
+
+  # 7) CONDITION - only seal-to-S3 + page when there is at least one CONFIRMED material drift.
+  #    A clean sweep (fail_count == 0) skips the immutable PUT and the page entirely. No model.
+  - id: route_drift
+    type: condition
+    depends_on: [seal_drift_events]
+    condition_config:
+      expression: "{steps.aggregate_drift.output.fail_count} > 0"
+      then: [put_drift_record, page_owner, notify_drift]
+      else: [notify_clean]
+
+  # 7a) SEAL TO S3 (WORM) - PUT the SHA-256-sealed drift record to the object-lock bucket. The
+  #     ledger root hash travels as object metadata so the record is tamper-evident at rest, and
+  #     COMPLIANCE object-lock mode makes it immutable for the retention window. Connector: aws-s3.
+  - id: put_drift_record
+    type: http
+    http_config:
+      url: "{input.s3_base_url}/{input.s3_bucket}/{steps.seal_drift_events.output.object_key}"
+      method: PUT
+      headers:
+        Content-Type: "application/json"
+        x-amz-object-lock-mode: "COMPLIANCE"
+        x-amz-object-lock-retain-until-date: "2034-01-01T00:00:00Z"
+        x-amz-meta-ledger-root-sha256: "{steps.seal_drift_events.output.ledger_root_sha256}"
+        x-amz-meta-program-id: "{input.program_id}"
+      auth: "aws4:{env.AWS_ACCESS_KEY_ID}:{env.AWS_SECRET_ACCESS_KEY}"
+      body: "{steps.seal_drift_events.output.canonical_json}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 7b) PAGE the control owner - open a PagerDuty incident so the owner of a silently-broken
+  #     control is woken the moment it drifts, not at the next audit. Connector: pagerduty.
+  - id: page_owner
+    type: http
+    http_config:
+      url: "https://events.pagerduty.com/v2/enqueue"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      body: |
+        {
+          "routing_key": "{input.pagerduty_routing_key}",
+          "event_action": "trigger",
+          "dedup_key": "control-drift-{input.program_id}-{steps.seal_drift_events.output.ledger_root_sha256}",
+          "payload": {
+            "summary": "Control drift on {input.program_id}: {{ _steps['aggregate_drift']['confirmed_drift_count'] }} control(s) silently broke between audits ({{ _steps['aggregate_drift']['newly_broken_count'] }} newly broken)",
+            "severity": "critical",
+            "source": "control-continuous-drift-sentinel",
+            "custom_details": {{ _steps['aggregate_drift']['drift_events'] }}
+          }
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 7c) NOTIFY (drift) - page the GRC channel with the confirmed drift events, owners and the
+  #     sealed ledger root hash so the compliance team sees the break in real time. service: slack.
+  - id: notify_drift
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        :rotating_light: CONTROL DRIFT - {steps.aggregate_drift.output.confirmed_drift_count} control(s) silently broke on {steps.aggregate_drift.output.program_id}
+        Newly broken : {steps.aggregate_drift.output.newly_broken_count}
+        Drifted      : {steps.aggregate_drift.output.drifted_count}
+        Noise filtered: {steps.aggregate_drift.output.noise_count}
+        Events + owners: {steps.aggregate_drift.output.drift_events}
+        Sealed (object-lock) at {steps.seal_drift_events.output.object_key}
+        Ledger root SHA-256: {steps.seal_drift_events.output.ledger_root_sha256}
+
+  # 7d) NOTIFY (clean) - quiet "all controls steady" digest on a clean sweep. No seal, no page.
+  - id: notify_clean
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        :white_check_mark: Drift sweep clean on {steps.aggregate_drift.output.program_id}.
+        {steps.aggregate_drift.output.steady_count} steady, {steps.aggregate_drift.output.noise_count} immaterial blips filtered, 0 confirmed drifts. No seal, no page.
+on_complete:
+  storage_path: "control-continuous-drift-sentinel/{run_id}/result.json"

@@ -1,0 +1,786 @@
+# name: LLM Golden Set Regression Gate
+# description: Freeze a versioned golden prompt->expected set and block any prompt/model change that regresses pass-rate beyond a budget, with per-case before/after diffs and baseline write-back.
+# tags: [llmops, golden-set, regression-gate, evaluation, ci, baseline, provider-neutral]
+# category: llmops_ai_eng
+name: llm-golden-set-regression-gate
+description: >-
+  A CI-style standing regression suite for LLM behavior. Unlike a one-off
+  provider swap comparison, this gate maintains a FROZEN, versioned golden set
+  of prompt->expected cases and blocks any prompt or model change that regresses
+  pass-rate beyond an explicit budget. It is fired by CI (or run manually before
+  a prompt/model merge): it pulls the versioned golden-set JSONL from object
+  storage / git raw, LOOPS over every case fanning a case-runner SUB-WORKFLOW
+  that runs the case prompt through the workflow's default_model, then a
+  deterministic CODE step scores each output (exact-match / regex / numeric
+  tolerance / JSON-schema validity for structured cases). For the free-text
+  cases a two-judge GATE rubric-grades faithfulness on a 1-5 scale so scoring is
+  not one model's whim. A second CODE step aggregates pass-rate plus per-case
+  before/after delta vs the stored baseline, and a threshold GATE blocks
+  promotion when the run is over the regression budget; a NOTIFY posts the
+  failing-case diff table. On a clean run a final CODE step writes the new
+  baseline back to storage so the suite advances.
+
+  PROVIDER NEUTRALITY: the case-runner sub-workflow uses default_model, so the
+  SAME golden set runs unchanged on any of the 7 providers. The pass/fail verdict
+  is deterministic code plus a rubric llm_eval - never one vendor's proprietary
+  eval API. Swapping providers is a config change, not a rewrite. The two rubric
+  judges are pinned to DIFFERENT providers so no single vendor's grader is
+  load-bearing.
+default_model: sonnet
+default_timeout: 2400
+
+input_schema:
+  required: ["golden_set_url", "baseline_url"]
+  properties:
+    golden_set_url:
+      type: string
+      description: >-
+        URL of the FROZEN, versioned golden-set JSONL in object storage or git
+        raw. One JSON object per line: {id, prompt, expected, match_type
+        (exact|regex|numeric|json_schema|free_text), tolerance?, schema?,
+        rubric?}. Pin a tag/commit/version in the path so the set is immutable.
+      default: "https://raw.githubusercontent.com/acme/llm-evals/v3/golden/core.jsonl"
+    baseline_url:
+      type: string
+      description: >-
+        URL of the stored baseline JSON for THIS golden set version: the last
+        accepted per-case pass map + pass-rate. Read for the before/after delta
+        and overwritten on a clean run via the baseline_write_url.
+      default: "https://evalstore.internal/baselines/core/latest.json"
+    baseline_write_url:
+      type: string
+      description: >-
+        URL the new baseline is POSTed to on a clean (non-regressing) run, so the
+        standing suite advances. Defaults to the same object key as baseline_url.
+      default: "https://evalstore.internal/baselines/core/latest.json"
+    golden_set_version:
+      type: string
+      description: "Immutable version/tag of the golden set being gated (echoed into the baseline + notify)."
+      default: "v3"
+    regression_budget_pp:
+      type: number
+      description: >-
+        Max tolerated pass-rate DROP vs baseline, in percentage points. 1.0 means
+        the candidate may lose up to 1pp of pass-rate before promotion is blocked.
+      default: 1.0
+    hard_block_on_new_failures:
+      type: boolean
+      description: >-
+        When true, ANY case that passed on the baseline but fails now blocks the
+        gate, even if the aggregate pass-rate stays within budget (catches silent
+        per-case regressions masked by other cases improving).
+      default: true
+    rubric_pass_score:
+      type: number
+      description: "Minimum faithfulness rubric score (1-5) for a free_text case to count as a pass."
+      default: 4.0
+    slack_channel:
+      type: string
+      description: "Slack channel that receives the verdict and the failing-case diff table."
+      default: "#llm-evals"
+
+steps:
+  # ---------------------------------------------------------------------------
+  # 1) HTTP - GET the FROZEN, versioned golden-set JSONL from object storage /
+  #    git raw. The version is pinned in the URL so the set is immutable: the
+  #    same bytes gate every candidate. Returned as raw text (JSONL), parsed in
+  #    the next code step (one JSON object per line).
+  # ---------------------------------------------------------------------------
+  - id: fetch_golden_set
+    type: http
+    http_config:
+      url: "{input.golden_set_url}"
+      method: GET
+      headers:
+        Accept: "application/jsonl, text/plain, application/json"
+      auth: "bearer:{env.EVALSTORE_API_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # ---------------------------------------------------------------------------
+  # 2) HTTP - GET the stored BASELINE for this golden-set version: the last
+  #    accepted {pass_map: {case_id: bool}, pass_rate, version}. Used for the
+  #    per-case before/after delta. on_failure=skip so the very first run (no
+  #    baseline yet) still proceeds - the aggregate treats a missing baseline as
+  #    "establish, do not block".
+  # ---------------------------------------------------------------------------
+  - id: fetch_baseline
+    type: http
+    depends_on: [fetch_golden_set]
+    http_config:
+      url: "{input.baseline_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.EVALSTORE_API_TOKEN}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # ---------------------------------------------------------------------------
+  # 3) CODE (deterministic) - parse the JSONL into a clean, validated list of
+  #    golden cases the loop iterates over. Tolerates blank lines / BOM / a JSON
+  #    array body, drops malformed rows, and stamps a stable index. No model here
+  #    - pure shaping so the frozen set is reproducible.
+  # ---------------------------------------------------------------------------
+  - id: parse_cases
+    type: code
+    depends_on: [fetch_baseline]
+    code_config:
+      language: python
+      code: |
+        import json
+
+        raw = _steps.get("fetch_golden_set")
+        # HTTP body may arrive as text, bytes, or already-parsed structure.
+        if isinstance(raw, dict):
+            # Some backends wrap the body; try common containers.
+            body = raw.get("body", raw.get("text", raw.get("content", raw)))
+        else:
+            body = raw
+        if isinstance(body, bytes):
+            try:
+                body = body.decode("utf-8", "replace")
+            except Exception:
+                body = str(body)
+
+        cases = []
+        if isinstance(body, list):
+            cases = [c for c in body if isinstance(c, dict)]
+        elif isinstance(body, str):
+            text = body.lstrip("﻿").strip()
+            # Allow a JSON array body in addition to true JSONL.
+            if text.startswith("["):
+                try:
+                    arr = json.loads(text)
+                    cases = [c for c in arr if isinstance(c, dict)]
+                except (ValueError, TypeError):
+                    cases = []
+            else:
+                for line in text.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except (ValueError, TypeError):
+                        continue
+                    if isinstance(obj, dict):
+                        cases.append(obj)
+        elif isinstance(body, dict):
+            inner = body.get("cases") or body.get("items") or []
+            cases = [c for c in inner if isinstance(c, dict)]
+
+        VALID_MATCH = {"exact", "regex", "numeric", "json_schema", "free_text"}
+        plan = []
+        for i, c in enumerate(cases):
+            cid = str(c.get("id") or ("case_" + str(i)))
+            prompt = str(c.get("prompt") or "").strip()
+            if not prompt:
+                # A case with no prompt cannot be run.
+                continue
+            mt = str(c.get("match_type") or "exact").strip().lower()
+            if mt not in VALID_MATCH:
+                mt = "exact"
+            plan.append({
+                "idx": i,
+                "id": cid,
+                "prompt": prompt,
+                "expected": c.get("expected"),
+                "match_type": mt,
+                "tolerance": c.get("tolerance"),
+                "schema": c.get("schema"),
+                "rubric": c.get("rubric"),
+            })
+
+        result = {
+            "cases": plan,
+            "case_count": len(plan),
+            "no_cases": len(plan) == 0,
+            "version": str(_input.get("golden_set_version", "v3")),
+        }
+
+  # ---------------------------------------------------------------------------
+  # 4) LOOP over every golden case. The child is a case-runner SUB-WORKFLOW that
+  #    runs the case prompt through the workflow's default_model (provider-
+  #    neutral). Downstream depends on the loop; child reads the case via _item.
+  # ---------------------------------------------------------------------------
+  - id: run_cases
+    type: loop
+    depends_on: [parse_cases]
+    loop_config:
+      over: "steps.parse_cases.output.cases"
+      step_ids: [run_one_case]
+      max_iterations: 500
+
+  # 4a) SUB-WORKFLOW (loop child) - runs ONE golden case's prompt through an
+  #     EXISTING template on the workflow's default_model. Because the runner is
+  #     default_model, the same golden set replays unchanged on any provider;
+  #     swapping the provider is a config change, not a rewrite. The case prompt
+  #     is mapped from the loop item; the runner's output is the candidate answer
+  #     the scorer compares against `expected`.
+  - id: run_one_case
+    type: sub_workflow
+    sub_workflow:
+      workflow: "summarize"
+      input_mapping:
+        text: "_item.prompt"
+        format: "plain"
+
+  # ---------------------------------------------------------------------------
+  # 5) CODE (deterministic, LOAD-BEARING scorer) - score each candidate output
+  #    against its expected value by the case's match_type: exact-match (string),
+  #    regex (search), numeric (abs tolerance), or json_schema validity for the
+  #    structured cases. free_text cases are NOT decided here - they are deferred
+  #    to the rubric judges (step 6) and merged in step 8. No model swings these
+  #    numbers; this is the mechanical part of the verdict.
+  # ---------------------------------------------------------------------------
+  - id: score_cases
+    type: code
+    depends_on: [parse_cases, run_cases]
+    code_config:
+      language: python
+      code: |
+        import json
+        import re
+
+        plan = _steps.get("parse_cases") or {}
+        if not isinstance(plan, dict):
+            plan = {}
+        cases = plan.get("cases") or []
+
+        outs = _steps.get("run_cases")
+        # Loop output is a list aligned to the case order; normalize defensively.
+        if isinstance(outs, dict):
+            outs = outs.get("results") or outs.get("items") or list(outs.values())
+        if not isinstance(outs, list):
+            outs = [outs]
+
+        def candidate_text(o):
+            # The sub_workflow result may be a string or a dict with a text field.
+            if isinstance(o, str):
+                return o
+            if isinstance(o, dict):
+                for k in ("summary", "output", "text", "result", "answer", "content"):
+                    v = o.get(k)
+                    if isinstance(v, str) and v.strip():
+                        return v
+                return json.dumps(o, sort_keys=True)
+            return "" if o is None else str(o)
+
+        def to_num(x):
+            try:
+                return float(str(x).strip().replace(",", ""))
+            except (TypeError, ValueError):
+                return None
+
+        def first_number(s):
+            m = re.search(r"-?\d+(?:\.\d+)?", str(s))
+            return to_num(m.group(0)) if m else None
+
+        def schema_ok(obj, schema):
+            # Minimal, dependency-free JSON-schema check: type + required keys.
+            if not isinstance(schema, dict):
+                return isinstance(obj, dict)
+            t = schema.get("type")
+            if t == "object" and not isinstance(obj, dict):
+                return False
+            if t == "array" and not isinstance(obj, list):
+                return False
+            req = schema.get("required") or []
+            if isinstance(obj, dict):
+                for k in req:
+                    if k not in obj:
+                        return False
+                props = schema.get("properties") or {}
+                for k, sub in props.items():
+                    if k in obj and isinstance(sub, dict) and sub.get("type"):
+                        st = sub.get("type")
+                        val = obj.get(k)
+                        type_ok = {
+                            "string": isinstance(val, str),
+                            "number": isinstance(val, (int, float)) and not isinstance(val, bool),
+                            "integer": isinstance(val, int) and not isinstance(val, bool),
+                            "boolean": isinstance(val, bool),
+                            "object": isinstance(val, dict),
+                            "array": isinstance(val, list),
+                        }.get(st, True)
+                        if not type_ok:
+                            return False
+            return True
+
+        results = []
+        free_text_cases = []
+        for i, case in enumerate(cases):
+            if not isinstance(case, dict):
+                continue
+            cid = str(case.get("id") or ("case_" + str(i)))
+            mt = str(case.get("match_type") or "exact").lower()
+            expected = case.get("expected")
+            out = outs[i] if i < len(outs) else None
+            cand = candidate_text(out)
+            cand_norm = cand.strip()
+
+            passed = None       # None => deferred to rubric judge (free_text)
+            detail = ""
+
+            if mt == "exact":
+                exp = "" if expected is None else str(expected)
+                passed = (cand_norm == exp.strip())
+                detail = "exact-match"
+            elif mt == "regex":
+                pat = "" if expected is None else str(expected)
+                try:
+                    passed = bool(re.search(pat, cand, re.MULTILINE))
+                    detail = "regex /" + pat + "/"
+                except re.error as e:
+                    passed = False
+                    detail = "bad-regex: " + str(e)
+            elif mt == "numeric":
+                tol = to_num(case.get("tolerance"))
+                tol = 0.0 if tol is None else abs(tol)
+                exp_n = to_num(expected)
+                got_n = first_number(cand)
+                if exp_n is None or got_n is None:
+                    passed = False
+                    detail = "numeric: could not parse (expected=" + str(expected) + ", got=" + str(cand_norm[:40]) + ")"
+                else:
+                    passed = abs(got_n - exp_n) <= tol
+                    detail = "numeric |" + str(got_n) + "-" + str(exp_n) + "|<=" + str(tol)
+            elif mt == "json_schema":
+                try:
+                    parsed = json.loads(cand)
+                    valid = True
+                except (ValueError, TypeError):
+                    parsed = None
+                    valid = False
+                if valid:
+                    valid = schema_ok(parsed, case.get("schema"))
+                passed = bool(valid)
+                detail = "json-schema valid" if passed else "json-schema invalid/unparseable"
+            elif mt == "free_text":
+                # Deferred: graded by the rubric judges, merged in aggregate.
+                passed = None
+                detail = "free_text -> rubric"
+                free_text_cases.append({
+                    "id": cid,
+                    "prompt": str(case.get("prompt") or ""),
+                    "expected": expected,
+                    "candidate": cand,
+                    "rubric": case.get("rubric") or "Faithfulness to the expected answer and the prompt intent.",
+                })
+            else:
+                passed = False
+                detail = "unknown match_type"
+
+            results.append({
+                "id": cid,
+                "match_type": mt,
+                "expected": expected,
+                "candidate_excerpt": cand_norm[:240],
+                "deterministic_pass": passed,   # None for free_text
+                "detail": detail,
+            })
+
+        scored = sum(1 for r in results if r["deterministic_pass"] is not None)
+        det_passes = sum(1 for r in results if r["deterministic_pass"] is True)
+
+        result = {
+            "results": results,
+            "free_text_cases": free_text_cases,
+            "free_text_count": len(free_text_cases),
+            "deterministic_scored": scored,
+            "deterministic_passes": det_passes,
+            "total_cases": len(results),
+        }
+
+  # ---------------------------------------------------------------------------
+  # 6) GATE (TWO-JUDGE rubric, CROSS-PROVIDER) - the free-text cases are graded
+  #    on a 1-5 faithfulness rubric by TWO judges pinned to DIFFERENT providers,
+  #    so the qualitative pass/fail is not one vendor's whim. BOTH strategies
+  #    must agree the free-text batch is acceptable for the gate to pass; each
+  #    returns a per-case score map the next step parses. This gate is the
+  #    rubric stage only - the binding regression-budget decision is the code +
+  #    threshold gate below.
+  # ---------------------------------------------------------------------------
+  - id: rubric_judges
+    type: gate
+    depends_on: [score_cases]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are JUDGE A grading the FREE-TEXT golden cases on a 1-5
+              FAITHFULNESS rubric (5 = fully faithful to the expected answer and
+              prompt intent, 1 = contradicts or ignores it). For the batch below,
+              return STRICT JSON only: {"scores": {"<case_id>": <1-5 int>, ...},
+              "verdict": "approved"|"rejected"}. Set "verdict" to "approved" ONLY
+              if EVERY free-text case scores at or above the required pass score
+              of {input.rubric_pass_score}; otherwise "rejected". Do not invent
+              case ids; grade exactly the ids given.
+              FREE-TEXT CASES: {steps.score_cases.output.free_text_cases}
+            input: "{steps.score_cases.output.free_text_cases}"
+            model: sonnet
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are JUDGE B (independent, different provider) grading the same
+              FREE-TEXT golden cases on the identical 1-5 FAITHFULNESS rubric
+              (5 = fully faithful, 1 = contradicts/ignores). Return STRICT JSON
+              only: {"scores": {"<case_id>": <1-5 int>, ...}, "verdict":
+              "approved"|"rejected"}. "verdict" is "approved" ONLY if EVERY
+              free-text case scores at or above {input.rubric_pass_score};
+              otherwise "rejected". Grade exactly the ids given, no others.
+              FREE-TEXT CASES: {steps.score_cases.output.free_text_cases}
+            input: "{steps.score_cases.output.free_text_cases}"
+            model: google/gemini-2.5-pro
+
+  # ---------------------------------------------------------------------------
+  # 7) CODE (deterministic) - merge the two judges' rubric scores into a per-case
+  #    free-text pass map. A free-text case passes ONLY if the MINIMUM of the two
+  #    judges' scores meets rubric_pass_score (conservative consensus - one judge
+  #    can veto). Robust to judges returning JSON in a string or partial maps.
+  # ---------------------------------------------------------------------------
+  - id: merge_rubric
+    type: code
+    depends_on: [rubric_judges, score_cases]
+    code_config:
+      language: python
+      code: |
+        import json
+
+        sc = _steps.get("score_cases") or {}
+        if not isinstance(sc, dict):
+            sc = {}
+        free_cases = sc.get("free_text_cases") or []
+
+        try:
+            pass_score = float(_input.get("rubric_pass_score", 4.0))
+        except (TypeError, ValueError):
+            pass_score = 4.0
+
+        judge = _steps.get("rubric_judges")
+
+        def extract_score_maps(obj, acc):
+            # Collect every {"scores": {...}} dict found anywhere in the judge output.
+            if isinstance(obj, dict):
+                s = obj.get("scores")
+                if isinstance(s, dict):
+                    acc.append(s)
+                for v in obj.values():
+                    extract_score_maps(v, acc)
+            elif isinstance(obj, list):
+                for v in obj:
+                    extract_score_maps(v, acc)
+            elif isinstance(obj, str):
+                t = obj.strip()
+                if t.startswith("{") or t.startswith("["):
+                    try:
+                        extract_score_maps(json.loads(t), acc)
+                    except (ValueError, TypeError):
+                        pass
+
+        maps = []
+        extract_score_maps(judge, maps)
+
+        def num(x):
+            try:
+                return float(x)
+            except (TypeError, ValueError):
+                return None
+
+        free_pass_map = {}
+        free_detail = []
+        for case in free_cases:
+            cid = str(case.get("id"))
+            scores = []
+            for m in maps:
+                v = num(m.get(cid))
+                if v is not None:
+                    scores.append(v)
+            if scores:
+                worst = min(scores)            # conservative consensus: any judge can veto
+                passed = worst >= pass_score
+            else:
+                # No judge scored this case -> treat as a fail (cannot certify).
+                worst = 0.0
+                passed = False
+            free_pass_map[cid] = bool(passed)
+            free_detail.append({
+                "id": cid,
+                "judge_scores": scores,
+                "min_score": worst,
+                "passed": bool(passed),
+            })
+
+        result = {
+            "free_pass_map": free_pass_map,
+            "free_detail": free_detail,
+            "free_text_count": len(free_cases),
+            "judge_maps_found": len(maps),
+        }
+
+  # ---------------------------------------------------------------------------
+  # 8) CODE (deterministic, LOAD-BEARING aggregate) - fold the deterministic
+  #    scores and the merged free-text rubric verdicts into ONE per-case pass map,
+  #    compute the candidate pass-rate, and diff it case-by-case against the
+  #    stored baseline. Emits pass-rate delta in pp, the list of NEW failures
+  #    (passed on baseline, fails now), fixed cases, and a budget verdict against
+  #    regression_budget_pp + hard_block_on_new_failures. This is the binding
+  #    decision math - pure code, provider-neutral. A missing baseline => first
+  #    run => establish (do not block).
+  # ---------------------------------------------------------------------------
+  - id: aggregate
+    type: code
+    depends_on: [score_cases, merge_rubric, fetch_baseline]
+    code_config:
+      language: python
+      code: |
+        sc = _steps.get("score_cases") or {}
+        if not isinstance(sc, dict):
+            sc = {}
+        merged = _steps.get("merge_rubric") or {}
+        if not isinstance(merged, dict):
+            merged = {}
+        free_pass_map = merged.get("free_pass_map") or {}
+
+        results = sc.get("results") or []
+
+        # Build the unified per-case pass map (deterministic + free-text rubric).
+        cur_pass_map = {}
+        per_case = []
+        for r in results:
+            if not isinstance(r, dict):
+                continue
+            cid = str(r.get("id"))
+            dp = r.get("deterministic_pass")
+            if dp is None:
+                passed = bool(free_pass_map.get(cid, False))
+                source = "rubric"
+            else:
+                passed = bool(dp)
+                source = "deterministic"
+            cur_pass_map[cid] = passed
+            per_case.append({
+                "id": cid,
+                "match_type": r.get("match_type"),
+                "passed": passed,
+                "source": source,
+                "detail": r.get("detail"),
+                "candidate_excerpt": r.get("candidate_excerpt"),
+            })
+
+        total = len(cur_pass_map) or 1
+        cur_passes = sum(1 for v in cur_pass_map.values() if v)
+        cur_pass_rate = cur_passes / total
+
+        # Load the stored baseline (may be absent on the first run).
+        baseline = _steps.get("fetch_baseline")
+        if isinstance(baseline, dict):
+            baseline = baseline.get("body", baseline)
+        if not isinstance(baseline, dict):
+            baseline = {}
+        base_pass_map = baseline.get("pass_map")
+        has_baseline = isinstance(base_pass_map, dict) and len(base_pass_map) > 0
+        if not isinstance(base_pass_map, dict):
+            base_pass_map = {}
+
+        try:
+            base_rate = float(baseline.get("pass_rate"))
+        except (TypeError, ValueError):
+            base_rate = sum(1 for v in base_pass_map.values() if v) / (len(base_pass_map) or 1)
+
+        # Per-case before/after diff.
+        new_failures = []   # passed on baseline, fails now (true regressions)
+        fixed_cases = []    # failed on baseline, passes now
+        for cid, now in cur_pass_map.items():
+            before = base_pass_map.get(cid)
+            if before is True and now is False:
+                new_failures.append(cid)
+            elif before is False and now is True:
+                fixed_cases.append(cid)
+
+        pass_rate_delta_pp = round((cur_pass_rate - base_rate) * 100.0, 3)
+
+        try:
+            budget_pp = float(_input.get("regression_budget_pp", 1.0))
+        except (TypeError, ValueError):
+            budget_pp = 1.0
+        hard_block = bool(_input.get("hard_block_on_new_failures", True))
+
+        within_budget = pass_rate_delta_pp >= -abs(budget_pp)
+        no_new_failures = (len(new_failures) == 0)
+
+        if not has_baseline:
+            # First run for this version: establish the baseline, never block.
+            regression = False
+            verdict = "ESTABLISH"
+        else:
+            regression = (not within_budget) or (hard_block and not no_new_failures)
+            verdict = "BLOCK" if regression else "PASS"
+
+        # Build a compact failing-case diff table for the notify.
+        diff_rows = []
+        cur_by_id = {p["id"]: p for p in per_case}
+        for cid in new_failures:
+            p = cur_by_id.get(cid, {})
+            diff_rows.append(
+                cid + " | was PASS -> now FAIL | " + str(p.get("match_type")) +
+                " | " + str(p.get("detail"))
+            )
+
+        result = {
+            "version": str(_input.get("golden_set_version", "v3")),
+            "verdict": verdict,
+            "regression": regression,
+            "has_baseline": has_baseline,
+            "total_cases": total,
+            "candidate_passes": cur_passes,
+            "candidate_pass_rate": round(cur_pass_rate, 4),
+            "baseline_pass_rate": round(base_rate, 4),
+            "pass_rate_delta_pp": pass_rate_delta_pp,
+            "regression_budget_pp": budget_pp,
+            "within_budget": within_budget,
+            "new_failures": new_failures,
+            "new_failure_count": len(new_failures),
+            "fixed_cases": fixed_cases,
+            "fixed_count": len(fixed_cases),
+            "no_new_failures": no_new_failures,
+            "hard_block_on_new_failures": hard_block,
+            "per_case": per_case,
+            "pass_map": cur_pass_map,
+            "diff_table": diff_rows,
+            "summary": (
+                "First run for " + str(_input.get("golden_set_version", "v3")) +
+                ": baseline established (" + str(cur_passes) + "/" + str(total) + " pass)."
+                if not has_baseline else
+                ("PASS: pass-rate " + str(round(cur_pass_rate * 100, 2)) + "% (" +
+                 ("+" if pass_rate_delta_pp >= 0 else "") + str(pass_rate_delta_pp) +
+                 "pp vs baseline), no budget breach."
+                 if verdict == "PASS" else
+                 "BLOCK: " + str(len(new_failures)) + " new failing case(s), pass-rate delta " +
+                 str(pass_rate_delta_pp) + "pp vs budget -" + str(budget_pp) + "pp.")
+            ),
+        }
+
+  # ---------------------------------------------------------------------------
+  # 9) GATE (threshold control) - block promotion when the run is OVER the
+  #    regression budget. The DETERMINISTIC aggregate already decided; the
+  #    llm_eval strategy is an auditor that must confirm the record is internally
+  #    consistent (verdict matches regression/budget flags) before it can pass.
+  #    BLOCK verdict => the auditor rejects => the gate fails => promotion is
+  #    blocked. (Two-judge quality grading already happened upstream; this gate
+  #    is the budget threshold.)
+  # ---------------------------------------------------------------------------
+  - id: regression_gate
+    type: gate
+    depends_on: [aggregate]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You audit a golden-set regression verdict; you do NOT recompute it.
+              Reply with exactly one word: "approved" ONLY if BOTH hold in the
+              record: (1) verdict is "PASS" or "ESTABLISH" (NOT "BLOCK"), and
+              (2) regression is false AND - when has_baseline is true -
+              within_budget is true and (hard_block_on_new_failures is false OR
+              no_new_failures is true). If verdict is "BLOCK" or any flag
+              contradicts a PASS, reply "rejected". Record:
+              {steps.aggregate.output}
+            input: "{steps.aggregate.output}"
+            model: sonnet
+
+  # ---------------------------------------------------------------------------
+  # 10) NOTIFY - post the verdict and the failing-case diff table to Slack so the
+  #     author sees exactly which cases regressed (was PASS -> now FAIL), the
+  #     pass-rate delta, and the budget. Fires after the gate so the message
+  #     reflects the blocking decision.
+  # ---------------------------------------------------------------------------
+  - id: notify_result
+    type: notify
+    depends_on: [regression_gate]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: >-
+        LLM Golden Set Regression Gate [{steps.aggregate.output.version}]:
+        {steps.aggregate.output.verdict} - {steps.aggregate.output.summary}
+        Pass-rate {steps.aggregate.output.candidate_pass_rate} (baseline
+        {steps.aggregate.output.baseline_pass_rate}, delta
+        {steps.aggregate.output.pass_rate_delta_pp}pp, budget
+        -{steps.aggregate.output.regression_budget_pp}pp). New failures:
+        {steps.aggregate.output.new_failure_count}, fixed:
+        {steps.aggregate.output.fixed_count}. Failing-case diff:
+        {steps.aggregate.output.diff_table}. A BLOCK means a prompt/model change
+        regressed the frozen golden set beyond budget and must not be promoted.
+
+  # ---------------------------------------------------------------------------
+  # 11) CONDITION on the DETERMINISTIC verdict - the aggregate code (not a prompt)
+  #     decides the path. On PASS or ESTABLISH (a clean, non-regressing run) the
+  #     suite advances: build the new baseline record and write it back to
+  #     storage. On BLOCK we do nothing (the baseline is preserved so the next
+  #     candidate is still gated against the last good state).
+  # ---------------------------------------------------------------------------
+  - id: route_baseline
+    type: condition
+    depends_on: [notify_result]
+    condition_config:
+      expression: "{steps.aggregate.output.regression} == False"
+      then: [build_new_baseline, write_baseline]
+      else: [skip_baseline]
+
+  # 11a-PASS) TRANSFORM - shape the new baseline record (per-case pass map +
+  #           pass-rate + version) that becomes the next run's comparison point.
+  - id: build_new_baseline
+    type: transform
+    transform_config:
+      template: |
+        {
+          "version": "{steps.aggregate.output.version}",
+          "pass_rate": {steps.aggregate.output.candidate_pass_rate},
+          "total_cases": {steps.aggregate.output.total_cases},
+          "passes": {steps.aggregate.output.candidate_passes},
+          "pass_map": {steps.aggregate.output.pass_map},
+          "written_by": "llm-golden-set-regression-gate"
+        }
+
+  # 11b-PASS) HTTP - write the new baseline back to object storage so the standing
+  #           suite advances. This is the only write side effect, and it only
+  #           happens on a clean run. on_failure=skip so a storage hiccup does not
+  #           fail an already-green gate.
+  - id: write_baseline
+    type: http
+    http_config:
+      url: "{input.baseline_write_url}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Prefer: "resolution=merge-duplicates"
+      auth: "bearer:{env.EVALSTORE_API_TOKEN}"
+      body: "{steps.build_new_baseline.output}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 11c-BLOCK) CODE (no-op marker) - on a blocked run we deliberately do NOT touch
+  #            the baseline; this records that decision so the run output is
+  #            explicit about the preserved state.
+  - id: skip_baseline
+    type: code
+    code_config:
+      language: python
+      code: |
+        result = {
+            "baseline_written": False,
+            "reason": "regression detected - baseline preserved at last good state",
+            "verdict": (_steps.get("aggregate") or {}).get("verdict"),
+        }
+
+on_complete:
+  storage_path: "llm-golden-set-regression-gate/{run_id}/verdict.json"

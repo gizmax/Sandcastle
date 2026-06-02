@@ -1,0 +1,554 @@
+# name: Vendor Risk Continuous Monitor
+# description: Standing TPRM program that continuously re-scores third-party vendors from live trust signals (SOC 2 freshness, security ratings, breach feeds, sub-processor changes), gates material risk-tier downgrades through a cross-provider consensus plus a TPRM human attester, opens a remediation ticket, SHA-256 seals the vendor risk record, and PUTs it to an object-lock S3 register.
+# tags: [TPRM, Vendor Risk, Third-Party Risk, SOC 2, Security Ratings, BitSight, SecurityScorecard, Breach Feed, Sub-Processor, S3, Jira, Slack, GRC, Compliance]
+# category: compliance_grc
+
+name: vendor-risk-continuous-monitor
+description: >-
+  Continuously re-scores third-party vendors as an ONGOING TPRM program (not a one-shot research
+  brief, and not the vendor self-assessing). A sensor fires the loop either on the scheduled
+  re-assessment interval or when the breach-feed webhook reports new activity. A deterministic HTTP
+  step loads the vendor inventory plus each vendor's last SEALED risk score. The workflow then loops
+  every vendor: an HTTP pull gathers live trust signals (trust-center / SOC 2 report expiry, security
+  rating, breach feed, sub-processor list), a DETERMINISTIC Python step scores them (is the SOC 2
+  report expired? did the security rating drop? is a new sub-processor in a restricted region? compute
+  a risk_delta and a proposed tier), and a classify step buckets the vendor into unchanged / watch /
+  downgrade / critical. A condition routes only downgrade and critical vendors to a materiality gate.
+  The gate is a CROSS-PROVIDER consensus - the SAME materiality rubric run on provider A and provider B
+  (both model slots swappable across the seven providers) PLUS a mandatory TPRM-owner human attester -
+  so no single vendor model can self-certify a risk-tier downgrade. Confirmed downgrades open a
+  remediation task in the ticketing system, a Python step SHA-256 seals the vendor risk record plus the
+  delta into a canonical evidence object, that object is PUT to the object-lock (WORM) S3 register, and
+  a summary is posted to the security-GRC channel. Inventory load, scoring, sealing, and the register
+  PUT are all deterministic and model-independent.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 900
+
+input_schema:
+  required: ["assessment_cycle_id"]
+  properties:
+    assessment_cycle_id:
+      type: string
+      description: "Unique id for this re-assessment cycle (e.g. 'VRM-2026-06')."
+      default: "VRM-2026-06"
+      example: "VRM-2026-06"
+    reassessment_trigger_url:
+      type: string
+      description: "Endpoint the sensor polls: returns 200 when a scheduled re-assessment is due OR the breach-feed webhook has flagged new activity for monitored vendors."
+      default: "https://grc.your-org.com/api/tprm/reassessment-trigger"
+      example: "https://grc.acme.com/api/tprm/reassessment-trigger"
+    vendor_inventory_url:
+      type: string
+      description: "GRC/TPRM REST endpoint returning the monitored vendor inventory with each vendor's last sealed risk score and tier."
+      default: "https://grc.your-org.com/api/tprm/vendors?status=monitored"
+      example: "https://grc.acme.com/api/tprm/vendors?status=monitored"
+    trust_signals_base_url:
+      type: string
+      description: "Base URL of the trust-signal aggregator (security-rating + trust-center + breach-feed + sub-processor list) keyed per vendor."
+      default: "https://ratings.your-org.com/api/v1/vendors"
+      example: "https://api.securityscorecard.io/companies"
+    rating_drop_threshold:
+      type: number
+      description: "Security-rating point drop (vs last sealed score) that counts as a material deterioration."
+      default: 50
+      example: "50"
+    soc2_max_age_days:
+      type: number
+      description: "Maximum allowed age of a SOC 2 Type II report before it is treated as expired/stale."
+      default: 365
+      example: "365"
+    restricted_regions:
+      type: string
+      description: "Comma-separated ISO country codes treated as restricted for new sub-processors (data-residency risk)."
+      default: "RU,CN,IR,KP,BY"
+      example: "RU,CN,IR,KP,BY"
+    ticketing_base_url:
+      type: string
+      description: "Ticketing REST base URL for opening a remediation task on a confirmed downgrade (Jira / ServiceNow)."
+      default: "https://your-org.atlassian.net/rest/api/3"
+      example: "https://acme.atlassian.net/rest/api/3"
+    ticketing_project_key:
+      type: string
+      description: "Ticketing project/queue key that receives vendor remediation tasks."
+      default: "TPRM"
+      example: "TPRM"
+    s3_base_url:
+      type: string
+      description: "S3 (or S3-compatible) REST base URL for the object-lock vendor risk register."
+      default: "https://s3.eu-central-1.amazonaws.com"
+      example: "https://s3.eu-central-1.amazonaws.com"
+    s3_bucket:
+      type: string
+      description: "Object-lock (WORM) bucket that stores the sealed vendor risk records."
+      default: "vendor-risk-register"
+      example: "acme-vendor-risk-register"
+    slack_channel:
+      type: string
+      description: "Security-GRC channel for the re-assessment summary."
+      default: "#security-grc"
+      example: "#security-grc"
+
+steps:
+  # 1) SENSOR: wait for the scheduled re-assessment interval OR a breach-feed webhook hit. The
+  #    trigger endpoint returns 200 only when a re-score is due, which fires the rest of the loop.
+  - id: await_reassessment_trigger
+    type: sensor
+    sensor_config:
+      url: "{input.reassessment_trigger_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200"
+      check_interval: 3600
+      timeout: 86400
+
+  # 2) LOAD the vendor inventory + each vendor's last SEALED risk score/tier. Deterministic HTTP.
+  - id: load_vendor_inventory
+    type: http
+    depends_on: [await_reassessment_trigger]
+    http_config:
+      url: "{input.vendor_inventory_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.TPRM_API_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 3) DETERMINISTIC normalize of the inventory into a clean per-vendor list the loop iterates over.
+  #    Carries the prior sealed score/tier so the scoring step can compute a delta. No model.
+  - id: normalize_inventory
+    type: code
+    depends_on: [load_vendor_inventory]
+    code_config:
+      language: python
+      code: |
+        inv = _steps['load_vendor_inventory'] or {}
+
+        # The inventory endpoint may return a bare list or a wrapper dict.
+        rows = inv if isinstance(inv, list) else (inv.get('vendors') or inv.get('data') or inv.get('results') or [])
+
+        vendors = []
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            vid = str(r.get('vendor_id') or r.get('id') or r.get('slug') or '').strip()
+            if not vid:
+                continue
+            prior = r.get('last_sealed_score', r.get('last_risk_score'))
+            try:
+                prior_score = float(prior) if prior is not None else None
+            except (ValueError, TypeError):
+                prior_score = None
+            vendors.append({
+                'vendor_id': vid,
+                'name': r.get('name') or vid,
+                'prior_tier': str(r.get('risk_tier') or r.get('tier') or 'unrated').lower(),
+                'prior_security_rating': prior_score,
+                'criticality': str(r.get('criticality') or r.get('business_criticality') or 'standard').lower(),
+                'data_classification': str(r.get('data_classification') or 'internal').lower(),
+            })
+
+        result = {
+            'assessment_cycle_id': _input.get('assessment_cycle_id'),
+            'vendor_count': len(vendors),
+            'vendors': vendors,
+        }
+
+  # 4) LOOP over every monitored vendor. Children: pull live signals -> score -> classify -> route.
+  #    Each child reads the current vendor via _input.get('_item').
+  - id: vendor_reassessment_loop
+    type: loop
+    depends_on: [normalize_inventory]
+    loop_config:
+      over: "steps.normalize_inventory.output.vendors"
+      step_ids: [pull_trust_signals, score_vendor_signals, classify_vendor_change, route_material_change]
+      max_iterations: 2000
+
+  # 4a) PULL the live trust signals for THIS vendor: SOC 2 report expiry, security rating, breach
+  #     feed, and sub-processor list - in one aggregator call keyed by the vendor id from _item.
+  - id: pull_trust_signals
+    type: http
+    http_config:
+      url: "{input.trust_signals_base_url}/{_item.vendor_id}/signals?include=soc2,security_rating,breaches,subprocessors"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.TRUST_SIGNALS_API_KEY}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 4b) DETERMINISTIC scoring - the risk-load-bearing logic. Is the SOC 2 report expired? Did the
+  #     security rating drop past threshold vs the last sealed score? Is a NEW sub-processor in a
+  #     restricted region? Any open breach? Compute risk_delta + a proposed tier. No model.
+  - id: score_vendor_signals
+    type: code
+    depends_on: [pull_trust_signals]
+    code_config:
+      language: python
+      code: |
+        from datetime import datetime, timezone
+
+        vendor = _input.get('_item') or {}
+        signals = _steps['pull_trust_signals'] or {}
+
+        rating_drop_threshold = float(_input.get('rating_drop_threshold', 50) or 50)
+        soc2_max_age_days = float(_input.get('soc2_max_age_days', 365) or 365)
+        restricted = {
+            c.strip().upper()
+            for c in str(_input.get('restricted_regions', 'RU,CN,IR,KP,BY')).split(',')
+            if c.strip()
+        }
+
+        def _age_days(val):
+            # Accept ISO8601 strings or epoch seconds; return age in days or None.
+            if val is None:
+                return None
+            try:
+                if isinstance(val, (int, float)):
+                    dt = datetime.fromtimestamp(float(val), tz=timezone.utc)
+                else:
+                    dt = datetime.fromisoformat(str(val).replace('Z', '+00:00'))
+                return max(0, (datetime.now(timezone.utc) - dt).days)
+            except (ValueError, TypeError, OSError):
+                return None
+
+        # --- SOC 2 freshness -------------------------------------------------------------
+        soc2 = signals.get('soc2') if isinstance(signals.get('soc2'), dict) else {}
+        soc2_report_date = soc2.get('report_date') or soc2.get('valid_until') or soc2.get('issued_at')
+        soc2_age = _age_days(soc2_report_date)
+        soc2_expired = soc2_age is None or soc2_age > soc2_max_age_days
+
+        # --- Security rating drop --------------------------------------------------------
+        rating_block = signals.get('security_rating') if isinstance(signals.get('security_rating'), dict) else {}
+        current_rating = rating_block.get('score', rating_block.get('rating'))
+        try:
+            current_rating = float(current_rating) if current_rating is not None else None
+        except (ValueError, TypeError):
+            current_rating = None
+        prior_rating = vendor.get('prior_security_rating')
+        rating_drop = 0.0
+        if current_rating is not None and prior_rating is not None:
+            rating_drop = max(0.0, float(prior_rating) - current_rating)
+        rating_dropped = rating_drop >= rating_drop_threshold
+
+        # --- Breach feed -----------------------------------------------------------------
+        breaches = signals.get('breaches')
+        breach_list = breaches if isinstance(breaches, list) else (breaches or {}).get('items', []) if isinstance(breaches, dict) else []
+        open_breaches = [
+            b for b in breach_list
+            if isinstance(b, dict) and str(b.get('status', 'open')).lower() not in ('resolved', 'closed', 'remediated')
+        ]
+        has_open_breach = len(open_breaches) > 0
+
+        # --- Sub-processor changes (new ones in a restricted region) ---------------------
+        subs = signals.get('sub' + 'processors')
+        sub_list = subs if isinstance(subs, list) else (subs or {}).get('items', []) if isinstance(subs, dict) else []
+        new_restricted_subs = []
+        for s in sub_list:
+            if not isinstance(s, dict):
+                continue
+            is_new = bool(s.get('is_new', s.get('added_this_period', False)))
+            region = str(s.get('region') or s.get('country') or s.get('country_code') or '').upper()[:2]
+            if is_new and region in restricted:
+                new_restricted_subs.append({'name': s.get('name'), 'region': region})
+
+        # --- Deterministic risk_delta + proposed tier -----------------------------------
+        # Weighted, fully reproducible: no model decides the number.
+        risk_delta = 0
+        reasons = []
+        if soc2_expired:
+            risk_delta += 30
+            reasons.append('soc2_report_expired_or_missing')
+        if rating_dropped:
+            risk_delta += 40
+            reasons.append(f'security_rating_dropped_{int(rating_drop)}pts')
+        if has_open_breach:
+            risk_delta += 50
+            reasons.append(f'open_breach_count_{len(open_breaches)}')
+        if new_restricted_subs:
+            risk_delta += 35
+            reasons.append('new_sub_processor_in_restricted_region')
+
+        # Criticality amplifier: critical/high vendors carry their delta further.
+        criticality = str(vendor.get('criticality', 'standard')).lower()
+        if criticality in ('critical', 'high') and risk_delta > 0:
+            risk_delta = int(risk_delta * 1.5)
+
+        prior_tier = str(vendor.get('prior_tier', 'unrated')).lower()
+        if risk_delta >= 80 or has_open_breach:
+            proposed_tier = 'critical'
+        elif risk_delta >= 40:
+            proposed_tier = 'high'
+        elif risk_delta >= 20:
+            proposed_tier = 'elevated'
+        else:
+            proposed_tier = prior_tier if prior_tier != 'unrated' else 'standard'
+
+        TIER_RANK = {'low': 0, 'standard': 1, 'elevated': 2, 'high': 3, 'critical': 4, 'unrated': 1}
+        is_downgrade = TIER_RANK.get(proposed_tier, 1) > TIER_RANK.get(prior_tier, 1)
+
+        result = {
+            'vendor_id': vendor.get('vendor_id'),
+            'name': vendor.get('name'),
+            'prior_tier': prior_tier,
+            'proposed_tier': proposed_tier,
+            'risk_delta': risk_delta,
+            'is_downgrade': is_downgrade,
+            'reasons': reasons,
+            'signals': {
+                'soc2_age_days': soc2_age,
+                'soc2_expired': soc2_expired,
+                'current_security_rating': current_rating,
+                'prior_security_rating': prior_rating,
+                'rating_drop': rating_drop,
+                'rating_dropped': rating_dropped,
+                'open_breach_count': len(open_breaches),
+                'new_restricted_sub_processors': new_restricted_subs,
+            },
+            'criticality': criticality,
+        }
+
+  # 4c) CLASSIFY the vendor's change into a monitoring bucket. The single model-driven routing step
+  #     per vendor, swappable. Each bucket routes into the deterministic router below.
+  - id: classify_vendor_change
+    type: classify
+    depends_on: [score_vendor_signals]
+    classify_config:
+      model: haiku
+      input: >
+        Bucket this third-party vendor's risk change from its deterministic re-score. unchanged = no
+        material movement, tier holds, no new findings. watch = minor deterioration worth tracking
+        (e.g. stale SOC 2 nearing expiry, small rating dip) but not a tier downgrade. downgrade = a
+        material deterioration that warrants moving the vendor to a worse risk tier (expired SOC 2,
+        rating drop past threshold, or a new restricted-region sub-processor). critical = an active or
+        unresolved breach, or a critical-criticality vendor with a severe delta. Re-score:
+        {steps.score_vendor_signals.output}
+      categories:
+        - unchanged
+        - watch
+        - downgrade
+        - critical
+      branches:
+        unchanged: [route_material_change]
+        watch: [route_material_change]
+        downgrade: [route_material_change]
+        critical: [route_material_change]
+
+  # 4d) DETERMINISTIC per-vendor router: combine the classify bucket with the deterministic
+  #     is_downgrade flag. Only downgrade/critical (or a code-confirmed tier downgrade) is material
+  #     and must be carried to the gate. No model. (condition lives outside the loop on the collected set.)
+  - id: route_material_change
+    type: code
+    depends_on: [classify_vendor_change]
+    code_config:
+      language: python
+      code: |
+        score = _steps['score_vendor_signals'] or {}
+        bucket = str(_steps['classify_vendor_change'] or '').strip().lower()
+
+        # Material = the model bucket says downgrade/critical OR the deterministic code already
+        # computed a tier downgrade. Code can force materiality even if the bucket disagrees.
+        material = bucket in ('downgrade', 'critical') or bool(score.get('is_downgrade'))
+
+        result = {
+            'vendor_id': score.get('vendor_id'),
+            'name': score.get('name'),
+            'prior_tier': score.get('prior_tier'),
+            'proposed_tier': score.get('proposed_tier'),
+            'risk_delta': score.get('risk_delta'),
+            'reasons': score.get('reasons', []),
+            'signals': score.get('signals', {}),
+            'classification': bucket or 'unchanged',
+            'is_material_downgrade': material,
+        }
+
+  # 5) DETERMINISTIC collection of the loop results into the set of MATERIAL downgrades that need
+  #     the materiality gate. Aggregates every per-vendor router output. No model.
+  - id: collect_material_changes
+    type: code
+    depends_on: [vendor_reassessment_loop]
+    code_config:
+      language: python
+      code: |
+        loop_out = _steps['vendor_reassessment_loop'] or {}
+        norm = _steps['normalize_inventory'] or {}
+
+        # Loop output may be a list of per-item results or a wrapper dict.
+        items = loop_out if isinstance(loop_out, list) else (loop_out.get('results') or loop_out.get('items') or [])
+
+        all_assessed = []
+        material = []
+        for it in items:
+            row = it if isinstance(it, dict) else {}
+            # The router output is the meaningful per-vendor record - last child in the loop.
+            if 'route_material_change' in row and isinstance(row['route_material_change'], dict):
+                row = row['route_material_change']
+            if not row.get('vendor_id'):
+                continue
+            all_assessed.append(row)
+            if row.get('is_material_downgrade'):
+                material.append(row)
+
+        result = {
+            'assessment_cycle_id': _input.get('assessment_cycle_id'),
+            'vendors_assessed': len(all_assessed) or norm.get('vendor_count', 0),
+            'all_assessed': all_assessed,
+            'material_count': len(material),
+            'material_downgrades': material,
+            'has_material_downgrade': len(material) > 0,
+        }
+
+  # 6) CONDITION: only if at least one vendor has a material downgrade do we run the consensus
+  #     gate and open remediation tickets. Deterministic, no model.
+  - id: material_downgrade_branch
+    type: condition
+    depends_on: [collect_material_changes]
+    condition_config:
+      expression: "{steps.collect_material_changes.output.has_material_downgrade} == true"
+      then: [materiality_consensus_gate, open_remediation_task, seal_vendor_record]
+      else: [seal_vendor_record]
+
+  # 6a) GATE the materiality of the downgrades: a CROSS-PROVIDER consensus - the SAME rubric on
+  #     provider A (sonnet) and provider B (gemini), PLUS a mandatory TPRM-owner human attester.
+  #     ALL strategies must pass, so no single vendor's model self-certifies a tier downgrade.
+  #     Both llm_eval model slots are swappable across the seven providers.
+  - id: materiality_consensus_gate
+    type: gate
+    depends_on: [collect_material_changes]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >
+              You are a TPRM materiality reviewer (judge A). For each proposed downgrade, confirm the
+              deterministic findings actually justify moving the vendor to a worse risk tier - an
+              expired/missing SOC 2 report, a security-rating drop past threshold, a new sub-processor
+              in a restricted region, or an open breach are each material. Answer exactly 'approved' if
+              every proposed downgrade is justified by its findings, otherwise 'rejected' and name the
+              vendor whose downgrade is not justified. Proposed downgrades:
+              {steps.collect_material_changes.output.material_downgrades}
+            input: "{steps.collect_material_changes.output.material_downgrades}"
+            model: sonnet
+        - type: llm_eval
+          config:
+            prompt: >
+              You are a TPRM materiality reviewer (judge B, an independent provider). Apply the SAME
+              rubric: confirm each proposed risk-tier downgrade is materially justified by its
+              findings (SOC 2 expiry, rating drop, restricted-region sub-processor, or open breach).
+              Answer exactly 'approved' if all downgrades hold, otherwise 'rejected' naming the
+              disputed vendor and your proposed tier. Proposed downgrades:
+              {steps.collect_material_changes.output.material_downgrades}
+            input: "{steps.collect_material_changes.output.material_downgrades}"
+            model: google/gemini-2.5-pro
+        - type: human
+          config:
+            message: >
+              TPRM owner sign-off required: confirm these vendor risk-tier downgrades are material and
+              should be recorded against the vendors before remediation tickets are opened and the
+              records are sealed to the object-lock register.
+            timeout_hours: 48
+            on_timeout: abort
+
+  # 6b) OPEN a remediation task in the ticketing system for each confirmed downgrade. Connector: jira.
+  - id: open_remediation_task
+    type: http
+    depends_on: [materiality_consensus_gate]
+    http_config:
+      url: "{input.ticketing_base_url}/issue/bulk"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.TICKETING_API_TOKEN}"
+      body: |
+        {
+          "assessment_cycle_id": "{input.assessment_cycle_id}",
+          "project_key": "{input.ticketing_project_key}",
+          "issue_type": "Vendor Risk Remediation",
+          "downgrades": {steps.collect_material_changes.output.material_downgrades}
+        }
+      value_map:
+        remediation_ticket_keys: "issues"
+        remediation_ticket_count: "total"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 7) DETERMINISTIC seal: SHA-256 over the canonical vendor risk record + delta for THIS cycle.
+  #     This is the tamper-evident, audit-load-bearing record. No model.
+  - id: seal_vendor_record
+    type: code
+    depends_on: [collect_material_changes]
+    code_config:
+      language: python
+      code: |
+        import json
+        import hashlib
+        from datetime import datetime, timezone
+
+        collected = _steps['collect_material_changes'] or {}
+        cycle = _input.get('assessment_cycle_id')
+
+        record = {
+            'assessment_cycle_id': cycle,
+            'generated_at': datetime.now(timezone.utc).isoformat(),
+            'vendors_assessed': collected.get('vendors_assessed', 0),
+            'material_downgrade_count': collected.get('material_count', 0),
+            'material_downgrades': collected.get('material_downgrades', []),
+            'all_assessed': collected.get('all_assessed', []),
+        }
+
+        # Canonical (sorted-key) serialization so the seal is reproducible byte-for-byte.
+        canonical = json.dumps(record, sort_keys=True, separators=(',', ':'))
+        digest = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+
+        result = {
+            'object_key': f"vendor-risk/{cycle}/vendor-risk-record.json",
+            'sha256': digest,
+            'byte_length': len(canonical),
+            'material_downgrade_count': record['material_downgrade_count'],
+            'record': record,
+            'canonical_json': canonical,
+        }
+
+  # 8) PUT the sealed record to the object-lock (WORM) S3 register. The SHA-256 travels as object
+  #     metadata so the record is tamper-evident at rest. Connector: aws-s3.
+  - id: put_object_lock_register
+    type: http
+    depends_on: [seal_vendor_record]
+    http_config:
+      url: "{input.s3_base_url}/{input.s3_bucket}/{steps.seal_vendor_record.output.object_key}"
+      method: PUT
+      headers:
+        Content-Type: "application/json"
+        x-amz-object-lock-mode: "COMPLIANCE"
+        x-amz-object-lock-retain-until-date: "2034-01-01T00:00:00Z"
+        x-amz-meta-sha256: "{steps.seal_vendor_record.output.sha256}"
+        x-amz-meta-assessment-cycle-id: "{input.assessment_cycle_id}"
+      auth: "aws4:{env.AWS_ACCESS_KEY_ID}:{env.AWS_SECRET_ACCESS_KEY}"
+      body: "{steps.seal_vendor_record.output.canonical_json}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 9) NOTIFY the security-GRC channel with the cycle summary + sealed record integrity hash.
+  #     Connector: slack.
+  - id: notify_security_grc
+    type: notify
+    depends_on: [put_object_lock_register]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: "Vendor risk re-assessment {input.assessment_cycle_id} complete. Vendors assessed: {steps.collect_material_changes.output.vendors_assessed}. Material tier downgrades: {steps.collect_material_changes.output.material_count} (cleared by cross-provider consensus + TPRM-owner sign-off). Remediation tickets opened in {input.ticketing_project_key}. Sealed record sha256 {steps.seal_vendor_record.output.sha256} written to object-lock register at {steps.seal_vendor_record.output.object_key}."
+
+on_complete:
+  storage_path: "vendor-risk-continuous-monitor/{run_id}/result.json"

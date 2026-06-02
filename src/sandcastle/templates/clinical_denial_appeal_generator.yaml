@@ -1,0 +1,419 @@
+# name: Clinical Denial Appeal Generator
+# description: Turn a payer claim denial (CARC/RARC codes + EOB) into a grounded, citation-backed appeal letter with a deadline-aware tracker. Parse the denial, classify the reason, route to the matching appeal strategy, pull payer policy + clinical guidelines, minimize PHI, compute the appeal-deadline countdown, draft a chart-grounded letter, gate it (no-unsupported-claims LLM eval + human biller/clinician approval), produce a PDF appeal + evidence appendix, then poll the deadline and escalate if unsent.
+# tags: [Healthcare, Revenue-Cycle, Claim-Denial, Appeals, CARC, RARC, EOB, Payer-Policy, PHI, Deadline]
+# category: healthcare
+
+name: clinical-denial-appeal-generator
+description: >
+  Provider-side rebuttal to a payer claim DENIAL. Parses the EOB / denial PDF to extract
+  CARC/RARC reason codes, claim lines, the received date and the regulatory appeal deadline,
+  then CLASSIFIES the denial into one of four appeal tracks (medical-necessity, coding,
+  eligibility, timely-filing). A deterministic CONDITION routes to the matching appeal
+  strategy, which pulls the relevant payer policy bulletin and clinical-guideline references
+  over HTTP. A DETERMINISTIC Python step minimizes PHI (redacts the chart to the minimum
+  necessary) and computes the appeal-deadline countdown from the received date - the
+  deadline clock is code, not a model. A provider-agnostic LLM drafts the appeal letter
+  grounded ONLY in the redacted chart and the cited policy. A GATE (an LLM eval that there
+  are no unsupported clinical claims AND a human biller/clinician approval) must BOTH pass
+  before a PDF appeal letter + evidence appendix is rendered. A SENSOR then polls the appeal
+  deadline window and a NOTIFY escalates to the billing channel if the letter is still unsent
+  as the window closes. Classification and drafting are provider-agnostic LLM/classify with
+  failover; deadline math, code mapping and PHI handling are deterministic code; policy
+  lookup is HTTP. No vendor-specific model is required.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 900
+
+input_schema:
+  required: ["claim_id", "denial_document", "date_of_service", "received_date"]
+  properties:
+    claim_id:
+      type: string
+      description: "Provider claim / encounter id the denial is attached to (e.g. 'ENC-2026-518342')."
+      example: "ENC-2026-518342"
+    denial_document:
+      type: string
+      description: "The payer EOB / ERA / denial-letter PDF (path, URL, or doc ref) carrying the CARC/RARC reason codes, denied claim lines and appeal-rights language."
+      example: "s3://rcm-inbound/denials/ENC-2026-518342-eob.pdf"
+    date_of_service:
+      type: string
+      description: "Date of service of the denied encounter (ISO-8601). Used for timely-filing and policy-version matching."
+      example: "2026-03-14"
+    received_date:
+      type: string
+      description: "Date the denial / EOB was RECEIVED by the provider (ISO-8601). The appeal-deadline countdown is computed from this date."
+      example: "2026-05-20"
+    appeal_window_days:
+      type: number
+      description: "Payer's allowed appeal window in calendar days from the received date (commercial first-level is often 180; Medicare redetermination is 120)."
+      default: 180
+      example: "180"
+    chart_excerpt:
+      type: string
+      description: "The relevant clinical chart excerpt (H&P, op note, progress notes, labs, imaging) that grounds the medical-necessity argument. PHI is minimized downstream before drafting."
+      default: ""
+      example: "62yo M, CAD, presented with unstable angina; cath showed 90% LAD stenosis; PCI with DES per ACC/AHA guideline."
+    payer_policy_base_url:
+      type: string
+      description: "REST base URL for the payer's medical-policy / coverage-bulletin lookup service."
+      default: "https://api.payer-policy.example.com/v1"
+      example: "https://api.uhc-policy.example.com/v1"
+    guideline_base_url:
+      type: string
+      description: "REST base URL for the clinical-guideline / coding-reference lookup service (e.g. MCG / InterQual / specialty-society guideline index)."
+      default: "https://api.clinical-guidelines.example.com/v1"
+      example: "https://api.mcg-guidelines.example.com/v1"
+    deadline_tracker_url:
+      type: string
+      description: "Status endpoint of the appeal-tracker / clearinghouse that flips to submitted once the appeal is filed. The sensor polls it to detect unsent appeals before the window closes."
+      default: "https://api.appeal-tracker.example.com/v1/appeals"
+      example: "https://api.appeal-tracker.example.com/v1/appeals"
+    report_author:
+      type: string
+      description: "Author / department shown on the generated appeal-letter PDF."
+      default: "Revenue Cycle - Appeals Unit"
+      example: "Revenue Cycle - Appeals Unit"
+    escalation_channel:
+      type: string
+      description: "Slack channel notified to escalate an unsent appeal as the deadline window closes."
+      default: "#rcm-appeals"
+      example: "#rcm-appeals"
+
+steps:
+  # 1) PARSE the denial PDF/EOB to text so the codes, claim lines and deadline language can be read.
+  - id: parse_denial
+    type: parse
+    prompt: "{input.denial_document}"
+    parse_config:
+      output: markdown
+      pages: null
+      ocr: true
+      ocr_engine: auto
+
+  # 2) EXTRACT structured denial facts from the parsed EOB: CARC/RARC codes, denied claim lines,
+  #    payer + member-plan, and any stated appeal-rights / deadline language. LLM extraction with a schema.
+  - id: extract_denial_facts
+    type: llm
+    depends_on: [parse_denial]
+    prompt: |
+      You are a revenue-cycle denial analyst. From the parsed payer EOB / denial letter below,
+      extract a strict JSON object of the denial facts. Do NOT invent values - if a field is
+      not present, use null or an empty list. Read CARC (Claim Adjustment Reason Codes) and
+      RARC (Remittance Advice Remark Codes) exactly as printed.
+
+      Parsed denial document:
+      {steps.parse_denial.output}
+
+      Claim id: {input.claim_id}
+      Date of service: {input.date_of_service}
+      Received date: {input.received_date}
+
+      Return ONLY JSON with these keys:
+        payer_name, member_plan, carc_codes (list of {code, description}),
+        rarc_codes (list of {code, description}), denied_lines (list of
+        {cpt_hcpcs, modifier, billed_amount, denied_amount}), stated_appeal_window_days
+        (integer or null), appeal_address_or_portal, denial_narrative (one sentence).
+    output_schema:
+      type: object
+      properties:
+        payer_name: { type: string }
+        member_plan: { type: string }
+        carc_codes: { type: array }
+        rarc_codes: { type: array }
+        denied_lines: { type: array }
+        stated_appeal_window_days: { type: ["integer", "null"] }
+        appeal_address_or_portal: { type: string }
+        denial_narrative: { type: string }
+
+  # 3) CLASSIFY the denial into one of four appeal tracks. Provider-agnostic, swappable model.
+  #    Every category routes into the deterministic route_strategy condition.
+  - id: classify_denial
+    type: classify
+    depends_on: [extract_denial_facts]
+    classify_config:
+      model: haiku
+      input: >
+        Classify this payer claim denial into exactly one appeal track using the CARC/RARC codes
+        and narrative. medical_necessity = service deemed not medically necessary / experimental /
+        not covered for the diagnosis (e.g. CARC 50, 55, 167). coding = bundling, modifier,
+        units, NCCI/MUE, dx-procedure mismatch (e.g. CARC 4, 11, 16, 97, 234). eligibility =
+        coverage/benefit/member problems - not eligible, COB, non-covered benefit, auth absent
+        (e.g. CARC 27, 31, 96, 197, 22). timely_filing = claim filed past the payer filing limit
+        (e.g. CARC 29). Choose the single best track. Denial facts: {steps.extract_denial_facts.output}
+      categories:
+        - medical_necessity
+        - coding
+        - eligibility
+        - timely_filing
+      branches:
+        medical_necessity: [route_strategy]
+        coding: [route_strategy]
+        eligibility: [route_strategy]
+        timely_filing: [route_strategy]
+
+  # 4) ROUTE deterministically to the matching appeal-strategy policy lookups. timely_filing needs
+  #    no clinical-necessity guideline, so it skips the guideline pull; everything else fetches both.
+  - id: route_strategy
+    type: condition
+    depends_on: [classify_denial]
+    condition_config:
+      expression: "'{steps.classify_denial.output}' == 'timely_filing'"
+      then: [fetch_payer_policy, minimize_and_count]
+      else: [fetch_payer_policy, fetch_clinical_guideline, minimize_and_count]
+
+  # 4a) HTTP: fetch the relevant payer medical / coverage policy bulletin for the denied codes.
+  - id: fetch_payer_policy
+    type: http
+    http_config:
+      url: "{input.payer_policy_base_url}/policies?denial_track={steps.classify_denial.output}&dos={input.date_of_service}&claim_id={input.claim_id}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.PAYER_POLICY_API_KEY}"
+      value_map:
+        policy_id: "id"
+        policy_title: "title"
+        policy_url: "url"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 4b) HTTP: fetch clinical-guideline / coding-reference citations grounding the medical case.
+  #     Routed to only for medical_necessity / coding / eligibility tracks (see route_strategy.else).
+  - id: fetch_clinical_guideline
+    type: http
+    http_config:
+      url: "{input.guideline_base_url}/references?track={steps.classify_denial.output}&dos={input.date_of_service}&claim_id={input.claim_id}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.GUIDELINE_API_KEY}"
+      value_map:
+        guideline_id: "id"
+        guideline_title: "title"
+        guideline_citation: "citation"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 5) DETERMINISTIC PHI minimization + appeal-deadline countdown. The load-bearing math is code,
+  #    not a model: redact direct identifiers to the minimum-necessary chart and compute the exact
+  #    number of calendar days remaining to file from the received date + appeal window.
+  - id: minimize_and_count
+    type: code
+    depends_on: [route_strategy]
+    code_config:
+      language: python
+      code: |
+        import re
+        from datetime import datetime, timezone, timedelta
+
+        facts = _steps['extract_denial_facts'] or {}
+        if isinstance(facts, str):
+            import json
+            try:
+                facts = json.loads(facts)
+            except (ValueError, TypeError):
+                facts = {}
+
+        received_raw = str(_input.get('received_date') or '').strip()
+        dos_raw = str(_input.get('date_of_service') or '').strip()
+
+        # Appeal window: prefer the window the EOB itself states, else the input default.
+        stated = facts.get('stated_appeal_window_days') if isinstance(facts, dict) else None
+        try:
+            window_days = int(stated) if stated not in (None, '', 0) else int(float(_input.get('appeal_window_days', 180) or 180))
+        except (ValueError, TypeError):
+            window_days = int(float(_input.get('appeal_window_days', 180) or 180))
+
+        def _parse_date(s):
+            if not s:
+                return None
+            try:
+                return datetime.fromisoformat(s.replace('Z', '+00:00')).date()
+            except (ValueError, TypeError):
+                for fmt in ('%Y-%m-%d', '%m/%d/%Y', '%d.%m.%Y'):
+                    try:
+                        return datetime.strptime(s[:10], fmt).date()
+                    except (ValueError, TypeError):
+                        continue
+            return None
+
+        received = _parse_date(received_raw)
+        today = datetime.now(timezone.utc).date()
+
+        deadline = None
+        days_remaining = None
+        if received is not None:
+            deadline = received + timedelta(days=window_days)
+            days_remaining = (deadline - today).days
+
+        # Escalation tiers drive the sensor/notify urgency downstream.
+        if days_remaining is None:
+            urgency = 'unknown'
+        elif days_remaining < 0:
+            urgency = 'overdue'
+        elif days_remaining <= 7:
+            urgency = 'critical'
+        elif days_remaining <= 21:
+            urgency = 'warning'
+        else:
+            urgency = 'normal'
+
+        # --- PHI minimization: redact direct identifiers from the free-text chart excerpt so the
+        #     downstream draft is grounded on the minimum-necessary record - HIPAA minimum necessary. ---
+        chart = str(_input.get('chart_excerpt') or '')
+        # SSN, MRN-like long digit runs, phone, email, dates-of-birth style tokens.
+        chart = re.sub(r'\b\d{3}-\d{2}-\d{4}\b', '[SSN-REDACTED]', chart)
+        chart = re.sub(r'\b(MRN|mrn)[:#\s]*\d{4,}\b', '[MRN-REDACTED]', chart)
+        chart = re.sub(r'\b\d{7,}\b', '[ID-REDACTED]', chart)
+        chart = re.sub(r'\b[\w.\-]+@[\w.\-]+\.\w+\b', '[EMAIL-REDACTED]', chart)
+        chart = re.sub(r'\b(\+?\d[\d\-\s().]{8,}\d)\b', '[PHONE-REDACTED]', chart)
+        chart = re.sub(r'\bDOB[:\s]*\d{1,4}[\/.\-]\d{1,2}[\/.\-]\d{1,4}\b', '[DOB-REDACTED]', chart, flags=re.IGNORECASE)
+        redacted_chart = chart.strip()
+
+        # Pull a compact code list for the letter header.
+        carc = facts.get('carc_codes', []) if isinstance(facts, dict) else []
+        rarc = facts.get('rarc_codes', []) if isinstance(facts, dict) else []
+        carc_str = ', '.join(str(c.get('code')) for c in carc if isinstance(c, dict) and c.get('code'))
+        rarc_str = ', '.join(str(c.get('code')) for c in rarc if isinstance(c, dict) and c.get('code'))
+
+        result = {
+            'claim_id': _input.get('claim_id'),
+            'received_date': received.isoformat() if received else None,
+            'date_of_service': dos_raw or None,
+            'appeal_window_days': window_days,
+            'appeal_deadline': deadline.isoformat() if deadline else None,
+            'days_remaining': days_remaining,
+            'urgency': urgency,
+            'is_unsent_blocking': urgency in ('critical', 'overdue'),
+            'carc_codes': carc_str,
+            'rarc_codes': rarc_str,
+            'redacted_chart': redacted_chart,
+            'phi_minimized': True,
+        }
+
+  # 6) LLM: draft the appeal letter grounded ONLY in the redacted chart + the cited payer policy /
+  #     clinical guideline. Provider-agnostic; runs on default_model and is swappable.
+  - id: draft_appeal_letter
+    type: llm
+    depends_on: [minimize_and_count, fetch_payer_policy]
+    prompt: |
+      You are a revenue-cycle appeals writer drafting a FIRST-LEVEL appeal letter to a health
+      plan. Write a formal, professional appeal letter that rebuts the denial.
+
+      Ground your argument ONLY in:
+        - The redacted clinical chart excerpt (do NOT introduce any clinical fact not present here).
+        - The cited payer policy and clinical-guideline references provided below.
+      If a claim is not supported by the chart or a cited source, DO NOT make it. Cite the
+      payer policy id/title and any guideline citation inline.
+
+      Appeal track (denial category): {steps.classify_denial.output}
+      Denial facts: {steps.extract_denial_facts.output}
+      CARC codes: {steps.minimize_and_count.output.carc_codes}
+      RARC codes: {steps.minimize_and_count.output.rarc_codes}
+      Claim id: {input.claim_id}   Date of service: {steps.minimize_and_count.output.date_of_service}
+      Appeal deadline: {steps.minimize_and_count.output.appeal_deadline} (days remaining: {steps.minimize_and_count.output.days_remaining})
+
+      Redacted (minimum-necessary) chart excerpt:
+      {steps.minimize_and_count.output.redacted_chart}
+
+      Cited payer policy: {steps.fetch_payer_policy.output}
+      Cited clinical guideline references: {steps.fetch_clinical_guideline.output}
+
+      Structure the letter: (1) reference line with claim id, member plan, CARC/RARC codes and
+      date of service; (2) statement of the specific denial being appealed; (3) the grounded
+      clinical / coding argument with inline citations; (4) the explicit request to overturn and
+      reprocess; (5) a closing noting the filing is within the appeal window. No markdown headers,
+      no emojis. End with a one-line bracketed list of every source you cited.
+
+  # 7) GATE: BOTH must pass before rendering - an LLM eval that there are NO unsupported clinical
+  #     claims (every assertion traces to the redacted chart or a cited source) AND a human
+  #     biller/clinician sign-off. Gate strategies are llm_eval + human; all must pass.
+  - id: appeal_gate
+    type: gate
+    depends_on: [draft_appeal_letter]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >
+              You are a clinical-appeals compliance reviewer. Read the draft appeal letter and
+              compare every clinical / coding assertion against the redacted chart excerpt and the
+              cited payer policy + guideline references. Answer exactly 'approved' ONLY if every
+              assertion is supported by the chart or a cited source and no fact was fabricated;
+              otherwise answer 'rejected' and name the unsupported claim. Draft letter and sources:
+              {steps.draft_appeal_letter.output} || Chart: {steps.minimize_and_count.output.redacted_chart}
+              || Policy: {steps.fetch_payer_policy.output} || Guideline: {steps.fetch_clinical_guideline.output}
+            model: sonnet
+        - type: human
+          config:
+            message: >
+              Biller / clinician sign-off: confirm this appeal letter is clinically accurate, every
+              claim is supported by the chart and cited policy, and it is ready to file with the payer.
+            timeout_hours: 48
+            on_timeout: abort
+
+  # 8) REPORT: render the approved appeal letter + an evidence appendix (codes, deadline, cited
+  #     policy/guideline, redacted chart) to a PDF the biller files with the payer.
+  - id: appeal_report
+    type: report
+    depends_on: [appeal_gate]
+    report_config:
+      template: research-report
+      format: pdf
+      theme: professional
+      title: "Claim Denial Appeal - {input.claim_id}"
+      author: "{input.report_author}"
+    prompt: |
+      Assemble the final appeal package PDF for claim {input.claim_id}.
+
+      Section 1 - Appeal Letter (verbatim, ready to file):
+      {steps.draft_appeal_letter.output}
+
+      Section 2 - Evidence Appendix:
+      - Denial facts (payer, plan, CARC/RARC, denied lines): {steps.extract_denial_facts.output}
+      - Appeal track: {steps.classify_denial.output}
+      - Appeal deadline: {steps.minimize_and_count.output.appeal_deadline}
+        (received {steps.minimize_and_count.output.received_date}, window
+        {steps.minimize_and_count.output.appeal_window_days} days, days remaining
+        {steps.minimize_and_count.output.days_remaining}, urgency {steps.minimize_and_count.output.urgency})
+      - Cited payer policy: {steps.fetch_payer_policy.output}
+      - Cited clinical guideline references: {steps.fetch_clinical_guideline.output}
+      - Minimum-necessary chart excerpt (PHI minimized): {steps.minimize_and_count.output.redacted_chart}
+
+  # 9) SENSOR: poll the appeal tracker for this claim. The condition is satisfied (resolves) the
+  #     moment the tracker reports the appeal as SUBMITTED; if it never flips, the sensor times out
+  #     at the deadline window and the downstream escalation notify fires.
+  - id: poll_deadline
+    type: sensor
+    depends_on: [appeal_report]
+    sensor_config:
+      url: "{input.deadline_tracker_url}/{input.claim_id}/status"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200 and 'submitted' in str(response).lower()"
+      check_interval: 3600
+      timeout: 86400
+
+  # 10) NOTIFY: escalate to the billing channel with the live deadline countdown so an unsent
+  #     appeal gets filed before the regulatory window closes.
+  - id: escalate_unsent
+    type: notify
+    depends_on: [poll_deadline]
+    notify_config:
+      service: slack
+      channel: "{input.escalation_channel}"
+      message: >
+        Appeal deadline check for claim {input.claim_id} ({steps.classify_denial.output}):
+        deadline {steps.minimize_and_count.output.appeal_deadline},
+        {steps.minimize_and_count.output.days_remaining} days remaining
+        (urgency {steps.minimize_and_count.output.urgency}). PDF appeal package is ready - file it
+        with the payer before the window closes if the tracker has not already marked it submitted.
+
+on_complete:
+  storage_path: "clinical-denial-appeal-generator/{run_id}/result.json"

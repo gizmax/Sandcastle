@@ -1,0 +1,527 @@
+# name: Reg E Dispute Provisional Credit Engine
+# description: Intake a cardholder dispute, classify the claim, run the Reg E / Reg Z provisional-credit and investigation deadline clocks deterministically, pull transaction + chargeback-rights context from the processor/network, gate the claim-vs-facts consistency with a human dispute-analyst sign-off, branch to provisional-credit / deny / chargeback-eligible, render the resolution letter + investigation log, then poll the regulatory deadline and escalate before the window closes.
+# tags: [fintech, banking, card-disputes, reg-e, reg-z, provisional-credit, chargeback, compliance, deadlines]
+# category: fintech_banking
+
+name: reg-e-dispute-provisional-credit-engine
+description: >-
+  Card-issuer dispute engine for a regulated cardholder claim. PARSES the cardholder's
+  dispute form / message to extract the disputed transaction, amount, date and the stated
+  reason, then CLASSIFIES the claim into one of four dispute types (unauthorized, billing
+  error, merchant-not-as-described, duplicate). A DETERMINISTIC Python step runs the Reg E
+  (EFTA 12 CFR 1005.11) and Reg Z (12 CFR 1026.13) clocks: the provisional-credit timer
+  (10 business days, extended to 20 for new accounts / POS / foreign), the investigation
+  window (45 / 90 days) and the resolution deadline - the regulatory math and rights
+  determination are CODE, not a model, so compliance is identical regardless of provider.
+  Transaction and chargeback-rights context is pulled over HTTP from the processor / card
+  network. A GATE (an LLM eval that the claimed category is consistent with the transaction
+  facts AND a human dispute-analyst approval) must BOTH pass before money moves. A CONDITION
+  then routes to provisional-credit, deny, or chargeback-eligible. A REPORT renders the
+  cardholder resolution letter plus the internal investigation log, and a SENSOR polls the
+  regulatory deadline window with a NOTIFY escalation when it is closing. Classification and
+  letter drafting are provider-agnostic LLM/classify with failover; the deadline timers and
+  rights logic are pure deterministic code; transaction context is HTTP. No vendor-specific
+  model is required.
+default_model: sonnet
+default_timeout: 900
+
+input_schema:
+  required: ["dispute_id", "card_last4", "dispute_document"]
+  properties:
+    dispute_id:
+      type: string
+      description: "Internal dispute case id the claim is filed under (e.g. 'DSP-2026-100482')."
+      default: ""
+    card_last4:
+      type: string
+      description: "Last four of the cardholder PAN the dispute is filed against (used for processor lookup, never the full PAN)."
+      default: ""
+    dispute_document:
+      type: string
+      description: "The cardholder's dispute claim form / message / PDF (path, URL, or doc ref) carrying the disputed transaction, amount, date and stated reason."
+      default: ""
+    account_opened_date:
+      type: string
+      description: "Date the deposit/card account was opened (ISO-8601). Accounts open <30 days at the transaction date get the extended 20-business-day provisional-credit window under Reg E."
+      default: ""
+    notice_received_date:
+      type: string
+      description: "Date the institution RECEIVED the cardholder's notice of error (ISO-8601). All Reg E / Reg Z clocks run from this date."
+      default: ""
+    is_pos_or_foreign:
+      type: boolean
+      description: "True if the disputed transaction was point-of-sale or foreign-initiated, which extends the Reg E provisional-credit window to 20 business days."
+      default: false
+    processor_api_base:
+      type: string
+      description: "REST base URL for the card processor / network connector that returns the authorization, settlement and chargeback-rights context."
+      default: "https://api.cardprocessor.example.com/v1"
+    network_rights_api_base:
+      type: string
+      description: "REST base URL for the card-network (Visa/Mastercard) chargeback reason-code + rights lookup service."
+      default: "https://api.cardnetwork.example.com/v1"
+    deadline_tracker_url:
+      type: string
+      description: "Status endpoint of the dispute-case tracker that flips to resolved once the investigation is closed. The sensor polls it to detect an unresolved case before the regulatory window closes."
+      default: "https://api.dispute-tracker.example.com/v1/disputes"
+    report_author:
+      type: string
+      description: "Author / department shown on the generated resolution letter + investigation log."
+      default: "Card Operations - Dispute Resolution Unit"
+    escalation_channel:
+      type: string
+      description: "Slack channel notified to escalate a dispute whose regulatory deadline window is closing."
+      default: "#card-disputes"
+
+steps:
+  # 1) PARSE the cardholder dispute form / message into text so the disputed
+  #    transaction, amount, date and stated reason can be read.
+  - id: parse_dispute
+    type: parse
+    prompt: "{input.dispute_document}"
+    parse_config:
+      output: markdown
+      pages: null
+      ocr: true
+      ocr_engine: auto
+
+  # 2) EXTRACT structured dispute facts from the parsed claim: the disputed
+  #    transaction(s), amount, post date, merchant and the cardholder's stated
+  #    reason. LLM extraction with a strict schema; provider-agnostic.
+  - id: extract_dispute_facts
+    type: llm
+    depends_on: [parse_dispute]
+    prompt: |
+      You are a card-dispute intake analyst. From the parsed cardholder dispute claim below,
+      extract a strict JSON object of the dispute facts. Do NOT invent values - if a field is
+      not present, use null or an empty list.
+
+      Parsed cardholder dispute:
+      {steps.parse_dispute.output}
+
+      Dispute id: {input.dispute_id}
+      Card last4: {input.card_last4}
+      Notice received date: {input.notice_received_date}
+
+      Return ONLY JSON with these keys:
+        cardholder_name, disputed_transactions (list of {merchant, amount, transaction_date,
+        network_ref}), total_disputed_amount (number), stated_reason (one sentence),
+        cardholder_contacted_merchant (true/false/null), recognizes_merchant (true/false/null).
+    output_schema:
+      type: object
+      properties:
+        cardholder_name: { type: string }
+        disputed_transactions: { type: array }
+        total_disputed_amount: { type: number }
+        stated_reason: { type: string }
+        cardholder_contacted_merchant: { type: ["boolean", "null"] }
+        recognizes_merchant: { type: ["boolean", "null"] }
+
+  # 3) CLASSIFY the claim into one of four dispute types. Provider-agnostic,
+  #    swappable model. Every category routes into the deterministic clock engine.
+  - id: classify_dispute
+    type: classify
+    depends_on: [extract_dispute_facts]
+    classify_config:
+      model: haiku
+      input: >
+        Classify this cardholder card dispute into exactly one type. unauthorized = the
+        cardholder did not authorize and does not recognize the charge (fraud / lost-stolen,
+        Reg E EFT or Reg Z unauthorized-use). billing_error = wrong amount, charge for goods
+        not received, computational/posting error, or a statement error the cardholder
+        contests (Reg Z 1026.13). merchant_not_as_described = goods/services received were
+        defective, not as described, or not delivered as promised (quality / not-as-described
+        chargeback right). duplicate = the same transaction was posted more than once.
+        Choose the single best type. Dispute facts: {steps.extract_dispute_facts.output}
+      categories:
+        - unauthorized
+        - billing_error
+        - merchant_not_as_described
+        - duplicate
+      branches:
+        unauthorized: [deadline_engine]
+        billing_error: [deadline_engine]
+        merchant_not_as_described: [deadline_engine]
+        duplicate: [deadline_engine]
+
+  # 4) DETERMINISTIC Reg E / Reg Z deadline engine. The load-bearing compliance math is
+  #    CODE, not a model: provisional-credit timer (10 business days, extended to 20 for
+  #    new accounts / POS / foreign), the investigation window (45 / 90 days) and the
+  #    final resolution deadline - all computed from the notice-received date. Identical
+  #    output regardless of provider.
+  - id: deadline_engine
+    type: code
+    depends_on: [classify_dispute]
+    code_config:
+      language: python
+      code: |
+        from datetime import datetime, timezone, timedelta
+
+        dispute_type = str(_steps.get('classify_dispute') or '').strip().lower()
+        facts = _steps.get('extract_dispute_facts') or {}
+        if isinstance(facts, str):
+            import json
+            try:
+                facts = json.loads(facts)
+            except (ValueError, TypeError):
+                facts = {}
+
+        def _parse_date(s):
+            s = str(s or '').strip()
+            if not s:
+                return None
+            try:
+                return datetime.fromisoformat(s.replace('Z', '+00:00')).date()
+            except (ValueError, TypeError):
+                for fmt in ('%Y-%m-%d', '%m/%d/%Y', '%d.%m.%Y'):
+                    try:
+                        return datetime.strptime(s[:10], fmt).date()
+                    except (ValueError, TypeError):
+                        continue
+            return None
+
+        def _add_business_days(start, n):
+            # Add n business days (Mon-Fri), skipping weekends. Deterministic, no holidays calendar.
+            d = start
+            added = 0
+            while added < n:
+                d = d + timedelta(days=1)
+                if d.weekday() < 5:
+                    added += 1
+            return d
+
+        notice = _parse_date(_input.get('notice_received_date'))
+        opened = _parse_date(_input.get('account_opened_date'))
+        today = datetime.now(timezone.utc).date()
+
+        is_pos_or_foreign = bool(_input.get('is_pos_or_foreign', False))
+
+        # New account: opened within 30 days of the disputed transaction / notice gets the
+        # extended Reg E provisional-credit window (20 business days vs 10).
+        is_new_account = False
+        if opened is not None and notice is not None:
+            is_new_account = (notice - opened).days <= 30
+
+        # --- Reg E provisional-credit timer (12 CFR 1005.11) ---
+        # 10 business days from notice to investigate or grant provisional credit;
+        # extended to 20 business days for new accounts, POS, or foreign transactions.
+        prov_credit_business_days = 20 if (is_new_account or is_pos_or_foreign) else 10
+
+        # --- Investigation window ---
+        # Reg E: 45 calendar days normally, 90 for new-account / POS / foreign.
+        # Reg Z (12 CFR 1026.13) billing-error: resolve within 2 cycles / 90 days.
+        reg_e_types = ('unauthorized',)  # EFT/unauthorized runs primarily on Reg E
+        is_reg_e = dispute_type in reg_e_types
+        if is_reg_e:
+            investigation_days = 90 if (is_new_account or is_pos_or_foreign) else 45
+            governing_reg = 'Reg E (12 CFR 1005.11)'
+        else:
+            # billing_error, merchant_not_as_described, duplicate -> Reg Z credit-billing-error
+            investigation_days = 90
+            governing_reg = 'Reg Z (12 CFR 1026.13)'
+
+        provisional_credit_deadline = None
+        investigation_deadline = None
+        prov_days_remaining = None
+        inv_days_remaining = None
+        if notice is not None:
+            provisional_credit_deadline = _add_business_days(notice, prov_credit_business_days)
+            investigation_deadline = notice + timedelta(days=investigation_days)
+            prov_days_remaining = (provisional_credit_deadline - today).days
+            inv_days_remaining = (investigation_deadline - today).days
+
+        # --- Rights determination (deterministic, by dispute type) ---
+        # Provisional credit is mandatory under Reg E when the EFT investigation exceeds the
+        # initial timer; Reg Z does not mandate provisional credit but bars collection of the
+        # disputed amount while it is under investigation.
+        if dispute_type == 'unauthorized':
+            provisional_credit_required = True
+            chargeback_eligible = True
+            rights_basis = 'Reg E mandates provisional credit if not resolved within the timer.'
+        elif dispute_type == 'duplicate':
+            provisional_credit_required = False
+            chargeback_eligible = True
+            rights_basis = 'Duplicate posting is a clear chargeback right; credit on confirmation.'
+        elif dispute_type == 'billing_error':
+            provisional_credit_required = False
+            chargeback_eligible = True
+            rights_basis = 'Reg Z: disputed amount uncollectible during investigation; chargeback per network rules.'
+        else:  # merchant_not_as_described
+            provisional_credit_required = False
+            chargeback_eligible = True
+            rights_basis = 'Quality/not-as-described chargeback right; requires cardholder merchant-contact evidence.'
+
+        # Total disputed amount from extracted facts (model only extracts; it never decides money).
+        try:
+            disputed_amount = float(facts.get('total_disputed_amount') or 0) if isinstance(facts, dict) else 0.0
+        except (TypeError, ValueError):
+            disputed_amount = 0.0
+
+        # Urgency tiers drive the sensor / notify escalation downstream.
+        urgency_basis = prov_days_remaining if prov_days_remaining is not None else inv_days_remaining
+        if urgency_basis is None:
+            urgency = 'unknown'
+        elif urgency_basis < 0:
+            urgency = 'overdue'
+        elif urgency_basis <= 2:
+            urgency = 'critical'
+        elif urgency_basis <= 5:
+            urgency = 'warning'
+        else:
+            urgency = 'normal'
+
+        result = {
+            'dispute_id': _input.get('dispute_id'),
+            'dispute_type': dispute_type,
+            'governing_reg': governing_reg,
+            'notice_received_date': notice.isoformat() if notice else None,
+            'is_new_account': is_new_account,
+            'is_pos_or_foreign': is_pos_or_foreign,
+            'provisional_credit_business_days': prov_credit_business_days,
+            'provisional_credit_deadline': provisional_credit_deadline.isoformat() if provisional_credit_deadline else None,
+            'provisional_credit_days_remaining': prov_days_remaining,
+            'investigation_window_days': investigation_days,
+            'investigation_deadline': investigation_deadline.isoformat() if investigation_deadline else None,
+            'investigation_days_remaining': inv_days_remaining,
+            'provisional_credit_required': provisional_credit_required,
+            'chargeback_eligible': chargeback_eligible,
+            'rights_basis': rights_basis,
+            'disputed_amount': round(disputed_amount, 2),
+            'urgency': urgency,
+        }
+
+  # 5a) HTTP: pull the authorization / settlement + chargeback-rights context for the card
+  #     from the processor / network connector. The real ledger, not the cardholder's claim.
+  - id: fetch_processor_context
+    type: http
+    depends_on: [deadline_engine]
+    http_config:
+      url: "{input.processor_api_base}/transactions?card_last4={input.card_last4}&dispute_id={input.dispute_id}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.PROCESSOR_API_KEY}"
+      value_map:
+        auth_status: "authorization.status"
+        settlement_status: "settlement.status"
+        network_ref: "network_reference_id"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 5b) HTTP: look up the card-network chargeback reason code + the rights window for the
+  #     classified dispute type (Visa/Mastercard reason-code rights).
+  - id: fetch_network_rights
+    type: http
+    depends_on: [deadline_engine]
+    http_config:
+      url: "{input.network_rights_api_base}/chargeback-rights?dispute_type={steps.classify_dispute.output}&dispute_id={input.dispute_id}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.NETWORK_RIGHTS_API_KEY}"
+      value_map:
+        reason_code: "reason_code"
+        rights_window_days: "rights_window_days"
+        reason_code_title: "title"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 6) GATE: BOTH must pass before money moves - an LLM eval that the claimed dispute
+  #    category is CONSISTENT with the transaction facts (no recognizing-merchant +
+  #    unauthorized mismatch, amount matches, etc.) AND a human dispute-analyst approval.
+  #    Gate strategies are llm_eval + human; all must pass.
+  - id: consistency_gate
+    type: gate
+    depends_on: [classify_dispute, deadline_engine, fetch_processor_context, fetch_network_rights]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >
+              You are a dispute-compliance reviewer. Answer exactly 'approved' ONLY if the
+              classified dispute type is consistent with the cardholder's stated facts and the
+              processor transaction context - e.g. an 'unauthorized' claim should not have the
+              cardholder recognizing the merchant, a 'duplicate' claim should show repeated
+              postings, the disputed amount should match the transaction, and the network rights
+              window should cover the dispute type. Otherwise answer 'rejected' and name the
+              inconsistency. Dispute facts: {steps.extract_dispute_facts.output} || Type:
+              {steps.classify_dispute.output} || Deadlines/rights: {steps.deadline_engine.output}
+              || Processor: {steps.fetch_processor_context.output} || Network rights:
+              {steps.fetch_network_rights.output}
+            model: sonnet
+        - type: human
+          config:
+            message: >
+              Dispute-analyst sign-off: confirm the dispute category matches the facts and the
+              transaction context, and approve before any provisional credit is posted. The
+              regulatory deadlines and rights are set by the deterministic engine, not by you.
+            timeout_hours: 24
+            on_timeout: abort
+
+  # 7) APPROVAL: explicit human authorization to move money (provisional credit), with the
+  #    deterministic engine output shown. EU AI Act / bank-controls human-in-the-loop before
+  #    crediting the cardholder.
+  - id: credit_authorization
+    type: approval
+    depends_on: [consistency_gate]
+    approval_config:
+      message: >
+        Authorize the dispute action for case {input.dispute_id} (card ...{input.card_last4}).
+        Review the deterministic Reg E / Reg Z deadline + rights determination below. The
+        provisional-credit requirement and amount are set by the engine, not by you.
+      show_data: steps.deadline_engine.output
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: true
+
+  # 8) CONDITION: deterministic routing to provisional-credit / deny / chargeback-eligible
+  #    branches from the engine's rights determination. Provisional credit when Reg E mandates
+  #    it; otherwise chargeback-eligible; deny only when no chargeback right exists.
+  - id: route_decision
+    type: condition
+    depends_on: [credit_authorization, deadline_engine]
+    condition_config:
+      expression: "{steps.deadline_engine.output.provisional_credit_required} == True"
+      then: [post_provisional_credit, draft_resolution_letter]
+      else: [open_chargeback, draft_resolution_letter]
+
+  # 8a) THEN branch: post the provisional credit to the cardholder's account via the processor.
+  #     Amount comes only from the deterministic engine.
+  - id: post_provisional_credit
+    type: http
+    http_config:
+      url: "{input.processor_api_base}/disputes/{input.dispute_id}/provisional-credit"
+      method: POST
+      auth: "bearer:{env.PROCESSOR_API_KEY}"
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      body:
+        card_last4: "{input.card_last4}"
+        amount: "{steps.deadline_engine.output.disputed_amount}"
+        reason: "Reg E provisional credit - dispute {input.dispute_id}"
+        provisional_credit_deadline: "{steps.deadline_engine.output.provisional_credit_deadline}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
+
+  # 8b) ELSE branch: open a chargeback with the card network using the looked-up reason code.
+  - id: open_chargeback
+    type: http
+    http_config:
+      url: "{input.network_rights_api_base}/chargebacks"
+      method: POST
+      auth: "bearer:{env.NETWORK_RIGHTS_API_KEY}"
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      body:
+        dispute_id: "{input.dispute_id}"
+        card_last4: "{input.card_last4}"
+        dispute_type: "{steps.classify_dispute.output}"
+        amount: "{steps.deadline_engine.output.disputed_amount}"
+        reason_code: "{steps.fetch_network_rights.output}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 9) LLM: draft the cardholder-facing resolution letter, grounded ONLY in the deterministic
+  #    engine output + the dispute facts. Provider-agnostic; runs on default_model, swappable.
+  - id: draft_resolution_letter
+    type: llm
+    depends_on: [credit_authorization, deadline_engine]
+    prompt: |
+      You are a card-dispute resolution writer drafting the cardholder-facing letter for a
+      regulated dispute. Write a formal, clear resolution letter.
+
+      Ground the letter ONLY in:
+        - The deterministic Reg E / Reg Z engine output below (deadlines, provisional-credit
+          requirement, governing regulation, rights basis). Do NOT change any date or amount.
+        - The extracted dispute facts.
+      State the disputed amount, the governing regulation, whether provisional credit is being
+      provided and by when, the investigation window and the final resolution deadline. Make NO
+      promise beyond what the engine authorizes.
+
+      Dispute id: {input.dispute_id}   Card ending: {input.card_last4}
+      Dispute type: {steps.classify_dispute.output}
+      Engine determination (authoritative, do not alter numbers): {steps.deadline_engine.output}
+      Dispute facts: {steps.extract_dispute_facts.output}
+
+      Structure: (1) reference line with dispute id, card ending, disputed amount; (2) the
+      regulation under which the claim is handled; (3) the provisional-credit statement (granted
+      and by which date, or why not applicable); (4) the investigation window and final
+      resolution deadline; (5) what the cardholder should expect next. No markdown headers, no
+      emojis.
+
+  # 10) REPORT: render the resolution letter + the internal investigation log (codes,
+  #     deadlines, rights basis, processor + network context) to a PDF for the case file.
+  - id: resolution_report
+    type: report
+    depends_on: [draft_resolution_letter, route_decision]
+    report_config:
+      template: research-report
+      format: pdf
+      theme: professional
+      title: "Dispute Resolution - {input.dispute_id}"
+      author: "{input.report_author}"
+    prompt: |
+      Assemble the final dispute resolution package PDF for case {input.dispute_id}.
+
+      Section 1 - Cardholder Resolution Letter (verbatim, ready to send):
+      {steps.draft_resolution_letter.output}
+
+      Section 2 - Investigation Log:
+      - Dispute type: {steps.classify_dispute.output}
+      - Governing regulation: {steps.deadline_engine.output.governing_reg}
+      - Notice received: {steps.deadline_engine.output.notice_received_date}
+      - Provisional-credit window: {steps.deadline_engine.output.provisional_credit_business_days} business days,
+        deadline {steps.deadline_engine.output.provisional_credit_deadline}
+        (required: {steps.deadline_engine.output.provisional_credit_required})
+      - Investigation window: {steps.deadline_engine.output.investigation_window_days} days,
+        deadline {steps.deadline_engine.output.investigation_deadline}
+        (days remaining {steps.deadline_engine.output.investigation_days_remaining}, urgency {steps.deadline_engine.output.urgency})
+      - Rights basis: {steps.deadline_engine.output.rights_basis}
+      - Disputed amount: {steps.deadline_engine.output.disputed_amount}
+      - Processor transaction context: {steps.fetch_processor_context.output}
+      - Network chargeback rights: {steps.fetch_network_rights.output}
+
+  # 11) SENSOR: poll the dispute-case tracker. Resolves the moment the tracker reports the case
+  #     RESOLVED; if it never flips, the sensor times out at the regulatory window and the
+  #     downstream escalation notify fires.
+  - id: poll_deadline
+    type: sensor
+    depends_on: [resolution_report]
+    sensor_config:
+      url: "{input.deadline_tracker_url}/{input.dispute_id}/status"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200 and 'resolved' in str(response).lower()"
+      check_interval: 3600
+      timeout: 86400
+
+  # 12) NOTIFY: escalate to the dispute channel with the live deadline countdown so an
+  #     unresolved case is closed before the Reg E / Reg Z window closes.
+  - id: escalate_deadline
+    type: notify
+    depends_on: [poll_deadline]
+    notify_config:
+      service: slack
+      channel: "{input.escalation_channel}"
+      message: >
+        Dispute deadline check for case {input.dispute_id} ({steps.classify_dispute.output},
+        {steps.deadline_engine.output.governing_reg}): provisional-credit deadline
+        {steps.deadline_engine.output.provisional_credit_deadline}, investigation deadline
+        {steps.deadline_engine.output.investigation_deadline}
+        ({steps.deadline_engine.output.investigation_days_remaining} days remaining, urgency
+        {steps.deadline_engine.output.urgency}). Resolution package is ready - close the case
+        before the regulatory window expires if the tracker has not already marked it resolved.
+
+on_complete:
+  storage_path: "reg-e-dispute-provisional-credit-engine/{run_id}/result.json"
