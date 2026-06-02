@@ -41,6 +41,7 @@
 
 - [Why Sandcastle?](#why-sandcastle)
 - [Start Local. Scale When Ready.](#start-local-scale-when-ready)
+- [⚡ Spark Mode — local AI on NVIDIA DGX Spark](#-spark-mode--local-ai-on-nvidia-dgx-spark)
 - [Quickstart](#quickstart)
 - [MCP Integration](#mcp-integration)
 - [Features](#features)
@@ -205,6 +206,37 @@ sandcastle serve
 ```bash
 docker compose up -d   # PostgreSQL + Redis + API + Worker, all configured
 ```
+
+---
+
+## ⚡ Spark Mode — local AI on NVIDIA DGX Spark
+
+Sandcastle's environment auto-detection goes one step further on an **NVIDIA DGX Spark** (or any
+Grace-Blackwell host with 110 GB+ unified memory): it turns on **Spark Mode** automatically — no
+flags, no config.
+
+- **$0 per run.** Point Sandcastle at a local OpenAI-compatible model server (Ollama, vLLM, or
+  NVIDIA NIM) on the Spark's GPU. Inference is tracked at `$0.00`, region `local` — you pay for
+  electricity, not tokens.
+- **Your data never leaves the box.** Fully local and air-gappable. Pair Spark Mode with the
+  `docker` sandbox backend and `data_residency=local` for an offline agent appliance — the engine
+  raises at runtime if a step targets a non-local model.
+- **Auto-tuned throughput.** Concurrency lifts automatically (5 → 40 workers) to use the Spark's
+  headroom for wide `parallel_over` fan-outs.
+- **One-glance status.** `sandcastle serve` prints a Spark Mode banner, the dashboard shows a
+  `⚡ Spark Mode` badge, and `GET /api/runtime` exposes `spark_mode`.
+
+```bash
+# On the Spark: serve a local model (example: Ollama), then point Sandcastle at it
+OLLAMA_HOST=http://localhost:11434 sandcastle serve   # Spark Mode auto-detects and engages
+```
+
+Override detection anytime with `SANDCASTLE_SPARK_MODE=on|off`. On any non-Spark machine nothing
+changes — detection is fail-closed.
+
+> Spark Mode auto-configures Sandcastle for NVIDIA DGX Spark and local NVIDIA GPU inference. It is
+> **not** an official NVIDIA certification or endorsement. "NVIDIA", "DGX", and "DGX Spark" are
+> trademarks of NVIDIA Corporation, used here only to describe compatibility.
 
 ---
 
@@ -489,6 +521,7 @@ Once connected, ask your AI assistant to:
 |---|---|
 | **Pluggable sandbox backends** (E2B, Docker, Local, Cloudflare) | Yes |
 | **Multi-provider model routing** (Claude, OpenAI, MiniMax, Google/Gemini, Mistral, Ollama, oMLX) | Yes |
+| **⚡ Spark Mode** — auto-detects NVIDIA DGX Spark, local-inference defaults, $0/run, air-gappable | Yes |
 | **62 built-in integrations** across 9 categories | Yes |
 | **22 step types** (standard, llm, http, code, race, sensor, gate, parse, managed-agent...) | Yes |
 | **Zero-config local mode** | Yes |
