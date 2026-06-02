@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { XCircle, GitCompareArrows, Trash2, Download, Copy, FileDown, ChevronDown, ArrowLeft, Sparkles, AlertTriangle, AlertOctagon, Shield, ChevronRight } from "lucide-react";
+import { XCircle, GitCompareArrows, Trash2, Download, Copy, FileDown, ChevronDown, ArrowLeft, Sparkles, AlertTriangle, AlertOctagon, Shield, ChevronRight, Share2, ExternalLink } from "lucide-react";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useRuns } from "@/hooks/useRuns";
 import { useEventStreamContext } from "@/hooks/useEventStreamContext";
@@ -42,6 +42,7 @@ interface Step {
   owner?: string;
   type?: string;
   artifact_url?: string;
+  model?: string | null;
 }
 
 interface RunDetail {
@@ -87,6 +88,8 @@ export default function RunDetailPage() {
   const [loadingReport, setLoadingReport] = useState(false);
   const [flamegraphExpanded, setFlamegraphExpanded] = useState(true);
   const [anomaliesExpanded, setAnomaliesExpanded] = useState(false);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [sharing, setSharing] = useState(false);
   const { notifyRunComplete } = useNotifications();
   const prevStatusRef = useRef<string | null>(null);
   const celebratedRef = useRef(false);
@@ -292,6 +295,42 @@ export default function RunDetailPage() {
     setDeleting(false);
     setDeleteConfirmOpen(false);
   }, [id, navigate]);
+
+  const handleShare = useCallback(async () => {
+    if (!id || sharing) return;
+    setSharing(true);
+    const res = await api.post<{ share_token: string; share_path: string }>(
+      `/runs/${id}/share`
+    );
+    if (res.error) {
+      toast.error(`Share failed: ${res.error.message}`);
+    } else if (res.data) {
+      const url = `${window.location.origin}${res.data.share_path}`;
+      setShareUrl(url);
+      try {
+        await navigator.clipboard.writeText(url);
+        toast.success("Public link copied (secrets and PII scrubbed)");
+      } catch {
+        toast.success("Public link created (secrets and PII scrubbed)");
+      }
+    }
+    setSharing(false);
+  }, [id, sharing]);
+
+  // Per-provider cost rollup from the run's steps - surfaces the provider-neutral story.
+  const providerStats = useMemo(() => {
+    const map = new Map<string, { cost: number; count: number }>();
+    for (const s of run?.steps ?? []) {
+      if (!s.model) continue;
+      const e = map.get(s.model) ?? { cost: 0, count: 0 };
+      e.cost += s.cost_usd || 0;
+      e.count += 1;
+      map.set(s.model, e);
+    }
+    return [...map.entries()]
+      .map(([model, v]) => ({ model, ...v }))
+      .sort((a, b) => b.cost - a.cost);
+  }, [run]);
 
   // Filter out internal fields (prefixed with _) from outputs
   const filterOutputs = useCallback(
@@ -538,6 +577,20 @@ export default function RunDetailPage() {
               </button>
             )}
             <button
+              onClick={handleShare}
+              disabled={sharing}
+              title="Create a public, scrubbed permalink for this run"
+              className={cn(
+                "flex items-center gap-1.5 rounded-lg border border-accent/30 px-3 py-1.5",
+                "text-xs sm:text-sm font-medium text-accent",
+                "hover:bg-accent/10 transition-colors",
+                "disabled:opacity-50 disabled:cursor-not-allowed"
+              )}
+            >
+              <Share2 className="h-4 w-4" />
+              <span className="hidden sm:inline">{sharing ? "Sharing..." : "Share"}</span>
+            </button>
+            <button
               onClick={() => setChatOpen(true)}
               className={cn(
                 "flex items-center gap-1.5 rounded-lg border border-accent/30 px-3 py-1.5",
@@ -728,6 +781,52 @@ export default function RunDetailPage() {
                 )}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Public share link (after the owner mints it) */}
+      {shareUrl && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-accent/30 bg-accent/5 px-4 py-3 text-xs sm:text-sm">
+          <Share2 className="h-4 w-4 shrink-0 text-accent" />
+          <span className="text-muted">Public link (secrets and PII scrubbed):</span>
+          <a
+            href={shareUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 truncate font-mono text-accent hover:underline"
+          >
+            {shareUrl}
+            <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+          </a>
+        </div>
+      )}
+
+      {/* Providers used - surfaces the provider-neutral cost story */}
+      {providerStats.length > 0 && (
+        <div className="rounded-xl border border-border bg-surface p-4 shadow-sm card-hover-lift transition-all">
+          <div className="mb-3 flex items-center gap-2">
+            <Shield className="h-4 w-4 text-accent" />
+            <span className="text-sm font-semibold text-foreground">Providers</span>
+            <span className="text-xs text-muted">
+              {providerStats.length === 1
+                ? "1 provider"
+                : `${providerStats.length} providers, failover-ready`}
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {providerStats.map((p) => (
+              <div
+                key={p.model}
+                className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-1.5"
+              >
+                <span className="font-mono text-xs text-foreground">{p.model}</span>
+                <span className="text-[11px] text-muted">
+                  {p.count} {p.count === 1 ? "step" : "steps"}
+                </span>
+                <span className="text-[11px] font-medium text-accent">{formatCost(p.cost)}</span>
+              </div>
+            ))}
           </div>
         </div>
       )}
