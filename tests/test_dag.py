@@ -244,6 +244,23 @@ steps:
         errors = validate(workflow)
         assert any("Cycle" in e for e in errors)
 
+    def test_cycle_detection_reports_full_path(self):
+        # The full loop (a -> c -> b -> a) must be reported, not just one edge,
+        # so the message points at every step involved.
+        workflow = parse_yaml_string(CYCLE_WORKFLOW_YAML)
+        errors = validate(workflow)
+        cycle_errs = [e for e in errors if e.startswith("Cycle detected:")]
+        assert cycle_errs, errors
+        loop = cycle_errs[0].split("Cycle detected:", 1)[1].strip()
+        nodes = [n.strip() for n in loop.split("->")]
+        assert nodes[0] == nodes[-1], f"loop must be closed: {loop}"
+        assert set(nodes) == {"a", "b", "c"}, f"loop must name every step: {loop}"
+
+    def test_invalid_yaml_reports_line_and_column(self):
+        bad_yaml = "name: x\nsteps:\n  - id: a\n   bad_indent: y\n"
+        with pytest.raises(ValueError, match=r"line \d+, column \d+"):
+            parse_yaml_string(bad_yaml)
+
 
 # --- Tests: build_plan ---
 

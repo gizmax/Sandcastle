@@ -833,6 +833,34 @@ def _validate_browser_url(url: str) -> str:
     # If no scheme, prepend https
     if not parsed.scheme:
         url = f"https://{url}"
+        parsed = urlparse(url)
+
+    # SSRF prevention: resolve the host and reject private/internal networks
+    # (cloud metadata 169.254.169.254, localhost, RFC-1918, link-local, etc.),
+    # mirroring the HTTP-step guard so browser / computer-use / CDP steps cannot
+    # be pointed at internal services. Opt out for trusted single-tenant setups
+    # that automate local apps with SANDCASTLE_ALLOW_PRIVATE_NETWORKS=1.
+    import os as _os
+
+    if _os.getenv("SANDCASTLE_ALLOW_PRIVATE_NETWORKS", "").lower() not in ("1", "true", "yes"):
+        import ipaddress as _ipaddress
+        import socket as _socket
+
+        from sandcastle.webhooks.dispatcher import _BLOCKED_NETWORKS
+
+        if parsed.hostname:
+            try:
+                _resolved = _socket.getaddrinfo(parsed.hostname, parsed.port or 443)
+            except _socket.gaierror:
+                _resolved = []  # let the browser surface the resolution error naturally
+            for _, _, _, _, _sockaddr in _resolved:
+                _ip = _ipaddress.ip_address(_sockaddr[0])
+                for _network in _BLOCKED_NETWORKS:
+                    if _ip in _network:
+                        raise ValueError(
+                            f"Browser URL host resolves to a blocked private/internal "
+                            f"network ({_ip}) - refusing to navigate (SSRF guard)"
+                        )
 
     return url
 
@@ -1698,6 +1726,11 @@ def _compute_cache_key(
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
+# Bounds concurrent step-cache DB lookups so a wide fan-out cannot exhaust the
+# connection pool. Created at import; asyncio binds it to the running loop lazily.
+_CACHE_LOOKUP_SEMAPHORE = asyncio.Semaphore(5)
+
+
 async def _get_cached_result(cache_key: str) -> dict | None:
     """Look up a cached step result. Returns output_data dict or None."""
     try:
@@ -1706,7 +1739,10 @@ async def _get_cached_result(cache_key: str) -> dict | None:
         from sandcastle.models.db import StepCache, async_session
 
         now = datetime.now(timezone.utc)
-        async with async_session() as session:
+        # Cap concurrent cache lookups: a wide parallel_over otherwise opens one DB
+        # session per item simultaneously and can exhaust the connection pool (SQLite
+        # has a single writer), deadlocking under load. The semaphore bounds it.
+        async with _CACHE_LOOKUP_SEMAPHORE, async_session() as session:
             row = await session.scalar(
                 sa_select(StepCache).where(
                     StepCache.cache_key == cache_key,

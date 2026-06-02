@@ -1444,7 +1444,17 @@ def parse_yaml_string(yaml_content: str) -> WorkflowDefinition:
         raise ValueError(
             f"Workflow YAML too large ({len(yaml_content)} bytes, max {_MAX_YAML_SIZE})"
         )
-    data = yaml.safe_load(yaml_content)
+    try:
+        data = yaml.safe_load(yaml_content)
+    except yaml.YAMLError as e:
+        # Surface the exact line/column instead of a generic 422 downstream.
+        mark = getattr(e, "problem_mark", None)
+        if mark is not None:
+            detail = getattr(e, "problem", None) or str(e)
+            raise ValueError(
+                f"Invalid workflow YAML at line {mark.line + 1}, column {mark.column + 1}: {detail}"
+            ) from e
+        raise ValueError(f"Invalid workflow YAML: {e}") from e
     if data is None:
         raise ValueError("Workflow YAML parsed to None (empty document)")
     if not isinstance(data, dict):
@@ -1917,21 +1927,27 @@ def _detect_cycles(steps: list[StepDefinition]) -> list[str]:
     adj: dict[str, list[str]] = {s.id: list(s.depends_on) for s in steps}
     visited: set[str] = set()
     in_stack: set[str] = set()
+    path: list[str] = []
     errors: list[str] = []
 
     def dfs(node: str) -> bool:
         visited.add(node)
         in_stack.add(node)
+        path.append(node)
         found_cycle = False
         for neighbor in adj.get(node, []):
             if neighbor in in_stack:
-                errors.append(f"Cycle detected involving step '{node}' -> '{neighbor}'")
+                # Report the full loop, e.g. "a -> b -> c -> a", instead of just the
+                # closing edge - it points straight at every step in the cycle.
+                loop = path[path.index(neighbor):] + [neighbor]
+                errors.append("Cycle detected: " + " -> ".join(loop))
                 found_cycle = True
                 # Continue checking other neighbors to find all cycles
             elif neighbor not in visited:
                 if dfs(neighbor):
                     found_cycle = True
         in_stack.discard(node)
+        path.pop()
         return found_cycle
 
     for step in steps:

@@ -283,7 +283,18 @@ class TestValidateBrowserUrl:
         url = "https://example.com/page#section"
         assert _validate_browser_url(url) == url
 
-    def test_localhost_url(self):
+    def test_localhost_url_blocked_by_ssrf_guard(self):
+        # SSRF guard: localhost resolves to 127.0.0.1, a blocked private network.
+        with pytest.raises(ValueError, match="blocked private/internal network"):
+            _validate_browser_url("http://localhost:3000")
+
+    def test_cloud_metadata_endpoint_blocked_by_ssrf_guard(self):
+        with pytest.raises(ValueError, match="blocked private/internal network"):
+            _validate_browser_url("http://169.254.169.254/latest/meta-data/")
+
+    def test_private_network_allowed_with_optout(self, monkeypatch):
+        # Trusted single-tenant setups can opt out to automate local apps.
+        monkeypatch.setenv("SANDCASTLE_ALLOW_PRIVATE_NETWORKS", "1")
         url = "http://localhost:3000"
         assert _validate_browser_url(url) == url
 

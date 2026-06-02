@@ -39,11 +39,20 @@ PUBLIC_SUFFIXES = ("/spec",)
 _API_KEY_PEPPER = os.getenv("API_KEY_PEPPER", "sandcastle-default-pepper-change-in-production")
 
 if _API_KEY_PEPPER == "sandcastle-default-pepper-change-in-production":
-    # Only warn if auth is actually enabled (avoids noise in local/dev mode)
+    if settings.auth_required:
+        # Auth is enforced but the pepper is the public in-repo default: every API
+        # key is hashed with a known pepper, making key_hash offline-precomputable
+        # from a DB leak. Refuse to start rather than warn silently.
+        raise RuntimeError(
+            "API_KEY_PEPPER is the in-repo default while AUTH_REQUIRED is enabled. "
+            "Set a strong, secret API_KEY_PEPPER environment variable before starting "
+            "with auth enabled (the default pepper makes API key hashes precomputable)."
+        )
+    # Auth disabled (local/dev): a stable default pepper is harmless, just note it.
     import logging as _auth_logging
 
     _auth_logging.getLogger(__name__).debug(
-        "Using default API_KEY_PEPPER. Set API_KEY_PEPPER env var for production."
+        "Using default API_KEY_PEPPER (auth disabled). Set API_KEY_PEPPER for production."
     )
 
 

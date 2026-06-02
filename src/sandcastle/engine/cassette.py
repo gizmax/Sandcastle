@@ -64,10 +64,19 @@ class CassetteStore:
         self.meta = data.get("meta", {})
         self._signature_ok = self.verify()
         if self._signature_ok is False:
-            logger.warning(
-                "Cassette signature mismatch for %s - the file was modified after recording",
-                self.path,
+            msg = (
+                f"Cassette signature mismatch for {self.path} - the file was modified "
+                "after recording"
             )
+            # STRICT mode (opt-in via SANDCASTLE_CASSETTE_STRICT=1) makes the
+            # tamper-evidence enforceable: a modified cassette aborts the replay
+            # instead of silently running stale/forged records. Recommended for any
+            # deployment that treats a replay as an audit artifact.
+            import os as _os
+
+            if _os.getenv("SANDCASTLE_CASSETTE_STRICT", "").lower() in ("1", "true", "yes"):
+                raise ValueError(f"{msg} (SANDCASTLE_CASSETTE_STRICT is enabled)")
+            logger.warning("%s", msg)
 
     def get(self, cache_key: str) -> dict[str, Any] | None:
         """Return the recorded {output, cost_usd, model, step_id} for a key, or None."""

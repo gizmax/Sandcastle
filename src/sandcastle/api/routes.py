@@ -5953,7 +5953,12 @@ async def share_run(run_id: str, req: Request) -> ApiResponse:
                 ).model_dump(),
             )
         if not run.share_token:
-            run.share_token = _secrets.token_urlsafe(24)
+            # Self-describing token "<hex-unix-expiry>.<random>": embeds a TTL so a
+            # leaked /api/r/ link stops resolving after 30 days. The DB lookup stays
+            # an exact match on the full string, so a tampered expiry prefix simply
+            # fails to match (404). Legacy tokens without "." never expire.
+            _expiry = int((datetime.now(timezone.utc) + timedelta(days=30)).timestamp())
+            run.share_token = f"{_expiry:x}.{_secrets.token_urlsafe(24)}"
             await session.commit()
         token = run.share_token
 
@@ -6015,6 +6020,21 @@ async def view_shared_run(token: str, req: Request) -> Response:
             media_type="text/html",
             status_code=404,
         )
+
+    # Enforce the share-token TTL (self-describing "<hex-expiry>.<random>" tokens).
+    # Legacy tokens without a "." prefix never expire.
+    if "." in token:
+        try:
+            _expiry = int(token.split(".", 1)[0], 16)
+        except ValueError:
+            _expiry = None
+        if _expiry is not None and _expiry < int(datetime.now(timezone.utc).timestamp()):
+            return Response(
+                content="<!doctype html><title>Link expired</title>"
+                "<h1>This run link has expired.</h1>",
+                media_type="text/html",
+                status_code=410,
+            )
 
     html = render_run_page(run)
     return Response(content=html, media_type="text/html", status_code=200)

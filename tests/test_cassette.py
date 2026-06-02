@@ -118,3 +118,23 @@ def test_record_mode_requires_valid_mode(tmp_path):
 def test_replay_missing_file_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
         CassetteStore(tmp_path / "does-not-exist.json", "replay")
+
+
+def test_strict_mode_aborts_replay_on_tamper(tmp_path, monkeypatch):
+    """SANDCASTLE_CASSETTE_STRICT=1 turns the tamper warning into a hard failure."""
+    cassette_path = tmp_path / "tampered.cassette.json"
+    rec = CassetteStore(cassette_path, "record")
+    rec.put("k1", output="ORIGINAL", cost_usd=0.01, model="sonnet", step_id="s")
+    rec.save()
+    data = json.loads(cassette_path.read_text())
+    data["records"]["k1"]["output"] = "TAMPERED"
+    cassette_path.write_text(json.dumps(data))
+
+    # Lenient (default): loads despite the signature mismatch.
+    monkeypatch.delenv("SANDCASTLE_CASSETTE_STRICT", raising=False)
+    assert CassetteStore(cassette_path, "replay").verify() is False
+
+    # Strict: refuses to load a modified cassette.
+    monkeypatch.setenv("SANDCASTLE_CASSETTE_STRICT", "1")
+    with pytest.raises(ValueError, match="signature mismatch"):
+        CassetteStore(cassette_path, "replay")
