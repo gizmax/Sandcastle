@@ -1190,6 +1190,34 @@ def _cmd_cancel(args: argparse.Namespace) -> None:
     print(f"Cancelled run {args.run_id}")
 
 
+def _cmd_share(args: argparse.Namespace) -> None:
+    """Mint (or revoke) a public, scrubbed share permalink for a run."""
+    _validate_run_id(args.run_id)
+    client = _get_client(args)
+    base = getattr(client, "_base_url", "")
+    revoke = getattr(args, "revoke", False)
+    try:
+        if revoke:
+            resp = client._client.delete(f"/api/runs/{args.run_id}/share")
+        else:
+            resp = client._client.post(f"/api/runs/{args.run_id}/share")
+    except Exception as exc:
+        print(_format_cli_error(exc), file=sys.stderr)
+        sys.exit(1)
+
+    if resp.status_code >= 400:
+        print(f"Error: HTTP {resp.status_code}: {resp.text[:200]}", file=sys.stderr)
+        sys.exit(1)
+
+    if revoke:
+        print(_color("Share link revoked.", _C.GREEN))
+        return
+
+    data = resp.json().get("data", {})
+    print(_color(f"Public run link: {base}{data.get('share_path', '')}", _C.GREEN))
+    print(_color("Secrets and PII are scrubbed on the public page.", _C.GRAY))
+
+
 def _cmd_logs(args: argparse.Namespace) -> None:
     """Stream SSE events for a run."""
     _validate_run_id(args.run_id)
@@ -4571,6 +4599,16 @@ def _build_parser() -> argparse.ArgumentParser:
     p_cancel.add_argument("run_id", help="Run ID to cancel")
     _add_connection_args(p_cancel)
 
+    # --- share ---
+    p_share = subparsers.add_parser(
+        "share", help="Mint a public, scrubbed permalink for a run (or --revoke it)"
+    )
+    p_share.add_argument("run_id", help="Run ID to share")
+    p_share.add_argument(
+        "--revoke", action="store_true", help="Revoke the run's public share link"
+    )
+    _add_connection_args(p_share)
+
     # --- logs ---
     p_logs = subparsers.add_parser("logs", help="Stream run events (SSE)")
     p_logs.add_argument("run_id", help="Run ID to stream")
@@ -4989,6 +5027,7 @@ def main() -> None:
         "run": _cmd_run,
         "status": _cmd_status,
         "cancel": _cmd_cancel,
+        "share": _cmd_share,
         "logs": _cmd_logs,
         "ls": _cmd_ls,
         "worker": _cmd_worker,

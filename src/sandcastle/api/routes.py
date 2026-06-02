@@ -5916,6 +5916,108 @@ async def list_runs(
     )
 
 
+# --- Shareable run permalinks ---
+
+
+@router.post("/runs/{run_id}/share")
+async def share_run(run_id: str, req: Request) -> ApiResponse:
+    """Mint a public, scrubbed share permalink for a run (owner only).
+
+    Returns the relative share path /api/r/{token}. The token is stable across calls so
+    re-sharing the same run returns the same link.
+    """
+    import secrets as _secrets
+
+    tenant_id = get_tenant_id(req)
+    try:
+        run_uuid = uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_ID", message="Invalid run ID format")
+            ).model_dump(),
+        )
+
+    async with async_session() as session:
+        stmt = select(Run).where(Run.id == run_uuid)
+        stmt = _apply_tenant_filter(stmt, tenant_id, Run.tenant_id)
+        run = (await session.execute(stmt)).scalar_one_or_none()
+        if not run:
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="NOT_FOUND", message=f"Run '{run_id}' not found")
+                ).model_dump(),
+            )
+        if not run.share_token:
+            run.share_token = _secrets.token_urlsafe(24)
+            await session.commit()
+        token = run.share_token
+
+    return ApiResponse(data={"share_token": token, "share_path": f"/api/r/{token}"})
+
+
+@router.delete("/runs/{run_id}/share")
+async def unshare_run(run_id: str, req: Request) -> ApiResponse:
+    """Revoke a run's public share permalink (owner only)."""
+    tenant_id = get_tenant_id(req)
+    try:
+        run_uuid = uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_ID", message="Invalid run ID format")
+            ).model_dump(),
+        )
+    async with async_session() as session:
+        stmt = select(Run).where(Run.id == run_uuid)
+        stmt = _apply_tenant_filter(stmt, tenant_id, Run.tenant_id)
+        run = (await session.execute(stmt)).scalar_one_or_none()
+        if not run:
+            raise HTTPException(
+                status_code=404,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="NOT_FOUND", message=f"Run '{run_id}' not found")
+                ).model_dump(),
+            )
+        run.share_token = None
+        await session.commit()
+    return ApiResponse(data={"revoked": True})
+
+
+@router.get("/r/{token}")
+async def view_shared_run(token: str, req: Request) -> Response:
+    """Public, auth-bypassed view of a shared run as a self-contained, scrubbed HTML page.
+
+    Secrets and PII are redacted before rendering (redact-by-default). The page is only
+    reachable when the owner has minted a token via POST /runs/{id}/share.
+    """
+    from sandcastle.api.share import render_run_page
+
+    if not token or len(token) > 128:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    async with async_session() as session:
+        stmt = (
+            select(Run)
+            .options(selectinload(Run.steps))
+            .where(Run.share_token == token)
+        )
+        run = (await session.execute(stmt)).scalar_one_or_none()
+
+    if not run:
+        return Response(
+            content="<!doctype html><title>Not found</title><h1>This run link is not available.</h1>",
+            media_type="text/html",
+            status_code=404,
+        )
+
+    html = render_run_page(run)
+    return Response(content=html, media_type="text/html", status_code=200)
+
+
 # --- Cancel ---
 
 
