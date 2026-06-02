@@ -4,12 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Community Hub - Sandcastle</title>
-  <meta name="description" content="Browse, discover, and install 118 AI workflows shared by the Sandcastle community. Ready-to-use templates for sales, marketing, support, engineering, HR, and AI.">
+  <meta name="description" content="Browse, discover, and install 235 AI workflows shared by the Sandcastle community. Ready-to-use templates for sales, marketing, support, engineering, HR, and AI.">
   <meta name="author" content="Tomas Pflanzer @gizmax">
 
   <!-- Open Graph -->
   <meta property="og:title" content="Sandcastle Community Hub">
-  <meta property="og:description" content="118 community AI workflows for Sandcastle. Sales, marketing, support, engineering, HR, and AI templates - browse, install, remix.">
+  <meta property="og:description" content="235 community AI workflows for Sandcastle. Sales, marketing, support, engineering, HR, and AI templates - browse, install, remix.">
   <meta property="og:url" content="https://sandcastle-ai.eu/hub/">
   <meta property="og:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
   <meta property="og:type" content="website">
@@ -2421,7 +2421,7 @@
   <section class="hero">
     <div class="container">
       <h1>The <span class="accent">Workflow</span> Marketplace</h1>
-      <p>118 production-ready AI workflows. Browse, fork, remix. Ship faster with community-built automation.</p>
+      <p id="hero-subtitle">Production-ready AI workflows. Browse, fork, remix. Ship faster with community-built automation.</p>
       <div class="stats-bar">
         <div class="stat">
           <span class="stat-number" id="stat-templates">0</span>
@@ -2728,6 +2728,12 @@
       animateNumber('stat-authors', stats.total_authors);
       animateNumber('stat-categories', catCount);
       animateNumber('stat-downloads', stats.total_downloads);
+      // Keep the hero count in step with the registry so it never goes stale.
+      var hero = document.getElementById('hero-subtitle');
+      if (hero && stats.total_templates) {
+        hero.textContent = stats.total_templates +
+          ' production-ready AI workflows. Browse, fork, remix. Ship faster with community-built automation.';
+      }
     }
 
     function animateNumber(id, target) {
@@ -2787,13 +2793,31 @@
     }
 
     /* ========== Badge helpers ========== */
+    // "New" is relative to the freshest submission in the registry, not a fixed
+    // date, so the badge keeps tracking the most recent uploads as the community
+    // grows (a static date would silently stop badging anything).
+    var _hubNewestCreated = null;
+    function hubNewestCreated() {
+      if (_hubNewestCreated === null && registry && registry.templates) {
+        _hubNewestCreated = registry.templates.reduce(function(m, t) {
+          return (t.created_at && t.created_at > m) ? t.created_at : m;
+        }, '0000-00-00');
+      }
+      return _hubNewestCreated;
+    }
+    function daysBetweenISO(a, b) {
+      var da = Date.parse(a + 'T00:00:00Z'), db = Date.parse(b + 'T00:00:00Z');
+      if (isNaN(da) || isNaN(db)) return Infinity;
+      return Math.abs(db - da) / 86400000;
+    }
     function getBadge(t) {
       var rating = computeRating(t);
       var downloads = t.downloads || 0;
       var remixCount = t.remix_count || 0;
       if (rating >= 4.8 && downloads > 150) return 'featured';
       if (remixCount >= 3) return 'trending';
-      if (t.created_at === '2026-02-25') return 'new';
+      var newest = hubNewestCreated();
+      if (newest && t.created_at && daysBetweenISO(t.created_at, newest) <= 14) return 'new';
       return null;
     }
 

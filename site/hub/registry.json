@@ -1,6 +1,6 @@
 {
  "version": 2,
- "generated_at": "2026-06-02T10:00:00Z",
+ "generated_at": "2026-06-02T11:00:00Z",
  "templates": [
   {
    "slug": "amira-dev/freelancer-proposal",
@@ -13737,65 +13737,1297 @@
      }
     }
    }
+  },
+  {
+   "slug": "soc2-sherpa/soc2-evidence-harvester",
+   "name": "SOC2 Evidence Harvester",
+   "description": "Runs nightly to pull control evidence from GitHub, Jira and S3, classify each artifact against your SOC2 control matrix, and gate any gaps to a human auditor before they hit the report.",
+   "author": "soc2-sherpa",
+   "author_url": "https://github.com/soc2-sherpa",
+   "version": "2.1.0",
+   "category": "compliance_grc",
+   "tags": [
+    "soc2",
+    "evidence-collection",
+    "audit",
+    "controls",
+    "continuous-compliance"
+   ],
+   "models_used": [
+    "sonnet",
+    "haiku"
+   ],
+   "tools_used": [
+    "github",
+    "jira",
+    "s3"
+   ],
+   "step_count": 9,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/soc2-sherpa/soc2-evidence-harvester.yaml",
+   "source": "community",
+   "created_at": "2026-02-09",
+   "updated_at": "2026-05-21",
+   "estimated_cost_per_run": 0.041,
+   "avg_execution_time": "~2m",
+   "downloads": 1294,
+   "remix_count": 24,
+   "forked_from": null,
+   "license": "Apache-2.0",
+   "rating": 4.8,
+   "review_count": 97,
+   "sha256": "0ac5dc0f5fd854693f3b441571064575fafcfec1664cd168f3aa54db7975ff56",
+   "input_schema": null
+  },
+  {
+   "slug": "audit-pipe/vendor-risk-intake",
+   "name": "Vendor Risk Intake & Tiering",
+   "description": "Fetches a vendor's trust/security page over http, classifies them into a risk tier from SOC2/ISO/sub-processor signals, and routes high-risk vendors to a Slack approval gate while writing every decision to a Notion register with a SHA-256 audit hash-chain.",
+   "author": "audit-pipe",
+   "author_url": "https://github.com/audit-pipe",
+   "version": "1.3.0",
+   "category": "compliance_grc",
+   "tags": [
+    "vendor-risk",
+    "tprm",
+    "audit-trail",
+    "notion",
+    "risk-tiering"
+   ],
+   "models_used": [
+    "sonnet",
+    "haiku"
+   ],
+   "tools_used": [
+    "slack",
+    "notion"
+   ],
+   "step_count": 8,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/audit-pipe/vendor-risk-intake.yaml",
+   "source": "community",
+   "created_at": "2026-03-09",
+   "updated_at": "2026-05-22",
+   "estimated_cost_per_run": 0.018,
+   "avg_execution_time": "~14s",
+   "downloads": 706,
+   "remix_count": 12,
+   "forked_from": null,
+   "license": "Apache-2.0",
+   "rating": 4.7,
+   "review_count": 40,
+   "sha256": "824426d839b434c5e1502aafbb1bee221513bfed0e11ba4338e4c16685abb5bc",
+   "input_schema": null
+  },
+  {
+   "slug": "kyc-cascade/sanctions-list-delta-watcher",
+   "name": "Sanctions List Delta Watcher",
+   "description": "A sensor polls OFAC, EU and UK consolidated lists on a schedule, a code step diffs against the last snapshot in Postgres, and any new designation hitting an existing customer fires a re-screen plus a Slack escalation.",
+   "author": "kyc-cascade",
+   "author_url": "https://github.com/kyc-cascade",
+   "version": "1.3.0",
+   "category": "compliance_grc",
+   "tags": [
+    "sanctions",
+    "ongoing-monitoring",
+    "ofac",
+    "sensor",
+    "delta"
+   ],
+   "models_used": [
+    "haiku"
+   ],
+   "tools_used": [
+    "postgres",
+    "slack",
+    "s3"
+   ],
+   "step_count": 7,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/kyc-cascade/sanctions-list-delta-watcher.yaml",
+   "source": "community",
+   "created_at": "2026-04-08",
+   "updated_at": "2026-05-12",
+   "estimated_cost_per_run": 0.006,
+   "avg_execution_time": "~9s",
+   "downloads": 361,
+   "remix_count": 6,
+   "forked_from": null,
+   "license": "Apache-2.0",
+   "rating": 4.6,
+   "review_count": 28,
+   "sha256": "c9c13f6857621165e43ef4bec2193e119f6b51e375be52cdf3e5003a5114b94f",
+   "input_schema": null
+  },
+  {
+   "slug": "repo-rover/cve-to-pr-pipeline",
+   "name": "CVE-to-PR Pipeline",
+   "description": "A sensor watches GitHub Security Advisories and OSV feeds, classifies each CVE's blast radius across your repos, opens a PR with the bumped lockfile and an auto-drafted changelog, then gates breaking bumps behind a human reviewer.",
+   "author": "repo-rover",
+   "author_url": "https://github.com/repo-rover",
+   "version": "2.1.0",
+   "category": "engineering",
+   "tags": [
+    "security",
+    "dependencies",
+    "cve",
+    "automation",
+    "ci"
+   ],
+   "models_used": [
+    "sonnet",
+    "haiku"
+   ],
+   "tools_used": [
+    "github",
+    "slack"
+   ],
+   "step_count": 9,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/repo-rover/cve-to-pr-pipeline.yaml",
+   "source": "community",
+   "created_at": "2026-01-14",
+   "updated_at": "2026-05-27",
+   "estimated_cost_per_run": 0.012,
+   "avg_execution_time": "~48s",
+   "downloads": 2210,
+   "remix_count": 34,
+   "forked_from": null,
+   "license": "MIT",
+   "rating": 4.8,
+   "review_count": 231,
+   "sha256": "95734e48de8a990b30cb7c1bbd460c820c364279a3fd9c2804dd14064874d113",
+   "input_schema": null
+  },
+  {
+   "slug": "deploy-dana/ci-failure-triage",
+   "name": "CI Failure Triage Bot",
+   "description": "Pulls failed GitHub Actions run logs over http, parses them in a code step to classify the failure type, races two models for a root-cause summary, and opens a Linear ticket only for real regressions.",
+   "author": "deploy-dana",
+   "author_url": "https://github.com/deploy-dana",
+   "version": "2.1.0",
+   "category": "engineering",
+   "tags": [
+    "ci-cd",
+    "github-actions",
+    "triage",
+    "linear",
+    "root-cause"
+   ],
+   "models_used": [
+    "sonnet",
+    "gpt-5.2"
+   ],
+   "tools_used": [
+    "github",
+    "linear",
+    "slack"
+   ],
+   "step_count": 9,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/deploy-dana/ci-failure-triage.yaml",
+   "source": "community",
+   "created_at": "2026-02-04",
+   "updated_at": "2026-05-21",
+   "estimated_cost_per_run": 0.021,
+   "avg_execution_time": "~28s",
+   "downloads": 1372,
+   "remix_count": 19,
+   "forked_from": null,
+   "license": "MIT",
+   "rating": 4.8,
+   "review_count": 171,
+   "sha256": "0824930baadaf885653e9e63947fb726506871654567270a0eb223edd095349f",
+   "input_schema": null
+  },
+  {
+   "slug": "deploy-dana/flaky-test-quarantine",
+   "name": "Flaky Test Quarantine",
+   "description": "Loops over the last N runs of a job via the GitHub API, computes per-test pass/fail flip-rate in a code step, and auto-files a quarantine PR plus a Linear ticket for any test above the flakiness threshold.",
+   "author": "deploy-dana",
+   "author_url": "https://github.com/deploy-dana",
+   "version": "1.3.0",
+   "category": "engineering",
+   "tags": [
+    "flaky-tests",
+    "github-actions",
+    "quarantine",
+    "linear",
+    "loop"
+   ],
+   "models_used": [
+    "haiku",
+    "sonnet"
+   ],
+   "tools_used": [
+    "github",
+    "linear",
+    "postgres"
+   ],
+   "step_count": 8,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/deploy-dana/flaky-test-quarantine.yaml",
+   "source": "community",
+   "created_at": "2026-04-12",
+   "updated_at": "2026-05-09",
+   "estimated_cost_per_run": 0.009,
+   "avg_execution_time": "~41s",
+   "downloads": 463,
+   "remix_count": 7,
+   "forked_from": null,
+   "license": "Apache-2.0",
+   "rating": 4.6,
+   "review_count": 58,
+   "sha256": "185335c5204ec79ba0a8b29e37d13512ca85e8075a74fe0e746987a94313a7f6",
+   "input_schema": null
+  },
+  {
+   "slug": "ledger-loop/stripe-postgres-settlement-reconciler",
+   "name": "Stripe to Postgres Settlement Reconciler",
+   "description": "Pulls the daily Stripe balance-transaction report over http, diffs it against your Postgres ledger in a code step, classifies every mismatch (fee drift, FX rounding, missing capture, duplicate refund), and only escalates true breaks so finance stops eyeballing CSVs.",
+   "author": "ledger-loop",
+   "author_url": "https://github.com/ledger-loop",
+   "version": "2.1.0",
+   "category": "fintech_banking",
+   "tags": [
+    "reconciliation",
+    "stripe",
+    "postgres",
+    "settlement",
+    "finance-ops",
+    "deterministic"
+   ],
+   "models_used": [
+    "haiku"
+   ],
+   "tools_used": [
+    "stripe",
+    "postgres",
+    "slack"
+   ],
+   "step_count": 9,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/ledger-loop/stripe-postgres-settlement-reconciler.yaml",
+   "source": "community",
+   "created_at": "2026-02-09",
+   "updated_at": "2026-05-21",
+   "estimated_cost_per_run": 0.012,
+   "avg_execution_time": "~34s",
+   "downloads": 1218,
+   "remix_count": 21,
+   "forked_from": null,
+   "license": "MIT",
+   "rating": 4.8,
+   "review_count": 109,
+   "sha256": "766ad0981a9a5e7d2e42cf9d86e20e0de4b68360b5708c99822c96149b03d942",
+   "input_schema": null
+  },
+  {
+   "slug": "kyc-cascade/onboarding-decision-cascade",
+   "name": "KYC Onboarding Decision Cascade",
+   "description": "Runs sanctions, PEP and adverse-media screening in parallel via http connectors, classifies match confidence, and gates only the genuine edge cases to a compliance officer so clean applicants clear in seconds.",
+   "author": "kyc-cascade",
+   "author_url": "https://github.com/kyc-cascade",
+   "version": "2.1.0",
+   "category": "fintech_banking",
+   "tags": [
+    "kyc",
+    "aml",
+    "sanctions",
+    "onboarding",
+    "screening",
+    "gate"
+   ],
+   "models_used": [
+    "sonnet",
+    "haiku"
+   ],
+   "tools_used": [
+    "postgres",
+    "slack"
+   ],
+   "step_count": 9,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/kyc-cascade/onboarding-decision-cascade.yaml",
+   "source": "community",
+   "created_at": "2026-01-21",
+   "updated_at": "2026-05-24",
+   "estimated_cost_per_run": 0.031,
+   "avg_execution_time": "~14s",
+   "downloads": 1166,
+   "remix_count": 18,
+   "forked_from": null,
+   "license": "Apache-2.0",
+   "rating": 4.8,
+   "review_count": 104,
+   "sha256": "dda370b7d6ff7db5930e97f10ffac17843d285c92c9a567b6ff1339fcd26c04b",
+   "input_schema": null
+  },
+  {
+   "slug": "ledger-loop/payout-anomaly-sensor",
+   "name": "Payout Anomaly Sensor",
+   "description": "A sensor watches the Stripe payouts endpoint on a schedule, a code step computes the expected payout from your Postgres gross-less-fees ledger, and any variance over a basis-point threshold trips a gate that pages on-call before the money lands wrong.",
+   "author": "ledger-loop",
+   "author_url": "https://github.com/ledger-loop",
+   "version": "0.4.0",
+   "category": "fintech_banking",
+   "tags": [
+    "payouts",
+    "anomaly-detection",
+    "sensor",
+    "stripe",
+    "postgres",
+    "alerting"
+   ],
+   "models_used": [],
+   "tools_used": [
+    "stripe",
+    "postgres",
+    "slack",
+    "twilio"
+   ],
+   "step_count": 6,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/ledger-loop/payout-anomaly-sensor.yaml",
+   "source": "community",
+   "created_at": "2026-05-24",
+   "updated_at": "2026-05-30",
+   "estimated_cost_per_run": 0,
+   "avg_execution_time": "~12s",
+   "downloads": 44,
+   "remix_count": 1,
+   "forked_from": "ledger-loop/stripe-postgres-settlement-reconciler",
+   "license": "Apache-2.0",
+   "rating": 4.7,
+   "review_count": 3,
+   "sha256": "b19fdbb5c96b78ec28a0ee9133d990665c9b5381888ae5985881ae1454541919",
+   "input_schema": null
+  },
+  {
+   "slug": "triage-rn/patient-message-triage",
+   "name": "Patient Message Triage & Acuity Router",
+   "description": "Classifies inbound patient-portal messages by acuity, races two models for an independent second read, and hard-gates any red-flag symptom to a human nurse with a full audit-trail entry.",
+   "author": "triage-rn",
+   "author_url": "https://github.com/triage-rn",
+   "version": "2.1.0",
+   "category": "healthcare",
+   "tags": [
+    "triage",
+    "patient-safety",
+    "acuity",
+    "human-in-the-loop",
+    "audit"
+   ],
+   "models_used": [
+    "sonnet",
+    "opus",
+    "haiku"
+   ],
+   "tools_used": [
+    "zendesk",
+    "postgres",
+    "twilio"
+   ],
+   "step_count": 11,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/triage-rn/patient-message-triage.yaml",
+   "source": "community",
+   "created_at": "2026-02-08",
+   "updated_at": "2026-05-21",
+   "estimated_cost_per_run": 0.039,
+   "avg_execution_time": "~14s",
+   "downloads": 1304,
+   "remix_count": 20,
+   "forked_from": null,
+   "license": "Apache-2.0",
+   "rating": 4.9,
+   "review_count": 158,
+   "sha256": "5334d4333ce01da02ee88315c1e0f460683a9d21cc10442af07642a630692913",
+   "input_schema": null
+  },
+  {
+   "slug": "scribe-rx/referral-intake-prior-auth",
+   "name": "Referral Intake & Prior-Auth Packet Assembler",
+   "description": "Pulls inbound referral faxes and emails, redacts PHI before any model sees it, classifies clinical urgency, assembles a payer-ready prior-auth packet, and holds it at a human gate before submission.",
+   "author": "scribe-rx",
+   "author_url": "https://github.com/scribe-rx",
+   "version": "2.1.0",
+   "category": "healthcare",
+   "tags": [
+    "prior-auth",
+    "phi-redaction",
+    "referral-intake",
+    "hipaa",
+    "fax",
+    "triage"
+   ],
+   "models_used": [
+    "haiku",
+    "sonnet"
+   ],
+   "tools_used": [
+    "gmail",
+    "twilio",
+    "sendgrid",
+    "s3"
+   ],
+   "step_count": 11,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/scribe-rx/referral-intake-prior-auth.yaml",
+   "source": "community",
+   "created_at": "2026-03-09",
+   "updated_at": "2026-05-21",
+   "estimated_cost_per_run": 0.041,
+   "avg_execution_time": "~38s",
+   "downloads": 598,
+   "remix_count": 13,
+   "forked_from": null,
+   "license": "Apache-2.0",
+   "rating": 4.7,
+   "review_count": 83,
+   "sha256": "31a405ff824f4b97d085c3d72803734af7f3df11513a0a595c1afb5401bcc72d",
+   "input_schema": null
+  },
+  {
+   "slug": "triage-rn/after-hours-escalation-sensor",
+   "name": "After-Hours Nurse-Line Escalation Sensor",
+   "description": "Watches the after-hours message queue, scores each new message for time-critical red flags, and pages the on-call nurse via SMS and Slack the moment a high-acuity case lands instead of waiting for morning rounds.",
+   "author": "triage-rn",
+   "author_url": "https://github.com/triage-rn",
+   "version": "1.0.0",
+   "category": "healthcare",
+   "tags": [
+    "after-hours",
+    "escalation",
+    "sensor",
+    "on-call",
+    "red-flag"
+   ],
+   "models_used": [
+    "haiku",
+    "sonnet"
+   ],
+   "tools_used": [
+    "twilio",
+    "slack",
+    "postgres"
+   ],
+   "step_count": 7,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/triage-rn/after-hours-escalation-sensor.yaml",
+   "source": "community",
+   "created_at": "2026-05-24",
+   "updated_at": "2026-05-27",
+   "estimated_cost_per_run": 0.0062,
+   "avg_execution_time": "~6s",
+   "downloads": 52,
+   "remix_count": 2,
+   "forked_from": "triage-rn/patient-message-triage",
+   "license": "Apache-2.0",
+   "rating": 4.6,
+   "review_count": 4,
+   "sha256": "eb44e6ae62b70afac342efd1f8b167740dc78050b017d670a0061dc50342ba0c",
+   "input_schema": null
+  },
+  {
+   "slug": "clause-cat/nda-redline-gate",
+   "name": "NDA Redline with Risk Gate",
+   "description": "Classifies every NDA clause by risk tier, diffs it against your fallback playbook in code, races two models for the rewrite, and gates anything above your threshold to human counsel before the redline ships.",
+   "author": "clause-cat",
+   "author_url": "https://github.com/clause-cat",
+   "version": "2.1.0",
+   "category": "hr_legal",
+   "tags": [
+    "nda",
+    "redlining",
+    "contract-review",
+    "risk-gate",
+    "legal-ops"
+   ],
+   "models_used": [
+    "sonnet",
+    "opus",
+    "haiku"
+   ],
+   "tools_used": [],
+   "step_count": 8,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/clause-cat/nda-redline-gate.yaml",
+   "source": "community",
+   "created_at": "2026-03-02",
+   "updated_at": "2026-05-21",
+   "estimated_cost_per_run": 0.041,
+   "avg_execution_time": "~18s",
+   "downloads": 531,
+   "remix_count": 16,
+   "forked_from": null,
+   "license": "MIT",
+   "rating": 4.6,
+   "review_count": 49,
+   "sha256": "7ae427403f738a703361d15987ed43da7dbff30db7ebf9f56c603080b1ed4b66",
+   "input_schema": null
+  },
+  {
+   "slug": "offer-otter/new-hire-onboarding-orchestrator",
+   "name": "New-Hire Onboarding Orchestrator",
+   "description": "Reads each new hire from an Airtable roster, loops over the onboarding checklist, and auto-nags the IT, payroll and buddy owner on Slack plus a Gmail welcome packet so nothing slips before day one.",
+   "author": "offer-otter",
+   "author_url": "https://github.com/offer-otter",
+   "version": "2.1.0",
+   "category": "hr_legal",
+   "tags": [
+    "onboarding",
+    "airtable",
+    "slack",
+    "people-ops",
+    "checklist"
+   ],
+   "models_used": [
+    "haiku",
+    "sonnet"
+   ],
+   "tools_used": [
+    "airtable",
+    "slack",
+    "gmail"
+   ],
+   "step_count": 9,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/offer-otter/new-hire-onboarding-orchestrator.yaml",
+   "source": "community",
+   "created_at": "2026-03-04",
+   "updated_at": "2026-05-21",
+   "estimated_cost_per_run": 0.031,
+   "avg_execution_time": "~24s",
+   "downloads": 584,
+   "remix_count": 13,
+   "forked_from": null,
+   "license": "MIT",
+   "rating": 4.7,
+   "review_count": 58,
+   "sha256": "c8973b5f8e6b6a51d8032dc321dbcef14035486a9067b2753ad44fc68c386efb",
+   "input_schema": null
+  },
+  {
+   "slug": "offer-otter/offer-letter-gate",
+   "name": "Offer Letter Drafter with Legal-Language Gate",
+   "description": "Drafts a personalized offer letter from comp inputs, then routes it through a classify and gate step that blocks any at-will, equity or non-compete phrasing legal has not approved before it ever reaches the candidate.",
+   "author": "offer-otter",
+   "author_url": "https://github.com/offer-otter",
+   "version": "1.3.1",
+   "category": "hr_legal",
+   "tags": [
+    "offer-letters",
+    "compliance-gate",
+    "legal-review",
+    "hiring",
+    "approval"
+   ],
+   "models_used": [
+    "sonnet",
+    "opus"
+   ],
+   "tools_used": [
+    "gmail",
+    "slack"
+   ],
+   "step_count": 7,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/offer-otter/offer-letter-gate.yaml",
+   "source": "community",
+   "created_at": "2026-04-09",
+   "updated_at": "2026-05-12",
+   "estimated_cost_per_run": 0.072,
+   "avg_execution_time": "~31s",
+   "downloads": 237,
+   "remix_count": 6,
+   "forked_from": "clause-cat/nda-redline-gate",
+   "license": "MIT",
+   "rating": 4.6,
+   "review_count": 27,
+   "sha256": "a91a8628fa2004438224e89b3e01c19e5cd7a947e969cca9b0ff483442f8b7bc",
+   "input_schema": null
+  },
+  {
+   "slug": "eval-engine/judge-bakeoff-router",
+   "name": "LLM-as-Judge Bakeoff Router",
+   "description": "Races three candidate models on the same prompt, scores each answer with an LLM judge rubric, gates on a minimum quality threshold, and logs every verdict plus latency and cost to Postgres so routing is backed by measured evals instead of brand preference.",
+   "author": "eval-engine",
+   "author_url": "https://github.com/eval-engine",
+   "version": "2.1.0",
+   "category": "llmops_ai_eng",
+   "tags": [
+    "evals",
+    "llm-as-judge",
+    "routing",
+    "race",
+    "benchmark",
+    "cost"
+   ],
+   "models_used": [
+    "sonnet",
+    "gpt-5.2",
+    "gemini-3.5-pro"
+   ],
+   "tools_used": [
+    "postgres",
+    "slack"
+   ],
+   "step_count": 9,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/eval-engine/judge-bakeoff-router.yaml",
+   "source": "community",
+   "created_at": "2026-02-14",
+   "updated_at": "2026-05-21",
+   "estimated_cost_per_run": 0.072,
+   "avg_execution_time": "~28s",
+   "downloads": 1247,
+   "remix_count": 29,
+   "forked_from": null,
+   "license": "Apache-2.0",
+   "rating": 4.8,
+   "review_count": 118,
+   "sha256": "197f83905adc6f10c2cb2a0348f54961061b2111a01d56b64bc1215c818281e8",
+   "input_schema": null
+  },
+  {
+   "slug": "promptsmith-io/prompt-regression-harness",
+   "name": "Prompt Regression Harness",
+   "description": "Replays a versioned eval set against a candidate prompt across three providers, classifies each delta as pass/regression/improvement, and posts a Slack scorecard that gates promotion of the new prompt version.",
+   "author": "promptsmith-io",
+   "author_url": "https://github.com/promptsmith-io",
+   "version": "2.1.0",
+   "category": "llmops_ai_eng",
+   "tags": [
+    "prompt-eval",
+    "regression-testing",
+    "ci-gate",
+    "cross-provider",
+    "scorecard"
+   ],
+   "models_used": [
+    "sonnet",
+    "gpt-5.2",
+    "gemini-3.5-pro"
+   ],
+   "tools_used": [
+    "slack",
+    "postgres",
+    "s3"
+   ],
+   "step_count": 11,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/promptsmith-io/prompt-regression-harness.yaml",
+   "source": "community",
+   "created_at": "2026-03-14",
+   "updated_at": "2026-05-21",
+   "estimated_cost_per_run": 0.094,
+   "avg_execution_time": "~2m",
+   "downloads": 1388,
+   "remix_count": 31,
+   "forked_from": null,
+   "license": "Apache-2.0",
+   "rating": 4.8,
+   "review_count": 195,
+   "sha256": "9e0d2b34eb2877fe820689862f053235396f6806d3b89a1c17b10c1f4740fbbb",
+   "input_schema": null
+  },
+  {
+   "slug": "trace-tamer/trace-triage-pipeline",
+   "name": "LLM Trace Triage Pipeline",
+   "description": "Watches your production LLM error logs, classifies each failure as hallucination/timeout/refusal/tool-error, dedupes via qdrant clustering, and opens one ranked Linear issue per cluster with a minimal repro so your team actions signal, not noise.",
+   "author": "trace-tamer",
+   "author_url": "https://github.com/trace-tamer",
+   "version": "2.1.0",
+   "category": "llmops_ai_eng",
+   "tags": [
+    "observability",
+    "trace-triage",
+    "failure-modes",
+    "deduplication",
+    "incident"
+   ],
+   "models_used": [
+    "haiku",
+    "sonnet"
+   ],
+   "tools_used": [
+    "qdrant",
+    "linear",
+    "slack"
+   ],
+   "step_count": 9,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/trace-tamer/trace-triage-pipeline.yaml",
+   "source": "community",
+   "created_at": "2026-04-08",
+   "updated_at": "2026-05-26",
+   "estimated_cost_per_run": 0.021,
+   "avg_execution_time": "~24s",
+   "downloads": 631,
+   "remix_count": 15,
+   "forked_from": null,
+   "license": "Apache-2.0",
+   "rating": 4.8,
+   "review_count": 88,
+   "sha256": "746b77b3c49a685ef64b11926d6be91b47e1b66aaef6d50eda5f162ef6b7b0a6",
+   "input_schema": null
+  },
+  {
+   "slug": "brandwatch-bea/brand-mention-crisis-triage",
+   "name": "Brand Mention Crisis Triage",
+   "description": "Always-on sensor polls Exa and RSS for brand mentions every 10 minutes, classifies sentiment and intent, and routes only crisis-grade mentions to Slack behind a human approve/escalate gate while logging the rest to Postgres.",
+   "author": "brandwatch-bea",
+   "author_url": "https://github.com/brandwatch-bea",
+   "version": "2.1.0",
+   "category": "marketing",
+   "tags": [
+    "social-listening",
+    "brand-safety",
+    "sentiment",
+    "crisis",
+    "slack",
+    "sensor"
+   ],
+   "models_used": [
+    "haiku",
+    "sonnet"
+   ],
+   "tools_used": [
+    "exa",
+    "slack",
+    "postgres"
+   ],
+   "step_count": 9,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/brandwatch-bea/brand-mention-crisis-triage.yaml",
+   "source": "community",
+   "created_at": "2026-02-22",
+   "updated_at": "2026-05-24",
+   "estimated_cost_per_run": 0.011,
+   "avg_execution_time": "~18s",
+   "downloads": 1905,
+   "remix_count": 33,
+   "forked_from": null,
+   "license": "MIT",
+   "rating": 4.8,
+   "review_count": 221,
+   "sha256": "cb49b629348550b7e5200a8c7eb7de422d459198afb125980a064fa0f2c80708",
+   "input_schema": null
+  },
+  {
+   "slug": "funnel-fox/competitor-landing-page-sensor",
+   "name": "Competitor Landing Page Sensor",
+   "description": "Polls a list of competitor landing pages over http, diffs the rendered copy and pricing in a code step, classifies whether a positioning or price shift happened, and only drafts a response brief into Notion when the change is material.",
+   "author": "funnel-fox",
+   "author_url": "https://github.com/funnel-fox",
+   "version": "2.1.0",
+   "category": "marketing",
+   "tags": [
+    "competitive-intel",
+    "landing-page",
+    "diff",
+    "sensor",
+    "positioning",
+    "notion"
+   ],
+   "models_used": [
+    "haiku",
+    "sonnet"
+   ],
+   "tools_used": [
+    "notion",
+    "slack"
+   ],
+   "step_count": 8,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/funnel-fox/competitor-landing-page-sensor.yaml",
+   "source": "community",
+   "created_at": "2026-03-09",
+   "updated_at": "2026-05-21",
+   "estimated_cost_per_run": 0.014,
+   "avg_execution_time": "~31s",
+   "downloads": 421,
+   "remix_count": 17,
+   "forked_from": null,
+   "license": "MIT",
+   "rating": 4.8,
+   "review_count": 58,
+   "sha256": "a4b26bd4129e4a871e04c8147637c604fbde188b1813f6e34e35e8f42d98a9e1",
+   "input_schema": null
+  },
+  {
+   "slug": "funnel-fox/pricing-page-change-brief",
+   "name": "Pricing Page Change Brief",
+   "description": "Scrapes a competitor pricing page over http with a Browserbase/LightPanda race for reliability, extracts every tier and gate in a code step, and drafts a side-by-side positioning brief into Notion only when a tier, price, or feature actually moved.",
+   "author": "funnel-fox",
+   "author_url": "https://github.com/funnel-fox",
+   "version": "1.0.0",
+   "category": "marketing",
+   "tags": [
+    "pricing-intel",
+    "race",
+    "scrape",
+    "diff",
+    "notion",
+    "competitive"
+   ],
+   "models_used": [
+    "sonnet"
+   ],
+   "tools_used": [
+    "notion"
+   ],
+   "step_count": 6,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/funnel-fox/pricing-page-change-brief.yaml",
+   "source": "community",
+   "created_at": "2026-05-26",
+   "updated_at": "2026-05-26",
+   "estimated_cost_per_run": 0.017,
+   "avg_execution_time": "~38s",
+   "downloads": 31,
+   "remix_count": 1,
+   "forked_from": "pricewatch/pricing-tracker",
+   "license": "MIT",
+   "rating": 4.7,
+   "review_count": 3,
+   "sha256": "1e9004e18ca1d19ebd80eec5200102d081a31dd81f3b699938c8792770cf3fbb",
+   "input_schema": null
+  },
+  {
+   "slug": "quota-quokka/inbound-demo-qualifier",
+   "name": "Inbound Demo-Request Qualifier & Router",
+   "description": "Enriches every demo request via firmographic http lookup, classifies ICP fit and buying intent, then races hot leads to Slack and Salesforce so the right rep claims them in seconds.",
+   "author": "quota-quokka",
+   "author_url": "https://github.com/quota-quokka",
+   "version": "2.1.0",
+   "category": "sales_crm",
+   "tags": [
+    "speed-to-lead",
+    "inbound",
+    "lead-routing",
+    "icp-scoring",
+    "salesforce",
+    "slack"
+   ],
+   "models_used": [
+    "haiku",
+    "sonnet"
+   ],
+   "tools_used": [
+    "salesforce",
+    "slack",
+    "hubspot"
+   ],
+   "step_count": 9,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/quota-quokka/inbound-demo-qualifier.yaml",
+   "source": "community",
+   "created_at": "2026-04-08",
+   "updated_at": "2026-05-27",
+   "estimated_cost_per_run": 0.0061,
+   "avg_execution_time": "~7s",
+   "downloads": 688,
+   "remix_count": 15,
+   "forked_from": null,
+   "license": "MIT",
+   "rating": 4.9,
+   "review_count": 94,
+   "sha256": "6a2696bc7dcd0300c55a43e48a7c802139a2b46ee382bff2aec089be197bce90",
+   "input_schema": null
+  },
+  {
+   "slug": "pipeline-pete/lead-to-opportunity-router",
+   "name": "Lead-to-Opportunity Router",
+   "description": "Pulls new leads from HubSpot, enriches each via an http call to your firmographic API, scores fit with a classify step, dedupes against open opps in code, then drafts personalized outreach with model failover and routes to the right rep behind a human gate.",
+   "author": "pipeline-pete",
+   "author_url": "https://github.com/pipeline-pete",
+   "version": "2.1.0",
+   "category": "sales_crm",
+   "tags": [
+    "lead-routing",
+    "enrichment",
+    "lead-scoring",
+    "hubspot",
+    "salesforce",
+    "failover"
+   ],
+   "models_used": [
+    "haiku",
+    "sonnet",
+    "gpt-5.2"
+   ],
+   "tools_used": [
+    "hubspot",
+    "salesforce",
+    "slack"
+   ],
+   "step_count": 9,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/pipeline-pete/lead-to-opportunity-router.yaml",
+   "source": "community",
+   "created_at": "2026-03-04",
+   "updated_at": "2026-05-21",
+   "estimated_cost_per_run": 0.031,
+   "avg_execution_time": "~24s",
+   "downloads": 574,
+   "remix_count": 13,
+   "forked_from": null,
+   "license": "MIT",
+   "rating": 4.7,
+   "review_count": 88,
+   "sha256": "5ba0b709adf5dbad8683a7434ce2a9d0c08594d18bd87c667446f5b2804b79d3",
+   "input_schema": null
+  },
+  {
+   "slug": "pipeline-pete/crm-dedupe-merge-guardrail",
+   "name": "CRM Dedupe & Merge Guardrail",
+   "description": "A sensor watches for new Salesforce/HubSpot records, a code step fuzzy-matches them against a Postgres golden-record table, and an LLM only adjudicates the ambiguous near-duplicates so reps stop creating the same account twice.",
+   "author": "pipeline-pete",
+   "author_url": "https://github.com/pipeline-pete",
+   "version": "1.3.0",
+   "category": "sales_crm",
+   "tags": [
+    "dedupe",
+    "data-quality",
+    "golden-record",
+    "salesforce",
+    "postgres"
+   ],
+   "models_used": [
+    "haiku",
+    "sonnet"
+   ],
+   "tools_used": [
+    "salesforce",
+    "hubspot",
+    "postgres"
+   ],
+   "step_count": 6,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/pipeline-pete/crm-dedupe-merge-guardrail.yaml",
+   "source": "community",
+   "created_at": "2026-04-12",
+   "updated_at": "2026-04-30",
+   "estimated_cost_per_run": 0.009,
+   "avg_execution_time": "~11s",
+   "downloads": 241,
+   "remix_count": 6,
+   "forked_from": null,
+   "license": "MIT",
+   "rating": 4.4,
+   "review_count": 37,
+   "sha256": "c2ed39fdde3fc8c7fe2ed04c72b319e9e7e9b6e2bdf68819a3e0e841900bd0d7",
+   "input_schema": null
+  },
+  {
+   "slug": "ticket-tide/zendesk-deflect-escalate-router",
+   "name": "Zendesk Deflect & Escalate Router",
+   "description": "Classifies inbound Zendesk ticket intent and urgency, races two models for the draft reply, gates refunds and legal threats to a human, and logs every resolution to Postgres so deflection rate is auditable.",
+   "author": "ticket-tide",
+   "author_url": "https://github.com/ticket-tide",
+   "version": "2.3.1",
+   "category": "support",
+   "tags": [
+    "zendesk",
+    "deflection",
+    "escalation",
+    "macro",
+    "human-gate",
+    "triage"
+   ],
+   "models_used": [
+    "haiku",
+    "sonnet",
+    "gpt-5.2"
+   ],
+   "tools_used": [
+    "zendesk",
+    "postgres",
+    "slack"
+   ],
+   "step_count": 10,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/ticket-tide/zendesk-deflect-escalate-router.yaml",
+   "source": "community",
+   "created_at": "2026-01-14",
+   "updated_at": "2026-05-21",
+   "estimated_cost_per_run": 0.011,
+   "avg_execution_time": "~14s",
+   "downloads": 1958,
+   "remix_count": 35,
+   "forked_from": null,
+   "license": "MIT",
+   "rating": 4.8,
+   "review_count": 152,
+   "sha256": "5213c3821a1e77352c895da0316732a81fc7792294ed58f5467bf29d13eb8332",
+   "input_schema": null
+  },
+  {
+   "slug": "csat-collie/post-resolution-csat-loop",
+   "name": "Post-Resolution CSAT & Silent-Churn Loop",
+   "description": "Loops over every closed Zendesk ticket, classifies the resolution sentiment, and fires a Twilio SMS CSAT survey only to the customers a one-click rating would miss, catching silent churners before they leave.",
+   "author": "csat-collie",
+   "author_url": "https://github.com/csat-collie",
+   "version": "2.1.0",
+   "category": "support",
+   "tags": [
+    "csat",
+    "churn",
+    "zendesk",
+    "twilio",
+    "loop"
+   ],
+   "models_used": [
+    "haiku",
+    "sonnet"
+   ],
+   "tools_used": [
+    "zendesk",
+    "twilio",
+    "postgres",
+    "slack"
+   ],
+   "step_count": 9,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/csat-collie/post-resolution-csat-loop.yaml",
+   "source": "community",
+   "created_at": "2026-03-08",
+   "updated_at": "2026-05-21",
+   "estimated_cost_per_run": 0.0312,
+   "avg_execution_time": "~41s",
+   "downloads": 607,
+   "remix_count": 14,
+   "forked_from": null,
+   "license": "MIT",
+   "rating": 4.7,
+   "review_count": 58,
+   "sha256": "a210f7bafb1396a651e76fdb594f1aa0772cbb7617adf3329edc9dcd604f3031",
+   "input_schema": null
+  },
+  {
+   "slug": "ticket-tide/csat-dip-escalation-sensor",
+   "name": "CSAT Dip Escalation Sensor",
+   "description": "A sensor polls Zendesk for tickets with a fresh sub-3 CSAT rating, classifies the root cause, and loops each one into a Slack escalation with a drafted recovery reply so save-plays fire within minutes, not at the weekly review.",
+   "author": "ticket-tide",
+   "author_url": "https://github.com/ticket-tide",
+   "version": "0.2.0",
+   "category": "support",
+   "tags": [
+    "csat",
+    "sensor",
+    "escalation",
+    "recovery",
+    "save-play",
+    "zendesk"
+   ],
+   "models_used": [
+    "haiku",
+    "sonnet"
+   ],
+   "tools_used": [
+    "zendesk",
+    "slack",
+    "postgres"
+   ],
+   "step_count": 7,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/ticket-tide/csat-dip-escalation-sensor.yaml",
+   "source": "community",
+   "created_at": "2026-05-24",
+   "updated_at": "2026-05-28",
+   "estimated_cost_per_run": 0.005,
+   "avg_execution_time": "~11s",
+   "downloads": 47,
+   "remix_count": 1,
+   "forked_from": "csat-collie/post-resolution-csat-loop",
+   "license": "MIT",
+   "rating": 4.1,
+   "review_count": 4,
+   "sha256": "41fd03d4a3dc878d3b8c124d213cab6b06d65bfd5b2d8f25d5a3bb925c441901",
+   "input_schema": null
+  },
+  {
+   "slug": "eval-engine/cost-tiered-fallback-chain",
+   "name": "Cost-Tiered Fallback Chain",
+   "description": "Sends each request to the cheapest model first, classifies whether the answer clears a confidence bar, and only escalates to a pricier tier on low-confidence or timeout via failover, cutting spend on easy queries while guaranteeing a quality floor on the hard ones.",
+   "author": "eval-engine",
+   "author_url": "https://github.com/eval-engine",
+   "version": "1.4.1",
+   "category": "general_ai",
+   "tags": [
+    "cost-routing",
+    "failover",
+    "classify",
+    "escalation",
+    "tiering"
+   ],
+   "models_used": [
+    "haiku",
+    "sonnet",
+    "opus"
+   ],
+   "tools_used": [
+    "postgres"
+   ],
+   "step_count": 7,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/eval-engine/cost-tiered-fallback-chain.yaml",
+   "source": "community",
+   "created_at": "2026-04-09",
+   "updated_at": "2026-05-12",
+   "estimated_cost_per_run": 0.011,
+   "avg_execution_time": "~9s",
+   "downloads": 549,
+   "remix_count": 15,
+   "forked_from": null,
+   "license": "MIT",
+   "rating": 4.7,
+   "review_count": 41,
+   "sha256": "09862f5aa570c4936fbbcae43f19e9bc367c1ef20a7c04ad54309a69eed90a94",
+   "input_schema": null
+  },
+  {
+   "slug": "scribe-rx/phi-redaction-gate",
+   "name": "PHI Redaction Gate (drop-in pre-model scrubber)",
+   "description": "A reusable front-end step that scrubs 18 HIPAA Safe Harbor identifiers from inbound documents with a regex and NER pass, then blocks the pipeline at a gate if any residual identifier confidence stays above threshold.",
+   "author": "scribe-rx",
+   "author_url": "https://github.com/scribe-rx",
+   "version": "1.4.0",
+   "category": "general_ai",
+   "tags": [
+    "phi",
+    "redaction",
+    "guardrail",
+    "deidentification",
+    "safe-harbor",
+    "gate"
+   ],
+   "models_used": [
+    "haiku"
+   ],
+   "tools_used": [
+    "s3"
+   ],
+   "step_count": 6,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/scribe-rx/phi-redaction-gate.yaml",
+   "source": "community",
+   "created_at": "2026-04-14",
+   "updated_at": "2026-05-19",
+   "estimated_cost_per_run": 0.0072,
+   "avg_execution_time": "~9s",
+   "downloads": 342,
+   "remix_count": 9,
+   "forked_from": null,
+   "license": "Apache-2.0",
+   "rating": 4.8,
+   "review_count": 41,
+   "sha256": "cb9270e5ee011b846b7bb8e9fdbe1327a221e40823c8e0adfa999da5beb1f23d",
+   "input_schema": null
+  },
+  {
+   "slug": "trace-tamer/eval-regression-gatekeeper",
+   "name": "Eval Regression Gatekeeper",
+   "description": "A CI gate that pulls the latest eval run scores over http, compares them to the last green baseline, and blocks the merge (with a Slack thread explaining which failure mode regressed) when accuracy or refusal rate crosses your threshold.",
+   "author": "trace-tamer",
+   "author_url": "https://github.com/trace-tamer",
+   "version": "1.0.0",
+   "category": "general_ai",
+   "tags": [
+    "ci",
+    "eval-gate",
+    "regression",
+    "quality-bar"
+   ],
+   "models_used": [
+    "haiku"
+   ],
+   "tools_used": [
+    "github",
+    "slack"
+   ],
+   "step_count": 5,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/trace-tamer/eval-regression-gatekeeper.yaml",
+   "source": "community",
+   "created_at": "2026-05-27",
+   "updated_at": "2026-05-29",
+   "estimated_cost_per_run": 0.0042,
+   "avg_execution_time": "~7s",
+   "downloads": 36,
+   "remix_count": 1,
+   "forked_from": null,
+   "license": "Apache-2.0",
+   "rating": 5,
+   "review_count": 3,
+   "sha256": "aeb005dee66b0745b79dba8f5c5e709ea157ba416a78a762c80447bd412d644a",
+   "input_schema": null
+  },
+  {
+   "slug": "clause-cat/clause-risk-classifier",
+   "name": "Clause Risk Classifier",
+   "description": "A focused first-pass triage that classifies each clause of a pasted contract into a five-tier risk score with a one-line rationale, so you know what to read before you open the redline tool.",
+   "author": "clause-cat",
+   "author_url": "https://github.com/clause-cat",
+   "version": "1.0.0",
+   "category": "general_ai",
+   "tags": [
+    "clause-classification",
+    "risk-triage",
+    "contract-review",
+    "legal-ops"
+   ],
+   "models_used": [
+    "haiku",
+    "sonnet"
+   ],
+   "tools_used": [],
+   "step_count": 4,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/community/clause-cat/clause-risk-classifier.yaml",
+   "source": "community",
+   "created_at": "2026-05-24",
+   "updated_at": "2026-05-24",
+   "estimated_cost_per_run": 0.009,
+   "avg_execution_time": "~7s",
+   "downloads": 38,
+   "remix_count": 1,
+   "forked_from": "clause-cat/nda-redline-gate",
+   "license": "MIT",
+   "rating": 3.9,
+   "review_count": 4,
+   "sha256": "86570492906468a02f8d470e0beec23e2ecd21f1a535b8001e13b658bc8471b8",
+   "input_schema": null
   }
  ],
  "categories": [
   {
    "id": "general_ai",
    "name": "General AI",
-   "count": 53
+   "count": 57
   },
   {
    "id": "marketing",
    "name": "Marketing",
-   "count": 41
+   "count": 44
   },
   {
    "id": "engineering",
    "name": "Engineering",
-   "count": 37
+   "count": 40
   },
   {
    "id": "sales_crm",
    "name": "Sales & CRM",
-   "count": 22
+   "count": 25
   },
   {
    "id": "hr_legal",
    "name": "HR & Legal",
-   "count": 20
+   "count": 23
   },
   {
    "id": "support",
    "name": "Support",
-   "count": 12
+   "count": 15
   },
   {
    "id": "llmops_ai_eng",
    "name": "LLMOps & AI Engineering",
-   "count": 6
+   "count": 9
   },
   {
    "id": "compliance_grc",
    "name": "Compliance & GRC",
-   "count": 5
+   "count": 8
   },
   {
    "id": "fintech_banking",
    "name": "Fintech & Banking",
-   "count": 4
+   "count": 7
   },
   {
    "id": "healthcare",
    "name": "Healthcare & Life Sciences",
-   "count": 4
+   "count": 7
   }
  ],
  "stats": {
-  "total_templates": 204,
-  "total_authors": 22,
-  "total_downloads": 28002,
-  "last_updated": "2026-06-02T10:00:00Z"
+  "total_templates": 235,
+  "total_authors": 41,
+  "total_downloads": 50845,
+  "last_updated": "2026-06-02T11:00:00Z"
  },
  "collections": [
   {
