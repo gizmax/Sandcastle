@@ -32,3 +32,6 @@ build_template.py
 :memory:*
 .coverage
 coverage*.json
+
+# autoresearch scratch output
+.autoresearch/

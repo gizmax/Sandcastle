@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
-import { Suspense, lazy } from "react";
+import { Suspense } from "react";
 import { Layout } from "@/components/layout/Layout";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
@@ -7,32 +7,35 @@ import { EventStreamProvider } from "@/components/providers/EventStreamProvider"
 import { useAuth } from "@/hooks/useAuth";
 import { AuthGate } from "@/components/auth/AuthGate";
 import { usePageTracking } from "@/hooks/usePageTracking";
+import { lazyWithRetry } from "@/lib/lazyWithRetry";
 
-// Lazy-loaded page components for code splitting
-const Overview = lazy(() => import("@/pages/Overview"));
-const Runs = lazy(() => import("@/pages/Runs"));
-const RunComparePage = lazy(() => import("@/pages/RunComparePage"));
-const RunDetailPage = lazy(() => import("@/pages/RunDetailPage"));
-const Workflows = lazy(() => import("@/pages/Workflows"));
-const WorkflowBuilderPage = lazy(() => import("@/pages/WorkflowBuilderPage"));
-const WorkflowDetailPage = lazy(() => import("@/pages/WorkflowDetailPage"));
-const ApprovalsPage = lazy(() => import("@/pages/ApprovalsPage"));
-const AutoPilotPage = lazy(() => import("@/pages/AutoPilotPage"));
-const ViolationsPage = lazy(() => import("@/pages/ViolationsPage"));
-const OptimizerPage = lazy(() => import("@/pages/OptimizerPage"));
-const Schedules = lazy(() => import("@/pages/Schedules"));
-const ScheduleMonitorPage = lazy(() => import("@/pages/ScheduleMonitorPage"));
-const DeadLetterPage = lazy(() => import("@/pages/DeadLetterPage"));
-const ApiKeysPage = lazy(() => import("@/pages/ApiKeysPage"));
-const SettingsPage = lazy(() => import("@/pages/SettingsPage"));
-const TemplatesPage = lazy(() => import("@/pages/TemplatesPage"));
-const IntegrationsPage = lazy(() => import("@/pages/IntegrationsPage"));
-const EvaluationsPage = lazy(() => import("@/pages/EvaluationsPage"));
-const EvolutionPage = lazy(() => import("@/pages/EvolutionPage"));
-const SystemHealthPage = lazy(() => import("@/pages/SystemHealthPage"));
-const CompliancePage = lazy(() => import("@/pages/CompliancePage"));
-const MemoryPage = lazy(() => import("@/pages/MemoryPage"));
-const Onboarding = lazy(() => import("@/pages/Onboarding"));
+// Lazy-loaded page components for code splitting. lazyWithRetry recovers from a
+// stale-deploy chunk miss (open tab + new deploy = 404 on the old hashed chunk)
+// by reloading once for the fresh index.html, instead of dead-ending the route.
+const Overview = lazyWithRetry(() => import("@/pages/Overview"), "overview");
+const Runs = lazyWithRetry(() => import("@/pages/Runs"), "runs");
+const RunComparePage = lazyWithRetry(() => import("@/pages/RunComparePage"), "run-compare");
+const RunDetailPage = lazyWithRetry(() => import("@/pages/RunDetailPage"), "run-detail");
+const Workflows = lazyWithRetry(() => import("@/pages/Workflows"), "workflows");
+const WorkflowBuilderPage = lazyWithRetry(() => import("@/pages/WorkflowBuilderPage"), "workflow-builder");
+const WorkflowDetailPage = lazyWithRetry(() => import("@/pages/WorkflowDetailPage"), "workflow-detail");
+const ApprovalsPage = lazyWithRetry(() => import("@/pages/ApprovalsPage"), "approvals");
+const AutoPilotPage = lazyWithRetry(() => import("@/pages/AutoPilotPage"), "autopilot");
+const ViolationsPage = lazyWithRetry(() => import("@/pages/ViolationsPage"), "violations");
+const OptimizerPage = lazyWithRetry(() => import("@/pages/OptimizerPage"), "optimizer");
+const Schedules = lazyWithRetry(() => import("@/pages/Schedules"), "schedules");
+const ScheduleMonitorPage = lazyWithRetry(() => import("@/pages/ScheduleMonitorPage"), "schedule-monitor");
+const DeadLetterPage = lazyWithRetry(() => import("@/pages/DeadLetterPage"), "dead-letter");
+const ApiKeysPage = lazyWithRetry(() => import("@/pages/ApiKeysPage"), "api-keys");
+const SettingsPage = lazyWithRetry(() => import("@/pages/SettingsPage"), "settings");
+const TemplatesPage = lazyWithRetry(() => import("@/pages/TemplatesPage"), "templates");
+const IntegrationsPage = lazyWithRetry(() => import("@/pages/IntegrationsPage"), "integrations");
+const EvaluationsPage = lazyWithRetry(() => import("@/pages/EvaluationsPage"), "evaluations");
+const EvolutionPage = lazyWithRetry(() => import("@/pages/EvolutionPage"), "evolution");
+const SystemHealthPage = lazyWithRetry(() => import("@/pages/SystemHealthPage"), "system-health");
+const CompliancePage = lazyWithRetry(() => import("@/pages/CompliancePage"), "compliance");
+const MemoryPage = lazyWithRetry(() => import("@/pages/MemoryPage"), "memory");
+const Onboarding = lazyWithRetry(() => import("@/pages/Onboarding"), "onboarding");
 
 /** Wrap a lazy-loaded page in a per-route error boundary so a crash in one
  *  page does not take down the entire app. */

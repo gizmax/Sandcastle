@@ -11,6 +11,18 @@ function GoodComponent(): React.ReactElement {
   return <div>Everything is fine</div>;
 }
 
+// Throws the exact shape a stale-deploy chunk miss produces.
+function ChunkBroken(): React.ReactElement {
+  throw new TypeError(
+    "Failed to fetch dynamically imported module: https://x/assets/TemplatesPage-abc.js"
+  );
+}
+
+// Throws a genuine network error (api call), not a chunk miss.
+function NetworkBroken(): React.ReactElement {
+  throw new TypeError("Failed to fetch");
+}
+
 describe("ErrorBoundary", () => {
   // Suppress React's error boundary console.error in tests
   let consoleError: ReturnType<typeof vi.spyOn>;
@@ -61,8 +73,56 @@ describe("ErrorBoundary", () => {
     expect(screen.getByText("Something went wrong")).toBeInTheDocument();
   });
 
+  it("shows an 'Update available' reload prompt for a stale-deploy chunk miss", () => {
+    render(
+      <ErrorBoundary>
+        <ChunkBroken />
+      </ErrorBoundary>
+    );
+    // Chunk misses must NOT read as a network/connection problem.
+    expect(screen.getByText("Update available")).toBeInTheDocument();
+    expect(screen.getByText("Reload")).toBeInTheDocument();
+    expect(screen.queryByText("Connection error")).not.toBeInTheDocument();
+    expect(screen.queryByText("Something went wrong")).not.toBeInTheDocument();
+  });
+
+  it("Reload button hard-reloads and clears the chunk-retry guards", () => {
+    const reload = vi.fn();
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { ...window.location, reload },
+    });
+    window.sessionStorage.setItem("sc:chunk-reload:templates", "1");
+    window.sessionStorage.setItem("unrelated", "keep");
+
+    render(
+      <ErrorBoundary>
+        <ChunkBroken />
+      </ErrorBoundary>
+    );
+    fireEvent.click(screen.getByText("Reload"));
+
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(window.sessionStorage.getItem("sc:chunk-reload:templates")).toBeNull();
+    expect(window.sessionStorage.getItem("unrelated")).toBe("keep");
+  });
+
+  it("still shows 'Connection error' for a real network failure", () => {
+    render(
+      <ErrorBoundary>
+        <NetworkBroken />
+      </ErrorBoundary>
+    );
+    expect(screen.getByText("Connection error")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Could not reach the server/)
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Update available")).not.toBeInTheDocument();
+  });
+
   // Clean up
   afterEach(() => {
     consoleError?.mockRestore();
+    window.sessionStorage.clear();
   });
 });
