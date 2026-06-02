@@ -97,6 +97,26 @@ PROVIDER_REGISTRY: dict[str, ModelInfo] = {
         "omlx", "mlx-community/Qwen3-30B-A3B-4bit", "runner-openai.mjs",
         "", "http://localhost:8080/v1", 0.0, 0.0, region="local",
     ),
+    # NVIDIA NIM (local inference microservice, OpenAI-compatible) - e.g. served
+    # on a DGX Spark / NVIDIA GPU. The base URL is read from settings.nim_base_url
+    # at runtime (see resolve_base_url); these are common models, but any model a
+    # NIM exposes works via the dynamic "nim/<model-id>" form (see resolve_model).
+    "nim/llama-3.1-70b": ModelInfo(
+        "nim", "meta/llama-3.1-70b-instruct", "runner-openai.mjs",
+        "NIM_API_KEY", "http://localhost:8000/v1", 0.0, 0.0, region="local",
+    ),
+    "nim/llama-3.1-8b": ModelInfo(
+        "nim", "meta/llama-3.1-8b-instruct", "runner-openai.mjs",
+        "NIM_API_KEY", "http://localhost:8000/v1", 0.0, 0.0, region="local",
+    ),
+    "nim/mixtral-8x7b": ModelInfo(
+        "nim", "mistralai/mixtral-8x7b-instruct-v0.1", "runner-openai.mjs",
+        "NIM_API_KEY", "http://localhost:8000/v1", 0.0, 0.0, region="local",
+    ),
+    "nim/qwen2.5-coder-32b": ModelInfo(
+        "nim", "qwen/qwen2.5-coder-32b-instruct", "runner-openai.mjs",
+        "NIM_API_KEY", "http://localhost:8000/v1", 0.0, 0.0, region="local",
+    ),
 }
 
 # All known model names (for validation)
@@ -106,14 +126,32 @@ KNOWN_MODELS = frozenset(PROVIDER_REGISTRY.keys())
 def resolve_model(model_str: str) -> ModelInfo:
     """Resolve a model string to its full configuration.
 
-    Raises ``KeyError`` if the model is not in the registry.
+    Beyond the static registry, any ``nim/<model-id>`` resolves dynamically: a
+    NIM exposes whatever model it serves over its OpenAI-compatible API, so we
+    do not hardcode the catalogue. The base URL comes from settings.nim_base_url.
+
+    Raises ``KeyError`` if the model is neither registered nor a valid nim/* id.
     """
-    if model_str not in PROVIDER_REGISTRY:
-        raise KeyError(
-            f"Unknown model '{model_str}'. "
-            f"Available: {', '.join(sorted(PROVIDER_REGISTRY))}"
+    if model_str in PROVIDER_REGISTRY:
+        return PROVIDER_REGISTRY[model_str]
+    if isinstance(model_str, str) and model_str.startswith("nim/") and len(model_str) > len("nim/"):
+        return ModelInfo(
+            "nim", model_str[len("nim/"):], "runner-openai.mjs",
+            "NIM_API_KEY", "http://localhost:8000/v1", 0.0, 0.0, region="local",
         )
-    return PROVIDER_REGISTRY[model_str]
+    raise KeyError(
+        f"Unknown model '{model_str}'. "
+        f"Available: {', '.join(sorted(PROVIDER_REGISTRY))}"
+    )
+
+
+def is_known_model(model_str: str) -> bool:
+    """True if *model_str* is registered or a valid dynamic ``nim/<model-id>``."""
+    return model_str in KNOWN_MODELS or (
+        isinstance(model_str, str)
+        and model_str.startswith("nim/")
+        and len(model_str) > len("nim/")
+    )
 
 
 def get_api_key(model_info: ModelInfo) -> str:
@@ -136,6 +174,7 @@ def get_api_key(model_info: ModelInfo) -> str:
         "OPENAI_API_KEY": "openai_api_key",
         "OPENROUTER_API_KEY": "openrouter_api_key",
         "MISTRAL_API_KEY": "mistral_api_key",
+        "NIM_API_KEY": "nim_api_key",
     }
     attr = attr_map.get(model_info.api_key_env)
     if attr:
@@ -153,6 +192,9 @@ def resolve_base_url(model_info: ModelInfo) -> str:
     if model_info.provider == "omlx":
         from sandcastle.config import settings
         return settings.omlx_base_url.rstrip("/") + "/v1"
+    if model_info.provider == "nim":
+        from sandcastle.config import settings
+        return settings.nim_base_url.rstrip("/") + "/v1"
     return model_info.api_base_url or "https://api.openai.com/v1"
 
 
@@ -229,6 +271,11 @@ FAILOVER_CHAINS: dict[str, list[str]] = {
     "omlx/qwen-3": [
         "omlx/llama-4-scout", "omlx/mistral-small", "omlx/gemma-3", "ollama",
     ],
+    # NVIDIA NIM local - failover to other NIM models, then Ollama.
+    "nim/llama-3.1-70b": ["nim/llama-3.1-8b", "nim/mixtral-8x7b", "ollama"],
+    "nim/llama-3.1-8b": ["nim/llama-3.1-70b", "nim/mixtral-8x7b", "ollama"],
+    "nim/mixtral-8x7b": ["nim/llama-3.1-70b", "nim/llama-3.1-8b", "ollama"],
+    "nim/qwen2.5-coder-32b": ["nim/llama-3.1-70b", "nim/mixtral-8x7b", "ollama"],
 }
 
 

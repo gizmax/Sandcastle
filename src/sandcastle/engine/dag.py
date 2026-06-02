@@ -1814,7 +1814,7 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
                 )
 
     # Check model names against provider registry
-    from sandcastle.engine.providers import KNOWN_MODELS
+    from sandcastle.engine.providers import KNOWN_MODELS, is_known_model
 
     all_models = {workflow.default_model}
     for step in workflow.steps:
@@ -1831,7 +1831,7 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
         if step.classify_config and step.classify_config.model:
             all_models.add(step.classify_config.model)
     for model_name in all_models:
-        if model_name not in KNOWN_MODELS:
+        if not is_known_model(model_name):
             errors.append(
                 f"Unknown model '{model_name}'. Available: {', '.join(sorted(KNOWN_MODELS))}"
             )

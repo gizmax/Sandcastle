@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     # Ollama server URL (for GLM-OCR and other local models)
     ollama_host: str = "http://localhost:11434"
 
+    # NVIDIA NIM server URL (OpenAI-compatible inference microservice, e.g. on a
+    # DGX Spark / NVIDIA GPU). nim_api_key is optional (local NIMs need none;
+    # NGC-hosted NIMs do). Used by the nim/* provider in engine/providers.py.
+    nim_base_url: str = "http://localhost:8000"
+    nim_api_key: str = ""
+
     # E2B custom template (pre-built sandbox with SDK installed)
     e2b_template: str = ""  # e.g. "sandcastle-runner"
 
