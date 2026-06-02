@@ -1,7 +1,7 @@
 # name: ATS Job Application Autosubmit
 # description: Files a placed candidate's tailored application into a Workday / Greenhouse / Lever / iCIMS / Taleo-style ATS apply flow on behalf of an outplacement or high-volume recruiting agency's back-office application ops. Public ATS apply flows expose no candidate-facing write API: the apply form is a login-gated, multi-page JS SPA with dynamic per-job EEO / screening questions, resume-parse autofill that must be corrected, and file uploads - none reachable by http - and each posting renders a different field map that must be discovered at runtime in the live DOM. It deterministically validates the candidate payload and normalizes a flat field-intent map, reads the live apply-wizard structure READ-ONLY in dom mode (login via ATS_CREDS, CAPTCHA pauses to a human), classifies each discovered field to a candidate-data key, gates the whole mapping behind an llm_eval anti-fabrication check plus a human reviewer, fills every field and uploads the resume in a provider-neutral playwright pass that STOPS on the review page (never clicks Submit), holds for a human approval of the irreversible submit, clicks Submit and captures the confirmation number, asserts the confirmation deterministically, then sensor-polls the application's own status page until the ATS confirms receipt before writing the confirmation back. Read is split from write, the flow fails closed, and the irreversible submit can never fire on a single model's opinion alone.
 # tags: [ATS, JobApplication, Workday, Greenhouse, Lever, iCIMS, Taleo, RPA, Playwright, DOM, HumanInTheLoop, Sensor, ProviderNeutral, NoAPI, Outplacement, Recruiting]
-# category: sales_crm
+# category: automation_rpa
 
 name: ats-job-application-autosubmit
 description: >-

@@ -1,7 +1,7 @@
 # name: SaaS Role Permission Remediator
 # description: Downgrade over-privileged roles for a list of users across a SaaS admin console with no bulk-role API - e.g. demote stale admins to member - behind one batch owner-style approval, with a strict downgrade-only guard, a last-admin lockout guard, and full before/after role reconciliation.
 # tags: [IAM, GRC, LeastPrivilege, SOC2, ISO27001, AccessReview, RoleDowngrade, Browser, Playwright, Reconciliation, Audit]
-# category: devops
+# category: automation_rpa
 
 name: saas-role-permission-remediator
 description: >-

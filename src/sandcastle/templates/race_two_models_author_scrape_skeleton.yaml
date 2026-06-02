@@ -1,7 +1,7 @@
 # name: Race Two Models Author Scrape Skeleton
 # description: A cross-provider resilience skeleton that races two different reasoning models to author the SAME Playwright extraction against a brittle, frequently-changing SPA and takes whichever returns schema-valid output FIRST - so a single model's bad day never breaks a high-value scrape. The race arbitrates purely on a deterministic schema gate, not on any model's opinion, which makes the flow provably provider-neutral: adding or dropping a provider is a one-line branch change. Read-only extraction, so there is no irreversible action and no approval gate; safety comes from the code-step schema gate, a drift classifier, per-branch max_actions caps, captcha_strategy=pause, and a hard notify that surfaces both-branch failure to humans rather than emitting silent garbage.
 # tags: [rpa, browser, playwright, race, cross-provider, scraping, spa, resilience, provider-neutral, drift-detection]
-# category: general_ai
+# category: automation_rpa
 
 name: race-two-models-author-scrape-skeleton
 description: >-

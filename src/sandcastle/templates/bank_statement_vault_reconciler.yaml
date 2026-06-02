@@ -1,7 +1,7 @@
 # name: Bank Statement Vault Reconciler
 # description: On a monthly schedule, logs into each bank/card portal that exposes statements ONLY as PDFs behind an authenticated JS SPA (no API, no Plaid/Yodlee coverage), downloads the new statement, parses balances and transactions, reconciles deterministically against the GL/ledger, files the PDF + reconciliation report into a dated client/year/month vault, and notifies. Any unreconciled delta beyond tolerance is gated behind a human approval BEFORE the period is marked reconciled. The fragile login+download is wrapped by a per-portal trajectory-replay golden run that hard-fails on UI drift before any client books are touched.
 # tags: [Finance, Bookkeeping, Reconciliation, Browser, Playwright, RPA, BankStatements, GL, Vault, TrajectoryReplay]
-# category: general_ai
+# category: automation_rpa
 
 name: bank-statement-vault-reconciler
 description: >-

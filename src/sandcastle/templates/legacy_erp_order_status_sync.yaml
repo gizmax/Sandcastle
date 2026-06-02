@@ -1,7 +1,7 @@
 # name: Legacy ERP Order Status Sync
 # description: Logs into a no-API legacy ERP / order portal (old SAP GUI-web, Epicor, or a homegrown 1990s order system exposed only as a session-cookie-authenticated server-rendered web UI), reads each open order's TRUE fulfillment status via a provider-neutral dom-mode browser extraction, deterministically diffs it in sandboxed Python against the desired status from the downstream WMS/CRM system of record, and pushes status updates back into the ERP ONLY after a human approves the per-order old->new diff. The irreversible write is a stateful CSRF-gated multi-field form fill driven in provider-neutral playwright mode, captured with screenshots for audit, then double-checked by an llm_eval gate against the ERP's own confirmation page before success is declared. Read is split from write; the load-bearing correctness (the diff and the extraction validation) is deterministic code, never a single model's opinion.
 # tags: [DevOps, ERP, LegacyIntegration, Browser, Playwright, DOM, RPA, OrderManagement, HumanApproval, NoAPI, ProviderNeutral]
-# category: devops
+# category: automation_rpa
 
 name: legacy-erp-order-status-sync
 description: >-

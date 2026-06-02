@@ -1,7 +1,7 @@
 # name: Utility Municipal Bill Filer
 # description: Runs on each utility account's billing cycle to log into electric/water/gas/municipal and telecom customer portals that are paperless-by-default with NO public API - the bill lives only inside the portal's 'Billing History' behind an authenticated session (often with a CAPTCHA). A per-account sensor polls the billing-history page until this cycle's new bill posts, a provider-neutral browser step (dom/lightpanda for lightweight municipal sites, playwright for JS portals) logs in via credentials_env and downloads the newest bill READ-ONLY via output_schema, parse + deterministic Python validate the amount/due-date and compute the percent change vs the prior period (NORMAL / SPIKE / VALIDATION_FAIL), the bill is filed by property/utility/year-month to the property-management drive, anomalies alert the facilities manager immediately, and the IRREVERSIBLE 'Pay' click is unreachable unless a human approval explicitly authorizes the exact amount and account - the agent never pays autonomously. trajectory-replay (fail_below_score 0.85) fails the run on municipal-portal UI drift so a redesign can never cause a wrong-bill download or a misdirected pay click.
 # tags: [Utilities, Municipal, Billing, PaperlessPortal, RPA, DOM, Lightpanda, Playwright, SpikeDetection, HumanApproval, TrajectoryReplay, ProviderNeutral, PropertyManagement]
-# category: general_ai
+# category: automation_rpa
 
 name: utility-municipal-bill-filer
 description: >-

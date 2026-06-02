@@ -1,7 +1,7 @@
 # name: Portal Login 2FA Extract Skeleton
 # description: The canonical login-with-credentials-env, pause-on-2FA/CAPTCHA, then structured-extract skeleton that every gated-portal RPA flow forks from. A playwright browser step navigates the start_url, fills the login form from credentials_env, and submits - captcha_strategy=pause hands BOTH the CAPTCHA and the interactive SMS/TOTP 2FA challenge to a human (HITL). A sensor then confirms the portal's own authenticated report endpoint is reachable before the read is trusted. A second, cheap dom-mode browser step reads the post-login report table and returns strict JSON via output_schema {rows:[{date,metric,amount}], page_count}. A deterministic code step VALIDATES the extraction (row count > 0, every amount parses as a number after stripping currency symbols, page_count consistent with the read) and raises on schema drift. A condition routes: on a bad/empty read it notifies Slack with the screenshot_on_error artifact and stops; on success a transform normalizes to the caller's shape for the parent workflow. Strictly READ-ONLY by design - no submit / pay / file / delete anywhere, so no approval gate is needed. Both browser steps run in provider-neutral playwright/dom mode where the reasoning model only AUTHORS the script, so default_model is fully swappable; the load-bearing correctness is deterministic code + an engine-native sensor, never a single model's opinion.
 # tags: [RPA, BrowserAutomation, Playwright, DOM, PortalLogin, TwoFactor, CAPTCHA, HumanInTheLoop, StructuredExtract, ReadOnly, ProviderNeutral, Skeleton, Sensor, NoAPI]
-# category: general_ai
+# category: automation_rpa
 
 name: portal-login-2fa-extract-skeleton
 description: >-

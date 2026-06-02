@@ -1,7 +1,7 @@
 # name: Tax Form 1099 W2 Collector
 # description: At tax season, logs into every payroll, brokerage, gig-platform, and contractor portal that posts year-end information returns (1099-NEC/MISC/INT/DIV, W-2, K-1) ONLY as session-gated downloadable PDFs behind login + MFA, retrieves each form, deterministically validates the payee TIN-last4 and box amounts against expectations (refusing any form whose recipient_tin_last4 does not match the expected payee - cross-payee leak guard), files an organized, server-side-encrypted tax packet to secure storage, and HARD-BLOCKS on a human approval before anything is ever transmitted to a preparer or e-file service. The browser is strictly read/download - it has NO path to e-file or submit. A date-window sensor re-polls the 'Tax Documents' page until each expected form is published or the deadline passes; a trajectory-replay guards each portal's login+download path against the seasonal UI redesigns brokers push every January.
 # tags: [tax, 1099, w2, k1, brokerage, payroll, gig, browser, playwright, computer-use, rpa, trajectory-replay, human-approval, pii, encrypted, read-only, provider-neutral]
-# category: general_ai
+# category: automation_rpa
 
 name: tax-form-1099-w2-collector
 description: >-

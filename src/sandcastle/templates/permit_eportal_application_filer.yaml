@@ -1,7 +1,7 @@
 # name: Permit Eportal Application Filer
 # description: Fills and lodges a building / business / environmental permit application on a municipal e-permitting portal (Accela Citizen Access, Tyler EnerGov, OpenGov-hosted city sites, regional environmental agencies) - per-jurisdiction, login-gated legacy SPAs with NO programmatic submission path. It deterministically validates the project record against a per-jurisdiction+permit_type rules table, routes to the right portal start_url, reads the application wizard READ-ONLY (dom mode) to learn its tabs/fields/upload requirements, maps the record onto the fields with a provider-agnostic classify, gates entry on a code-compliance llm_eval plus a permit-specialist human, fills every tab and uploads each drawing in provider-neutral playwright mode and STOPS at the review/fee page, holds for an applicant-of-record approval that explicitly shows the fee_amount, submits ONLY after approval, asserts the charged fee equals the approved fee (deterministic - no silent overpay), and runs a per-jurisdiction trajectory-replay to block filing when a portal redesign diverges. Triggered when a permit package is marked ready in the project tracker, often fanned out by a parent multi-site sub_workflow.
 # tags: [Permits, EPermitting, Accela, TylerEnerGov, OpenGov, Municipal, RPA, Playwright, DOM, HumanApproval, ProviderNeutral, TrajectoryReplay, FeeMatch, Building, Environmental]
-# category: hr_legal
+# category: automation_rpa
 
 name: permit-eportal-application-filer
 description: >-

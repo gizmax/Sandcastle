@@ -1,7 +1,7 @@
 # name: Web Portal Supplier Onboarding Filer
 # description: Fills and submits a supplier/vendor onboarding application across a buyer's JS-heavy procurement portal (Ariba/Coupa-style SPA or government e-procurement) that has no public submission API. Uses provider-neutral Playwright mode - the reasoning model AUTHORS a Playwright script, so any of the 7 providers can drive it. Read is split from write; the irreversible filing is gated behind deterministic validation, an llm_eval verifier, and a human approval.
 # tags: [Procurement, Ariba, Coupa, SupplierOnboarding, Playwright, RPA, SalesOps, BidManagement, e-Procurement, HumanInTheLoop]
-# category: sales_crm
+# category: automation_rpa
 
 name: web-portal-supplier-onboarding-filer
 description: >-

@@ -1,7 +1,7 @@
 # name: Supplier Portal Invoice Status Reconciler
 # description: Logs into customer-mandated AP/supplier web portals (Ariba/Coupa-style and bespoke buyer portals) that expose no supplier-side API, scrapes the live status of every submitted invoice into structured JSON with a deterministic provider-neutral Playwright script, validates the extraction in code, reconciles it against the company's own AR ledger, and posts a stuck/short-paid invoices digest to Finance. Read-only on the external portals - it never submits, edits, or pays anything, so the only writes are to the internal reconciliation summary.
 # tags: [Finance, AccountsReceivable, Collections, Browser, Playwright, Ariba, Coupa, Reconciliation, RPA]
-# category: general_ai
+# category: automation_rpa
 
 name: supplier-portal-invoice-status-reconciler
 description: >-

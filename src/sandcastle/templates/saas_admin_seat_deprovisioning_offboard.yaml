@@ -1,7 +1,7 @@
 # name: SaaS Admin Seat Deprovisioning Offboard
 # description: On an employee-offboard trigger from HRIS/ticketing, drive every no-API SaaS admin console to find the departing user's seat, capture license + owned-asset state (read-only dom census), deterministically verify the matched email is the right person, classify each account as safe-to-deactivate vs needs-asset-transfer-first, then - behind ONE human approval that shows the full per-app blast radius - perform ownership transfer and deactivation in playwright mode, llm_eval-gate that each console now shows the seat inactive, and ship a PDF evidence pack to Slack and the ticket.
 # tags: [Offboarding, Deprovisioning, SaaS, ITSec, NoAPI, Browser, Playwright, DOM, HumanApproval, Audit, Evidence]
-# category: devops
+# category: automation_rpa
 
 name: saas-admin-seat-deprovisioning-offboard
 description: >-

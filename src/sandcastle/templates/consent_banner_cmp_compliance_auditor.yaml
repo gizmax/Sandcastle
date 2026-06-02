@@ -1,7 +1,7 @@
 # name: Consent Banner CMP Compliance Auditor
 # description: Drives a real first-visit browser session per in-scope domain to PROVE the cookie/consent banner blocks non-essential trackers BEFORE any consent and honors a 'Reject All' click - the legally load-bearing client-side behavior no API can observe - then deterministically computes violations against a tracker denylist, gates severity (non-LLM threshold + swappable EU llm_eval), seals timestamped screenshots + a canonical network trace to an object-lock WORM S3 bucket, routes high-severity findings to privacy counsel behind a human approval, emits a per-domain PDF dossier, and trajectory-replays against a golden run so a CMP redesign that breaks the audit is caught as a regression, not a silent false-pass.
 # tags: [GDPR, ePrivacy, CNIL, ICO, ConsentBanner, CMP, PriorConsent, CookieAudit, Browser, Playwright, ObjectLock, WORM, TrajectoryReplay, DPO, PrivacyCounsel]
-# category: hr_legal
+# category: automation_rpa
 
 name: consent-banner-cmp-compliance-auditor
 description: >-

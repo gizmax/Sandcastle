@@ -1,0 +1,691 @@
+# name: Desktop Thick-Client Data-Entry Reconciler
+# description: Keys a batch of structured records into a legacy Windows/Citrix/VDI thick-client app that has NO web DOM and NO API by driving the real desktop via mouse/keyboard/screenshot (computer-use is the ONLY way in), then a deterministic OCR-vs-source reconcile proves every record landed exactly, behind one batch approval. Load carried by computer-use + delegate + a pure-Python field reconcile; the model only drives the mouse, correctness lives in code.
+# tags: [rpa, desktop, computer-use, vdi, citrix, winforms, green-screen, data-entry, reconciliation, ocr, audit, legacy]
+# category: automation_rpa
+# connectors: slack
+
+name: desktop-thickclient-dataentry-reconciler
+description: >-
+  Keys a batch of structured records into a legacy Windows / Citrix / VDI
+  thick-client app that exposes NO web DOM and NO API - the target is a native
+  WinForms / green-screen grid, so browser and http steps are physically
+  inapplicable. The ONLY way in is computer-use: a sandboxed virtual desktop
+  driven by mouse / keyboard / screenshot. This is desktop (not browser)
+  automation, which zero existing automation_rpa templates do.
+
+  Flow: a delegate hands credential acquisition / sandbox attach off to a
+  reusable helper workflow so this template stays a thin operator. A parse
+  normalizes the input batch into {row_id, fields} records. A READ-ONLY
+  computer-use screenshot pass captures the app's current grid as before_state
+  (tools=[computer], require_human_approval_for clicks/types so it cannot
+  accidentally mutate). A DETERMINISTIC code step builds an
+  idempotency / skip-if-already-present plan (records whose key already shows in
+  before_state are skipped, never double-keyed). A classify buckets each record
+  by mutation risk. ONE human batch approval gates ALL writes - nothing is
+  typed before it returns approved. A loop then runs a per-record computer-use
+  WRITE that keys exactly one record (max_turns capped, tools=[computer] only,
+  require_human_approval_for the consequential save keystroke). A SECOND
+  read-only computer-use screenshot pass yields after_state. Then the
+  load-bearing PURE-PYTHON reconcile OCR-diffs every committed field against its
+  source row AND asserts no untouched record changed - correctness lives in
+  code, never in the model that drove the mouse. A SHA-256 audit chain records
+  every keystroke transition + the approver.
+
+  PROVIDER NEUTRAL: the computer-use driver only produces mouse / keyboard
+  actions from the prompt and is swappable across any vision-capable provider;
+  the classify judge is swappable. The idempotency plan and the final
+  field-by-field reconcile are pure Python, so whether a record landed exactly
+  does NOT depend on which model moved the mouse.
+
+default_model: sonnet
+default_max_turns: 12
+default_timeout: 2400
+
+input_schema:
+  required: ["record_batch", "sandbox_url", "field_map_json"]
+  properties:
+    record_batch:
+      type: string
+      description: "Reference to the batch of structured records to key into the thick-client. Accepts @upload:<file_id>, @file:<path>, a URL, or pasted CSV/JSON. Each row needs a stable key column plus the data fields named in field_map_json."
+      example: "@upload:vendor-invoices-2026-06-02.csv"
+    sandbox_url:
+      type: string
+      description: "Connection target for the virtual desktop hosting the legacy thick-client (RDP / Citrix ICA / VNC / VDI broker URL). The computer-use sandbox attaches here; the app inside has NO DOM and NO API, which is why computer-use is the only entry point."
+      default: "vnc://desktop-sandbox.internal:5900"
+      example: "https://citrix-broker.acme.internal/launch/erp-legacy"
+    field_map_json:
+      type: string
+      description: "JSON map of source-column name -> on-screen field label / tab-order index in the thick-client form, so the driver knows where each value goes and the reconcile knows which field to OCR-check. Also names the key column used for idempotency."
+      default: '{"key_column": "invoice_no", "fields": {"invoice_no": "Invoice #", "vendor": "Vendor Name", "amount": "Gross Amount", "due_date": "Due Date"}}'
+      example: '{"key_column": "po_number", "fields": {"po_number": "PO Number", "gl_code": "GL Account", "amount": "Net Amount"}}'
+    credentials_env_var:
+      type: string
+      description: "Name of the environment variable holding the desktop / app login (RDP or app session). The value is NEVER inlined into the workflow; the delegate helper and computer-use steps read it by name."
+      default: "THICKCLIENT_CREDS"
+      example: "ERP_LEGACY_CREDS"
+    creds_helper_workflow:
+      type: string
+      description: "Reusable workflow that attaches the sandbox to sandbox_url and authenticates the desktop session, returning a ready-to-drive virtual desktop. Keeps this template a thin operator over a shared connect routine."
+      default: "vdi_session_attach"
+      example: "citrix_session_broker"
+    max_records:
+      type: string
+      description: "Hard cap on records keyed in one run, so a malformed batch can never rampage through the legacy app. The write loop will not exceed this."
+      default: "500"
+      example: "500"
+    slack_channel:
+      type: string
+      description: "Slack channel for the completion summary, reconcile drift report, and audit integrity hash."
+      default: "#rpa-dataentry"
+      example: "#rpa-dataentry"
+
+steps:
+  # 1) DELEGATE - hand sandbox attach + desktop authentication off to a reusable
+  #    connect workflow so this template stays a thin operator. Produces a
+  #    ready-to-drive virtual desktop attached to sandbox_url. Credentials are
+  #    read from credentials_env_var by name, never inlined.
+  - id: attach_session
+    type: delegate
+    delegate_config:
+      workflow: "{input.creds_helper_workflow}"
+      task_description: >-
+        Attach a sandboxed virtual desktop to the thick-client host at
+        {input.sandbox_url} and authenticate the desktop / app session using the
+        login stored in the {input.credentials_env_var} environment variable
+        (never echo the secret). Return a ready-to-drive desktop where the legacy
+        WinForms / green-screen application is open at its data-entry grid. Do
+        NOT key any records - this step only establishes the session.
+      timeout: 300
+
+  # 2) PARSE the batch into structured rows {row_id, fields}. Deterministic
+  #    ingest; no desktop contact yet.
+  - id: parse_batch
+    type: parse
+    depends_on: [attach_session]
+    prompt: "{input.record_batch}"
+    parse_config:
+      output: json
+
+  # 3) READ-ONLY computer-use census. The ONLY way to see the app's current grid
+  #    is to look at the screen - there is no DOM to query. tools=[computer] only,
+  #    and require_human_approval_for click/type so this pass CANNOT mutate: it
+  #    just screenshots and OCR-reads the existing rows into before_state. This is
+  #    the pre-image of the audit before/after pair.
+  - id: census_before
+    type: computer-use
+    depends_on: [parse_batch]
+    prompt: >
+      You are looking at a legacy desktop application's data-entry grid over a
+      virtual desktop. Do a READ-ONLY census: take screenshots and read the rows
+      already present in the grid. Do NOT click any editable field, do NOT type,
+      and do NOT press any Save / Commit / Enter that would create or change a
+      record - scrolling and screenshotting only. For every record already in the
+      grid, read its key value (the column named as key_column in
+      {input.field_map_json}) and the value of each mapped field. The batch we are
+      about to key is {steps.parse_batch.output}; use it only to know which key
+      values to look for. Return the existing rows as structured JSON.
+    computer_use_config:
+      tools: [computer]
+      sandbox_url: "{input.sandbox_url}"
+      credentials_env: "{input.credentials_env_var}"
+      max_turns: 20
+      require_human_approval_for: ["click", "type", "key", "submit"]
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          before_rows:
+            type: array
+            items:
+              type: object
+              properties:
+                key: { type: string }
+                fields: { type: object }
+                found: { type: boolean }
+              required: ["key", "found"]
+          total_rows_observed: { type: integer }
+        required: ["before_rows"]
+
+  # 4) DETERMINISTIC idempotency / skip-if-already-present plan. The load-bearing
+  #    safety: any record whose key already shows in before_state is SKIPPED (never
+  #    double-keyed); only genuinely new, well-formed records become writes. Also
+  #    enforces the max_records cap and an allowlist (no key outside the input batch
+  #    can be in the plan). Pure Python, no model.
+  - id: idempotency_plan
+    type: code
+    depends_on: [parse_batch, census_before]
+    code_config:
+      language: python
+      code: |
+        # NOTE: the code sandbox preloads `json` as a global - no import needed
+        # (import statements are blocked in the restricted exec environment).
+
+        # --- field map (key column + source->screen field labels) ----------------
+        raw_map = _input.get('field_map_json') or {}
+        if isinstance(raw_map, str):
+            try:
+                raw_map = json.loads(raw_map) if raw_map.strip() else {}
+            except (ValueError, TypeError):
+                raw_map = {}
+        if not isinstance(raw_map, dict):
+            raw_map = {}
+        key_column = str(raw_map.get('key_column') or 'id').strip()
+        field_labels = raw_map.get('fields') or {}
+        if not isinstance(field_labels, dict):
+            field_labels = {}
+        source_cols = [str(c) for c in field_labels.keys()]
+
+        # --- record cap ----------------------------------------------------------
+        try:
+            max_records = int(str(_input.get('max_records') or '500'))
+        except (ValueError, TypeError):
+            max_records = 500
+        if max_records < 0:
+            max_records = 0
+
+        # --- normalize the parsed batch into rows --------------------------------
+        raw_rows = _steps['parse_batch']
+        if isinstance(raw_rows, str):
+            try:
+                raw_rows = json.loads(raw_rows) if raw_rows.strip() else []
+            except (ValueError, TypeError):
+                raw_rows = []
+        if isinstance(raw_rows, dict):
+            raw_rows = raw_rows.get('rows') or raw_rows.get('records') or raw_rows.get('data') or []
+        if not isinstance(raw_rows, list):
+            raw_rows = []
+
+        requested = []
+        requested_keys = set()
+        for idx, row in enumerate(raw_rows):
+            if not isinstance(row, dict):
+                continue
+            key_val = str(row.get(key_column) or row.get(key_column.lower()) or '').strip()
+            if not key_val:
+                continue
+            fields = {}
+            for col in source_cols:
+                if col in row:
+                    fields[col] = row.get(col)
+                elif col.lower() in row:
+                    fields[col] = row.get(col.lower())
+            requested.append({
+                'row_id': idx,
+                'key': key_val,
+                'fields': fields,
+            })
+            requested_keys.add(key_val.lower())
+
+        # --- existing keys already in the grid (idempotency source) --------------
+        census = _steps['census_before'] or {}
+        if isinstance(census, str):
+            try:
+                census = json.loads(census) if census.strip() else {}
+            except (ValueError, TypeError):
+                census = {}
+        before_rows = census.get('before_rows', []) if isinstance(census, dict) else []
+        existing_keys = set()
+        for m in before_rows:
+            if isinstance(m, dict) and m.get('found'):
+                ek = str(m.get('key') or '').strip().lower()
+                if ek:
+                    existing_keys.add(ek)
+
+        # --- build the write plan + skip / reject lists --------------------------
+        write_plan = []
+        skipped = []
+        rejected = []
+        seen_in_batch = set()
+        for req in requested:
+            k = req['key'].lower()
+            if k in seen_in_batch:
+                rejected.append({**req, 'reason': 'duplicate_key_within_batch'})
+                continue
+            seen_in_batch.add(k)
+            # require at least one non-empty mapped field to key
+            non_empty = [c for c, v in req['fields'].items() if v is not None and str(v).strip() != '']
+            if not non_empty:
+                rejected.append({**req, 'reason': 'no_non_empty_mapped_fields'})
+                continue
+            if k in existing_keys:
+                skipped.append({**req, 'reason': 'already_present_in_grid_idempotent_skip'})
+                continue
+            write_plan.append(req)
+
+        # --- enforce the hard record cap on the write plan -----------------------
+        cap_truncated = False
+        if len(write_plan) > max_records:
+            for over in write_plan[max_records:]:
+                rejected.append({**over, 'reason': 'exceeds_max_records_cap'})
+            write_plan = write_plan[:max_records]
+            cap_truncated = True
+
+        # --- allowlist guard: no plan key outside the input batch ----------------
+        plan_keys = {p['key'].lower() for p in write_plan}
+        scope_violations = sorted(plan_keys - requested_keys)
+        allowlist_ok = len(scope_violations) == 0
+
+        result = {
+            'allowlist_ok': allowlist_ok,
+            'scope_violations': scope_violations,
+            'key_column': key_column,
+            'mapped_fields': source_cols,
+            'requested_count': len(requested),
+            'plan_count': len(write_plan),
+            'skipped_count': len(skipped),
+            'rejected_count': len(rejected),
+            'cap_truncated': cap_truncated,
+            'max_records': max_records,
+            'write_plan': write_plan,
+            'skipped': skipped,
+            'rejected': rejected,
+            'requested_keys': sorted(requested_keys),
+        }
+
+  # 5) CLASSIFY the batch by mutation risk. The ONLY model in the correctness
+  #    path, and it is swappable. high_risk = financial / irreversible fields
+  #    (amounts, GL codes, posting dates) or a large batch; standard_risk = small
+  #    batches of low-stakes fields. Every category routes into the single human
+  #    batch approval; the bucket surfaces blast radius inside that gate.
+  - id: classify_risk
+    type: classify
+    depends_on: [idempotency_plan]
+    classify_config:
+      model: haiku
+      input: "Bucket this batch of about-to-be-keyed records by blast radius into a legacy financial thick-client. high_risk = records carrying monetary amounts, GL / account codes, posting or due dates, or a batch larger than 100 records (irreversible once committed in the legacy app); standard_risk = small batches of low-stakes descriptive fields. Mapped fields: {steps.idempotency_plan.output.mapped_fields}. Records to key: {steps.idempotency_plan.output.plan_count}. Answer with the single highest-risk bucket present."
+      categories:
+        - standard_risk
+        - high_risk
+      branches:
+        standard_risk: [batch_approval]
+        high_risk: [batch_approval]
+
+  # 6) APPROVAL: the SINGLE human batch sign-off over the whole write_plan. This is
+  #    the ONLY place a human authorizes keystrokes into the legacy app; NOTHING is
+  #    typed before this returns approved. The reviewer sees the idempotency plan
+  #    (writes vs idempotent skips vs rejects), the risk bucket, and the cap, and can
+  #    edit (e.g. drop a borderline row) before any mutation runs.
+  - id: batch_approval
+    type: approval
+    depends_on: [classify_risk]
+    approval_config:
+      message: >
+        Thick-client data-entry batch - APPROVE to key the listed records into the
+        legacy app, REJECT to abort the whole run. This is the only authorization
+        gate before any keystroke is sent. Cohort risk: {steps.classify_risk.output}.
+        To key: {steps.idempotency_plan.output.plan_count}. Idempotent skips (already
+        present): {steps.idempotency_plan.output.skipped_count}. Rejected (skipped +
+        reported): {steps.idempotency_plan.output.rejected_count}. Record cap:
+        {steps.idempotency_plan.output.max_records} (truncated:
+        {steps.idempotency_plan.output.cap_truncated}). Allowlist OK (no out-of-batch
+        key): {steps.idempotency_plan.output.allowlist_ok}. Review the plan and confirm
+        any high-risk financial rows before approving.
+      show_data: steps.idempotency_plan.output
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: true
+
+  # 7) LOOP over write_plan. Each iteration keys exactly ONE record via the per-record
+  #    computer-use WRITE (child step key_one_record), reading the current record via
+  #    _item. Runs ONLY after the human approval. max_iterations caps the batch size as
+  #    a second backstop to the in-code record cap.
+  - id: write_loop
+    type: loop
+    depends_on: [batch_approval]
+    loop_config:
+      over: "steps.idempotency_plan.output.write_plan"
+      step_ids: [key_one_record]
+      max_iterations: 500
+
+  # 7a) PER-RECORD WRITE (computer-use, tools=[computer] only). The driver authors
+  #     only mouse / keyboard actions from the prompt and is swappable across any
+  #     vision provider. max_turns is tightly capped so a misnavigation cannot rampage
+  #     through the grid; require_human_approval_for the consequential Save/Commit
+  #     keystroke caps the irreversible action; capture_screenshots is ON for audit.
+  #     output_schema returns a structured per-record result {key, action_taken,
+  #     screenshot_ref}.
+  - id: key_one_record
+    type: computer-use
+    prompt: >
+      You are keying exactly ONE record into a legacy desktop application's
+      data-entry form over a virtual desktop. The record is: {{ _item }}. Start a
+      NEW record / blank row, then for each entry in this record's fields, click the
+      on-screen field whose label matches the mapping in {input.field_map_json} and
+      type the value exactly as given (do not reformat numbers or dates). Operate on
+      this ONE record only - never edit, overwrite, or delete any other row already
+      in the grid. When all mapped fields are filled, trigger the app's Save / Commit
+      / Enter to persist this one record (this is the consequential keystroke and will
+      ask for human confirmation). Then take a screenshot and read back the values the
+      grid now shows for this record's key and return them. Do not open menus, reports,
+      or unrelated screens.
+    computer_use_config:
+      tools: [computer]
+      sandbox_url: "{input.sandbox_url}"
+      credentials_env: "{input.credentials_env_var}"
+      max_turns: 12
+      require_human_approval_for: ["submit", "save", "commit"]
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          key: { type: string }
+          action_taken: { type: string, enum: ["keyed", "skipped", "failed"] }
+          fields_written: { type: object }
+          screenshot_ref: { type: string }
+        required: ["key", "action_taken"]
+
+  # 8) READ-ONLY computer-use RE-CENSUS into after_state - the post-image of the audit
+  #    pair. Same screenshot-only extraction as the before census; tools=[computer],
+  #    require_human_approval_for click/type so it cannot mutate. No DOM, so the screen
+  #    is again the only source of truth.
+  - id: census_after
+    type: computer-use
+    depends_on: [write_loop]
+    prompt: >
+      Take a READ-ONLY re-census of the legacy app's data-entry grid after a batch of
+      records was keyed. Refresh / scroll to load current state. Do NOT click any
+      editable field, do NOT type, and do NOT press Save / Commit / Enter - screenshots
+      and scrolling only. For every record now in the grid, read its key value (the
+      key_column from {input.field_map_json}) and the value of each mapped field. Return
+      the full current grid as structured JSON.
+    computer_use_config:
+      tools: [computer]
+      sandbox_url: "{input.sandbox_url}"
+      credentials_env: "{input.credentials_env_var}"
+      max_turns: 20
+      require_human_approval_for: ["click", "type", "key", "submit"]
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          after_rows:
+            type: array
+            items:
+              type: object
+              properties:
+                key: { type: string }
+                fields: { type: object }
+                found: { type: boolean }
+              required: ["key", "found"]
+          total_rows_observed: { type: integer }
+        required: ["after_rows"]
+
+  # 9) DETERMINISTIC final reconcile. The load-bearing post-check: OCR-diff every
+  #    committed field against its SOURCE row value, assert every keyed record now
+  #    shows exactly the source values, AND assert no untouched record changed vs the
+  #    before census. Emits a drift list for any record that did not land exactly.
+  #    Correctness lives HERE, never in the model that drove the mouse. Pure Python.
+  - id: reconcile
+    type: code
+    depends_on: [idempotency_plan, census_after, write_loop]
+    code_config:
+      language: python
+      code: |
+        # NOTE: `json` is preloaded as a global in the code sandbox - no import.
+
+        def norm(v):
+            # Field-equality normalization: trim, collapse case + inner whitespace, and
+            # strip thousands separators / currency symbols so an OCR read of "1,250.00"
+            # matches a source value of "1250.00". Deterministic, no model.
+            s = str(v if v is not None else '').strip().lower()
+            s = s.replace(',', '').replace('$', '').replace('€', '').replace('£', '')
+            # collapse any run of whitespace to a single space without re (str only)
+            s = ' '.join(s.split())
+            return s.strip()
+
+        plan = _steps['idempotency_plan'] or {}
+        write_plan = plan.get('write_plan', []) if isinstance(plan, dict) else []
+        mapped_fields = plan.get('mapped_fields', []) if isinstance(plan, dict) else []
+        source_by_key = {}
+        for p in write_plan:
+            if isinstance(p, dict):
+                source_by_key[str(p.get('key') or '').strip().lower()] = p.get('fields') or {}
+        targeted_keys = set(source_by_key.keys())
+
+        # --- before census (re-derived for the untouched-record diff) ------------
+        census_b = _steps['census_before'] or {}
+        if isinstance(census_b, str):
+            try:
+                census_b = json.loads(census_b) if census_b.strip() else {}
+            except (ValueError, TypeError):
+                census_b = {}
+        before_rows = census_b.get('before_rows', []) if isinstance(census_b, dict) else []
+        before_fields = {}
+        for m in before_rows:
+            if isinstance(m, dict):
+                k = str(m.get('key') or '').strip().lower()
+                if k:
+                    before_fields[k] = m.get('fields') or {}
+
+        # --- after census --------------------------------------------------------
+        census_a = _steps['census_after'] or {}
+        if isinstance(census_a, str):
+            try:
+                census_a = json.loads(census_a) if census_a.strip() else {}
+            except (ValueError, TypeError):
+                census_a = {}
+        after_rows = census_a.get('after_rows', []) if isinstance(census_a, dict) else []
+        after_fields = {}
+        for m in after_rows:
+            if isinstance(m, dict):
+                k = str(m.get('key') or '').strip().lower()
+                if k:
+                    after_fields[k] = m.get('fields') or {}
+
+        # --- per-loop computer-use results, indexed by reported key --------------
+        loop_out = _steps['write_loop'] or {}
+        loop_items = loop_out if isinstance(loop_out, list) else (
+            loop_out.get('results') or loop_out.get('items') or []
+        )
+        result_by_key = {}
+        for it in loop_items:
+            if isinstance(it, dict):
+                k = str(it.get('key') or '').strip().lower()
+                if k:
+                    result_by_key[k] = it
+
+        # --- assert every keyed record now shows its SOURCE field values ----------
+        confirmed = []
+        drift = []
+        for k in sorted(targeted_keys):
+            want_fields = source_by_key.get(k) or {}
+            post = after_fields.get(k)
+            res = result_by_key.get(k, {})
+            field_checks = []
+            all_match = post is not None
+            if post is None:
+                all_match = False
+            for col in mapped_fields:
+                if col not in want_fields:
+                    continue
+                want_v = norm(want_fields.get(col))
+                got_v = norm((post or {}).get(col)) if isinstance(post, dict) else ''
+                match = (want_v == got_v)
+                if not match:
+                    all_match = False
+                field_checks.append({
+                    'field': col,
+                    'source': want_fields.get(col),
+                    'on_screen': (post or {}).get(col) if isinstance(post, dict) else None,
+                    'match': match,
+                })
+            diff_row = {
+                'key': k,
+                'present_after': post is not None,
+                'browser_action': res.get('action_taken'),
+                'screenshot_ref': res.get('screenshot_ref'),
+                'field_checks': field_checks,
+            }
+            if all_match and post is not None:
+                confirmed.append(diff_row)
+            else:
+                drift.append({**diff_row, 'drift_reason': 'keyed_field_does_not_match_source'})
+
+        # --- assert no UNTOUCHED record changed (collateral / scope-creep) --------
+        collateral = []
+        for k, bf in before_fields.items():
+            if k in targeted_keys:
+                continue
+            af = after_fields.get(k)
+            if af is None:
+                continue
+            changed_fields = []
+            for col in mapped_fields:
+                if norm(bf.get(col)) != norm(af.get(col)):
+                    changed_fields.append(col)
+            if changed_fields:
+                collateral.append({
+                    'key': k,
+                    'changed_fields': changed_fields,
+                    'drift_reason': 'untouched_record_changed',
+                })
+
+        all_clean = (len(drift) == 0 and len(collateral) == 0 and len(targeted_keys) == len(confirmed))
+
+        result = {
+            'all_clean': all_clean,
+            'targeted_count': len(targeted_keys),
+            'confirmed_count': len(confirmed),
+            'drift_count': len(drift),
+            'collateral_count': len(collateral),
+            'confirmed': confirmed,
+            'drift': drift,
+            'collateral': collateral,
+        }
+
+  # 10) AUDIT chain: deterministic, tamper-evident SHA-256 over the canonical
+  #     data-entry record (plan, approver outcome, every per-record keystroke
+  #     transition before->after, drift, collateral). No model.
+  - id: audit_chain
+    type: code
+    depends_on: [idempotency_plan, batch_approval, reconcile]
+    code_config:
+      language: python
+      code: |
+        # `json` is preloaded as a global. The sandbox blocks imports, so this
+        # step ships a self-contained pure-Python SHA-256 (FIPS 180-4) instead of
+        # hashlib - it uses only int/bitwise ops, bytes iteration (yields ints, so
+        # no ord), and a hex lookup string (so no chr/format/hex). Verified byte-
+        # for-byte against hashlib across test vectors.
+        def _sha256_hex(data_bytes):
+            mask = 0xffffffff
+            HEXD = '0123456789abcdef'
+            k = [
+                0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+                0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+                0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+                0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+                0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+                0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+                0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+                0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2,
+            ]
+            h = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19]
+
+            def rotr(x, n):
+                return ((x >> n) | (x << (32 - n))) & mask
+
+            msg = list(data_bytes)
+            ml = len(msg) * 8
+            msg.append(0x80)
+            while (len(msg) % 64) != 56:
+                msg.append(0x00)
+            for i in range(8):
+                msg.append((ml >> (8 * (7 - i))) & 0xff)
+
+            for chunk_start in range(0, len(msg), 64):
+                w = [0] * 64
+                for i in range(16):
+                    b0 = msg[chunk_start + i * 4]
+                    b1 = msg[chunk_start + i * 4 + 1]
+                    b2 = msg[chunk_start + i * 4 + 2]
+                    b3 = msg[chunk_start + i * 4 + 3]
+                    w[i] = ((b0 << 24) | (b1 << 16) | (b2 << 8) | b3) & mask
+                for i in range(16, 64):
+                    s0 = rotr(w[i-15], 7) ^ rotr(w[i-15], 18) ^ (w[i-15] >> 3)
+                    s1 = rotr(w[i-2], 17) ^ rotr(w[i-2], 19) ^ (w[i-2] >> 10)
+                    w[i] = (w[i-16] + s0 + w[i-7] + s1) & mask
+                a, b, c, d, e, f, g, hh = h
+                for i in range(64):
+                    S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)
+                    ch = (e & f) ^ ((~e & mask) & g)
+                    t1 = (hh + S1 + ch + k[i] + w[i]) & mask
+                    S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)
+                    maj = (a & b) ^ (a & c) ^ (b & c)
+                    t2 = (S0 + maj) & mask
+                    hh = g; g = f; f = e; e = (d + t1) & mask
+                    d = c; c = b; b = a; a = (t1 + t2) & mask
+                h = [(h[0]+a)&mask,(h[1]+b)&mask,(h[2]+c)&mask,(h[3]+d)&mask,
+                     (h[4]+e)&mask,(h[5]+f)&mask,(h[6]+g)&mask,(h[7]+hh)&mask]
+            out = ''
+            for v in h:
+                for shift in (28, 24, 20, 16, 12, 8, 4, 0):
+                    out = out + HEXD[(v >> shift) & 0xf]
+            return out
+
+        plan = _steps['idempotency_plan'] or {}
+        reconcile = _steps['reconcile'] or {}
+        approval = _steps['batch_approval'] or {}
+
+        approver = 'unknown'
+        if isinstance(approval, dict):
+            approver = str(approval.get('approver') or approval.get('approved_by') or 'unknown')
+
+        # chain of keystroke transitions (confirmed + drift) for the audit record
+        transitions = []
+        for row in (reconcile.get('confirmed', []) + reconcile.get('drift', [])):
+            transitions.append({
+                'key': row.get('key'),
+                'present_after': row.get('present_after'),
+                'browser_action': row.get('browser_action'),
+                'screenshot_ref': row.get('screenshot_ref'),
+                'field_checks': row.get('field_checks'),
+                'reconciled': row.get('drift_reason') is None,
+            })
+
+        record = {
+            'approver': approver,
+            'allowlist_ok': plan.get('allowlist_ok'),
+            'key_column': plan.get('key_column'),
+            'mapped_fields': plan.get('mapped_fields'),
+            'requested_count': plan.get('requested_count'),
+            'plan_count': plan.get('plan_count'),
+            'skipped_count': plan.get('skipped_count'),
+            'rejected_count': plan.get('rejected_count'),
+            'cap_truncated': plan.get('cap_truncated'),
+            'targeted_count': reconcile.get('targeted_count'),
+            'confirmed_count': reconcile.get('confirmed_count'),
+            'drift_count': reconcile.get('drift_count'),
+            'collateral_count': reconcile.get('collateral_count'),
+            'all_clean': reconcile.get('all_clean'),
+            'keystroke_transitions': transitions,
+            'drift': reconcile.get('drift', []),
+            'collateral': reconcile.get('collateral', []),
+            'rejected': plan.get('rejected', []),
+            'skipped': plan.get('skipped', []),
+        }
+
+        # canonical (sorted-key) serialization so the audit hash is reproducible
+        # byte-for-byte regardless of dict ordering.
+        canonical = json.dumps(record, sort_keys=True, separators=(',', ':'))
+        digest = _sha256_hex(canonical.encode('utf-8'))
+
+        result = {
+            'sha256': digest,
+            'byte_length': len(canonical),
+            'audit_record': record,
+            'canonical_json': canonical,
+        }
+
+  # 11) NOTIFY the RPA channel with the result + reconcile drift report + audit
+  #     integrity hash.
+  - id: notify_summary
+    type: notify
+    depends_on: [audit_chain]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: "Thick-client data-entry batch complete. Keyed: {steps.idempotency_plan.output.plan_count} | Confirmed at source: {steps.reconcile.output.confirmed_count} | Drift (mismatch): {steps.reconcile.output.drift_count} | Collateral (untouched changed): {steps.reconcile.output.collateral_count} | Idempotent skips: {steps.idempotency_plan.output.skipped_count} | Allowlist OK: {steps.idempotency_plan.output.allowlist_ok} | All clean: {steps.reconcile.output.all_clean} | Approver: {steps.audit_chain.output.audit_record.approver} | Audit sha256 {steps.audit_chain.output.sha256}."
+
+on_complete:
+  storage_path: "desktop-thickclient-dataentry-reconciler/{run_id}/result.json"

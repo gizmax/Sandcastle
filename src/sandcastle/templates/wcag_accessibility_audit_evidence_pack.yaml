@@ -1,7 +1,7 @@
 # name: WCAG Accessibility Audit Evidence Pack
 # description: Runs a deterministic axe-core accessibility scan inside a real rendered browser across a sampled set of journey pages - including states only reachable after interaction (opened modals, expanded menus, SPA route changes) - classifies every violation by WCAG 2.2 success criterion and EAA/ADA/Section-508 clause with pure-Python mapping, scores each page against a configurable max-critical threshold, and ships a timestamped, screenshot-backed remediation dossier to an object-lock (WORM) S3 bucket as the defensible audit evidence pack, with a VPAT-style PDF behind a human filing-approval gate.
 # tags: [wcag, accessibility, axe-core, a11y, eaa, ada, section-508, vpat, browser, playwright, evidence, compliance, trajectory-replay]
-# category: engineering
+# category: automation_rpa
 
 name: wcag-accessibility-audit-evidence-pack
 description: >-
