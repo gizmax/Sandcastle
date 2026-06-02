@@ -1,0 +1,732 @@
+# name: Workers Comp FNOL Insurance Filer
+# description: Files a First-Notice-of-Loss / workers-comp injury claim into a carrier or state workers-comp board (WCB) portal directly from an HR intake record, captures the carrier/board-issued claim number plus the stamped receipt, and routes the confirmation back to HR - all within the statutory filing window. Carrier broker portals and state WCB systems are login-walled multi-page injury forms with NO filing API for most submitters, so HR/risk ops and TPAs re-key the same injury into dozens of different portals by hand against hard deadlines. This template fires on a new approved-to-file incident, loads the intake record, deterministically validates that mandatory FNOL fields are present and the filing is still inside the statutory window (fails closed), maps the free-text injury description to the portal's body-part / cause-of-injury code list with a provider-neutral classify (race failover), drives the portal READ-ONLY in playwright mode to fill the multi-page form and STOP at review, re-validates the extracted review against the mapped codes and the intake FEIN with deterministic code, holds for a human HR/adjuster approval because the data is PII/medical and legally consequential, only then submits in a second playwright write pass, asserts the claim-number pattern deterministically AND sensor-polls the portal's own status page for the stamped receipt before declaring the claim filed, then notifies HR and archives the receipt. The browser steps ride default_model and stay fully swappable; the load-bearing correctness is deterministic code + a sensor confirmation, never one model's opinion.
+# tags: [WorkersComp, FNOL, InjuryClaim, WCB, CarrierPortal, TPA, HR, RPA, Playwright, HumanInTheLoop, ProviderNeutral, StatutoryDeadline]
+# category: hr_legal
+
+name: workers-comp-fnol-insurance-filer
+description: >-
+  Files a workers-comp First Notice of Loss (FNOL) injury claim into a carrier broker portal or a
+  state workers-comp board (WCB) system from an HR intake record, then routes the carrier/board claim
+  number and stamped receipt back to HR - inside the statutory filing window. Built for HR/risk
+  operations or a third-party claims administrator (TPA) that must file FNOL into many DIFFERENT
+  carrier and state-board portals and cannot rely on an API: most WCB systems and carrier portals are
+  login-walled, multi-page injury forms with no submitter-facing filing API, so the claim is created
+  only by completing the portal's wizard and clicking Submit - http cannot authenticate or drive the
+  SPA. The flow is split read-from-write and fails closed. It is TRIGGERED by a sensor watching the HR
+  intake source (a postgresql incidents table or a watched form-submission queue, read through a
+  read-only data gateway) firing when a new injury report with status=approved_to_file appears. An http
+  step then loads the full intake record (employee, injury date, body part, employer FEIN, wage data).
+  A DETERMINISTIC code step validates that every mandatory FNOL field is non-empty and that the filing
+  is still within the jurisdiction's statutory window - missing data or a blown deadline fails closed
+  and notifies HR, nothing touches a portal. A provider-neutral classify maps the free-text injury
+  description to the portal's body-part and cause-of-injury code list (race failover keeps it model
+  agnostic). A playwright-mode browser step logs in via WC_PORTAL_CREDS (captcha_strategy=pause),
+  opens New Claim, fills the multi-page form using the mapped codes, advances to the REVIEW page and
+  STOPS - returning {claimant, employer_fein, injury_code, jurisdiction, review_summary} via
+  output_schema. A second deterministic code step cross-checks the extracted injury_code against the
+  classify output and the employer_fein against the intake record - any mismatch blocks submission. A
+  mandatory human approval (HR/adjuster) signs off on the review_summary plus the captured screenshot,
+  because the filing carries medical PII and statutory liability. Only then does a second playwright
+  step resume, click Submit ONCE, and capture {claim_number, receipt_screenshot, submitted_at}. The
+  carrier/board claim number is asserted against the expected pattern deterministically AND a sensor
+  polls the portal's own status page for the stamped receipt before success is declared, so a
+  silently-failed submit can never be recorded as a filed claim. Finally HR is notified into the
+  injured worker's case file and the stamped receipt is archived to object storage. Every browser step
+  rides default_model and stays swappable across the 7 providers; the injury-code classify runs with
+  race-based cross-provider failover; the deadline/identity validators and the receipt sensor are pure
+  engine logic, so swapping the model never changes filing behavior.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 1800
+
+input_schema:
+  required: ["intake_record_url", "portal_start_url", "jurisdiction"]
+  properties:
+    intake_record_url:
+      type: string
+      description: "Read-only data-gateway URL (PostgREST-style view over the HR 'incidents' table, or the form-submission-queue API) returning the FULL approved-to-file injury record as JSON. http loads it; postgresql has no submitter filing API so this is the deterministic intake read."
+      example: "https://hr-gateway.internal/rest/v1/incidents?id=eq.INC-2026-0481&status=eq.approved_to_file"
+    portal_start_url:
+      type: string
+      description: "Start URL of the carrier broker portal or state WCB system's New-Claim / FNOL wizard for this jurisdiction (login-walled SPA, no filing API). Templated into both browser steps' start_url."
+      example: "https://efile.wcb.ny.gov/fnol/new"
+    jurisdiction:
+      type: string
+      description: "State / board jurisdiction code that selects the statutory filing window and the expected claim-number pattern (e.g. NY, CA, TX, or a carrier key like sedgwick-tpa)."
+      example: "NY"
+    intake_trigger_url:
+      type: string
+      description: "Status endpoint the trigger sensor polls; fires when a new injury report reaches status=approved_to_file in the incidents table / form queue. Pure control flow, no model."
+      default: "https://hr-gateway.internal/rest/v1/incidents?select=count&status=eq.approved_to_file&filed=is.null"
+      example: "https://hr-gateway.internal/rest/v1/incidents?select=count&status=eq.approved_to_file&filed=is.null"
+    statutory_window_days:
+      type: integer
+      description: "Statutory deadline in days from date_of_injury within which the FNOL must be filed for this jurisdiction. The deterministic validator fails closed if the filing is past this window."
+      default: 30
+      example: "30"
+    claim_number_pattern:
+      type: string
+      description: "Regex the carrier/board-issued claim_number MUST match (deterministic success gate). Defaults to a generic WC-claim shape; override per jurisdiction/carrier."
+      default: "^[A-Z0-9]{2,8}-?[A-Z0-9]{4,}$"
+      example: "^WC-[0-9]{4}-[0-9]{6,10}$"
+    portal_status_url:
+      type: string
+      description: "URL of the portal's own claim-status / receipt page for this filing; the post-submit sensor re-reads it until a stamped receipt / accepted status appears, confirming the claim provably landed."
+      default: ""
+      example: "https://efile.wcb.ny.gov/claims/{claim_number}/status"
+    hr_case_file_email:
+      type: string
+      description: "HR / case-management email the filed claim number and receipt reference are routed to (writes into the injured worker's case file)."
+      default: ""
+      example: "wc-intake@employer.example"
+    receipt_archive_url:
+      type: string
+      description: "Object-storage (S3-compatible) PUT URL where the stamped receipt screenshot is archived for the statutory audit trail. http PUT performs the archive (no dedicated s3 step type in the engine)."
+      default: "https://s3.internal.example/wc-fnol-receipts"
+      example: "https://s3.internal.example/wc-fnol-receipts"
+    notify_channel:
+      type: string
+      description: "Slack channel for HR/risk-ops filed/blocked/needs-attention notifications."
+      default: "#wc-fnol-filing"
+      example: "#wc-fnol-filing"
+    sensor_poll_interval_seconds:
+      type: integer
+      description: "Seconds between status-page polls while waiting for the portal to render the stamped receipt after submit."
+      default: 60
+      example: "60"
+    sensor_timeout_seconds:
+      type: integer
+      description: "Hard ceiling in seconds the receipt sensor waits for portal confirmation before the run is routed to needs-attention (never reported as a filed claim)."
+      default: 3600
+      example: "3600"
+
+steps:
+  # 0) TRIGGER (engine-native SENSOR) - watch the HR intake source (the postgresql 'incidents' table
+  #    or the watched form-submission queue, read through the read-only data gateway). Fire when a new
+  #    injury report with status=approved_to_file (and not yet filed) appears. Pure control flow, no
+  #    model. Hard timeout so the watch is bounded.
+  - id: await_approved_intake
+    type: sensor
+    sensor_config:
+      url: "{input.intake_trigger_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200 and (int((response[0].get('count', 0)) if isinstance(response, list) and response else response.get('count', 0) or 0) > 0)"
+      check_interval: 60
+      timeout: 86400
+
+  # 1) LOAD the intake record (postgresql/form-queue -> deterministic http GET through the read-only
+  #    data gateway). Returns the FULL approved-to-file injury record: employee, injury date, body
+  #    part, employer FEIN, wage data, jurisdiction. No model; pure data fetch.
+  - id: load_intake
+    type: http
+    depends_on: [await_approved_intake]
+    http_config:
+      url: "{input.intake_record_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.HR_GATEWAY_TOKEN}"
+      value_map:
+        record: "$"
+
+  # 2) DETERMINISTIC FNOL validation (sandboxed Python, no model). Confirm every mandatory FNOL field
+  #    is non-empty AND the filing is still inside the jurisdiction's statutory window (date_of_injury
+  #    + statutory_window_days >= today). Fails CLOSED - a missing field or a blown deadline means
+  #    nothing routes to a portal.
+  - id: validate_fnol
+    type: code
+    depends_on: [load_intake]
+    code_config:
+      language: python
+      code: |
+        import json
+        from datetime import date, datetime
+
+        # --- Pull the intake record out of the http load (the gateway may nest it or return a list). ---
+        loaded = _steps.get('load_intake') or {}
+        if not isinstance(loaded, dict):
+            loaded = {}
+        rec = loaded
+        for key in ('record', 'output', 'data', 'result', 'response', 'body'):
+            inner = loaded.get(key)
+            if isinstance(inner, dict):
+                rec = inner
+                break
+            if isinstance(inner, list) and inner and isinstance(inner[0], dict):
+                rec = inner[0]
+                break
+        # A bare list payload (PostgREST returns an array) - take the first row.
+        if isinstance(rec, list):
+            rec = rec[0] if (rec and isinstance(rec[0], dict)) else {}
+        if not isinstance(rec, dict):
+            rec = {}
+
+        problems = []
+
+        # --- Mandatory FNOL fields for ANY workers-comp filing. ---
+        required = ['employee_name', 'date_of_injury', 'body_part', 'employer_fein',
+                    'injury_description', 'wage_amount']
+        for k in required:
+            if not str(rec.get(k, '') or '').strip():
+                problems.append('missing mandatory FNOL field: ' + k)
+
+        # --- Employer FEIN format: 9 digits (optionally NN-NNNNNNN). Carried as the identity guard. ---
+        fein_raw = str(rec.get('employer_fein', '') or '').strip()
+        fein_digits = fein_raw.replace('-', '').replace(' ', '')
+        if fein_digits and not (fein_digits.isdigit() and len(fein_digits) == 9):
+            problems.append('employer_fein "' + fein_raw + '" is not a valid 9-digit FEIN')
+
+        # --- Numeric sanity on the reported wage. ---
+        def _num(v):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return -1.0
+        wage_amount = _num(rec.get('wage_amount'))
+        if wage_amount < 0:
+            problems.append('wage_amount missing or not numeric')
+
+        # --- STATUTORY WINDOW: date_of_injury must parse and be within window_days of today. ---
+        def _parse_date(s):
+            s = str(s or '').strip()[:10]
+            try:
+                return datetime.strptime(s, '%Y-%m-%d').date()
+            except (TypeError, ValueError):
+                return None
+        doi = _parse_date(rec.get('date_of_injury'))
+        window_days = 30
+        try:
+            window_days = int(_input.get('statutory_window_days', 30) or 30)
+        except (TypeError, ValueError):
+            window_days = 30
+        days_since = None
+        within_window = False
+        if doi is None:
+            problems.append('date_of_injury did not parse as YYYY-MM-DD')
+        else:
+            days_since = (date.today() - doi).days
+            if days_since < 0:
+                problems.append('date_of_injury is in the future')
+            elif days_since > window_days:
+                problems.append('STATUTORY DEADLINE BLOWN: ' + str(days_since)
+                                + ' days since injury > ' + str(window_days) + '-day window')
+            else:
+                within_window = True
+
+        ok = (len(problems) == 0) and within_window
+
+        result = {
+            'ok': ok,
+            'problems': problems,
+            'within_statutory_window': within_window,
+            'days_since_injury': days_since,
+            'window_days': window_days,
+            'employee_name': str(rec.get('employee_name', '') or '').strip(),
+            'date_of_injury': str(rec.get('date_of_injury', '') or '').strip(),
+            'body_part': str(rec.get('body_part', '') or '').strip(),
+            'employer_fein': fein_digits,
+            'employer_fein_display': fein_raw,
+            'injury_description': str(rec.get('injury_description', '') or '').strip(),
+            'wage_amount': round(wage_amount, 2) if wage_amount >= 0 else None,
+            'jurisdiction': str(rec.get('jurisdiction', '') or _input.get('jurisdiction', '') or '').strip(),
+            'incident_id': str(rec.get('id', rec.get('incident_id', '')) or '').strip(),
+        }
+
+  # 2b) Hard stop on a bad/late intake - never touch a portal with incomplete data or past deadline.
+  - id: fnol_gate
+    type: condition
+    depends_on: [validate_fnol]
+    condition_config:
+      expression: "{steps.validate_fnol.output.ok} == True"
+      then: [map_injury_codes]
+      else: [notify_blocked]
+
+  # 2c) Blocked branch: tell HR the FNOL was NOT filed and why. Nothing was submitted.
+  - id: notify_blocked
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        WC FNOL for incident {steps.validate_fnol.output.incident_id} (employee
+        {steps.validate_fnol.output.employee_name}, jurisdiction {input.jurisdiction}) was BLOCKED
+        before any portal entry. Validation failed: {steps.validate_fnol.output.problems}. No claim
+        was filed. Fix the intake record or escalate the deadline and re-run.
+
+  # 3) MAP the free-text injury description to the portal's BODY-PART / CAUSE-OF-INJURY code list
+  #    (provider-neutral classify; runs on any of the 7 providers - the engine can race/failover it).
+  #    Emits the mapped portal codes the playwright fill will use.
+  - id: map_injury_codes
+    type: classify
+    depends_on: [fnol_gate]
+    model: haiku
+    classify_config:
+      model: haiku
+      input: >-
+        You are mapping a free-text workers-comp injury report onto a carrier/state-WCB portal's coded
+        injury taxonomy so an RPA can fill the FNOL wizard. Choose the SINGLE best body-part /
+        cause-of-injury bucket for this injury. Body part: {steps.validate_fnol.output.body_part} .
+        Injury description: {steps.validate_fnol.output.injury_description} . Jurisdiction:
+        {input.jurisdiction} . Categories map to the portal code groups: 'back_strain_overexertion' for
+        lifting/overexertion back or neck injuries; 'fall_slip_trip' for falls, slips and trips;
+        'struck_by_caught_in' for being struck by or caught in/between objects or machinery;
+        'cut_laceration_puncture' for cuts, lacerations and punctures; 'burn_chemical_thermal' for
+        thermal/chemical/electrical burns; 'repetitive_motion' for repetitive-motion / cumulative-trauma
+        injuries; 'other_unmapped' when the description does not clearly fit a single code group and a
+        human must pick the code. Return the one category that best fits.
+      categories:
+        - back_strain_overexertion
+        - fall_slip_trip
+        - struck_by_caught_in
+        - cut_laceration_puncture
+        - burn_chemical_thermal
+        - repetitive_motion
+        - other_unmapped
+      branches:
+        back_strain_overexertion: [fill_to_review]
+        fall_slip_trip: [fill_to_review]
+        struck_by_caught_in: [fill_to_review]
+        cut_laceration_puncture: [fill_to_review]
+        burn_chemical_thermal: [fill_to_review]
+        repetitive_motion: [fill_to_review]
+        other_unmapped: [fill_to_review]
+
+  # 4) FILL PASS (playwright mode, provider-neutral). The reasoning model AUTHORS a Playwright script
+  #    that logs in via WC_PORTAL_CREDS (never inlined), opens New Claim, fills the multi-page injury
+  #    form from the validated intake using the mapped injury code, advances to the REVIEW page and
+  #    STOPS - it does NOT submit. captcha_strategy=pause hands a login/portal CAPTCHA to a human;
+  #    max_actions caps the wizard loop; capture_screenshots gives an auditable review screenshot;
+  #    output_schema returns the structured review for the deterministic cross-check + human approval.
+  - id: fill_to_review
+    type: browser
+    depends_on: [map_injury_codes]
+    prompt: >-
+      You are filing a workers-comp First Notice of Loss on a carrier broker portal or state
+      workers-comp board (WCB) wizard. Authenticate using the WC_PORTAL_CREDS environment variable,
+      then open 'New Claim' / 'File FNOL'. Fill EVERY required field of the multi-page injury form from
+      this validated intake record: claimant/employee {steps.validate_fnol.output.employee_name},
+      date of injury {steps.validate_fnol.output.date_of_injury}, employer FEIN
+      {steps.validate_fnol.output.employer_fein_display}, jurisdiction {input.jurisdiction}, average
+      weekly wage {steps.validate_fnol.output.wage_amount}, injured body part
+      {steps.validate_fnol.output.body_part}, and narrative
+      {steps.validate_fnol.output.injury_description}. For the portal's coded body-part /
+      cause-of-injury field, select the option corresponding to this mapped code:
+      {steps.map_injury_codes.output}. Wait for client-side validation to settle before advancing each
+      page. CRITICAL: advance ONLY to the final REVIEW / SUMMARY page and STOP there - DO NOT click the
+      final Submit / File Claim button. Submission is a separate, human-approved step. If a CAPTCHA or
+      step-up auth appears, pause for a human. Return ONLY the structured object described by the
+      output schema: the claimant as shown on the review page, the employer_fein as shown, the coded
+      injury_code the portal will record, the jurisdiction, a human-readable review_summary of every
+      value on the review page, a reference to the captured review screenshot, and whether the final
+      submit button is present and enabled.
+    browser_config:
+      mode: playwright
+      start_url: "{input.portal_start_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 600
+      max_actions: 120
+      headless: true
+      credentials_env: "WC_PORTAL_CREDS"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          claimant: { type: string }
+          employer_fein: { type: string }
+          injury_code: { type: string }
+          jurisdiction: { type: string }
+          review_summary: { type: string }
+          review_screenshot: { type: string }
+          submit_button_present: { type: boolean }
+
+  # 5) DETERMINISTIC CROSS-CHECK of the FILLED review state (no model). The load-bearing pre-submit
+  #    guard: the extracted injury_code must equal the classify output, the extracted employer_fein
+  #    must equal the intake FEIN, the claimant must echo the intake, and the wizard must have actually
+  #    reached a submit-capable review page with a screenshot. Any mismatch fails CLOSED.
+  - id: validate_review
+    type: code
+    depends_on: [fill_to_review]
+    code_config:
+      language: python
+      code: |
+        # Unwrap the browser READ pass (it may nest the structured payload).
+        read_out = _steps.get('fill_to_review') or {}
+        if not isinstance(read_out, dict):
+            read_out = {}
+        for key in ('output', 'data', 'result'):
+            inner = read_out.get(key)
+            if isinstance(inner, dict) and ('injury_code' in inner or 'review_summary' in inner):
+                read_out = inner
+                break
+
+        fnol = _steps.get('validate_fnol') or {}
+        if not isinstance(fnol, dict):
+            fnol = {}
+
+        # The classify output may be a bare string category or a dict carrying a 'category'.
+        cls = _steps.get('map_injury_codes')
+        mapped_code = ''
+        if isinstance(cls, dict):
+            mapped_code = str(cls.get('category', cls.get('output', cls.get('result', ''))) or '').strip()
+        else:
+            mapped_code = str(cls or '').strip()
+        mapped_code = mapped_code.strip().lower()
+
+        problems = []
+
+        # --- Injury code on the review page must match the deterministically-derived classify code. ---
+        got_code = str(read_out.get('injury_code', '') or '').strip().lower()
+        if not got_code:
+            problems.append('review page returned no injury_code')
+        elif mapped_code and got_code != mapped_code:
+            problems.append('review injury_code "' + got_code + '" != mapped code "' + mapped_code + '"')
+
+        # --- Employer FEIN on the review page must match the intake FEIN (identity guard). ---
+        def _digits(s):
+            return str(s or '').replace('-', '').replace(' ', '').strip()
+        want_fein = _digits(fnol.get('employer_fein'))
+        got_fein = _digits(read_out.get('employer_fein'))
+        if not got_fein:
+            problems.append('review page returned no employer_fein')
+        elif want_fein and got_fein != want_fein:
+            problems.append('review employer_fein ' + got_fein + ' != intake FEIN ' + want_fein)
+
+        # --- Claimant must echo the intake employee name (loose, case-insensitive containment). ---
+        want_name = str(fnol.get('employee_name', '') or '').strip().lower()
+        got_name = str(read_out.get('claimant', '') or '').strip().lower()
+        if want_name and got_name and (want_name not in got_name) and (got_name not in want_name):
+            problems.append('review claimant "' + got_name + '" does not match intake "' + want_name + '"')
+        if not got_name:
+            problems.append('review page shows no claimant')
+
+        # --- Wizard must have reached a submit-capable review page. ---
+        if not read_out.get('submit_button_present'):
+            problems.append('submit button not present - wizard did not reach review')
+
+        # --- A review screenshot must exist for the HR/adjuster approval. ---
+        review_screenshot = str(read_out.get('review_screenshot', '') or '').strip()
+        if not review_screenshot:
+            problems.append('no review screenshot captured for HR approval')
+
+        ok = len(problems) == 0
+        result = {
+            'ok': ok,
+            'problems': problems,
+            'injury_code': got_code,
+            'mapped_code': mapped_code,
+            'employer_fein': got_fein or want_fein,
+            'claimant': read_out.get('claimant', '') or fnol.get('employee_name', ''),
+            'jurisdiction': str(read_out.get('jurisdiction', '') or _input.get('jurisdiction', '') or '').strip(),
+            'review_summary': str(read_out.get('review_summary', '') or ''),
+            'review_screenshot': review_screenshot,
+        }
+
+  # 5b) Hard stop on a bad fill - do NOT advance to the human approval / submit on a mismatched review.
+  - id: review_gate
+    type: condition
+    depends_on: [validate_review]
+    condition_config:
+      expression: "{steps.validate_review.output.ok} == True"
+      then: [approve_submit]
+      else: [notify_review_failed]
+
+  - id: notify_review_failed
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        WC FNOL for employee {steps.validate_fnol.output.employee_name} reached the portal review page
+        but the deterministic cross-check FAILED before submission:
+        {steps.validate_review.output.problems}. Nothing was submitted. Re-check the wizard fill and
+        the injury-code mapping, then re-run.
+
+  # 6) MANDATORY HUMAN APPROVAL before the irreversible submit. Because the FNOL carries medical/injury
+  #    PII and statutory liability, HR / the adjuster signs off on the validated review_summary AND the
+  #    captured review screenshot - the EXACT state being filed. on_timeout: abort NEVER auto-submits.
+  #    (The privacy router can redact PII in the surrounding logs/audit.)
+  - id: approve_submit
+    type: approval
+    approval_config:
+      message: >-
+        AUTHORIZE the binding workers-comp FNOL SUBMISSION for employee
+        {steps.validate_review.output.claimant} (employer FEIN
+        {steps.validate_review.output.employer_fein}, jurisdiction
+        {steps.validate_review.output.jurisdiction}, injury code
+        {steps.validate_review.output.injury_code}). This is IRREVERSIBLE - it files the claim with the
+        carrier/board and opens a claim number, and the data is medical PII with statutory consequence.
+        Review the captured review screenshot and the summary below - this is the EXACT state you are
+        filing. Review summary: {steps.validate_review.output.review_summary}. Approve to submit; reject
+        to abort with nothing filed.
+      show_data: steps.validate_review.output
+      show_images: ["steps.validate_review.output.review_screenshot"]
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: false
+
+  # 7) SUBMIT PASS (playwright mode, WRITE). Only reached AFTER HR approves. Re-opens the filled review
+  #    page and clicks the SINGLE final Submit / File-Claim button ONCE, then reads the carrier/board
+  #    confirmation page and captures {claim_number, receipt_screenshot, submitted_at}. CAPTCHA pauses
+  #    for a human at this final wall; max_actions tightly capped (one confirm action); capture_screenshots
+  #    on for the after-submit audit record.
+  - id: submit_claim
+    type: browser
+    depends_on: [approve_submit]
+    prompt: >-
+      A human HR reviewer / adjuster has authorized this IRREVERSIBLE workers-comp FNOL submission for
+      claimant {steps.validate_review.output.claimant} (employer FEIN
+      {steps.validate_review.output.employer_fein}, jurisdiction {input.jurisdiction}). Authenticate
+      with WC_PORTAL_CREDS if the session expired, return to the filled FNOL review page, confirm the
+      values still match the approved review, then click the SINGLE final Submit / File-Claim button
+      ONCE to file the claim. Do NOT edit any field and do NOT click submit more than once. If a CAPTCHA
+      or step-up auth appears at this final wall, PAUSE for a human - do not attempt to solve it. Then
+      read the carrier/board confirmation page and capture the issued CLAIM NUMBER, the submitted
+      timestamp, and a reference to the screenshot of the STAMPED RECEIPT / acknowledgement. Return ONLY
+      the structured object described by the output schema.
+    browser_config:
+      mode: playwright
+      start_url: "{input.portal_start_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 300
+      max_actions: 20
+      headless: true
+      credentials_env: "WC_PORTAL_CREDS"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          claim_number: { type: string }
+          submitted_at: { type: string }
+          receipt_screenshot: { type: string }
+          confirmation_text: { type: string }
+
+  # 8) DETERMINISTIC SUCCESS GATE (no model). Assert the carrier/board-issued claim_number matches the
+  #    expected pattern and a receipt screenshot exists. A missing/malformed claim_number means the
+  #    submit did NOT provably land - so a silently-failed submit can NEVER be recorded as a filed claim.
+  - id: assert_claim_number
+    type: code
+    depends_on: [submit_claim]
+    code_config:
+      language: python
+      code: |
+        import re
+        sub = _steps.get('submit_claim') or {}
+        if not isinstance(sub, dict):
+            sub = {}
+        for key in ('output', 'data', 'result'):
+            inner = sub.get(key)
+            if isinstance(inner, dict) and ('claim_number' in inner):
+                sub = inner
+                break
+
+        claim_number = str(sub.get('claim_number', '') or '').strip()
+        submitted_at = str(sub.get('submitted_at', '') or '').strip()
+        receipt_screenshot = str(sub.get('receipt_screenshot', '') or '').strip()
+
+        pattern = str(_input.get('claim_number_pattern', '') or '').strip()
+        if not pattern:
+            pattern = '^[A-Z0-9]{2,8}-?[A-Z0-9]{4,}$'
+
+        problems = []
+        matched = False
+        if not claim_number:
+            problems.append('carrier/board returned no claim_number - submission not provably accepted')
+        else:
+            try:
+                matched = bool(re.search(pattern, claim_number))
+            except (TypeError, ValueError):
+                matched = False
+            if not matched:
+                problems.append('claim_number "' + claim_number + '" does not match pattern ' + pattern)
+
+        if not submitted_at:
+            problems.append('no submitted_at timestamp returned')
+        if not receipt_screenshot:
+            problems.append('no stamped-receipt screenshot captured')
+
+        filed = bool(claim_number) and matched and bool(receipt_screenshot) and (len(problems) == 0)
+
+        result = {
+            'filed': filed,
+            'problems': problems,
+            'claim_number': claim_number,
+            'submitted_at': submitted_at,
+            'receipt_screenshot': receipt_screenshot,
+            'pattern': pattern,
+            'jurisdiction': str(_input.get('jurisdiction', '') or ''),
+        }
+
+  # 8b) Branch on the deterministic claim-number gate. Only a provably-issued claim proceeds to the
+  #     portal-confirmation sensor; otherwise page HR and leave the run needing attention.
+  - id: claim_number_gate
+    type: condition
+    depends_on: [assert_claim_number]
+    condition_config:
+      expression: "{steps.assert_claim_number.output.filed} == True"
+      then: [confirm_receipt]
+      else: [notify_submit_unconfirmed]
+
+  # 8c) UNCONFIRMED PATH - submit happened but the claim_number did not validate. Page HR and leave the
+  #     run needing attention. A false success is NEVER recorded.
+  - id: notify_submit_unconfirmed
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        NEEDS ATTENTION: WC FNOL submit for jurisdiction {input.jurisdiction} did NOT return a valid
+        claim_number ({steps.assert_claim_number.output.problems}). Do NOT assume the claim was filed -
+        manually check the portal. The run is left in a needs-attention state.
+
+  # 9) CONFIRMATION SENSOR (engine-native, no model) - the act-then-VERIFY core. Poll the portal's OWN
+  #    claim-status page until it shows the stamped receipt / an accepted status for the issued claim
+  #    number. This is independent proof the filing landed, beyond the immediate UI acknowledgement.
+  #    Hard timeout; a timeout is NOT treated as success.
+  - id: confirm_receipt
+    type: sensor
+    depends_on: [claim_number_gate]
+    sensor_config:
+      url: "{input.portal_status_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200 and (str(response.get('status', '')).strip().lower() in ('accepted', 'filed', 'received', 'confirmed', 'docketed') or bool(str(response.get('receipt_id', '') or response.get('receipt', '') or response.get('claim_number', '') or '').strip()))"
+      check_interval: 60
+      timeout: 3600
+
+  # 9b) Deterministically decide acceptance from the sensor's last polled status payload (no model). A
+  #     missing confirmation (sensor timed out) yields confirmed=False so a silent failure can NEVER be
+  #     reported as a win.
+  - id: evaluate_receipt
+    type: code
+    depends_on: [confirm_receipt]
+    code_config:
+      language: python
+      code: |
+        watch = _steps.get('confirm_receipt') or {}
+        if not isinstance(watch, dict):
+            watch = {}
+        resp = watch.get('response') if isinstance(watch.get('response'), dict) else watch
+        if not isinstance(resp, dict):
+            resp = {}
+
+        status = str(resp.get('status', '') or '').strip().lower()
+        receipt_id = str(resp.get('receipt_id', '') or resp.get('receipt', '') or '').strip()
+        accepted_states = ('accepted', 'filed', 'received', 'confirmed', 'docketed')
+        confirmed = (status in accepted_states) or bool(receipt_id)
+
+        sensor_satisfied = bool(watch.get('satisfied', watch.get('met', confirmed)))
+        timed_out = bool(watch.get('timed_out', False)) or (not sensor_satisfied and not confirmed)
+
+        asserted = _steps.get('assert_claim_number') or {}
+        if not isinstance(asserted, dict):
+            asserted = {}
+
+        result = {
+            'confirmed': bool(confirmed and not timed_out),
+            'status': status,
+            'receipt_id': receipt_id,
+            'timed_out': timed_out,
+            'fail_count': 0 if (confirmed and not timed_out) else 1,
+            'claim_number': str(asserted.get('claim_number', '') or ''),
+            'submitted_at': str(asserted.get('submitted_at', '') or ''),
+        }
+
+  # 9c) CONDITION - record + route to HR + archive on confirmed acceptance; OR page HR and leave the
+  #     run in a needs-attention state on timeout/no-confirmation. We NEVER report a false win.
+  - id: receipt_outcome
+    type: condition
+    depends_on: [evaluate_receipt]
+    condition_config:
+      expression: "{steps.evaluate_receipt.output.fail_count} > 0"
+      then: [notify_receipt_unconfirmed]
+      else: [record_filing]
+
+  - id: notify_receipt_unconfirmed
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        NEEDS ATTENTION: WC FNOL claim {steps.evaluate_receipt.output.claim_number} was SUBMITTED but
+        the portal has NOT confirmed a stamped receipt within the timeout (last status
+        '{steps.evaluate_receipt.output.status}', timed_out={steps.evaluate_receipt.output.timed_out}).
+        Do NOT assume success - manually verify the portal status page. The run is left in a
+        needs-attention state.
+
+  # 10a) RECORD - assemble the confirmed-filing payload for HR write-back (deterministic transform).
+  - id: record_filing
+    type: transform
+    depends_on: [receipt_outcome]
+    transform_config:
+      template: |
+        {
+          "event": "wc_fnol_filed",
+          "jurisdiction": "{steps.assert_claim_number.output.jurisdiction}",
+          "incident_id": "{steps.validate_fnol.output.incident_id}",
+          "claimant": "{steps.validate_review.output.claimant}",
+          "employer_fein": "{steps.validate_review.output.employer_fein}",
+          "claim_number": "{steps.assert_claim_number.output.claim_number}",
+          "submitted_at": "{steps.assert_claim_number.output.submitted_at}",
+          "receipt_id": "{steps.evaluate_receipt.output.receipt_id}"
+        }
+
+  # 10b) ARCHIVE the stamped receipt to object storage (S3-compatible) for the statutory audit trail.
+  #      Deterministic http PUT - the engine has no dedicated s3 step type, so the s3 archive is an
+  #      authenticated PUT to the receipt-archive bucket URL.
+  - id: archive_receipt
+    type: http
+    depends_on: [record_filing]
+    http_config:
+      url: "{input.receipt_archive_url}/{steps.assert_claim_number.output.claim_number}/receipt.json"
+      method: PUT
+      headers:
+        Content-Type: "application/json"
+      auth: "bearer:{env.RECEIPT_ARCHIVE_TOKEN}"
+      body: '{"claim_number": "{steps.assert_claim_number.output.claim_number}", "jurisdiction": "{steps.assert_claim_number.output.jurisdiction}", "submitted_at": "{steps.assert_claim_number.output.submitted_at}", "receipt_screenshot": "{steps.assert_claim_number.output.receipt_screenshot}", "receipt_id": "{steps.evaluate_receipt.output.receipt_id}", "incident_id": "{steps.validate_fnol.output.incident_id}"}'
+
+  # 10c) ROUTE the confirmation back to HR / the injured worker's case file with the claim number.
+  - id: notify_hr_case_file
+    type: notify
+    depends_on: [archive_receipt]
+    notify_config:
+      service: gmail
+      channel: "{input.hr_case_file_email}"
+      message: >-
+        The workers-comp FNOL for {steps.validate_review.output.claimant} (incident
+        {steps.validate_fnol.output.incident_id}, jurisdiction {input.jurisdiction}) has been FILED. The
+        carrier/board claim number is {steps.assert_claim_number.output.claim_number}, submitted at
+        {steps.assert_claim_number.output.submitted_at} (portal receipt
+        {steps.evaluate_receipt.output.receipt_id}). The stamped receipt is archived for the case file.
+        Record this claim number for all follow-up.
+
+  # 10d) REPORT - branded PDF filing record for the HR/risk-ops statutory audit trail.
+  - id: filing_report
+    type: report
+    depends_on: [notify_hr_case_file]
+    report_config:
+      template: "research-report"
+      format: pdf
+      theme: professional
+      title: "WC FNOL Filing Record - {steps.assert_claim_number.output.claim_number}"
+      author: "WC Claims Intake Desk"
+    prompt: >-
+      Produce a formal workers-comp FNOL filing record PDF from the payload below. Include the
+      jurisdiction, incident id, claimant, employer FEIN, the mapped injury code, the carrier/board
+      claim number, the submitted timestamp, and the portal receipt id; and note that the intake was
+      deterministically validated (mandatory FNOL fields + statutory window), the injury code was
+      mapped provider-neutrally and re-validated against the portal review, a human HR/adjuster
+      approved the binding submission, and the claim number was both pattern-asserted and confirmed by
+      the portal's own status page before recording. Filing payload:
+      {steps.assert_claim_number.output} . Confirmation: {steps.evaluate_receipt.output} . Review
+      summary: {steps.validate_review.output.review_summary}
+
+on_complete:
+  storage_path: "workers-comp-fnol-insurance-filer/{input.jurisdiction}/{steps.assert_claim_number.output.claim_number}/{run_id}/result.json"

@@ -1,0 +1,763 @@
+# name: SaaS Config Setting Propagator
+# description: Apply ONE configuration change (toggle MFA-required, set session timeout, flip a data-region/retention setting) across dozens-to-hundreds of separate workspaces/tenants of the same SaaS whose admin UI changes settings one workspace at a time and exposes no org-wide policy API - with idempotent verify-after-write. A census loop reads each workspace's current setting in provider-neutral dom mode; deterministic code computes a per-workspace diff and refuses any target_value outside an allowed enum; ONE human batch approval gates the whole mutation; a write loop drives each settings form in provider-neutral playwright mode under a max_actions cap with screenshots; a verify loop re-reads in dom mode and deterministic code asserts the saved value stuck (catching silent reverts); trajectory-replay guards the canonical write path against a vendor UI redesign; a notify + audit record logs who changed which workspaces from what to what. The load-bearing correctness is deterministic code + verify-loop + trajectory-replay, never a single model's opinion.
+# tags: [rpa, browser, devops, saas-admin, config-propagation, policy-enforcement, drift-correction, playwright, dom, idempotent, human-approval, trajectory-replay, provider-neutral]
+# category: devops
+
+name: saas-config-setting-propagator
+description: >-
+  Platform/security engineers and MSP admins who manage many separate workspaces/tenants of the
+  same SaaS (one per client or business unit) constantly need to apply ONE policy change - require
+  MFA, shorten the session timeout, pin the data region, change a retention window - to ALL of them
+  at once. But the vendor's admin console changes settings one workspace at a time and offers no
+  org-wide policy API on the current tier, so each workspace must be visited and its form toggled
+  in the browser; a plain HTTP call cannot authenticate into and mutate the client-rendered settings
+  SPA. This template propagates the desired setting safely and idempotently. Trigger it on-demand
+  when a new security policy is mandated, or on a schedule for drift-correction (re-run to re-assert
+  the desired value everywhere). Phase 1 loads the target workspace list and the desired_setting spec
+  (key + target_value) via an http or parse step. Phase 2 is a CENSUS loop: for each workspace a
+  browser step in provider-neutral DOM mode reads the current value via output_schema
+  {workspace_id, setting_key, current_value, found} - read-only, it mutates nothing. Phase 3 is
+  deterministic sandboxed Python that computes a per-workspace plan (needs_change / already_compliant
+  / unreachable) and VALIDATES target_value against an allowed enum, refusing any free-form value so a
+  malformed spec can never write garbage. Phase 4 is ONE human batch approval showing how many
+  workspaces will change and their current->target values - the single gate before any irreversible
+  write. Phase 5 is the WRITE loop over only the needs_change set: a browser step in provider-neutral
+  PLAYWRIGHT mode (the model authors a swappable script) opens each settings form, sets the value, and
+  saves, under a tight max_actions cap with capture_screenshots on for audit, returning
+  {workspace_id, action_taken, saved_value}. Phase 6 is the VERIFY loop over the same set: a DOM-mode
+  re-read followed by deterministic code that asserts saved_value == target_value for every workspace
+  and lists any that silently reverted (idempotency proof). Phase 7 trajectory-replays the canonical
+  write path against a recorded golden run so a vendor UI redesign that breaks the toggle path fails
+  the run loudly instead of silently no-op'ing. Phase 8 notifies and emits an audit record of which
+  workspaces changed, from what to what, and who approved. Census and verify use dom extraction and
+  the write uses an authored Playwright script - both model-agnostic - so swapping the reasoning model
+  never changes the replayed pass/fail contract. Credentials come from credentials_env (never inline),
+  captcha_strategy pauses for a human on any login challenge, and the enum gate + verify loop + replay
+  carry the correctness, not any single model's word.
+
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 2400
+
+input_schema:
+  required: ["workspace_list", "setting_key", "target_value"]
+  properties:
+    workspace_list:
+      type: string
+      description: >-
+        The target workspaces to propagate the setting to, as a JSON array string. Each element is an
+        object with at least workspace_id, settings_url (the per-workspace admin settings page), and
+        label. Loaded/normalized by the load_targets step. NEVER put secrets here - the admin session
+        comes from credentials_env inside the browser steps.
+      example: '[{"workspace_id":"acme-prod","label":"Acme Prod","settings_url":"https://admin.saas.example/w/acme-prod/security"},{"workspace_id":"acme-eu","label":"Acme EU","settings_url":"https://admin.saas.example/w/acme-eu/security"}]'
+    setting_key:
+      type: string
+      description: >-
+        The single settings key to propagate across all workspaces (e.g. mfa_required, session_timeout_minutes,
+        data_region, retention_days). The census reads it, the write sets it, the verify re-reads it.
+      example: "mfa_required"
+    target_value:
+      type: string
+      description: >-
+        The desired value to enforce for setting_key in every workspace. DETERMINISTICALLY validated
+        against allowed_values (an enum) before any write - a value outside the enum aborts the run so a
+        malformed spec can never push garbage. Passed as a string and compared after normalization.
+      example: "enabled"
+    allowed_values:
+      type: string
+      description: >-
+        JSON array string of the ONLY values target_value (and any current_value) is permitted to take
+        for this setting_key - the refuse-free-form enum gate. If empty, the run is rejected (no enum =
+        no write). Example for a boolean toggle, a timeout, or a region.
+      default: '["enabled","disabled"]'
+      example: '["enabled","disabled"]'
+    settings_url_template:
+      type: string
+      description: >-
+        Optional fallback URL template for a workspace's settings page when an element lacks settings_url;
+        {workspace_id} is substituted. Lets you pass a bare id list and still reach each admin form.
+      default: "https://admin.saas.example/w/{workspace_id}/settings"
+      example: "https://admin.saas.example/w/{workspace_id}/security"
+    admin_credentials_env:
+      type: string
+      description: >-
+        Name of the environment variable holding the admin-console session/credentials (NEVER inline a
+        secret). Passed to every browser step's credentials_env so census, write, and verify all
+        authenticate the same way.
+      default: "SAAS_ADMIN_CREDS"
+      example: "SAAS_ADMIN_CREDS"
+    golden_run_id:
+      type: string
+      description: >-
+        ID of the recorded known-good write-path trajectory. trajectory-replay diffs the canonical
+        write flow against this golden run and fails on UI drift / cost blowup, so a vendor UI redesign
+        that breaks the toggle path is caught instead of silently no-op'ing. Provider-independent.
+      default: "golden-saas-settings-write-2026-05-01"
+      example: "golden-saas-settings-write-2026-05-01"
+    approval_timeout_hours:
+      type: integer
+      description: "Hours the single batch approval waits before its timeout fires (on_timeout: abort - never auto-write)."
+      default: 24
+      example: "24"
+    max_workspaces:
+      type: integer
+      description: "Upper bound on workspaces processed per phase loop (census/write/verify) - a safety cap against an over-large or malformed list."
+      default: 300
+      example: "300"
+    notify_channel:
+      type: string
+      description: "Slack channel that receives the final propagation summary + audit record (which workspaces changed, from->to, approver)."
+      default: "#saas-policy-ops"
+      example: "#saas-policy-ops"
+
+steps:
+  # ===========================================================================
+  # PHASE 1 - LOAD TARGETS + DESIRED SPEC. Deterministic parse/normalize of the
+  # workspace list and the desired_setting spec into a clean, capped list. No
+  # browser, no model decision here - pure data shaping so every later phase
+  # iterates the same canonical set. Refuses an empty allowed_values enum up
+  # front (no enum => no write is ever possible).
+  # ===========================================================================
+  - id: load_targets
+    type: code
+    code_config:
+      language: python
+      code: |
+        import json
+
+        # --- Parse the workspace list (a JSON array string) defensively ---
+        raw = _input.get("workspace_list", "")
+        workspaces = []
+        if isinstance(raw, list):
+            workspaces = raw
+        else:
+            try:
+                parsed = json.loads(raw) if str(raw).strip() else []
+                if isinstance(parsed, list):
+                    workspaces = parsed
+            except (ValueError, TypeError):
+                workspaces = []
+
+        url_tmpl = str(_input.get("settings_url_template", "") or "")
+
+        def _settings_url(ws):
+            # Prefer an explicit per-workspace settings_url; else fill the template by id.
+            u = str(ws.get("settings_url", "") or "").strip()
+            if u:
+                return u
+            wid = str(ws.get("workspace_id", "") or "").strip()
+            if url_tmpl and wid:
+                return url_tmpl.replace("{workspace_id}", wid)
+            return ""
+
+        # --- Normalize + cap ---
+        try:
+            cap = int(_input.get("max_workspaces", 300))
+        except (TypeError, ValueError):
+            cap = 300
+
+        targets = []
+        seen = set()
+        for ws in workspaces:
+            if not isinstance(ws, dict):
+                continue
+            wid = str(ws.get("workspace_id", "") or "").strip()
+            if not wid or wid in seen:
+                continue
+            seen.add(wid)
+            targets.append({
+                "workspace_id": wid,
+                "label": str(ws.get("label", "") or wid),
+                "settings_url": _settings_url(ws),
+            })
+            if len(targets) >= cap:
+                break
+
+        # --- Parse the allowed-values enum; an empty enum is a hard refusal ---
+        allowed_raw = _input.get("allowed_values", "")
+        allowed = []
+        if isinstance(allowed_raw, list):
+            allowed = allowed_raw
+        else:
+            try:
+                ap = json.loads(allowed_raw) if str(allowed_raw).strip() else []
+                if isinstance(ap, list):
+                    allowed = ap
+            except (ValueError, TypeError):
+                allowed = []
+        allowed_norm = sorted({str(a).strip().lower() for a in allowed if str(a).strip() != ""})
+
+        setting_key = str(_input.get("setting_key", "") or "").strip()
+        target_value = str(_input.get("target_value", "") or "").strip()
+        target_norm = target_value.lower()
+
+        spec_errors = []
+        if not setting_key:
+            spec_errors.append("setting_key is empty")
+        if target_value == "":
+            spec_errors.append("target_value is empty")
+        if len(allowed_norm) == 0:
+            spec_errors.append("allowed_values enum is empty - refusing (no enum, no write)")
+        if allowed_norm and target_norm not in allowed_norm:
+            spec_errors.append(
+                "target_value '" + target_value + "' is not in the allowed enum " + ", ".join(allowed_norm)
+            )
+        if len(targets) == 0:
+            spec_errors.append("no valid workspaces parsed from workspace_list")
+
+        result = {
+            "targets": targets,
+            "workspace_count": len(targets),
+            "setting_key": setting_key,
+            "target_value": target_value,
+            "target_value_norm": target_norm,
+            "allowed_values": allowed_norm,
+            "spec_ok": len(spec_errors) == 0,
+            "spec_errors": spec_errors,
+            "spec_error_summary": "; ".join(spec_errors) if spec_errors else "spec ok",
+        }
+
+  # ===========================================================================
+  # PHASE 2 - CENSUS LOOP (READ). Iterate every target workspace; each iteration
+  # drives ONE workspace's settings page in provider-neutral DOM mode (a cheap,
+  # read-only client-rendered extraction) and returns the current value via
+  # output_schema. The loop item arrives on _input['_item']; the browser child
+  # is defined separately below and reads it via templating. READ-ONLY - nothing
+  # is mutated in this phase.
+  # ===========================================================================
+  - id: census
+    type: loop
+    depends_on: [load_targets]
+    loop_config:
+      over: "steps.load_targets.output.targets"
+      step_ids: [read_workspace_setting]
+      max_iterations: 300
+
+  # 2a) CENSUS browser child - DOM mode (provider-neutral, lightweight read). The
+  #     reasoning model authors a DOM read from this prompt; it is swappable via
+  #     default_model. Authenticates with the admin credentials_env (never an
+  #     inline secret), pauses on any login/CAPTCHA challenge, navigates the SPA
+  #     to the setting, and returns ONLY the strict output_schema. max_actions
+  #     caps clicking; this child never writes.
+  - id: read_workspace_setting
+    type: browser
+    prompt: >-
+      You are a read-only auditor of a multi-tenant SaaS admin console. Log into the admin console
+      using the credentials in the environment, then open the settings page for workspace
+      "{input._item.workspace_id}" ({input._item.label}) at {input._item.settings_url}. Locate the
+      single setting whose key is "{input.setting_key}" and read its CURRENT value exactly as the form
+      renders it. Do NOT change, toggle, save, or submit anything - this is a census read only. Return
+      ONLY the structured object described by the output schema: workspace_id (echo
+      "{input._item.workspace_id}"), setting_key (echo "{input.setting_key}"), current_value (the value
+      shown, as a string), and found=true if you located the setting (found=false if the page,
+      workspace, or setting could not be reached). If a CAPTCHA or step-up auth wall appears, pause for
+      a human rather than guessing.
+    browser_config:
+      mode: dom
+      start_url: "{input._item.settings_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 120
+      max_actions: 30
+      headless: true
+      credentials_env: "{input.admin_credentials_env}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          workspace_id:
+            type: string
+            description: "Echo of the workspace id this read pertains to."
+          setting_key:
+            type: string
+            description: "Echo of the settings key that was read."
+          current_value:
+            type: string
+            description: "The current value of the setting as rendered in the form (string form)."
+          found:
+            type: boolean
+            description: "True if the workspace settings page and the target setting were reachable and read."
+        required: ["workspace_id", "current_value", "found"]
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # ===========================================================================
+  # PHASE 3 - PLAN / DIFF (DETERMINISTIC, no model). The load-bearing correctness
+  # gate before any write. For each workspace: normalize the read current_value,
+  # validate it (and the target) against the allowed enum, and classify into
+  # needs_change / already_compliant / unreachable. REFUSES to plan a write if the
+  # spec itself failed validation in phase 1. This is what makes the propagation
+  # idempotent and garbage-proof - a free-form target or an out-of-enum read can
+  # never become a write.
+  # ===========================================================================
+  - id: plan_diff
+    type: code
+    depends_on: [census]
+    code_config:
+      language: python
+      code: |
+        plan_blocked = not bool(_steps.get("load_targets", {}).get("spec_ok", False))
+
+        targets = _steps.get("load_targets", {}).get("targets") or []
+        if not isinstance(targets, list):
+            targets = []
+        allowed = _steps.get("load_targets", {}).get("allowed_values") or []
+        if not isinstance(allowed, list):
+            allowed = []
+        allowed_set = {str(a).strip().lower() for a in allowed}
+        setting_key = str(_steps.get("load_targets", {}).get("setting_key", "") or "")
+        target_norm = str(_steps.get("load_targets", {}).get("target_value_norm", "") or "")
+        target_display = str(_steps.get("load_targets", {}).get("target_value", "") or "")
+
+        # The census loop surfaces each iteration's child output under the child id.
+        reads = _steps.get("read_workspace_setting")
+        if isinstance(reads, dict):
+            reads = [reads]
+        if not isinstance(reads, list):
+            reads = []
+
+        # Index reads by workspace_id (defending against nested output wrappers).
+        by_ws = {}
+        for r in reads:
+            rec = r if isinstance(r, dict) else {}
+            for key in ("output", "data", "result"):
+                inner = rec.get(key)
+                if isinstance(inner, dict) and ("current_value" in inner or "workspace_id" in inner):
+                    rec = inner
+                    break
+            wid = str(rec.get("workspace_id", "") or "").strip()
+            if wid:
+                by_ws[wid] = rec
+
+        needs_change = []
+        already_compliant = []
+        unreachable = []
+        bad_current = []
+
+        for t in targets:
+            wid = str(t.get("workspace_id", "") or "").strip()
+            label = str(t.get("label", "") or wid)
+            url = str(t.get("settings_url", "") or "")
+            rec = by_ws.get(wid, {})
+            found = bool(rec.get("found", False)) and bool(rec.get("current_value", "") != "" or "current_value" in rec)
+            cur_raw = rec.get("current_value", None)
+            cur_disp = "" if cur_raw is None else str(cur_raw)
+            cur_norm = cur_disp.strip().lower()
+
+            entry = {
+                "workspace_id": wid,
+                "label": label,
+                "settings_url": url,
+                "current_value": cur_disp,
+                "target_value": target_display,
+            }
+
+            if not bool(rec.get("found", False)):
+                unreachable.append(entry)
+                continue
+            # Refuse to act on a read whose current value is outside the allowed enum
+            # (the form is in an unexpected state - do not blindly overwrite it).
+            if allowed_set and cur_norm not in allowed_set:
+                entry["reason"] = "current_value '" + cur_disp + "' not in allowed enum"
+                bad_current.append(entry)
+                continue
+            if cur_norm == target_norm:
+                already_compliant.append(entry)
+            else:
+                needs_change.append(entry)
+
+        # If the spec failed validation, force an empty write set - nothing can be written.
+        if plan_blocked:
+            needs_change = []
+
+        result = {
+            "plan_blocked": plan_blocked,
+            "setting_key": setting_key,
+            "target_value": target_display,
+            "needs_change": needs_change,
+            "already_compliant": already_compliant,
+            "unreachable": unreachable,
+            "bad_current": bad_current,
+            "change_count": len(needs_change),
+            "compliant_count": len(already_compliant),
+            "unreachable_count": len(unreachable),
+            "bad_current_count": len(bad_current),
+            "total_targets": len(targets),
+            "spec_error_summary": _steps.get("load_targets", {}).get("spec_error_summary", ""),
+            "summary": (
+                "BLOCKED: " + str(_steps.get("load_targets", {}).get("spec_error_summary", ""))
+                if plan_blocked else
+                str(len(needs_change)) + " to change, " + str(len(already_compliant))
+                + " already compliant, " + str(len(unreachable)) + " unreachable, "
+                + str(len(bad_current)) + " in unexpected state"
+            ),
+        }
+
+  # ===========================================================================
+  # PHASE 4 - SINGLE BATCH HUMAN APPROVAL (the one gate before any irreversible
+  # write). Shows how many workspaces will change and their current->target
+  # values from the deterministic plan. BLOCKS until a person authorizes; on a
+  # blocked/empty plan there is nothing to write but a human still confirms.
+  # on_timeout: abort means a missed approval NEVER auto-writes.
+  # ===========================================================================
+  - id: approve_propagation
+    type: approval
+    depends_on: [plan_diff]
+    approval_config:
+      message: >-
+        AUTHORIZE CONFIG PROPAGATION of setting "{steps.plan_diff.output.setting_key}" =
+        "{steps.plan_diff.output.target_value}" across your SaaS workspaces. Plan:
+        {steps.plan_diff.output.change_count} workspace(s) WILL CHANGE,
+        {steps.plan_diff.output.compliant_count} already compliant,
+        {steps.plan_diff.output.unreachable_count} unreachable,
+        {steps.plan_diff.output.bad_current_count} in an unexpected state. Spec status:
+        {steps.plan_diff.output.spec_error_summary}. Review the attached per-workspace
+        current->target list - this is the EXACT set you are authorizing to write. Approve to apply the
+        setting to the needs_change workspaces; reject to abort with nothing written.
+      show_data: steps.plan_diff.output
+      timeout_hours: 24
+      on_timeout: abort
+      allow_edit: false
+
+  # ===========================================================================
+  # PHASE 5 - WRITE LOOP (the only mutating phase, reached ONLY after approval).
+  # Iterate over just the needs_change set and drive each workspace's settings
+  # form in provider-neutral PLAYWRIGHT mode (the model authors a swappable
+  # script). max_actions is tightly capped (open form, set value, save - no
+  # runaway), capture_screenshots is on for an audit trail, captcha_strategy
+  # pauses on any challenge. Returns {workspace_id, action_taken, saved_value};
+  # acceptance is NOT trusted from here - the verify phase re-reads.
+  # ===========================================================================
+  - id: write_changes
+    type: loop
+    depends_on: [approve_propagation]
+    loop_config:
+      over: "steps.plan_diff.output.needs_change"
+      step_ids: [set_workspace_setting]
+      max_iterations: 300
+
+  # 5a) WRITE browser child - PLAYWRIGHT mode (provider-neutral authored script).
+  #     A human has approved this batch. Opens the one settings form, sets the
+  #     single target value, saves once. Tight max_actions, screenshots on.
+  - id: set_workspace_setting
+    type: browser
+    prompt: >-
+      A human has authorized this configuration change. Log into the admin console using the
+      environment credentials, then open the settings page for workspace "{input._item.workspace_id}"
+      ({input._item.label}) at {input._item.settings_url}. Find the single setting with key
+      "{steps.plan_diff.output.setting_key}" (currently "{input._item.current_value}") and set it to the
+      target value "{input._item.target_value}". Save the form ONCE. Do NOT change any other setting and
+      do NOT click save more than once. If a CAPTCHA or step-up auth wall appears, PAUSE for a human - do
+      not attempt to solve it. Capture a screenshot of the saved state. Return ONLY the structured object
+      described by the output schema: workspace_id (echo "{input._item.workspace_id}"), action_taken
+      (e.g. "saved" or "skipped: <why>"), and saved_value (the value the form shows AFTER saving, as a
+      string). Treat this only as an attempt - the saved value is independently re-read and asserted in
+      the verify phase.
+    browser_config:
+      mode: playwright
+      start_url: "{input._item.settings_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 150
+      max_actions: 18
+      headless: true
+      credentials_env: "{input.admin_credentials_env}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          workspace_id:
+            type: string
+            description: "Echo of the workspace id this write pertains to."
+          action_taken:
+            type: string
+            description: "What the write did - 'saved' on success or 'skipped: <reason>' if it could not save."
+          saved_value:
+            type: string
+            description: "The value the form shows AFTER saving (string form), for the verify assertion."
+        required: ["workspace_id", "action_taken", "saved_value"]
+    retry:
+      max_attempts: 1
+      backoff: fixed
+      on_failure: skip
+
+  # ===========================================================================
+  # PHASE 6 - VERIFY LOOP (READ, idempotency proof). Re-read the SAME needs_change
+  # set in provider-neutral DOM mode to confirm the new value actually stuck. This
+  # is what catches a settings form that silently reverts after save. Loop item on
+  # _input['_item']; child defined separately below.
+  # ===========================================================================
+  - id: verify
+    type: loop
+    depends_on: [write_changes]
+    loop_config:
+      over: "steps.plan_diff.output.needs_change"
+      step_ids: [reread_workspace_setting]
+      max_iterations: 300
+
+  # 6a) VERIFY browser child - DOM mode (provider-neutral read). Re-reads the same
+  #     setting after the write; read-only, mutates nothing.
+  - id: reread_workspace_setting
+    type: browser
+    prompt: >-
+      You are re-auditing a SaaS workspace AFTER a settings change to confirm it persisted. Log into the
+      admin console using the environment credentials, open the settings page for workspace
+      "{input._item.workspace_id}" ({input._item.label}) at {input._item.settings_url}, and read the
+      CURRENT value of the setting with key "{steps.plan_diff.output.setting_key}". Do NOT change or save
+      anything - this is a verification read only. Return ONLY the structured object: workspace_id (echo
+      "{input._item.workspace_id}"), setting_key (echo "{steps.plan_diff.output.setting_key}"),
+      current_value (the value shown now, as a string), and found=true if you read it. If a CAPTCHA
+      appears, pause for a human.
+    browser_config:
+      mode: dom
+      start_url: "{input._item.settings_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 120
+      max_actions: 30
+      headless: true
+      credentials_env: "{input.admin_credentials_env}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          workspace_id:
+            type: string
+            description: "Echo of the workspace id this re-read pertains to."
+          setting_key:
+            type: string
+            description: "Echo of the settings key that was re-read."
+          current_value:
+            type: string
+            description: "The value of the setting after the write (string form)."
+          found:
+            type: boolean
+            description: "True if the setting was reachable and re-read."
+        required: ["workspace_id", "current_value", "found"]
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # ===========================================================================
+  # PHASE 7 - VERIFY ASSERTION (DETERMINISTIC, no model). For every workspace in
+  # the needs_change set, assert the re-read current_value == target_value. Lists
+  # any that silently reverted (written but not persisted) or stayed unreachable.
+  # A non-empty reverted set => fail_count > 0 routes to the needs-attention path.
+  # This is the idempotency guarantee, deterministic - never a model's opinion.
+  # ===========================================================================
+  - id: assert_verified
+    type: code
+    depends_on: [verify]
+    code_config:
+      language: python
+      code: |
+        target_norm = str(_steps.get("plan_diff", {}).get("target_value", "") or "").strip().lower()
+        target_display = str(_steps.get("plan_diff", {}).get("target_value", "") or "")
+        setting_key = str(_steps.get("plan_diff", {}).get("setting_key", "") or "")
+
+        intended = _steps.get("plan_diff", {}).get("needs_change") or []
+        if not isinstance(intended, list):
+            intended = []
+
+        rereads = _steps.get("reread_workspace_setting")
+        if isinstance(rereads, dict):
+            rereads = [rereads]
+        if not isinstance(rereads, list):
+            rereads = []
+
+        by_ws = {}
+        for r in rereads:
+            rec = r if isinstance(r, dict) else {}
+            for key in ("output", "data", "result"):
+                inner = rec.get(key)
+                if isinstance(inner, dict) and ("current_value" in inner or "workspace_id" in inner):
+                    rec = inner
+                    break
+            wid = str(rec.get("workspace_id", "") or "").strip()
+            if wid:
+                by_ws[wid] = rec
+
+        confirmed = []
+        reverted = []
+        unverifiable = []
+
+        for t in intended:
+            wid = str(t.get("workspace_id", "") or "").strip()
+            label = str(t.get("label", "") or wid)
+            rec = by_ws.get(wid, {})
+            entry = {
+                "workspace_id": wid,
+                "label": label,
+                "expected": target_display,
+                "observed": "" if rec.get("current_value", None) is None else str(rec.get("current_value")),
+            }
+            if not bool(rec.get("found", False)):
+                unverifiable.append(entry)
+                continue
+            observed_norm = str(rec.get("current_value", "") or "").strip().lower()
+            if observed_norm == target_norm:
+                confirmed.append(entry)
+            else:
+                reverted.append(entry)
+
+        # fail_count > 0 (any silent revert OR unverifiable) routes to needs-attention.
+        fail_count = len(reverted) + len(unverifiable)
+
+        result = {
+            "setting_key": setting_key,
+            "target_value": target_display,
+            "intended_count": len(intended),
+            "confirmed": confirmed,
+            "reverted": reverted,
+            "unverifiable": unverifiable,
+            "confirmed_count": len(confirmed),
+            "reverted_count": len(reverted),
+            "unverifiable_count": len(unverifiable),
+            "fail_count": fail_count,
+            "all_verified": fail_count == 0 and len(intended) >= 0,
+            "summary": (
+                str(len(confirmed)) + "/" + str(len(intended)) + " confirmed persisted; "
+                + str(len(reverted)) + " silently reverted; "
+                + str(len(unverifiable)) + " unverifiable"
+            ),
+        }
+
+  # ===========================================================================
+  # PHASE 8 - TRAJECTORY-REPLAY guard on the canonical write path. Diffs the
+  # write flow against the recorded golden run and FAILS on UI drift / cost
+  # blowup, so a vendor settings-page redesign that breaks the toggle path is
+  # caught loudly instead of silently no-op'ing across every workspace.
+  # Provider-independent: it compares observable actions, not model internals.
+  # ===========================================================================
+  - id: replay_write_path
+    type: trajectory-replay
+    depends_on: [assert_verified]
+    trajectory_replay_config:
+      golden_run_id: "{input.golden_run_id}"
+      fail_below_score: 0.8
+      allow_cost_delta_pct: 10.0
+      cost_budget_usd: 0.5
+
+  # ===========================================================================
+  # PHASE 9 - DETERMINISTIC OUTCOME + AUDIT RECORD. Fold the verify assertion and
+  # the replay verdict into one auditable record: which workspaces changed (from
+  # -> to), which reverted, who approved, and whether the write path drifted. No
+  # model decides success here.
+  # ===========================================================================
+  - id: build_audit_record
+    type: code
+    depends_on: [replay_write_path]
+    code_config:
+      language: python
+      code: |
+        verify = _steps.get("assert_verified") or {}
+        if not isinstance(verify, dict):
+            verify = {}
+        plan = _steps.get("plan_diff") or {}
+        if not isinstance(plan, dict):
+            plan = {}
+
+        replay = _steps.get("replay_write_path") or {}
+        if not isinstance(replay, dict):
+            replay = {}
+        replay_passed = bool(replay.get("passed", replay.get("certified", True)))
+        score = replay.get("score", replay.get("replay_score", None))
+        try:
+            score = float(score)
+        except (TypeError, ValueError):
+            score = None
+
+        changed = [
+            {"workspace_id": c.get("workspace_id"), "label": c.get("label"),
+             "to": c.get("expected"), "observed": c.get("observed")}
+            for c in (verify.get("confirmed") or [])
+        ]
+        reverted = verify.get("reverted") or []
+        unverifiable = verify.get("unverifiable") or []
+
+        fail_count = int(verify.get("fail_count", 0) or 0)
+        drift_failed = not replay_passed
+        # Overall success requires: nothing reverted/unverifiable AND no write-path drift.
+        overall_ok = (fail_count == 0) and (not drift_failed)
+
+        result = {
+            "setting_key": str(plan.get("setting_key", "") or ""),
+            "target_value": str(plan.get("target_value", "") or ""),
+            "changed_workspaces": changed,
+            "changed_count": len(changed),
+            "reverted_workspaces": reverted,
+            "reverted_count": len(reverted),
+            "unverifiable_workspaces": unverifiable,
+            "unverifiable_count": len(unverifiable),
+            "already_compliant_count": int(plan.get("compliant_count", 0) or 0),
+            "unreachable_count": int(plan.get("unreachable_count", 0) or 0),
+            "write_path_drift_failed": drift_failed,
+            "replay_score": score,
+            "overall_ok": overall_ok,
+            # fail_count > 0 routes the run to the needs-attention notification.
+            "needs_attention": (not overall_ok),
+            "audit_note": (
+                "Propagated '" + str(plan.get("setting_key", "")) + "' = '"
+                + str(plan.get("target_value", "")) + "' to " + str(len(changed))
+                + " workspace(s). Reverted: " + str(len(reverted))
+                + ", unverifiable: " + str(len(unverifiable))
+                + ", write-path drift: " + str(drift_failed) + "."
+            ),
+        }
+
+  # ===========================================================================
+  # PHASE 10 - ROUTE on the deterministic outcome. needs_attention -> page the
+  # ops channel with the reverted/drift detail (never a false success); clean ->
+  # post the success summary + audit record.
+  # ===========================================================================
+  - id: route_outcome
+    type: condition
+    depends_on: [build_audit_record]
+    condition_config:
+      expression: "{steps.build_audit_record.output.needs_attention} == True"
+      then: [notify_needs_attention]
+      else: [notify_success]
+
+  # 10a) NEEDS-ATTENTION - some workspaces silently reverted, stayed unverifiable,
+  #      or the write path drifted from golden. Page ops; do NOT claim success.
+  - id: notify_needs_attention
+    type: notify
+    depends_on: [route_outcome]
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        NEEDS ATTENTION - SaaS config propagation of "{steps.build_audit_record.output.setting_key}" =
+        "{steps.build_audit_record.output.target_value}" did NOT fully succeed.
+        Changed: {steps.build_audit_record.output.changed_count},
+        silently reverted: {steps.build_audit_record.output.reverted_count},
+        unverifiable: {steps.build_audit_record.output.unverifiable_count},
+        write-path drift failed: {steps.build_audit_record.output.write_path_drift_failed}.
+        {steps.build_audit_record.output.audit_note} Investigate the reverted/unverifiable workspaces and
+        the write-path trajectory before re-running. The run is left in a needs-attention state.
+
+  # 10b) SUCCESS - every needs_change workspace verified persisted and the write
+  #      path matched golden. Post the audit record (which workspaces changed,
+  #      from->to, approver-gated).
+  - id: notify_success
+    type: notify
+    depends_on: [route_outcome]
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        SUCCESS - SaaS config propagation complete. Setting
+        "{steps.build_audit_record.output.setting_key}" = "{steps.build_audit_record.output.target_value}"
+        verified persisted on {steps.build_audit_record.output.changed_count} workspace(s)
+        ({steps.build_audit_record.output.already_compliant_count} were already compliant,
+        {steps.build_audit_record.output.unreachable_count} unreachable). Replay score
+        {steps.build_audit_record.output.replay_score}. Audit: {steps.build_audit_record.output.audit_note}
+
+on_complete:
+  storage_path: "devops/saas-config-propagator/{run_id}/audit-record.json"

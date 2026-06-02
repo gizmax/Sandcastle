@@ -1,0 +1,713 @@
+# name: Government Procurement Bid Submitter
+# description: Assembles and files a tender response in a public e-procurement portal (SAM.gov, TED/eSourcing, a state vendor portal) that has NO bid-submission API - fetches the approved bid package (pricing PDF, technical proposal, compliance attestations) from a gdrive/s3 vault via a presigned URL, deterministically verifies the document checklist is complete and the deadline has not passed (fails closed), then drives a provider-neutral playwright browser step that logs in (credentials via PROCURE_PORTAL_CREDS, captcha_strategy=pause), uploads every required document, fills the structured bid form (price, lead time, certifications), advances to the REVIEW screen and STOPS - returning a structured preview via output_schema. A deterministic code step asserts the uploaded-doc set matches the required checklist and the portal-computed total_bid_price equals the approved pricing figure (anti-fat-finger guard). Only then does an llm_eval + human gate plus a mandatory approval show the exact price + docs + review screenshot and require explicit sign-off, because a submitted public bid is legally binding. A second playwright step clicks Submit ONCE and captures the confirmation/receipt number + timestamp screenshot; a sensor re-reads the portal's own submission-status page until it confirms received before the receipt is archived (presigned s3 PUT) and the team is notified. The brittle write is isolated behind the human gate; the load-bearing correctness is deterministic code + an engine-native sensor, never a single model's opinion.
+# tags: [Procurement, Tender, RFP, SAMgov, TED, eProcurement, RPA, Playwright, HumanInTheLoop, ProviderNeutral, DeadlineGuard, Sensor]
+# category: sales_crm
+
+name: government-procurement-bid-submitter
+description: >-
+  Files a complete tender response into a public e-procurement portal - SAM.gov, the EU's TED /
+  eSourcing, or a state/municipal vendor portal - on behalf of a bid/proposal manager at a government
+  contractor or SME. These portals are login-gated, JavaScript-heavy single-page apps with multi-step
+  upload wizards, document-checklist validation, and NO bid-submission API: attaching files and clicking
+  'Submit Bid' literally only exists in the browser UI, so teams re-key pricing and re-upload documents
+  by hand and lose deals to missed deadlines or transcription errors. This template is triggered when an
+  approved bid package in a watched gdrive/s3 folder reaches status=ready_to_submit and the deadline is
+  inside the configured window. It splits read-prep from the legally binding write and fails closed.
+  First an http step downloads the approved bid-package manifest from the vault via a presigned URL
+  (gdrive/s3 connector; no inline secrets). A DETERMINISTIC code step then verifies the document
+  checklist is complete (every required filename present, page counts greater than zero) and that the
+  submission deadline has NOT passed - rejecting on any gap so nothing is ever filed late or short a
+  document. A provider-neutral playwright browser step logs in via PROCURE_PORTAL_CREDS
+  (captcha_strategy=pause), opens the solicitation, uploads each document, fills the structured bid form
+  (total price, lead time, certifications), advances to the REVIEW screen and STOPS - returning
+  {solicitation_id, uploaded_docs[], total_bid_price, attestations_checked, review_page_summary,
+  review_screenshot} via output_schema. A second DETERMINISTIC code step asserts the uploaded-doc set
+  matches the required checklist exactly and the portal-computed total_bid_price equals the approved
+  pricing figure within tolerance - the anti-fat-finger guard, with no model deciding correctness. An
+  llm_eval + human gate then verifies internal consistency and requires an explicit human, followed by a
+  mandatory approval that shows the exact price, the document list, and the review screenshot and BLOCKS
+  until a person authorizes, because a submitted public bid is legally binding. Only on sign-off does a
+  second playwright step click Submit ONCE and capture the portal's confirmation/submission receipt
+  number and a timestamp screenshot. An engine-native sensor re-reads the portal's own submission-status
+  page until it confirms the bid was received before success is declared; a deterministic decision routes
+  a timeout to a needs-attention page, never a false win. Finally the receipt is archived to the vault via
+  a presigned s3 PUT (audit chain) and the team is notified. Both browser steps ride default_model and
+  stay swappable across providers; the consistency llm_eval, the human gate, and the approval are
+  model-independent and engine-native, so swapping the reasoning provider never weakens the safety or
+  changes filing behavior.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 1800
+
+input_schema:
+  required: ["solicitation_url", "submission_status_url", "bid_package_url", "required_documents", "approved_total_price", "bid_deadline_iso"]
+  properties:
+    solicitation_url:
+      type: string
+      description: "URL of the solicitation / tender response wizard in the e-procurement portal (login-gated SPA, no submission API). Templated into both browser steps' start_url."
+      example: "https://sam.gov/opp/abc123def456/responses/new"
+    submission_status_url:
+      type: string
+      description: "URL of the portal's OWN submission-status page for THIS response; the verify sensor re-reads it until the portal confirms the bid was received."
+      example: "https://sam.gov/opp/abc123def456/responses/mine/status"
+    bid_package_url:
+      type: string
+      description: "Presigned gdrive/s3 download URL for the approved bid-package manifest JSON (lists pricing PDF, technical proposal, compliance attestations and their page counts). NEVER inline secrets - this is a short-lived presigned URL."
+      example: "https://storage.googleapis.com/bid-vault/SOL-2026-0098/manifest.json?X-Goog-Signature=..."
+    required_documents:
+      type: string
+      description: "Comma-separated list of required document filenames the solicitation demands (the checklist). Every one must be present in the package and uploaded to the portal before submission is allowed."
+      example: "pricing.pdf,technical_proposal.pdf,sf1449.pdf,reps_and_certs.pdf,past_performance.pdf"
+    approved_total_price:
+      type: number
+      description: "The approved total bid price (the figure sign-off was given for). The deterministic guard rejects if the portal-computed total_bid_price differs from this beyond tolerance - prevents a fat-finger price error on a binding bid."
+      example: "487350.00"
+    bid_deadline_iso:
+      type: string
+      description: "The solicitation's hard submission deadline as an ISO-8601 timestamp. The deterministic deadline check fails closed if now is at or past this - never files late."
+      example: "2026-06-15T17:00:00+00:00"
+    now_iso:
+      type: string
+      description: "Current time as an ISO-8601 timestamp, injected by the trigger so the deadline check is deterministic and testable (no clock calls in the sandbox). Defaults empty; supply at run time."
+      default: ""
+      example: "2026-06-10T09:30:00+00:00"
+    lead_time_days:
+      type: integer
+      description: "Promised delivery lead time in days, entered into the structured bid form alongside price and certifications."
+      default: 30
+      example: "45"
+    certifications:
+      type: string
+      description: "Comma-separated certification / attestation codes to assert on the bid form (e.g. small-business, ISO9001, ITAR). Used to fill the certifications section and checked by the deterministic guard."
+      default: ""
+      example: "small-business,ISO9001,ITAR-registered"
+    price_tolerance:
+      type: number
+      description: "Absolute currency tolerance allowed when reconciling the portal-computed total_bid_price against approved_total_price (covers portal rounding/fees). A larger delta is rejected."
+      default: 0.01
+      example: "0.01"
+    deadline_window_hours:
+      type: integer
+      description: "How many hours BEFORE the deadline the deadline check still considers it safe to submit. If now is within this window of the deadline it warns but allows; past the deadline it always fails closed."
+      default: 1
+      example: "2"
+    receipt_archive_url:
+      type: string
+      description: "Presigned gdrive/s3 PUT URL the captured submission receipt is archived to for the audit chain after the portal confirms receipt."
+      default: ""
+      example: "https://bid-vault.s3.amazonaws.com/SOL-2026-0098/receipt.json?X-Amz-Signature=..."
+    portal_credentials_env:
+      type: string
+      description: "Name of the environment variable holding the e-procurement portal login credentials (NEVER inline secrets). Passed to both browser steps' credentials_env."
+      default: "PROCURE_PORTAL_CREDS"
+      example: "PROCURE_PORTAL_CREDS"
+    approval_timeout_hours:
+      type: integer
+      description: "Hours the human submit-approval and the human gate wait before timing out. on_timeout: abort means a missed approval NEVER auto-submits a binding public bid."
+      default: 12
+      example: "12"
+    sensor_poll_interval_seconds:
+      type: integer
+      description: "Seconds between submission-status-page polls while waiting for the portal to confirm the bid was received."
+      default: 60
+      example: "60"
+    sensor_timeout_seconds:
+      type: integer
+      description: "Hard ceiling in seconds the verify sensor waits for the portal to confirm receipt before the run is routed to needs-attention (never reported as a successful submission)."
+      default: 3600
+      example: "3600"
+    notify_channel:
+      type: string
+      description: "Slack channel for the bid desk's filed / blocked / needs-attention notifications."
+      default: "#bid-desk"
+      example: "#bid-desk"
+    solicitation_label:
+      type: string
+      description: "Human-readable label for this solicitation used in the approval message and notifications (e.g. solicitation number and agency)."
+      default: "tender response"
+      example: "SOL-2026-0098 - GSA IT Services BPA"
+
+steps:
+  # 1) FETCH the approved bid-package manifest from the gdrive/s3 vault via a presigned URL (http,
+  #    deterministic; no inline secrets - the presigned URL is short-lived and supplied at run time).
+  #    The manifest lists each required document and its page count so the checklist can be verified
+  #    BEFORE any portal entry. value_map lifts the fields the validator needs.
+  - id: fetch_bid_package
+    type: http
+    http_config:
+      url: "{input.bid_package_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      value_map:
+        documents: "documents"
+        package_status: "status"
+        package_solicitation_id: "solicitation_id"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2) DETERMINISTIC checklist + deadline gate (sandboxed Python, no model). The load-bearing pre-portal
+  #    check: every required filename must be present in the fetched package with a page count greater
+  #    than zero, the package must be ready_to_submit, and the deadline must NOT have passed. Fails
+  #    CLOSED - nothing touches the portal on an incomplete package or a missed deadline.
+  - id: verify_checklist_and_deadline
+    type: code
+    depends_on: [fetch_bid_package]
+    code_config:
+      language: python
+      code: |
+        import json
+        import datetime
+
+        # --- Pull the document manifest from the http fetch (value_map lifted fields, with fallbacks). ---
+        fetched = _steps.get('fetch_bid_package') or {}
+        if not isinstance(fetched, dict):
+            fetched = {}
+        # http step may surface lifted fields at top level or nest the raw body under output/data/body.
+        body = fetched
+        for key in ('output', 'data', 'body', 'json', 'result'):
+            inner = fetched.get(key)
+            if isinstance(inner, dict) and ('documents' in inner or 'status' in inner):
+                body = inner
+                break
+
+        docs = body.get('documents')
+        if not isinstance(docs, list):
+            docs = []
+        package_status = str(body.get('package_status', body.get('status', '')) or '').strip().lower()
+        package_solicitation_id = str(
+            body.get('package_solicitation_id', body.get('solicitation_id', '')) or ''
+        ).strip()
+
+        problems = []
+
+        # --- Required-document checklist: each required filename present with page_count > 0. ---
+        required_raw = _input.get('required_documents') or ''
+        required = [r.strip() for r in str(required_raw).split(',') if r.strip()]
+        if not required:
+            problems.append('no required_documents checklist supplied (cannot verify completeness)')
+
+        # Map provided filename -> page count.
+        present = {}
+        for d in docs:
+            if not isinstance(d, dict):
+                continue
+            fname = str(d.get('filename', d.get('name', '')) or '').strip()
+            if not fname:
+                continue
+            pages_val = d.get('page_count', d.get('pages', 0))
+            try:
+                pages = int(pages_val)
+            except (TypeError, ValueError):
+                pages = 0
+            present[fname] = pages
+
+        missing_docs = [f for f in required if f not in present]
+        empty_docs = [f for f in required if f in present and present.get(f, 0) <= 0]
+        if missing_docs:
+            problems.append('missing required documents: ' + ', '.join(missing_docs))
+        if empty_docs:
+            problems.append('required documents have zero pages: ' + ', '.join(empty_docs))
+
+        uploaded_ok_set = sorted([f for f in required if f in present and present.get(f, 0) > 0])
+
+        # --- Package must be flagged ready_to_submit by the upstream approval. ---
+        if package_status and package_status != 'ready_to_submit':
+            problems.append("package status is '" + package_status + "', expected 'ready_to_submit'")
+
+        # --- Deadline check (deterministic, fails closed). Parse ISO timestamps without clock calls. ---
+        def _parse_iso(s):
+            s = str(s or '').strip()
+            if not s:
+                return None
+            # Normalise a trailing Z to +00:00 for fromisoformat.
+            if s.endswith('Z'):
+                s = s[:-1] + '+00:00'
+            try:
+                return datetime.datetime.fromisoformat(s)
+            except (TypeError, ValueError):
+                return None
+
+        deadline_dt = _parse_iso(_input.get('bid_deadline_iso'))
+        now_dt = _parse_iso(_input.get('now_iso'))
+
+        deadline_ok = False
+        within_window = False
+        if deadline_dt is None:
+            problems.append('bid_deadline_iso missing or unparseable (cannot verify deadline)')
+        elif now_dt is None:
+            problems.append('now_iso missing or unparseable (cannot deterministically check deadline)')
+        else:
+            # If either is naive, compare as naive to avoid mixed tz errors.
+            if (deadline_dt.tzinfo is None) != (now_dt.tzinfo is None):
+                deadline_dt = deadline_dt.replace(tzinfo=None)
+                now_dt = now_dt.replace(tzinfo=None)
+            remaining = (deadline_dt - now_dt).total_seconds()
+            deadline_ok = remaining > 0
+            try:
+                window_hours = int(_input.get('deadline_window_hours', 1) or 1)
+            except (TypeError, ValueError):
+                window_hours = 1
+            within_window = (0 < remaining <= window_hours * 3600)
+            if not deadline_ok:
+                problems.append('DEADLINE PASSED - now is at or past the submission deadline; refusing to file late')
+
+        ok = len(problems) == 0
+        result = {
+            'ok': ok,
+            'problems': problems,
+            'required_documents': required,
+            'present_documents': sorted(list(present.keys())),
+            'uploaded_ok_set': uploaded_ok_set,
+            'missing_documents': missing_docs,
+            'empty_documents': empty_docs,
+            'package_status': package_status,
+            'package_solicitation_id': package_solicitation_id,
+            'approved_total_price': float(_input.get('approved_total_price', 0) or 0),
+            'deadline_ok': deadline_ok,
+            'within_deadline_window': within_window,
+        }
+
+  # 2b) Hard stop on an incomplete package or a missed deadline - never touch the portal.
+  - id: checklist_gate
+    type: condition
+    depends_on: [verify_checklist_and_deadline]
+    condition_config:
+      expression: "{steps.verify_checklist_and_deadline.output.ok} == True"
+      then: [assemble_and_fill]
+      else: [notify_blocked]
+
+  # 2c) Blocked branch: tell the bid desk the response was NOT filed and exactly why. Nothing submitted.
+  - id: notify_blocked
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        BLOCKED before portal entry: {input.solicitation_label}. Pre-submission checks FAILED, so no
+        tender response was filed. Problem(s): {steps.verify_checklist_and_deadline.output.problems}.
+        Missing docs: {steps.verify_checklist_and_deadline.output.missing_documents}; deadline_ok:
+        {steps.verify_checklist_and_deadline.output.deadline_ok}. Fix the package or deadline and re-run.
+
+  # 3) ASSEMBLE + FILL (READ-PREP pass, playwright mode, provider-neutral). The reasoning model AUTHORS a
+  #    Playwright script that logs in via PROCURE_PORTAL_CREDS (never inlined), opens the solicitation,
+  #    UPLOADS every required document, fills the structured bid form (total price, lead time,
+  #    certifications), advances to the REVIEW screen and STOPS - it does NOT click Submit. CAPTCHA pauses
+  #    to a human; max_actions bounds the upload wizard; capture_screenshots gives an auditable review
+  #    screenshot; output_schema returns structured JSON to validate against. Read-prep only - reversible.
+  - id: assemble_and_fill
+    type: browser
+    depends_on: [checklist_gate]
+    prompt: >-
+      You are assembling a tender response in a public e-procurement portal (SAM.gov / TED / a state
+      vendor portal). Authenticate using the credentials provided via the PROCURE_PORTAL_CREDS
+      environment variable, then open the solicitation response wizard at the start URL. Walk the upload
+      wizard and UPLOAD every required document from this checklist to its correct slot:
+      {input.required_documents}. Then fill the structured bid form: enter the total bid price exactly as
+      the approved figure {input.approved_total_price}, set the delivery lead time to
+      {input.lead_time_days} days, and assert these certifications/attestations:
+      {input.certifications}. Let the portal compute and display its own total. CRITICAL: advance only to
+      the FINAL REVIEW / SUMMARY page and STOP there - DO NOT click Submit, Submit Bid, File Response, or
+      any final/confirm button. Submission is a separate, human-approved step. If a CAPTCHA or step-up
+      auth appears, PAUSE for a human - do not attempt to solve it. Solicitation: {input.solicitation_label}.
+      Read back the review screen and return ONLY the structured object described by the output schema: the
+      solicitation_id the portal shows, the list of uploaded document filenames, the portal-computed
+      total_bid_price, the list of attestations/certifications it shows as checked, a human-readable
+      review_page_summary, a reference to the captured review screenshot, and whether the final Submit
+      button is present and enabled.
+    browser_config:
+      mode: playwright
+      start_url: "{input.solicitation_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 600
+      max_actions: 120
+      headless: true
+      credentials_env: "{input.portal_credentials_env}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          solicitation_id:
+            type: string
+            description: "The solicitation/opportunity id the portal shows for this response."
+          uploaded_docs:
+            type: array
+            items: { type: string }
+            description: "Filenames of every document the wizard shows as successfully uploaded."
+          total_bid_price:
+            type: number
+            description: "The total bid price the portal itself computed/displays on the review screen."
+          attestations_checked:
+            type: array
+            items: { type: string }
+            description: "Certification/attestation codes the form shows as checked."
+          review_page_summary:
+            type: string
+            description: "Human-readable summary of the bid as shown on the portal's review page."
+          review_screenshot:
+            type: string
+            description: "Reference to the captured review-page screenshot for the human approver."
+          submit_button_present:
+            type: boolean
+            description: "True if the final Submit button is present and enabled (wizard reached review)."
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
+
+  # 4) DETERMINISTIC anti-fat-finger guard (sandboxed Python, no model). The load-bearing pre-submit
+  #    check: the uploaded-doc set must match the required checklist EXACTLY, the portal-computed
+  #    total_bid_price must equal the approved figure within tolerance, the attestations must cover the
+  #    requested certifications, the wizard must have reached a submit-capable review, and a review
+  #    screenshot must exist. ANY mismatch => ok=False with reasons; nothing is submitted on a bad fill.
+  - id: validate_filled_bid
+    type: code
+    depends_on: [assemble_and_fill]
+    code_config:
+      language: python
+      code: |
+        read_out = _steps.get('assemble_and_fill') or {}
+        if not isinstance(read_out, dict):
+            read_out = {}
+        # Browser payloads may nest the structured object under output/data/result.
+        for key in ('output', 'data', 'result'):
+            inner = read_out.get(key)
+            if isinstance(inner, dict) and ('total_bid_price' in inner or 'uploaded_docs' in inner):
+                read_out = inner
+                break
+
+        checklist = _steps.get('verify_checklist_and_deadline') or {}
+        if not isinstance(checklist, dict):
+            checklist = {}
+
+        problems = []
+
+        def _num(v, default=0.0):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return default
+
+        # --- Uploaded documents must match the required checklist EXACTLY (set equality). ---
+        required = checklist.get('required_documents')
+        if not isinstance(required, list):
+            required = []
+        uploaded = read_out.get('uploaded_docs')
+        if not isinstance(uploaded, list):
+            uploaded = []
+        req_set = set(str(r).strip() for r in required if str(r).strip())
+        up_set = set(str(u).strip() for u in uploaded if str(u).strip())
+        missing_uploads = sorted(req_set - up_set)
+        extra_uploads = sorted(up_set - req_set)
+        docs_ok = (req_set == up_set) and len(req_set) > 0
+        if missing_uploads:
+            problems.append('documents not uploaded to portal: ' + ', '.join(missing_uploads))
+        if extra_uploads:
+            problems.append('unexpected extra documents uploaded: ' + ', '.join(extra_uploads))
+        if len(req_set) == 0:
+            problems.append('empty required-document checklist (cannot confirm uploads)')
+
+        # --- Anti-fat-finger price guard: portal total must equal the approved price within tolerance. ---
+        portal_price = _num(read_out.get('total_bid_price'), -1.0)
+        approved_price = _num(_input.get('approved_total_price'), 0.0)
+        tolerance = abs(_num(_input.get('price_tolerance'), 0.01))
+        price_ok = (portal_price >= 0) and (abs(portal_price - approved_price) <= tolerance)
+        if portal_price < 0:
+            problems.append('portal did not return a total_bid_price (empty read)')
+        elif not price_ok:
+            problems.append(
+                'PRICE MISMATCH: portal shows ' + str(round(portal_price, 2))
+                + ' but approved price is ' + str(round(approved_price, 2))
+            )
+
+        # --- Requested certifications must all appear among the portal-checked attestations. ---
+        cert_raw = _input.get('certifications') or ''
+        wanted_certs = [c.strip().lower() for c in str(cert_raw).split(',') if c.strip()]
+        checked = read_out.get('attestations_checked')
+        if not isinstance(checked, list):
+            checked = []
+        checked_set = set(str(c).strip().lower() for c in checked)
+        missing_certs = [c for c in wanted_certs if c not in checked_set]
+        certs_ok = len(missing_certs) == 0
+        if missing_certs:
+            problems.append('certifications not checked on the bid form: ' + ', '.join(missing_certs))
+
+        # --- The wizard must have reached a submit-capable review with a screenshot for the approver. ---
+        submit_present = bool(read_out.get('submit_button_present', False))
+        if not submit_present:
+            problems.append('Submit button not present - wizard did not reach the review screen')
+        review_screenshot = str(read_out.get('review_screenshot', '') or '').strip()
+        if not review_screenshot:
+            problems.append('no review screenshot captured for the human approver')
+
+        ok = bool(docs_ok and price_ok and certs_ok and submit_present and review_screenshot)
+        result = {
+            'ok': ok,
+            'problems': problems,
+            'docs_ok': docs_ok,
+            'price_ok': price_ok,
+            'certs_ok': certs_ok,
+            'solicitation_id': str(read_out.get('solicitation_id', '') or ''),
+            'uploaded_docs': sorted(list(up_set)),
+            'portal_total_bid_price': round(portal_price, 2) if portal_price >= 0 else None,
+            'approved_total_price': round(approved_price, 2),
+            'attestations_checked': sorted(list(checked_set)),
+            'review_page_summary': str(read_out.get('review_page_summary', '') or ''),
+            'review_screenshot': review_screenshot,
+            'reason_summary': '; '.join(problems) if problems else 'all pre-submit checks passed',
+        }
+
+  # 4b) Hard stop on a bad fill - do NOT advance to the human gate / approval / submit on a bad review read.
+  - id: filled_gate
+    type: condition
+    depends_on: [validate_filled_bid]
+    condition_config:
+      expression: "{steps.validate_filled_bid.output.ok} == True"
+      then: [presubmit_gate]
+      else: [notify_fill_failed]
+
+  - id: notify_fill_failed
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        {input.solicitation_label} reached the portal review page but the deterministic anti-fat-finger
+        check FAILED before submission: {steps.validate_filled_bid.output.problems}. Nothing was
+        submitted. Re-check uploads and price and re-run.
+
+  # 5) PRE-SUBMIT GATE - ALL strategies must pass before the binding submit is even offered for approval.
+  #    (a) llm_eval consistency: the review summary, price, docs and attestations are internally
+  #        consistent and traceable to the validated bid (provider-swappable verifier, pinned to a
+  #        cross-provider judge). (b) human: a second person confirms the bid before the legally binding
+  #        submit. This gate is engine-native and model-independent for the human leg.
+  - id: presubmit_gate
+    type: gate
+    depends_on: [filled_gate]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are a public-procurement bid-review checker. The bid is filled on the portal's review
+              screen and is about to be submitted as a LEGALLY BINDING public tender response. Reply with
+              exactly 'approved' only if ALL hold: the portal-computed total price equals the approved
+              price, every required document is uploaded, every requested certification is checked, and the
+              review_page_summary is internally consistent with those values with no invented data.
+              Otherwise reply 'rejected' and name each inconsistency. Validated bid:
+              {steps.validate_filled_bid.output} . Approved price: {input.approved_total_price}. Required
+              documents: {input.required_documents}. Certifications: {input.certifications}.
+            input: "{steps.validate_filled_bid.output}"
+            model: google/gemini-2.5-pro
+        - type: human
+          config:
+            message: >-
+              PRE-SUBMIT review for {input.solicitation_label}. Portal total
+              {steps.validate_filled_bid.output.portal_total_bid_price} (approved
+              {steps.validate_filled_bid.output.approved_total_price}); uploaded
+              {steps.validate_filled_bid.output.uploaded_docs}; attestations
+              {steps.validate_filled_bid.output.attestations_checked}. Confirm the bid is correct before the
+              binding submission. Reject to abort with nothing submitted.
+            timeout_hours: 12
+            on_timeout: abort
+
+  # 6) MANDATORY HUMAN APPROVAL before the irreversible Submit. Shows the EXACT validated price + document
+  #    list and the captured review screenshot, and BLOCKS until a person authorizes - a submitted public
+  #    bid is legally binding. on_timeout: abort means a missed approval NEVER auto-submits.
+  - id: approve_submit
+    type: approval
+    depends_on: [presubmit_gate]
+    approval_config:
+      message: >-
+        AUTHORIZE the legally binding SUBMISSION of {input.solicitation_label}. This is IRREVERSIBLE - it
+        files the tender response with the agency. The bid is filled and sitting on the portal's review
+        screen: total price {steps.validate_filled_bid.output.portal_total_bid_price} (approved
+        {steps.validate_filled_bid.output.approved_total_price}), documents uploaded
+        {steps.validate_filled_bid.output.uploaded_docs}, attestations checked
+        {steps.validate_filled_bid.output.attestations_checked}. Checks:
+        {steps.validate_filled_bid.output.reason_summary}. Review the attached review screenshot - this is
+        the EXACT state you are submitting. Approve to click Submit; reject to abort with nothing submitted.
+      show_data: steps.validate_filled_bid.output
+      show_images: ["steps.validate_filled_bid.output.review_screenshot"]
+      timeout_hours: 12
+      on_timeout: abort
+      allow_edit: false
+
+  # 7) SUBMIT (WRITE pass, playwright mode). Only reached AFTER human approval. Re-opens the filled review
+  #    screen and clicks the single final Submit/Submit-Bid button ONCE, then reads the portal's
+  #    confirmation page and captures the submission RECEIPT number, timestamp, and a confirmation
+  #    screenshot. capture_screenshots gives an after-submit audit record; max_actions tightly capped (one
+  #    confirm action, no runaway); CAPTCHA pauses to a human at the final wall.
+  - id: submit_bid
+    type: browser
+    depends_on: [approve_submit]
+    prompt: >-
+      A human has authorized this IRREVERSIBLE, legally binding tender submission:
+      {input.solicitation_label}. Authenticate with the PROCURE_PORTAL_CREDS environment credentials if the
+      session expired, return to the filled review screen, confirm the total price still reads
+      {steps.validate_filled_bid.output.portal_total_bid_price} and the same documents are attached, then
+      click the SINGLE final Submit / Submit Bid / File Response button ONCE to file the response. Do NOT
+      edit any field and do NOT click submit more than once. If a CAPTCHA or step-up auth appears at this
+      final wall, PAUSE for a human - do not attempt to solve it. Then read the portal's confirmation page
+      and capture the submission RECEIPT / confirmation number, the submitted timestamp the portal shows,
+      and a confirmation screenshot. Return ONLY the structured object described by the output schema.
+    browser_config:
+      mode: playwright
+      start_url: "{input.solicitation_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 300
+      max_actions: 20
+      headless: true
+      credentials_env: "{input.portal_credentials_env}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          submitted:
+            type: boolean
+            description: "True if the UI accepted the final submit click without an error."
+          receipt_number:
+            type: string
+            description: "The portal-issued submission receipt / confirmation number."
+          submitted_at:
+            type: string
+            description: "The submitted timestamp the portal's confirmation page shows."
+          confirmation_screenshot:
+            type: string
+            description: "Reference to the captured post-submit confirmation screenshot for audit."
+    retry:
+      max_attempts: 1
+      backoff: fixed
+      on_failure: abort
+
+  # 8) VERIFY (engine-native SENSOR) - the act-then-VERIFY core. Poll the portal's OWN submission-status
+  #    page until it PROVABLY confirms the bid was received: status reads received/submitted/accepted OR a
+  #    receipt number is present. Pure control flow over the polled JSON, no model. Hard timeout so we
+  #    never wait forever; a timeout is NOT treated as success.
+  - id: verify_received
+    type: sensor
+    depends_on: [submit_bid]
+    sensor_config:
+      url: "{input.submission_status_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200 and (str(response.get('status', '')).strip().lower() in ('received', 'submitted', 'accepted', 'confirmed', 'under_review') or bool(str(response.get('receipt_number', '') or response.get('confirmation_number', '') or '').strip()))"
+      check_interval: 60
+      timeout: 3600
+
+  # 9) Deterministically decide acceptance from the sensor's last polled status payload AND the submit
+  #    step's captured receipt. No model. A missing confirmation (sensor timed out) yields confirmed=False
+  #    so a silently-failed submit can NEVER be reported as a filed bid.
+  - id: evaluate_receipt
+    type: code
+    depends_on: [verify_received]
+    code_config:
+      language: python
+      code: |
+        watch = _steps.get('verify_received') or {}
+        if not isinstance(watch, dict):
+            watch = {}
+        # The sensor surfaces the last polled `response` payload.
+        resp = watch.get('response') if isinstance(watch.get('response'), dict) else watch
+        if not isinstance(resp, dict):
+            resp = {}
+
+        # The submit browser step's captured receipt (preferred proof if present).
+        sub = _steps.get('submit_bid') or {}
+        if not isinstance(sub, dict):
+            sub = {}
+        for key in ('output', 'data', 'result'):
+            inner = sub.get(key)
+            if isinstance(inner, dict) and ('receipt_number' in inner):
+                sub = inner
+                break
+
+        status = str(resp.get('status', '') or '').strip().lower()
+        receipt = str(
+            sub.get('receipt_number', '')
+            or resp.get('receipt_number', '')
+            or resp.get('confirmation_number', '')
+            or ''
+        ).strip()
+        submitted_at = str(sub.get('submitted_at', '') or resp.get('submitted_at', '') or '').strip()
+
+        accepted_states = ('received', 'submitted', 'accepted', 'confirmed', 'under_review')
+        confirmed = (status in accepted_states) or bool(receipt)
+
+        sensor_satisfied = bool(watch.get('satisfied', watch.get('met', confirmed)))
+        timed_out = bool(watch.get('timed_out', False)) or (not sensor_satisfied and not confirmed)
+
+        landed = bool(confirmed and not timed_out and receipt)
+        result = {
+            'confirmed': landed,
+            'status': status,
+            'receipt_number': receipt,
+            'submitted_at': submitted_at,
+            'timed_out': timed_out,
+            # fail_count > 0 routes the run to the needs-attention path (never a false success).
+            'fail_count': 0 if landed else 1,
+            'solicitation_label': _input.get('solicitation_label', 'tender response'),
+        }
+
+  # 9b) Branch on the deterministic decision. Only a provably-received bid proceeds to archive + notify.
+  - id: receipt_gate
+    type: condition
+    depends_on: [evaluate_receipt]
+    condition_config:
+      expression: "{steps.evaluate_receipt.output.fail_count} > 0"
+      then: [notify_needs_attention]
+      else: [archive_receipt]
+
+  # 9c) NEEDS-ATTENTION PATH - the portal never confirmed receipt (timeout or non-received status). Page
+  #     the bid desk; the run stays unresolved. A silently-failed submit is surfaced, never a false win.
+  - id: notify_needs_attention
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        NEEDS ATTENTION: {input.solicitation_label} was SUBMITTED but the portal has NOT confirmed receipt
+        within the timeout (last status '{steps.evaluate_receipt.output.status}', receipt
+        '{steps.evaluate_receipt.output.receipt_number}',
+        timed_out={steps.evaluate_receipt.output.timed_out}). Do NOT assume the bid landed - manually check
+        the portal's submission-status page. The run is left in a needs-attention state.
+
+  # 10) ARCHIVE the submission receipt to the gdrive/s3 vault via a presigned PUT (audit chain, http,
+  #     deterministic; no inline secrets). Only reached once the portal provably confirmed receipt.
+  - id: archive_receipt
+    type: http
+    depends_on: [receipt_gate]
+    http_config:
+      url: "{input.receipt_archive_url}"
+      method: PUT
+      headers:
+        Content-Type: "application/json"
+      body: '{"event": "bid_submitted", "solicitation_label": "{input.solicitation_label}", "solicitation_id": "{steps.validate_filled_bid.output.solicitation_id}", "receipt_number": "{steps.evaluate_receipt.output.receipt_number}", "submitted_at": "{steps.evaluate_receipt.output.submitted_at}", "total_bid_price": "{steps.validate_filled_bid.output.portal_total_bid_price}", "uploaded_docs": "{steps.validate_filled_bid.output.uploaded_docs}", "status": "{steps.evaluate_receipt.output.status}"}'
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 11) NOTIFY the bid desk that the tender response was filed, with the portal-issued receipt number.
+  - id: notify_filed
+    type: notify
+    depends_on: [archive_receipt]
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        FILED: {input.solicitation_label} was submitted and the portal CONFIRMED receipt. Receipt number
+        {steps.evaluate_receipt.output.receipt_number}, submitted at
+        {steps.evaluate_receipt.output.submitted_at}, total bid price
+        {steps.validate_filled_bid.output.portal_total_bid_price}. Receipt archived to the vault for audit.
+
+on_complete:
+  storage_path: "government-procurement-bid-submitter/{input.solicitation_label}/{run_id}/result.json"

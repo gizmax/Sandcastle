@@ -1,0 +1,526 @@
+# name: Synthetic Checkout Revenue Canary
+# description: A synthetic shopper drives your live cart -> checkout -> payment iframe -> 3DS -> order-confirmation flow with a SANDBOX test card on a schedule, asserts the money path end to end in deterministic code (total == subtotal+tax+shipping), replays against a golden test purchase to catch silent flow drift, and pages revenue-ops the moment the Buy button stops converting - catching breakage no /health endpoint ever sees.
+# tags: [ecommerce, revenue, synthetic-monitoring, checkout, stripe, adyen, 3ds, playwright, golden-run, pagerduty, on-call]
+# category: engineering
+
+name: synthetic-checkout-revenue-canary
+description: >-
+  A scheduled synthetic-monitoring canary for the single most revenue-critical
+  flow in a D2C / marketplace store: the money path. An http /health probe
+  returns 200 while the Pay button is detached from its handler, the Stripe /
+  Adyen payment iframe fails to mount, the 3-D Secure redirect dead-ends, or a
+  tax-calc regression overcharges every order. None of that is visible to a
+  server-side API call - the checkout spans your storefront SPA, a cross-origin
+  script-isolated payment iframe, a 3DS redirect, tax/shipping recalculation, and
+  a hosted confirmation page. The ONLY way to prove a real card charge succeeds
+  and an order is written is to drive the rendered checkout as a browser does.
+
+  A SENSOR is the heartbeat clock (check_interval = 1800s during business hours)
+  and is also a webhook target so storefront CI can fire the same run post-deploy.
+  A BROWSER step in provider-neutral playwright mode authors a Playwright script
+  from its prompt: it adds a product to cart, walks to checkout, types a SANDBOX
+  test card into the payment iframe, completes the 3DS test OTP, and reaches the
+  hosted confirmation page - returning STRUCTURED JSON via output_schema (stages,
+  subtotal, tax, shipping, total_charged, currency, payment_iframe_loaded,
+  threeds_completed, order_id, confirmation_shown, error_text). All credentials
+  (test login + Stripe/Adyen TEST keys + 3DS test OTP) come from credentials_env =
+  SANDBOX_CHECKOUT_CREDS, never inline; the prompt FORBIDS any live / production
+  payment instrument. captcha_strategy = pause, max_actions = 80, and
+  capture_screenshots = true give a human handoff, a runaway-click cap, and an
+  audit trail. computer_use is offered ONLY as a documented fallback for payment
+  iframes that block scripted input and genuinely need pixel-level clicks.
+
+  A deterministic sandboxed CODE step is the load-bearing revenue verdict - NOT a
+  model opinion: it asserts payment_iframe_loaded, confirmation_shown, a non-null
+  order_id, the currency, and the arithmetic identity
+  total_charged == subtotal + tax + shipping within a small tolerance (this is the
+  assertion that catches a pricing / tax-calc regression). A TRAJECTORY-REPLAY
+  then scores the live run against a recorded golden test purchase
+  (fail_below_score = 0.9, cost_budget_usd = 0.02) to catch silent flow drift - a
+  new upsell interstitial, a moved Pay button - even when the arithmetic still
+  ties out. A CONDITION routes the folded verdict: healthy -> a quiet ok ping;
+  broken -> a human APPROVAL gate BEFORE any cleanup, then a NOTIFY that pages
+  PagerDuty + revenue-ops Slack with the broken stage, the failure screenshot, and
+  the exact amount discrepancy.
+
+  SAFETY: this canary only ever uses sandbox / test cards and TEST-mode gateway
+  keys via credentials_env - never a live card. The only mutation it makes is a
+  TEST order, tagged so downstream systems can filter it. The single irreversible
+  action - voiding / cancelling that test order in cleanup - is gated behind a
+  human APPROVAL showing the validated preview, so the synthetic flow can never
+  void a real customer order. Swap default_model and nothing else changes; the
+  arithmetic verdict and the golden replay are model-independent and engine-native.
+
+default_model: sonnet
+default_timeout: 1800
+
+input_schema:
+  required: ["product_url"]
+  properties:
+    product_url:
+      type: string
+      description: "Live product page URL the synthetic shopper starts from and adds to cart (e.g. https://shop.acme.com/products/flagship-tee)"
+      default: ""
+    checkout_url_contains:
+      type: string
+      description: "Substring the URL must contain to prove the SPA reached the checkout step (e.g. /checkout)"
+      default: "/checkout"
+    confirmation_url_contains:
+      type: string
+      description: "Substring the final URL must contain to prove the hosted order-confirmation page rendered (e.g. /order-confirmed)"
+      default: "/order"
+    expected_currency:
+      type: string
+      description: "ISO currency code the charge MUST be denominated in; a mismatch is a hard fail (e.g. USD, EUR)"
+      default: "USD"
+    amount_tolerance:
+      type: number
+      description: "Absolute tolerance (in major currency units) for total_charged vs subtotal+tax+shipping; above this is a pricing/tax-calc regression"
+      default: 0.01
+    expected_stages:
+      type: string
+      description: "Comma-separated money-path stages the run MUST reach, in order (used by the deterministic assertion code)"
+      default: "product_loaded,added_to_cart,checkout_reached,payment_iframe_loaded,card_entered,threeds_completed,confirmation_shown"
+    browser_mode:
+      type: string
+      description: "Documented browser-mode choice. 'playwright' (default, provider-neutral - the model authors a swappable Playwright script). Switch the browser step's mode to 'computer_use' ONLY as a fallback when the payment iframe blocks scripted input and genuinely needs pixel-level clicks."
+      default: "playwright"
+    golden_run_id:
+      type: string
+      description: "Run id of a recorded successful sandbox test purchase to replay against for silent-flow-drift detection (new interstitial, moved Pay button)"
+      default: "golden-test-purchase-baseline"
+    heartbeat_url:
+      type: string
+      description: "Lightweight heartbeat/clock endpoint the sensor polls on interval (also a storefront-CI webhook target for post-deploy firing)"
+      default: "https://shop.acme.com/healthz/heartbeat"
+    test_order_tag:
+      type: string
+      description: "Tag applied to the synthetic test order so downstream systems (analytics, fulfillment) can filter it out of real GMV"
+      default: "synthetic-canary"
+    ok_slack_channel:
+      type: string
+      description: "Quiet Slack channel for green checkout-canary confirmations"
+      default: "#revenue-canary-ok"
+    revops_slack_channel:
+      type: string
+      description: "Revenue-ops / payments on-call Slack channel that is paged (mirror of the PagerDuty route) when the money path breaks"
+      default: "#revops-oncall"
+    pagerduty_service:
+      type: string
+      description: "PagerDuty service / routing key label the broken-checkout page is sent to (the payments on-call rotation)"
+      default: "checkout-revenue-oncall"
+
+steps:
+  # ---------------------------------------------------------------------------
+  # 1) SENSOR heartbeat clock. On a schedule it ticks every 30 min during business
+  #    hours (check_interval = 1800s); also exposed as a webhook so storefront CI
+  #    can fire the SAME run post-deploy. Cheap pre-flight that the store is
+  #    reachable at all before we spend a browser drive on it - NOT the real proof
+  #    of checkout health (that comes from the rendered money path below).
+  # ---------------------------------------------------------------------------
+  - id: heartbeat_clock
+    type: sensor
+    sensor_config:
+      url: "{input.heartbeat_url}"
+      condition: "status_code == 200"
+      check_interval: 1800
+      timeout: 3600
+
+  # ---------------------------------------------------------------------------
+  # 2) BROWSER (provider-neutral playwright mode). The reasoning model AUTHORS a
+  #    Playwright script from this prompt that drives the REAL money path end to
+  #    end with a SANDBOX test card and returns STRUCTURED JSON via output_schema
+  #    (the read pass). credentials_env = SANDBOX_CHECKOUT_CREDS carries the test
+  #    login, Stripe/Adyen TEST keys, and the 3DS test OTP - never inline, never a
+  #    live card. captcha_strategy = pause hands a human the wheel on CAPTCHA;
+  #    max_actions = 80 caps runaway clicking; capture_screenshots = true keeps an
+  #    audit trail (and the failure screenshot the page-out attaches). This step
+  #    DOES create a (tagged) test order; the only IRREVERSIBLE action - voiding it
+  #    - is gated by a human approval later, never here.
+  # ---------------------------------------------------------------------------
+  - id: drive_checkout
+    type: browser
+    depends_on: [heartbeat_clock]
+    browser_config:
+      mode: playwright
+      start_url: "{input.product_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 120
+      max_actions: 80
+      headless: true
+      credentials_env: "SANDBOX_CHECKOUT_CREDS"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          stages:
+            type: array
+            items: { type: string }
+            description: "Money-path stages reached, in order (product_loaded, added_to_cart, checkout_reached, payment_iframe_loaded, card_entered, threeds_completed, confirmation_shown)."
+          subtotal: { type: number }
+          tax: { type: number }
+          shipping: { type: number }
+          total_charged: { type: number }
+          currency: { type: string }
+          payment_iframe_loaded: { type: boolean }
+          threeds_completed: { type: boolean }
+          order_id: { type: ["string", "null"] }
+          confirmation_shown: { type: boolean }
+          final_url: { type: string }
+          screenshot_url: { type: string }
+          error_text: { type: ["string", "null"] }
+        required:
+          - stages
+          - subtotal
+          - tax
+          - shipping
+          - total_charged
+          - currency
+          - payment_iframe_loaded
+          - threeds_completed
+          - order_id
+          - confirmation_shown
+          - error_text
+    prompt: |
+      You are a synthetic shopper monitoring the live checkout money path. Author
+      and run a Playwright script that drives the REAL storefront from product
+      page to a written, confirmed order, behaving like one careful human buyer.
+
+      ABSOLUTE SAFETY RULE: use ONLY the SANDBOX / TEST payment instrument and
+      TEST-mode gateway keys supplied via the SANDBOX_CHECKOUT_CREDS environment
+      variable (test login, Stripe/Adyen TEST card number, expiry, CVC, and the
+      3-D Secure test OTP). NEVER enter a live, real, or production card. NEVER
+      print or echo the secret. If only a production / live payment path is
+      available, STOP and report it in error_text rather than charging anything.
+
+      Tag the order as a synthetic test order using "{input.test_order_tag}"
+      wherever the storefront allows (order note, metadata, or a known test SKU)
+      so downstream systems can filter it out of real GMV.
+
+      Money path (append a stage string to `stages` as EACH is reached):
+        1. "product_loaded"        - open {input.product_url}; confirm the product
+                                     page rendered and an add-to-cart control is
+                                     present and interactable.
+        2. "added_to_cart"         - add the product to cart and open the cart.
+        3. "checkout_reached"      - proceed to checkout; confirm the URL now
+                                     contains "{input.checkout_url_contains}".
+                                     Read the order summary and record `subtotal`,
+                                     `tax`, and `shipping` as shown to the buyer.
+        4. "payment_iframe_loaded" - wait for the cross-origin Stripe/Adyen/
+                                     Braintree payment iframe (Elements) to MOUNT
+                                     and become interactable; set
+                                     payment_iframe_loaded = true only if it does.
+        5. "card_entered"          - type the SANDBOX test card from the secret
+                                     into the payment iframe fields and submit the
+                                     Pay button.
+        6. "threeds_completed"     - complete the 3-D Secure challenge using the
+                                     test OTP from the secret; set
+                                     threeds_completed = true on success.
+        7. "confirmation_shown"    - land on the hosted order-confirmation page
+                                     (URL contains "{input.confirmation_url_contains}");
+                                     set confirmation_shown = true, extract the
+                                     written `order_id`, and read the FINAL charged
+                                     amount into `total_charged` and the `currency`.
+
+      Record `final_url` as the last URL. Put a URL to the captured failure (or
+      last) screenshot in `screenshot_url`. If a CAPTCHA appears, pause for the
+      human per captcha_strategy. If anything throws, the Pay button is dead, the
+      iframe never mounts, 3DS dead-ends, or no order is written, set a short
+      human-readable cause in `error_text` and leave order_id null; otherwise
+      error_text = null.
+
+      NOTE: if the payment iframe blocks scripted input entirely, this monitor can
+      be re-run with the browser step's mode switched to computer_use to perform
+      pixel-level clicks - but the default and preferred mode is playwright.
+
+      Return ONLY the structured JSON object matching the output_schema. Do not add
+      prose outside the JSON.
+
+  # ---------------------------------------------------------------------------
+  # 3) DETERMINISTIC REVENUE VERDICT (sandboxed code). The load-bearing pass/fail
+  #    - NOT a model opinion. Validates the browser's structured extraction field
+  #    by field and asserts the arithmetic identity
+  #    total_charged == subtotal + tax + shipping within tolerance (the assertion
+  #    that catches a pricing / tax-calc regression). Rejects empty / malformed
+  #    reads so a blank scrape can never be reported as a healthy checkout.
+  # ---------------------------------------------------------------------------
+  - id: assert_money_path
+    type: code
+    depends_on: [drive_checkout]
+    code_config:
+      language: python
+      code: |
+        # Validate the browser read pass field by field. Any miss is a hard fail;
+        # we keep the FIRST failing assertion for the page-out, plus the full list.
+        b = _steps.get("drive_checkout") or {}
+        if not isinstance(b, dict):
+            b = {}
+
+        # Required money-path stages (comma-separated, ordered) from input.
+        raw_stages = str(_input.get("expected_stages", "") or "")
+        expected = [s.strip() for s in raw_stages.split(",") if s.strip()]
+        if not expected:
+            expected = [
+                "product_loaded",
+                "added_to_cart",
+                "checkout_reached",
+                "payment_iframe_loaded",
+                "card_entered",
+                "threeds_completed",
+                "confirmation_shown",
+            ]
+
+        reached = b.get("stages") or []
+        if not isinstance(reached, list):
+            reached = []
+        reached_set = {str(s).strip() for s in reached}
+
+        def as_float(v):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return None
+
+        subtotal = as_float(b.get("subtotal"))
+        tax = as_float(b.get("tax"))
+        shipping = as_float(b.get("shipping"))
+        total_charged = as_float(b.get("total_charged"))
+
+        try:
+            tolerance = float(_input.get("amount_tolerance", 0.01) or 0.01)
+        except (TypeError, ValueError):
+            tolerance = 0.01
+
+        failures = []
+
+        # Guard against an empty / malformed read - a blank result must never be
+        # reported as a healthy checkout.
+        if not reached_set:
+            failures.append("empty_read: browser returned no stages")
+
+        # Assertion 1: every expected money-path stage was reached.
+        missing = [m for m in expected if m not in reached_set]
+        if missing:
+            failures.append("missing_stages: " + ", ".join(missing))
+
+        # Assertion 2: the payment iframe actually mounted (cross-origin Elements).
+        if not bool(b.get("payment_iframe_loaded", False)):
+            failures.append("payment_iframe_not_loaded")
+
+        # Assertion 3: 3-D Secure completed.
+        if not bool(b.get("threeds_completed", False)):
+            failures.append("threeds_not_completed")
+
+        # Assertion 4: the hosted confirmation page rendered.
+        if not bool(b.get("confirmation_shown", False)):
+            failures.append("confirmation_not_shown")
+
+        # Assertion 5: an order was actually WRITTEN (non-null, non-empty id).
+        order_id = b.get("order_id")
+        order_id_str = "" if order_id is None else str(order_id).strip()
+        if order_id_str == "" or order_id_str.lower() == "null":
+            failures.append("order_id_missing")
+
+        # Assertion 6: the charge currency is the one we expect.
+        expected_ccy = str(_input.get("expected_currency", "") or "").strip().upper()
+        got_ccy = str(b.get("currency", "") or "").strip().upper()
+        if expected_ccy and got_ccy != expected_ccy:
+            failures.append("currency_mismatch: expected " + expected_ccy + " got " + (got_ccy or "<none>"))
+
+        # Assertion 7 (the revenue arithmetic - catches a pricing/tax-calc bug):
+        # total_charged MUST equal subtotal + tax + shipping within tolerance.
+        amount_discrepancy = None
+        if None in (subtotal, tax, shipping, total_charged):
+            failures.append("amount_parse_error: a money field was non-numeric")
+        else:
+            expected_total = subtotal + tax + shipping
+            amount_discrepancy = round(total_charged - expected_total, 4)
+            if abs(amount_discrepancy) > tolerance:
+                failures.append(
+                    "amount_mismatch: charged " + str(total_charged)
+                    + " != subtotal+tax+shipping " + str(round(expected_total, 4))
+                    + " (delta " + str(amount_discrepancy) + ", tol " + str(tolerance) + ")"
+                )
+
+        # Assertion 8: the browser reported no error text.
+        err = b.get("error_text")
+        if err not in (None, "", "null"):
+            failures.append("browser_error: " + str(err))
+
+        passed = len(failures) == 0
+        broken_stage = "" if passed else (missing[0] if missing else failures[0].split(":")[0])
+
+        result = {
+            "passed": passed,
+            "failing_assertion": ("" if passed else failures[0]),
+            "broken_stage": broken_stage,
+            "all_failures": failures,
+            "stages_reached": sorted(reached_set),
+            "missing_stages": missing,
+            "subtotal": subtotal,
+            "tax": tax,
+            "shipping": shipping,
+            "total_charged": total_charged,
+            "amount_discrepancy": amount_discrepancy,
+            "currency": got_ccy,
+            "order_id": order_id_str,
+            "confirmation_shown": bool(b.get("confirmation_shown", False)),
+            "screenshot_url": str(b.get("screenshot_url", "") or ""),
+            "final_url": str(b.get("final_url", "") or ""),
+            "tolerance": tolerance,
+        }
+
+  # ---------------------------------------------------------------------------
+  # 4) TRAJECTORY-REPLAY against a recorded successful sandbox test purchase.
+  #    Scores structural similarity to the golden run and fails below 0.9 -
+  #    catching SILENT flow drift (a new upsell interstitial, a moved Pay button,
+  #    an extra shipping step) even when the arithmetic above still ties out.
+  #    Reliability layer, golden-run based and provider-neutral - not a vote.
+  # ---------------------------------------------------------------------------
+  - id: golden_replay
+    type: trajectory-replay
+    depends_on: [drive_checkout, assert_money_path]
+    trajectory_replay_config:
+      golden_run_id: "{input.golden_run_id}"
+      fail_below_score: 0.9
+      allow_cost_delta_pct: 10.0
+      cost_budget_usd: 0.02
+
+  # ---------------------------------------------------------------------------
+  # 5) FOLD the arithmetic verdict AND the golden-replay verdict into ONE health
+  #    decision. Either a failed assertion OR structural drift below threshold
+  #    turns the canary red. Pure deterministic code - no model here.
+  # ---------------------------------------------------------------------------
+  - id: canary_verdict
+    type: code
+    depends_on: [assert_money_path, golden_replay]
+    code_config:
+      language: python
+      code: |
+        # Combine the deterministic money-path assertion with the golden replay.
+        a = _steps.get("assert_money_path") or {}
+        rep = _steps.get("golden_replay") or {}
+        if not isinstance(a, dict):
+            a = {}
+        if not isinstance(rep, dict):
+            rep = {}
+
+        assertions_passed = bool(a.get("passed", False))
+
+        threshold = 0.9
+        score = rep.get("score", rep.get("replay_score"))
+        try:
+            score_f = float(score)
+        except (TypeError, ValueError):
+            score_f = None
+
+        if "passed" in rep:
+            replay_ok = bool(rep.get("passed"))
+        elif score_f is not None:
+            replay_ok = score_f >= threshold
+        else:
+            # No replay signal (e.g. golden run missing) - do not let a missing
+            # baseline mask a real assertion failure, and do not invent a drift
+            # failure either; treat replay as neutral and rely on the arithmetic.
+            replay_ok = True
+
+        healthy = assertions_passed and replay_ok
+
+        if not assertions_passed:
+            reason = "assertion_failed: " + str(a.get("failing_assertion", "unknown"))
+        elif not replay_ok:
+            sc = "n/a" if score_f is None else str(round(score_f, 3))
+            reason = "flow_drift: replay score " + sc + " below " + str(threshold)
+        else:
+            reason = "all_clear"
+
+        disc = a.get("amount_discrepancy")
+        amount_note = "n/a" if disc is None else str(disc)
+
+        result = {
+            "healthy": healthy,
+            "status": ("green" if healthy else "red"),
+            "reason": reason,
+            "assertions_passed": assertions_passed,
+            "replay_ok": replay_ok,
+            "replay_score": score_f,
+            "broken_stage": str(a.get("broken_stage", "")),
+            "failing_assertion": str(a.get("failing_assertion", "")),
+            "all_failures": a.get("all_failures", []),
+            "amount_discrepancy": amount_note,
+            "currency": a.get("currency", ""),
+            "total_charged": a.get("total_charged"),
+            "order_id": a.get("order_id", ""),
+            "stages_reached": a.get("stages_reached", []),
+            "screenshot_url": a.get("screenshot_url", ""),
+            "final_url": a.get("final_url", ""),
+        }
+
+  # ---------------------------------------------------------------------------
+  # 6) CONDITION: route the folded verdict. healthy -> a quiet OK ping. broken ->
+  #    the page-out path, which FIRST passes through a human approval gate before
+  #    any cleanup, then pages PagerDuty + revenue-ops. Read pass is split from the
+  #    one irreversible action (the cleanup void) by that gate.
+  # ---------------------------------------------------------------------------
+  - id: route_verdict
+    type: condition
+    depends_on: [canary_verdict]
+    condition_config:
+      expression: "{steps.canary_verdict.output.healthy} == True"
+      then: [notify_ok]
+      else: [cleanup_approval, page_revops]
+
+  # --- GREEN branch ---------------------------------------------------------
+  # 6a) A quiet confirmation on the canary-ok channel. Low noise; the money path
+  #     is proven end to end (charge succeeded, order written, arithmetic ties).
+  - id: notify_ok
+    type: notify
+    depends_on: [route_verdict]
+    notify_config:
+      service: slack
+      channel: "{input.ok_slack_channel}"
+      message: ":white_check_mark: Checkout revenue canary GREEN. Money path proven: order {steps.canary_verdict.output.order_id} written, charged {steps.canary_verdict.output.total_charged} {steps.canary_verdict.output.currency}, arithmetic delta {steps.canary_verdict.output.amount_discrepancy}, golden replay {steps.canary_verdict.output.replay_score}. (product {input.product_url})"
+
+  # --- RED branch -----------------------------------------------------------
+  # 6b) HUMAN APPROVAL gate BEFORE the single irreversible action. The synthetic
+  #     run created a TEST order; voiding / cancelling it is destructive, so a
+  #     person must authorize the cleanup while looking at the validated preview.
+  #     on_timeout: abort means cleanup NEVER auto-fires - a real customer order
+  #     can never be voided by this canary. This gate runs on the RED path only.
+  - id: cleanup_approval
+    type: approval
+    depends_on: [route_verdict]
+    approval_config:
+      message: >
+        CHECKOUT CANARY RED - review before any cleanup. The synthetic run failed
+        the money path ({steps.canary_verdict.output.reason}) and may have left a
+        TEST order ({steps.canary_verdict.output.order_id}, tag {input.test_order_tag})
+        behind. APPROVE only to void / cancel THAT specific tagged test order during
+        cleanup. REJECT to leave it untouched. Voiding is irreversible - confirm the
+        order id is the synthetic test order and NOT a real customer order before
+        approving. Broken stage: {steps.canary_verdict.output.broken_stage}. Amount
+        discrepancy: {steps.canary_verdict.output.amount_discrepancy}
+        {steps.canary_verdict.output.currency}. Failure screenshot:
+        {steps.canary_verdict.output.screenshot_url}.
+      show_data: steps.canary_verdict.output
+      timeout_hours: 24
+      on_timeout: abort
+      allow_edit: true
+
+  # 6c) PAGE the payments on-call rotation. Posts to revenue-ops Slack (mirror of
+  #     the PagerDuty route) with the broken stage, the failure screenshot, and the
+  #     exact amount discrepancy. This is the page that fires when the Buy button
+  #     stops converting and every minute is lost GMV. Runs after the approval gate
+  #     so the human has seen the red verdict before the rotation is woken.
+  - id: page_revops
+    type: notify
+    depends_on: [cleanup_approval]
+    notify_config:
+      service: slack
+      channel: "{input.revops_slack_channel}"
+      message: ":rotating_light: CHECKOUT BROKEN - revenue canary RED (PagerDuty: {input.pagerduty_service}). Broken stage: {steps.canary_verdict.output.broken_stage}. Cause: {steps.canary_verdict.output.reason}. Failing assertion: {steps.canary_verdict.output.failing_assertion}. Amount discrepancy: {steps.canary_verdict.output.amount_discrepancy} {steps.canary_verdict.output.currency} (charged {steps.canary_verdict.output.total_charged}). Stages reached: {steps.canary_verdict.output.stages_reached}. Golden replay score {steps.canary_verdict.output.replay_score} (drift floor 0.9). Failure screenshot: {steps.canary_verdict.output.screenshot_url}. Product {input.product_url}. Paging payments on-call - every minute is lost GMV."
+
+on_complete:
+  storage_path: "synthetic-checkout-revenue-canary/{run_id}/result.json"

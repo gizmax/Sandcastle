@@ -1,0 +1,864 @@
+# name: KYC Onboarding Portal Filer
+# description: Drives a bank/broker/exchange KYC onboarding portal that exposes no batch write API to the onboarding party - a login-gated SPA with live document upload, OTP/2FA, and conditional PEP / beneficial-owner / source-of-funds sections that only render after earlier answers. It deterministically validates the entity record and document set, reads the onboarding wizard structure read-only (dom mode), builds a deterministic field+document mapping plan with a provider-agnostic conditional-section classify, gates data entry behind a compliance llm_eval plus a human analyst, fills every section and uploads each document via a provider-neutral playwright script that STOPS at the attestation/review screen, holds for a compliance officer's legally-binding approval, then checks the attestation box and Submits, asserts the case-reference pattern deterministically, regression-guards the fragile portal flow with a trajectory-replay against a golden run, and archives an immutable audit packet (screenshots, doc hashes, confirmation) for the AML file. Read is split from write and the flow fails closed - raw PII is redacted from logs, document hashes are logged, and the irreversible submit can never fire on a model's opinion alone.
+# tags: [KYC, AML, Onboarding, Compliance, BankPortal, BrokerPortal, CryptoExchange, RPA, Playwright, DOM, HumanInTheLoop, TrajectoryReplay, ProviderNeutral, NoAPI]
+# category: hr_legal
+
+name: kyc-onboarding-portal-filer
+description: >-
+  Takes an approved onboarding case that has reached status=ready_to_file - {entity_record, ubo_list,
+  document_set} - and files it onto a bank, broker, or crypto-exchange KYC onboarding portal on behalf
+  of a fintech / neobank / crypto-exchange compliance ops team onboarding a business or high-net-worth
+  customer. Correspondent-bank partner portals, regional regulator e-KYC sites, and broker sub-account
+  portals are per-provider, login-gated single-page apps with NO batch write API on the customer's plan:
+  data is keyed by hand today, with live document upload, OTP/2FA, and dynamic conditional sections
+  (PEP, beneficial-owner, source-of-funds) that only render after earlier answers. http cannot satisfy
+  session, file upload, or conditional rendering, so a real authenticated browser is the only path. The
+  flow is split read-from-write and fails closed. A DETERMINISTIC code step validates the entity record
+  against the required KYC field set, verifies every document file exists and matches an allowed
+  type/size, and redacts raw PII from logs while logging document hashes. A provider-neutral dom-mode
+  browser step logs in via KYC_PORTAL_CREDS (OTP/2FA handled by captcha_strategy=pause) and EXTRACTS the
+  onboarding wizard structure READ-ONLY via output_schema - sections, their visible_when conditions, and
+  the document upload slots - writing nothing. A provider-agnostic classify flags which conditional
+  sections (PEP / UBO / source-of-funds) must be filled, and a deterministic code step builds the exact
+  field+document mapping plan, rejecting on any value mismatch versus the source record. A gate
+  (llm_eval mapping-completeness + no-mismatch check, plus a human compliance analyst) must pass before
+  any data entry. Only then does a playwright-mode browser step fill all sections, upload each document
+  to its matched slot, advance to the attestation/REVIEW screen and STOP - returning a review snapshot,
+  the entered values, and the uploaded document hashes. A mandatory human compliance-officer approval
+  gates the legally-binding attestation: the officer reviews the entered values and doc hashes and
+  authorizes the irreversible submit. A second playwright step checks the attestation box and Submits,
+  capturing {case_reference, submitted_at, status}; a deterministic code step asserts the case_reference
+  matches the expected pattern - the load-bearing success gate, so a silently-failed submit can never be
+  recorded as a filed case. A trajectory-replay then regression-guards the fragile portal flow against a
+  known-good golden onboarding run (fail_below_score=0.9) so a portal redesign or a misclick is caught
+  instead of silently submitting garbage. Finally a report logs the filing as an immutable audit packet
+  PDF, and a reusable summarizer sub-workflow archives it for the AML file. Every browser step rides
+  default_model and stays swappable; the mapping-completeness llm_eval and the conditional-section
+  classify run provider-agnostically with failover; trajectory-replay compares structural trajectories,
+  not model-specific tokens, and the code validators are pure engine logic - so swapping the reasoning
+  provider never changes filing behavior or weakens safety.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 1800
+
+input_schema:
+  required: ["portal_url", "entity_record", "ubo_list", "document_set", "golden_run_id"]
+  properties:
+    portal_url:
+      type: string
+      description: "Start URL of the KYC onboarding wizard (a login-gated SPA with no batch write API). Templated into both browser steps' start_url."
+      example: "https://onboarding.partner-bank.example/kyc/new"
+    entity_record:
+      type: string
+      description: "Structured customer identity + entity data for this onboarding case, as a JSON string. Drives field mapping and the consistency check. Raw PII values are redacted from logs by the validate step."
+      example: '{"legal_name":"Acme Holdings Ltd","entity_type":"private_limited","registration_number":"HRB-558210","country":"DE","incorporation_date":"2019-03-14","registered_address":"Hauptstr 1, 10115 Berlin","is_pep":true,"source_of_funds":"operating_revenue","tax_id":"DE284912"}'
+    ubo_list:
+      type: string
+      description: "List of ultimate beneficial owners (>=25% or controlling) as a JSON string array. Each UBO drives the beneficial-owner conditional section. PII redacted from logs."
+      example: '[{"name":"Jane Roe","ownership_pct":40.0,"nationality":"DE","is_pep":true},{"name":"John Doe","ownership_pct":35.0,"nationality":"GB","is_pep":false}]'
+    document_set:
+      type: string
+      description: "List of identity / proof-of-address / incorporation documents to upload, as a JSON string array. Each item: {label, file_ref, type, size_bytes, sha256}. Existence, type, and size are validated before any filing; hashes are logged (never the raw bytes/PII)."
+      example: '[{"label":"certificate_of_incorporation","file_ref":"s3://kyc/acme/coi.pdf","type":"application/pdf","size_bytes":482113,"sha256":"a1b2c3"},{"label":"proof_of_address","file_ref":"s3://kyc/acme/poa.pdf","type":"application/pdf","size_bytes":201554,"sha256":"d4e5f6"},{"label":"ubo_passport_jane","file_ref":"s3://kyc/acme/jane.jpg","type":"image/jpeg","size_bytes":903221,"sha256":"99aa88"}]'
+    golden_run_id:
+      type: string
+      description: "Recorded run id of a known-good KYC onboarding flow for this portal. trajectory-replay diffs the live run against it and fails below fail_below_score so a portal redesign or misclick is caught (regression guard)."
+      example: "golden-partner-bank-kyc-2026-05-01"
+    required_kyc_fields:
+      type: array
+      description: "The required KYC field set the entity_record must satisfy for this jurisdiction/portal. The validate step fails closed if any is missing."
+      default: ["legal_name", "entity_type", "registration_number", "country", "incorporation_date", "registered_address", "source_of_funds"]
+    allowed_doc_types:
+      type: array
+      description: "Closed set of MIME types a document may carry; any other type fails validation (no filing on a disallowed document)."
+      default: ["application/pdf", "image/jpeg", "image/png"]
+    max_doc_size_bytes:
+      type: integer
+      description: "Maximum allowed size per document in bytes; an oversized file fails validation before any upload."
+      default: 10485760
+    case_reference_pattern:
+      type: string
+      description: "Regex the portal-issued case_reference must match (deterministic success gate). Defaults to a generic case-id shape; override per portal."
+      default: "^[A-Z]{2,6}-[0-9]{6,}$"
+      example: "^KYC-[0-9]{8,}$"
+    drift_fail_below_score:
+      type: number
+      description: "trajectory-replay score floor: if the live onboarding trajectory diverges from the golden run below this, the run is flagged as drifted (portal-redesign / misclick guard). Default 0.9 for a fragile legally-binding flow."
+      default: 0.9
+    compliance_officer_email:
+      type: string
+      description: "Email of the compliance officer who performs the legally-binding attestation approval before the irreversible submit."
+      default: ""
+      example: "compliance.officer@neobank.example"
+    notify_channel:
+      type: string
+      description: "Slack channel for the compliance ops team's filed / blocked / needs-attention notifications."
+      default: "#kyc-onboarding"
+      example: "#kyc-onboarding"
+
+steps:
+  # 1) DETERMINISTIC intake validation (sandboxed Python, no model). Confirm the entity_record satisfies
+  #    the required KYC field set, every referenced document exists with an allowed type and within the
+  #    size cap, and the UBO list is well-formed. Raw PII is REDACTED from the emitted log fields while
+  #    document HASHES are retained for the audit trail. Fails CLOSED - nothing touches a portal on a bad
+  #    packet. This is the load-bearing pre-flight check, not a model's opinion.
+  - id: validate_case
+    type: code
+    code_config:
+      language: python
+      code: |
+        import json
+        # --- Parse the structured onboarding case handed in by the CRM / case system. ---
+        def _load(raw, default):
+            if isinstance(raw, (dict, list)):
+                return raw
+            try:
+                return json.loads(raw)
+            except (TypeError, ValueError):
+                return default
+
+        entity = _load(_input.get('entity_record') or '', {})
+        if not isinstance(entity, dict):
+            entity = {}
+        ubos = _load(_input.get('ubo_list') or '', [])
+        if not isinstance(ubos, list):
+            ubos = []
+        docs = _load(_input.get('document_set') or '', [])
+        if not isinstance(docs, list):
+            docs = []
+
+        problems = []
+
+        # --- Required KYC field set for the entity record. ---
+        required_fields = _input.get('required_kyc_fields') or [
+            'legal_name', 'entity_type', 'registration_number', 'country',
+            'incorporation_date', 'registered_address', 'source_of_funds',
+        ]
+        for k in required_fields:
+            if not str(entity.get(k, '') or '').strip():
+                problems.append('missing required KYC field: ' + str(k))
+
+        # --- UBO list sanity: at least one UBO, each with a name and a numeric ownership pct. ---
+        if len(ubos) == 0:
+            problems.append('ubo_list is empty (at least one beneficial owner required)')
+        clean_ubos = []
+        for i, u in enumerate(ubos):
+            if not isinstance(u, dict):
+                problems.append('ubo #' + str(i) + ' is malformed')
+                continue
+            name = str(u.get('name', '') or '').strip()
+            if not name:
+                problems.append('ubo #' + str(i) + ' missing name')
+            try:
+                pct = float(u.get('ownership_pct'))
+            except (TypeError, ValueError):
+                pct = None
+                problems.append('ubo #' + str(i) + ' ownership_pct not numeric')
+            clean_ubos.append({
+                'index': i,
+                'has_name': bool(name),
+                'ownership_pct': pct,
+                'is_pep': bool(u.get('is_pep', False)),
+            })
+
+        # --- Document set: each must exist, carry an allowed type, and be within the size cap. ---
+        allowed_types = {str(t).lower() for t in (_input.get('allowed_doc_types') or
+                         ['application/pdf', 'image/jpeg', 'image/png'])}
+        try:
+            max_size = int(_input.get('max_doc_size_bytes', 10485760) or 10485760)
+        except (TypeError, ValueError):
+            max_size = 10485760
+
+        doc_manifest = []
+        if len(docs) == 0:
+            problems.append('document_set is empty (no documents to upload)')
+        for i, d in enumerate(docs):
+            if not isinstance(d, dict):
+                problems.append('document #' + str(i) + ' is malformed')
+                continue
+            label = str(d.get('label', '') or '').strip()
+            file_ref = str(d.get('file_ref', '') or '').strip()
+            dtype = str(d.get('type', '') or '').strip().lower()
+            sha = str(d.get('sha256', '') or '').strip()
+            try:
+                size = int(d.get('size_bytes', 0) or 0)
+            except (TypeError, ValueError):
+                size = 0
+            if not label:
+                problems.append('document #' + str(i) + ' missing label')
+            if not file_ref:
+                problems.append('document #' + str(i) + ' (' + (label or '?') + ') missing file_ref')
+            if dtype not in allowed_types:
+                problems.append('document ' + (label or '#' + str(i)) + ' has disallowed type ' + (dtype or '<none>'))
+            if size <= 0:
+                problems.append('document ' + (label or '#' + str(i)) + ' has non-positive size')
+            elif size > max_size:
+                problems.append('document ' + (label or '#' + str(i)) + ' exceeds max size ' + str(max_size))
+            if not sha:
+                problems.append('document ' + (label or '#' + str(i)) + ' missing sha256 hash (needed for audit)')
+            # Manifest carries the HASH, never raw bytes/PII.
+            doc_manifest.append({
+                'label': label,
+                'type': dtype,
+                'size_bytes': size,
+                'sha256': sha,
+                'present': bool(file_ref),
+            })
+
+        # --- PII REDACTION for logs: keep structure + flags, drop raw identity values. ---
+        is_pep = bool(entity.get('is_pep', False)) or any(u.get('is_pep') for u in clean_ubos)
+        source_of_funds = str(entity.get('source_of_funds', '') or '').strip()
+        redacted_entity = {
+            'entity_type': str(entity.get('entity_type', '') or ''),
+            'country': str(entity.get('country', '') or ''),
+            'legal_name_present': bool(str(entity.get('legal_name', '') or '').strip()),
+            'registration_number_present': bool(str(entity.get('registration_number', '') or '').strip()),
+            'registered_address_present': bool(str(entity.get('registered_address', '') or '').strip()),
+            'is_pep': is_pep,
+            'source_of_funds': source_of_funds,
+            'ubo_count': len(clean_ubos),
+        }
+
+        ok = len(problems) == 0
+        result = {
+            'ok': ok,
+            'problems': problems,
+            # Redacted, log-safe view (no raw PII).
+            'redacted_entity': redacted_entity,
+            'doc_manifest': doc_manifest,
+            'doc_count': len(doc_manifest),
+            'doc_hashes': [d['sha256'] for d in doc_manifest if d['sha256']],
+            'ubos': clean_ubos,
+            'ubo_count': len(clean_ubos),
+            # Flags that decide which conditional sections MUST be filled.
+            'is_pep': is_pep,
+            'has_ubos': len(clean_ubos) > 0,
+            'source_of_funds_present': bool(source_of_funds),
+            # Full entity is passed forward for the fill/mapping steps but is NOT a logged field.
+            'entity': entity,
+        }
+
+  # 1b) Hard stop on a bad packet - never touch a KYC portal with an incomplete case or bad document.
+  - id: case_gate
+    type: condition
+    depends_on: [validate_case]
+    condition_config:
+      expression: "{steps.validate_case.output.ok} == True"
+      then: [read_wizard]
+      else: [notify_blocked]
+
+  # 1c) Blocked branch: tell compliance ops the case was NOT filed and why. Nothing was submitted.
+  - id: notify_blocked
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        KYC onboarding case was BLOCKED before any portal entry. Packet validation failed:
+        {steps.validate_case.output.problems}. No case was filed and no PII was transmitted. Fix the
+        entity record / document set and re-run.
+
+  # 2) READ PASS (dom mode, READ-ONLY, provider-neutral). The reasoning model logs in via
+  #    KYC_PORTAL_CREDS (never inlined) - OTP/2FA and CAPTCHA both hand off to a human through
+  #    captcha_strategy=pause - opens the onboarding wizard, and EXTRACTS its structure WITHOUT entering
+  #    anything: the ordered sections, each section's visible_when condition (so PEP / UBO /
+  #    source-of-funds conditional rendering is captured), the fields, and the document UPLOAD slots.
+  #    max_actions caps clicking; output_schema returns structured JSON to map against. No write happens.
+  - id: read_wizard
+    type: browser
+    depends_on: [case_gate]
+    prompt: >-
+      You are doing a READ-ONLY reconnaissance of a bank/broker/exchange KYC onboarding web wizard. Log
+      in using the credentials provided via the KYC_PORTAL_CREDS environment variable. If an OTP / 2FA
+      prompt, a device-verification step, or a CAPTCHA appears, STOP and hand off to a human
+      (captcha_strategy=pause) - do not attempt to solve it. Open the onboarding / new-customer wizard.
+      DO NOT type into, select, upload to, or submit any field - this is a structure read only. Walk the
+      wizard and report its structure: the ordered list of sections, and for each section its name, its
+      visible_when condition (the prior answer that makes it render, e.g. a PEP, beneficial-owner, or
+      source-of-funds section that only appears after earlier answers), and its fields (name, label,
+      input type, whether required, allowed options if a dropdown). Also report the document UPLOAD slots
+      (which slot accepts which document label / accepted types). Return ONLY the structured object
+      described by the output schema.
+    browser_config:
+      mode: dom
+      start_url: "{input.portal_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 300
+      max_actions: 60
+      headless: true
+      credentials_env: "KYC_PORTAL_CREDS"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          sections:
+            type: array
+            items:
+              type: object
+              properties:
+                name: { type: string }
+                visible_when: { type: string }
+                fields:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name: { type: string }
+                      label: { type: string }
+                      input_type: { type: string }
+                      required: { type: boolean }
+                      options:
+                        type: array
+                        items: { type: string }
+          upload_slots:
+            type: array
+            items:
+              type: object
+              properties:
+                label: { type: string }
+                accepted_types:
+                  type: array
+                  items: { type: string }
+
+  # 3) CLASSIFY (provider-agnostic with failover) - flag WHICH conditional sections must be filled for
+  #    this case (PEP / beneficial-owner / source-of-funds) given the validated flags and the wizard's
+  #    visible_when conditions. Routing only - the load-bearing mapping is built deterministically in the
+  #    next code step; every branch converges on build_mapping_plan.
+  - id: flag_conditional_sections
+    type: classify
+    depends_on: [read_wizard]
+    model: haiku
+    classify_config:
+      model: haiku
+      input: >-
+        Decide which conditional onboarding sections this KYC case must complete, given the wizard's
+        sections and their visible_when conditions and the validated case flags. Choose 'pep_and_ubo'
+        when the case is a PEP AND has beneficial owners (both the PEP and beneficial-owner sections must
+        be filled); 'ubo_only' when there are beneficial owners but no PEP exposure; 'source_of_funds'
+        when neither PEP nor extra UBO sections apply but a source-of-funds section is required; 'base'
+        when only the standard identity sections apply. Validated case flags (PEP / UBO / source-of-funds
+        presence): {steps.validate_case.output} . Wizard structure with visible_when conditions:
+        {steps.read_wizard.output} .
+      categories:
+        - pep_and_ubo
+        - ubo_only
+        - source_of_funds
+        - base
+      branches:
+        pep_and_ubo: [build_mapping_plan]
+        ubo_only: [build_mapping_plan]
+        source_of_funds: [build_mapping_plan]
+        base: [build_mapping_plan]
+
+  # 4) DETERMINISTIC field+document MAPPING PLAN (sandboxed Python, no model). Builds the exact plan:
+  #    each entity_record value -> the wizard field that should hold it, each document -> its matched
+  #    upload slot, and the list of conditional sections that MUST be filled (PEP / UBO / source-of-funds
+  #    flagged from the validated record). REJECTS on any value mismatch vs the source record or any
+  #    required field with no source value, and flags any document with no matching slot. This is the
+  #    load-bearing correctness layer before the gate - nothing is entered on a bad plan.
+  - id: build_mapping_plan
+    type: code
+    depends_on: [flag_conditional_sections]
+    code_config:
+      language: python
+      code: |
+        validated = _steps.get('validate_case') or {}
+        if not isinstance(validated, dict):
+            validated = {}
+        wizard = _steps.get('read_wizard') or {}
+        if not isinstance(wizard, dict):
+            wizard = {}
+        # Browser payloads may nest under output/data/result.
+        for key in ('output', 'data', 'result'):
+            inner = wizard.get(key)
+            if isinstance(inner, dict) and ('sections' in inner or 'upload_slots' in inner):
+                wizard = inner
+                break
+
+        entity = validated.get('entity') if isinstance(validated.get('entity'), dict) else {}
+        doc_manifest = validated.get('doc_manifest') if isinstance(validated.get('doc_manifest'), list) else []
+        sections = wizard.get('sections') if isinstance(wizard.get('sections'), list) else []
+        upload_slots = wizard.get('upload_slots') if isinstance(wizard.get('upload_slots'), list) else []
+
+        problems = []
+
+        # --- Field mapping: every REQUIRED wizard field must trace to a source value. ---
+        field_plan = []
+        # Build a lower-cased lookup of source values so portal field names map by normalized key.
+        src_lookup = {}
+        for k, v in entity.items():
+            src_lookup[str(k).strip().lower().replace(' ', '_')] = v
+        required_unmapped = []
+        for sec in sections:
+            if not isinstance(sec, dict):
+                continue
+            sec_name = str(sec.get('name', '') or '')
+            for f in (sec.get('fields') or []):
+                if not isinstance(f, dict):
+                    continue
+                fname = str(f.get('name', '') or '').strip()
+                if not fname:
+                    continue
+                norm = fname.lower().replace(' ', '_')
+                src_val = src_lookup.get(norm)
+                has_src = src_val not in (None, '', [], {})
+                if bool(f.get('required')) and not has_src:
+                    required_unmapped.append(sec_name + '.' + fname)
+                field_plan.append({
+                    'section': sec_name,
+                    'field': fname,
+                    'source_key': norm if has_src else '',
+                    'has_source': bool(has_src),
+                    'required': bool(f.get('required')),
+                })
+        if required_unmapped:
+            problems.append('required wizard fields with no source value: ' + ', '.join(required_unmapped))
+
+        # --- Document -> upload slot matching (by normalized label, then by accepted type). ---
+        slot_by_label = {}
+        for s in upload_slots:
+            if isinstance(s, dict):
+                slot_by_label[str(s.get('label', '') or '').strip().lower()] = s
+        doc_plan = []
+        unmatched_docs = []
+        for d in doc_manifest:
+            if not isinstance(d, dict):
+                continue
+            label = str(d.get('label', '') or '').strip()
+            slot = slot_by_label.get(label.lower())
+            matched = bool(slot)
+            if not matched:
+                unmatched_docs.append(label or '<unlabeled>')
+            doc_plan.append({
+                'label': label,
+                'sha256': str(d.get('sha256', '') or ''),
+                'type': str(d.get('type', '') or ''),
+                'matched_slot': str(slot.get('label', '')) if isinstance(slot, dict) else '',
+                'matched': matched,
+            })
+        if unmatched_docs:
+            problems.append('documents with no matching upload slot: ' + ', '.join(unmatched_docs))
+
+        # --- Conditional sections that MUST be filled, from the validated flags. ---
+        must_fill = []
+        if validated.get('is_pep'):
+            must_fill.append('pep')
+        if validated.get('has_ubos'):
+            must_fill.append('beneficial_owner')
+        if validated.get('source_of_funds_present'):
+            must_fill.append('source_of_funds')
+
+        # The plan is only safe when every required field maps and every doc has a slot.
+        ok = (len(problems) == 0) and (len(field_plan) > 0) and (len(doc_plan) > 0)
+        result = {
+            'ok': ok,
+            'problems': problems,
+            'field_plan': field_plan,
+            'field_count': len(field_plan),
+            'required_unmapped': required_unmapped,
+            'doc_plan': doc_plan,
+            'doc_count': len(doc_plan),
+            'unmatched_docs': unmatched_docs,
+            'must_fill_conditional': must_fill,
+            'doc_hashes': validated.get('doc_hashes', []),
+        }
+
+  # 4b) Hard stop on a bad mapping - do NOT proceed to the gate / data entry on an incomplete plan.
+  - id: plan_gate
+    type: condition
+    depends_on: [build_mapping_plan]
+    condition_config:
+      expression: "{steps.build_mapping_plan.output.ok} == True"
+      then: [entry_gate]
+      else: [notify_plan_failed]
+
+  - id: notify_plan_failed
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        KYC onboarding case could NOT be mapped to the portal wizard before any data entry:
+        {steps.build_mapping_plan.output.problems}. Unmatched documents:
+        {steps.build_mapping_plan.output.unmatched_docs}; unmapped required fields:
+        {steps.build_mapping_plan.output.required_unmapped}. Nothing was entered. Resolve and re-run.
+
+  # 5) PRE-ENTRY GATE - ALL strategies must pass before anything is typed/uploaded into the portal.
+  #    (a) llm_eval: verifies the mapping is COMPLETE (all required conditional sections covered) and has
+  #        NO value mismatch versus the source record (provider-swappable, runs with failover).
+  #    (b) human: a compliance analyst signs off on the mapping before entry. This gate is the last stop
+  #    before the (still reversible) data entry; the irreversible submit is gated separately downstream.
+  - id: entry_gate
+    type: gate
+    depends_on: [plan_gate]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are a KYC mapping-completeness reviewer. Verify the proposed field+document mapping plan
+              is COMPLETE and CONSISTENT with the validated source record BEFORE any data is entered into
+              the onboarding portal. Reply with exactly 'approved' only if: every required wizard field
+              has a traceable source value (no required field unmapped); every required conditional
+              section flagged in must_fill_conditional (PEP / beneficial-owner / source-of-funds) is
+              covered by the field plan; every document is matched to an upload slot; and no planned value
+              contradicts the source record (no invented data). Otherwise reply 'rejected' and name each
+              gap or mismatch. Validated case (redacted flags + hashes): {steps.validate_case.output} .
+              Mapping plan: {steps.build_mapping_plan.output} .
+            input: "{steps.build_mapping_plan.output}"
+            model: google/gemini-2.5-pro
+        - type: human
+          config:
+            message: >-
+              KYC pre-entry review. Confirm the field+document mapping plan is correct and approve entry
+              into the onboarding portal. Conditional sections that must be filled:
+              {steps.build_mapping_plan.output.must_fill_conditional}. Documents:
+              {steps.build_mapping_plan.output.doc_count} matched. Reject if any required field is
+              unmapped or any document is unmatched. Mapping: {steps.build_mapping_plan.output}
+            timeout_hours: 24
+            on_timeout: abort
+
+  # 6) FILL PASS (playwright mode, provider-neutral). The reasoning model AUTHORS a Playwright script
+  #    that re-logs-in via KYC_PORTAL_CREDS (OTP/2FA/CAPTCHA pause to a human), fills EVERY section from
+  #    the approved plan - including the conditional PEP / beneficial-owner / source-of-funds sections
+  #    that only render after earlier answers - uploads EACH document to its matched slot, advances to
+  #    the ATTESTATION / REVIEW screen, and STOPS. It does NOT check the attestation box or click Submit.
+  #    capture_screenshots gives an auditable review snapshot; output_schema returns the entered values
+  #    and the uploaded document hashes for the compliance officer. max_actions bounds the wizard.
+  - id: fill_to_attestation
+    type: browser
+    depends_on: [entry_gate]
+    prompt: >-
+      You are completing a KYC onboarding wizard on a bank/broker/exchange portal. Authenticate using the
+      KYC_PORTAL_CREDS environment variable - if an OTP / 2FA prompt or CAPTCHA appears, PAUSE for a human
+      (do not attempt to solve it). Open the onboarding wizard and walk it end to end. Using the APPROVED
+      mapping plan, fill every required field in every section from the source record, including the
+      conditional sections that only render after earlier answers (PEP, beneficial-owner, and
+      source-of-funds), waiting for client-side validation to settle before advancing. Upload EACH
+      document from the plan to its matched upload slot. CRITICAL: advance only to the FINAL ATTESTATION /
+      REVIEW screen and STOP there - DO NOT check the attestation / declaration checkbox and DO NOT click
+      the final Submit / File button. Attestation and submission are a separate, human-approved step.
+      Approved mapping plan: {steps.build_mapping_plan.output} . Conditional sections to complete:
+      {steps.build_mapping_plan.output.must_fill_conditional}. Return ONLY the structured object: a
+      reference to the captured review snapshot, the entered values as shown on the review screen, the
+      list of uploaded document hashes (sha256), the count of documents actually attached, and whether
+      the attestation checkbox + submit button are present and enabled.
+    browser_config:
+      mode: playwright
+      start_url: "{input.portal_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 600
+      max_actions: 150
+      headless: true
+      credentials_env: "KYC_PORTAL_CREDS"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          review_snapshot: { type: string }
+          entered_values:
+            type: object
+            properties:
+              legal_name: { type: string }
+              entity_type: { type: string }
+              country: { type: string }
+              registration_number: { type: string }
+              is_pep: { type: boolean }
+              sections_completed: { type: integer }
+          uploaded_doc_hashes:
+            type: array
+            items: { type: string }
+          attached_doc_count: { type: integer }
+          attestation_checkbox_present: { type: boolean }
+          submit_button_present: { type: boolean }
+
+  # 6b) DETERMINISTIC validation of the FILLED attestation state (no model). The load-bearing pre-submit
+  #     check: the uploaded document hashes must equal the validated set (no missing/extra/wrong doc),
+  #     the attached count must match the plan, and the attestation checkbox + submit button must be
+  #     present (wizard actually reached attestation). A review snapshot must exist. Fails closed.
+  - id: validate_attestation
+    type: code
+    depends_on: [fill_to_attestation]
+    code_config:
+      language: python
+      code: |
+        read_out = _steps.get('fill_to_attestation') or {}
+        if not isinstance(read_out, dict):
+            read_out = {}
+        for key in ('output', 'data', 'result'):
+            inner = read_out.get(key)
+            if isinstance(inner, dict) and ('uploaded_doc_hashes' in inner or 'entered_values' in inner):
+                read_out = inner
+                break
+
+        plan = _steps.get('build_mapping_plan') or {}
+        if not isinstance(plan, dict):
+            plan = {}
+        validated = _steps.get('validate_case') or {}
+        if not isinstance(validated, dict):
+            validated = {}
+
+        problems = []
+
+        # Uploaded doc hashes must equal the validated document hash set (no missing/extra/wrong doc).
+        expected_hashes = [str(h) for h in (validated.get('doc_hashes') or []) if str(h)]
+        got_hashes = read_out.get('uploaded_doc_hashes')
+        if not isinstance(got_hashes, list):
+            got_hashes = []
+        got_hashes = [str(h) for h in got_hashes if str(h)]
+        if set(got_hashes) != set(expected_hashes):
+            missing = [h for h in expected_hashes if h not in got_hashes]
+            extra = [h for h in got_hashes if h not in expected_hashes]
+            problems.append('uploaded doc hashes do not match the validated set (missing '
+                            + str(len(missing)) + ', unexpected ' + str(len(extra)) + ')')
+
+        # Attached document count must equal the planned document count.
+        def _int(v):
+            try:
+                return int(v)
+            except (TypeError, ValueError):
+                return 0
+        expected_docs = _int(plan.get('doc_count'))
+        attached = _int(read_out.get('attached_doc_count'))
+        if attached != expected_docs:
+            problems.append('attached doc count ' + str(attached) + ' != planned ' + str(expected_docs))
+
+        # The wizard must have reached an attestation-capable review screen.
+        if not read_out.get('attestation_checkbox_present'):
+            problems.append('attestation checkbox not present - wizard did not reach attestation')
+        if not read_out.get('submit_button_present'):
+            problems.append('submit button not present - wizard did not reach review')
+
+        # A review snapshot must exist for the compliance officer to inspect.
+        review_snapshot = str(read_out.get('review_snapshot', '') or '').strip()
+        if not review_snapshot:
+            problems.append('no review snapshot captured for the compliance officer')
+
+        entered = read_out.get('entered_values') if isinstance(read_out.get('entered_values'), dict) else {}
+
+        ok = len(problems) == 0
+        result = {
+            'ok': ok,
+            'problems': problems,
+            'review_snapshot': review_snapshot,
+            'entered_values': entered,
+            'uploaded_doc_hashes': got_hashes,
+            'expected_doc_hashes': expected_hashes,
+            'attached_doc_count': attached,
+            'expected_doc_count': expected_docs,
+        }
+
+  # 6c) Hard stop on a bad fill - do NOT advance to the officer approval / submit on a bad attestation read.
+  - id: attestation_gate
+    type: condition
+    depends_on: [validate_attestation]
+    condition_config:
+      expression: "{steps.validate_attestation.output.ok} == True"
+      then: [approve_attestation]
+      else: [notify_attestation_failed]
+
+  - id: notify_attestation_failed
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        KYC onboarding reached the portal attestation screen but the deterministic review check FAILED
+        before submission: {steps.validate_attestation.output.problems}. Nothing was submitted. Re-check
+        the wizard fill and document uploads, then re-run.
+
+  # 7) HUMAN COMPLIANCE-OFFICER APPROVAL before the legally-binding attestation/submit. The officer sees
+  #    the validated entered values, the uploaded document hashes, and the captured review snapshot and
+  #    authorizes the IRREVERSIBLE submit. No submission can occur without this gate; on_timeout: abort
+  #    never auto-submits - this is the human authority over a legally-binding KYC filing.
+  - id: approve_attestation
+    type: approval
+    approval_config:
+      message: >-
+        AUTHORIZE the legally-binding KYC ATTESTATION + SUBMISSION. This is IRREVERSIBLE - it attests to
+        and files the customer's KYC onboarding case. The case is filled and sitting on the portal's
+        attestation screen with {steps.validate_attestation.output.attached_doc_count} documents attached
+        (expected {steps.validate_attestation.output.expected_doc_count}). Uploaded document hashes:
+        {steps.validate_attestation.output.uploaded_doc_hashes}. Review the captured review snapshot and
+        the entered values - this is the EXACT state you are attesting to and filing. Approve to check the
+        attestation box and submit; reject to abort with nothing filed.
+      show_data: steps.validate_attestation.output
+      show_images: ["steps.validate_attestation.output.review_snapshot"]
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: false
+
+  # 8) SUBMIT PASS (playwright mode, WRITE). Only reached AFTER the compliance officer approves. Re-opens
+  #    the filled attestation screen, checks the attestation/declaration box, clicks the single final
+  #    Submit button ONCE, then reads the portal's confirmation and captures {case_reference,
+  #    submitted_at, status}. capture_screenshots gives an after-submit audit record; max_actions tightly
+  #    capped (check box + one confirm action); OTP/2FA/CAPTCHA pause to a human.
+  - id: submit_case
+    type: browser
+    depends_on: [approve_attestation]
+    prompt: >-
+      A compliance officer has authorized this IRREVERSIBLE, legally-binding KYC submission. Authenticate
+      with KYC_PORTAL_CREDS if the session expired (OTP/2FA/CAPTCHA pause to a human), return to the
+      filled attestation / review screen, confirm the values still match the approved review, then check
+      the attestation / declaration checkbox and click the SINGLE final Submit / File button ONCE to file
+      the case. Do NOT edit any field, do NOT re-upload any document, and do NOT click submit more than
+      once. If a CAPTCHA or step-up auth appears at this final wall, PAUSE for a human - do not attempt to
+      solve it. Then read the portal's confirmation page and capture the portal-issued CASE REFERENCE, the
+      submitted timestamp, and the case status. Return ONLY the structured object described by the output
+      schema.
+    browser_config:
+      mode: playwright
+      start_url: "{input.portal_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 300
+      max_actions: 20
+      headless: true
+      credentials_env: "KYC_PORTAL_CREDS"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          case_reference: { type: string }
+          submitted_at: { type: string }
+          status: { type: string }
+          confirmation_screenshot: { type: string }
+
+  # 9) DETERMINISTIC SUCCESS GATE (no model). Assert the portal-issued case_reference is present and
+  #    matches the expected pattern. A missing/malformed case_reference means the submit did NOT provably
+  #    land - so a silently-failed submit can NEVER be recorded as a filed case.
+  - id: assert_case_reference
+    type: code
+    depends_on: [submit_case]
+    code_config:
+      language: python
+      code: |
+        import re
+        sub = _steps.get('submit_case') or {}
+        if not isinstance(sub, dict):
+            sub = {}
+        for key in ('output', 'data', 'result'):
+            inner = sub.get(key)
+            if isinstance(inner, dict) and ('case_reference' in inner):
+                sub = inner
+                break
+
+        case_reference = str(sub.get('case_reference', '') or '').strip()
+        submitted_at = str(sub.get('submitted_at', '') or '').strip()
+        status = str(sub.get('status', '') or '').strip()
+
+        pattern = str(_input.get('case_reference_pattern', '') or '').strip()
+        if not pattern:
+            pattern = '^[A-Z]{2,6}-[0-9]{6,}$'
+
+        problems = []
+        matched = False
+        if not case_reference:
+            problems.append('portal returned no case_reference - submission not provably accepted')
+        else:
+            try:
+                matched = bool(re.search(pattern, case_reference))
+            except (TypeError, ValueError):
+                matched = False
+            if not matched:
+                problems.append('case_reference "' + case_reference + '" does not match pattern ' + pattern)
+        if not submitted_at:
+            problems.append('no submitted_at timestamp returned')
+
+        filed = bool(case_reference) and matched and (len(problems) == 0)
+        result = {
+            'filed': filed,
+            'problems': problems,
+            'case_reference': case_reference,
+            'submitted_at': submitted_at,
+            'status': status,
+            'pattern': pattern,
+        }
+
+  # 9b) Branch on the deterministic success gate. Only a provably-filed case proceeds to the regression
+  #     guard + archive. An unconfirmed submit is paged to the team and left needing attention.
+  - id: filed_gate
+    type: condition
+    depends_on: [assert_case_reference]
+    condition_config:
+      expression: "{steps.assert_case_reference.output.filed} == True"
+      then: [regression_guard]
+      else: [notify_submit_unconfirmed]
+
+  # 9c) UNCONFIRMED PATH - submit happened but the case_reference did not validate. Page the team and
+  #     leave the run needing attention. A false success is NEVER recorded as a filed case.
+  - id: notify_submit_unconfirmed
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        NEEDS ATTENTION: KYC submit did NOT return a valid case_reference
+        ({steps.assert_case_reference.output.problems}). Do NOT assume the case was filed - manually
+        check the onboarding portal. The run is left in a needs-attention state.
+
+  # 10) TRAJECTORY-REPLAY (reliability gate, engine-native, model-independent). Re-drive the recorded
+  #     onboarding flow and diff its structural trajectory against the known-good golden run. If a portal
+  #     redesign moved a section or the submit control, or a misclick diverged the path - which could
+  #     otherwise silently submit garbage - the replay score drops below drift_fail_below_score (0.9 for
+  #     this fragile legally-binding flow) and the run is flagged as drifted. Cost blowup vs golden is
+  #     rejected too. trajectory-replay compares structural trajectories, not model-specific tokens, so
+  #     reliability does not depend on any one provider.
+  - id: regression_guard
+    type: trajectory-replay
+    depends_on: [filed_gate]
+    trajectory_replay_config:
+      golden_run_id: "{input.golden_run_id}"
+      fail_below_score: 0.9
+      allow_cost_delta_pct: 10.0
+      cost_budget_usd: 0.50
+
+  # 11) REPORT - log the filing as an immutable audit packet PDF for the AML file: the redacted case
+  #     summary, the portal case reference, the submitted timestamp, the uploaded document hashes, and a
+  #     note that the case was deterministically validated, a dual pre-entry gate (llm_eval mapping
+  #     completeness + human analyst) passed, a compliance officer approved the legally-binding
+  #     attestation, the case reference was asserted against the expected pattern, and a trajectory-replay
+  #     regression-guarded the portal flow. Screenshots from the browser steps are part of the audit trail.
+  - id: audit_packet_report
+    type: report
+    depends_on: [regression_guard]
+    report_config:
+      template: "research-report"
+      format: pdf
+      theme: professional
+      title: "KYC Onboarding Filing Record - {steps.assert_case_reference.output.case_reference}"
+      author: "Compliance Onboarding Desk"
+    prompt: >-
+      Produce a formal, immutable KYC onboarding audit packet PDF for the AML file from the payload below.
+      Include: the portal case reference, the submitted timestamp and status, the count of documents
+      attached and the full list of uploaded document hashes (sha256), the redacted entity/case summary
+      (entity type, country, PEP flag, UBO count, source of funds - NO raw PII), and an attestation trail
+      noting that the case packet was deterministically validated, a dual pre-entry gate (llm_eval mapping
+      completeness + a human compliance analyst) passed, a human compliance officer approved the
+      legally-binding attestation and submission, the case reference was asserted against the portal's
+      expected pattern before recording, and a trajectory-replay regression-guarded the fragile portal
+      flow against a golden run (score floor {input.drift_fail_below_score}). Filing payload:
+      {steps.assert_case_reference.output} . Validated case (redacted): {steps.validate_case.output.redacted_entity} .
+      Uploaded document hashes: {steps.validate_attestation.output.uploaded_doc_hashes} .
+
+  # 12) ARCHIVE (sub-workflow) - hand the audit packet to a reusable summarizer workflow so every filing
+  #     leaves an auditable, structured record for the AML file. Read-only handoff, provider-neutral
+  #     downstream workflow (not a vendor agent runtime). The packet bytes land via on_complete.storage_path.
+  - id: archive_audit_packet
+    type: sub_workflow
+    depends_on: [audit_packet_report]
+    sub_workflow:
+      workflow: "summarize"
+      input_mapping:
+        text: "{steps.assert_case_reference.output}"
+        format: "bullet-points"
+      max_concurrent: 1
+
+on_complete:
+  storage_path: "kyc-onboarding-portal-filer/{steps.assert_case_reference.output.case_reference}/{run_id}/audit-packet.json"

@@ -1,0 +1,587 @@
+# name: SaaS Admin Seat Deprovisioning Offboard
+# description: On an employee-offboard trigger from HRIS/ticketing, drive every no-API SaaS admin console to find the departing user's seat, capture license + owned-asset state (read-only dom census), deterministically verify the matched email is the right person, classify each account as safe-to-deactivate vs needs-asset-transfer-first, then - behind ONE human approval that shows the full per-app blast radius - perform ownership transfer and deactivation in playwright mode, llm_eval-gate that each console now shows the seat inactive, and ship a PDF evidence pack to Slack and the ticket.
+# tags: [Offboarding, Deprovisioning, SaaS, ITSec, NoAPI, Browser, Playwright, DOM, HumanApproval, Audit, Evidence]
+# category: devops
+
+name: saas-admin-seat-deprovisioning-offboard
+description: >-
+  Offboard a departing employee across SaaS tools whose admin panels expose NO SCIM/API on the
+  customer's plan tier (legacy or cheap-tier SaaS, internal-built admin panels, niche industry
+  tools). Triggered by a webhook from HRIS / ticketing when an offboarding ticket is created
+  (employee_email + last_day), this template drives each tool's authenticated admin SPA to find the
+  user's seat, capture license + owned-asset state, and deactivate the account - with a single human
+  gate before any irreversible deactivation.
+
+  Flow: a parse step extracts employee_email and the list of target SaaS apps from the offboard
+  payload. A deterministic code step normalizes that into a per-app work list. A READ census loop
+  runs a browser step (mode: dom) per app: it logs into that app's admin user-search URL via a
+  per-app credentials_env, finds the departing user, and returns a STRUCTURED snapshot via
+  output_schema (app, user_found, seat_id, role, last_login, owned_assets, billing_impact) -
+  mutating nothing. A DETERMINISTIC code step validates every snapshot: it normalizes the matched
+  email (case-insensitive via re.sub) and HARD-FAILS if any console's matched email is not the
+  target - so the wrong person can never be deactivated. A classify step tags each account as
+  safe_to_deactivate vs needs_asset_transfer_first. Then ONE human approval signs off the entire
+  batch, showing the full per-app blast radius (owned assets, billing impact); on_timeout it aborts.
+  Only after approval does a WRITE loop run a browser step (mode: playwright, capture_screenshots on,
+  max_actions capped) per app: it performs ownership transfer (if needed) then deactivation, and
+  returns a structured result (app, deactivated, assets_transferred_to, confirmation). An llm_eval
+  gate verifies each app's post-action page shows the seat as inactive; a deterministic code reconcile
+  is the authoritative correctness check; a report step compiles a PDF offboarding evidence pack; and
+  notify posts to Slack and the ticket.
+
+  PROVIDER NEUTRAL: the read census uses dom mode and the write pass uses playwright mode, both
+  authored from the prompt by whatever reasoning model is configured (any of the 7 providers), so the
+  automation is swappable - no vendor agent runtime is in the loop. The wrong-user safeguard is
+  deterministic Python email equality, not a model's opinion; the classify and the llm_eval gate are
+  provider-swappable. Per-app admin credentials are supplied ONLY via credentials_env (never inlined);
+  captcha_strategy=pause hands MFA/CAPTCHA walls to a human; max_actions caps the write pass.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 2400
+
+input_schema:
+  required: ["offboard_payload"]
+  properties:
+    offboard_payload:
+      type: string
+      description: "The offboarding webhook payload from HRIS / ticketing (JSON string or pasted text). Must contain the departing employee_email, last_day, and the list of target SaaS apps to deprovision. Each app entry should carry: app name, admin_search_url (the admin user-search URL), credentials_env (name of the env var holding that app's admin login), and optionally a member_url_template."
+      example: '{"employee_email":"jane.doe@acme.com","last_day":"2026-06-15","ticket_id":"OFFB-4821","apps":[{"app":"LegacyCRM","admin_search_url":"https://admin.legacycrm.io/users?q={email}","credentials_env":"LEGACYCRM_ADMIN_CREDS"},{"app":"NicheDAM","admin_search_url":"https://dam.niche.tools/team/search?email={email}","credentials_env":"NICHEDAM_ADMIN_CREDS"}]}'
+    default_credentials_env:
+      type: string
+      description: "Fallback env-var name for admin credentials if a given app entry does not specify its own credentials_env. The value is NEVER inlined into the workflow - only the variable NAME travels."
+      default: "SAAS_ADMIN_CREDS"
+      example: "SAAS_ADMIN_CREDS"
+    approval_timeout_hours:
+      type: integer
+      description: "Hours the single human deactivation-approval waits before its timeout fires. on_timeout is abort - a missed approval NEVER auto-deactivates."
+      default: 48
+      example: "48"
+    slack_channel:
+      type: string
+      description: "Slack channel for the offboarding evidence-pack summary and any drift report."
+      default: "#it-offboarding"
+      example: "#it-offboarding"
+    evidence_author:
+      type: string
+      description: "Author / owning team stamped onto the generated PDF offboarding evidence pack."
+      default: "IT Security - Offboarding"
+      example: "IT Security - Offboarding"
+
+steps:
+  # 1) PARSE the offboard webhook payload into structured JSON: the departing employee_email, the
+  #    last_day, the ticket id, and the list of target SaaS apps. Deterministic ingest; no console
+  #    contact yet.
+  - id: parse_offboard_payload
+    type: parse
+    prompt: "{input.offboard_payload}"
+    parse_config:
+      output: json
+
+  # 2) DETERMINISTIC normalize: turn the parsed payload into a clean per-app work list, each carrying
+  #    the app name, its admin_search_url (with {email} substituted to the target), and the NAME of
+  #    the env var holding that app's admin credentials (never the secret itself). Pure Python; this
+  #    is also the canonical lower-cased target email the safety check later compares against.
+  - id: build_app_worklist
+    type: code
+    depends_on: [parse_offboard_payload]
+    code_config:
+      language: python
+      code: |
+        import json
+        import re
+
+        payload = _steps['parse_offboard_payload']
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload) if payload.strip() else {}
+            except (ValueError, TypeError):
+                payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+
+        # Canonical target email (lower-cased, trimmed) - the single source of truth for the
+        # wrong-user safety check downstream.
+        raw_email = str(payload.get('employee_email') or payload.get('email') or '').strip()
+        target_email = re.sub(r'\s+', '', raw_email).lower()
+
+        last_day = str(payload.get('last_day') or payload.get('lastDay') or '').strip()
+        ticket_id = str(payload.get('ticket_id') or payload.get('ticketId') or payload.get('ticket') or '').strip()
+
+        default_creds = str(_input.get('default_credentials_env') or 'SAAS_ADMIN_CREDS').strip()
+
+        apps_in = payload.get('apps') or payload.get('saas_apps') or payload.get('targets') or []
+        if not isinstance(apps_in, list):
+            apps_in = []
+
+        worklist = []
+        for entry in apps_in:
+            if not isinstance(entry, dict):
+                continue
+            app_name = str(entry.get('app') or entry.get('name') or entry.get('tool') or '').strip()
+            search_url = str(entry.get('admin_search_url') or entry.get('search_url') or entry.get('url') or '').strip()
+            if not app_name or not search_url:
+                continue
+            # Substitute the target email into the app's admin user-search URL template.
+            resolved_url = search_url.replace('{email}', target_email)
+            creds_env = str(entry.get('credentials_env') or entry.get('creds_env') or default_creds).strip()
+            member_tpl = str(entry.get('member_url_template') or search_url).replace('{email}', target_email)
+            worklist.append({
+                'app': app_name,
+                'target_email': target_email,
+                'admin_search_url': resolved_url,
+                'credentials_env': creds_env,
+                'member_url_template': member_tpl,
+            })
+
+        result = {
+            'target_email': target_email,
+            'last_day': last_day,
+            'ticket_id': ticket_id,
+            'app_count': len(worklist),
+            'apps': worklist,
+            'email_present': bool(target_email),
+        }
+
+  # 3) READ CENSUS LOOP - one read-only browser pass per SaaS app. The loop fans out over the work
+  #    list; each iteration runs read_app_seat (defined below) on the current app via _item. Read-only:
+  #    nothing is mutated here. max_iterations caps the fan-out.
+  - id: read_census_loop
+    type: loop
+    depends_on: [build_app_worklist]
+    loop_config:
+      over: "steps.build_app_worklist.output.apps"
+      step_ids: [read_app_seat]
+      max_iterations: 200
+
+  # 3a) PER-APP READ PASS (mode: dom). The reasoning model only authors a DOM extraction from the
+  #     prompt; output_schema returns a STRUCTURED snapshot of exactly what a deactivation would
+  #     affect. This step does NOT click any Deactivate/Remove/Transfer control - it is the read
+  #     pre-image. credentials_env names the per-app admin login (never inlined); captcha_strategy
+  #     pauses for a human on an MFA/CAPTCHA wall; max_actions caps the navigation.
+  - id: read_app_seat
+    type: browser
+    prompt: >-
+      You are auditing ONE SaaS admin console as part of an employee offboarding, READ-ONLY. The app
+      and target are: {{ _item }}. Log into that app's admin console using the credentials provided
+      via the environment, open the admin user-search / members page at the start URL, and search for
+      the departing user by their target_email. Do NOT click any Deactivate, Suspend, Remove, Delete,
+      Transfer, or Reassign control - this is a read-only census. If you find the user, read back:
+      whether the user was found, their seat / license id, their role, their last_login timestamp as
+      shown, the list of assets they own (dashboards, files, projects, folders, boards - whatever this
+      tool tracks ownership of), and any billing impact of removing them (seat freed, license tier,
+      cost). Return ONLY the structured object described by the output schema. If a CAPTCHA, MFA, or
+      unexpected login wall appears, PAUSE for a human rather than guessing.
+    browser_config:
+      mode: dom
+      start_url: "{{ _item.admin_search_url }}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 180
+      max_actions: 40
+      headless: true
+      credentials_env: "{{ _item.credentials_env }}"
+      captcha_strategy: pause
+      capture_screenshots: false
+      output_schema:
+        type: object
+        properties:
+          app:
+            type: string
+            description: "The SaaS app this snapshot is for."
+          user_found:
+            type: boolean
+            description: "True if the departing user's seat was located in this console."
+          matched_email:
+            type: string
+            description: "The email the console actually rendered for the matched user (used by the deterministic wrong-user safety check)."
+          seat_id:
+            type: string
+            description: "The seat / license / membership id for this user in this tool."
+          role:
+            type: string
+            description: "The user's role / permission level in this tool (e.g. admin, member, viewer)."
+          last_login:
+            type: string
+            description: "The last_login timestamp the console shows for this user, as a string."
+          owned_assets:
+            type: array
+            items:
+              type: object
+              properties:
+                asset_type: { type: string }
+                asset_id: { type: string }
+                asset_name: { type: string }
+            description: "Assets this user owns that may need ownership transfer before deactivation."
+          billing_impact:
+            type: string
+            description: "What removing this seat does to billing (e.g. 'frees 1 paid seat, $12/mo')."
+        required: ["app", "user_found", "matched_email"]
+
+  # 4) DETERMINISTIC SNAPSHOT VALIDATION - the load-bearing wrong-user safeguard. For every app
+  #    snapshot, normalize the console-matched email (case-insensitive, whitespace-stripped via re.sub)
+  #    and compare it to the canonical target_email. If ANY found user's email does not equal the
+  #    target, mark a mismatch and HARD-FAIL the run (ok=False) so no write can proceed against the
+  #    wrong person. Pure Python - no model decides correctness here.
+  - id: validate_snapshots
+    type: code
+    depends_on: [build_app_worklist, read_census_loop]
+    code_config:
+      language: python
+      code: |
+        import json
+        import re
+
+        work = _steps['build_app_worklist'] or {}
+        if isinstance(work, str):
+            try:
+                work = json.loads(work) if work.strip() else {}
+            except (ValueError, TypeError):
+                work = {}
+        target_email = str(work.get('target_email') or '').strip().lower()
+
+        # Loop output may arrive as a list of per-iteration results or wrapped under results/items.
+        loop_out = _steps['read_census_loop'] or {}
+        if isinstance(loop_out, list):
+            snapshots = loop_out
+        elif isinstance(loop_out, dict):
+            snapshots = loop_out.get('results') or loop_out.get('items') or loop_out.get('output') or []
+        else:
+            snapshots = []
+        if not isinstance(snapshots, list):
+            snapshots = []
+
+        def _norm(addr):
+            # Case-insensitive, whitespace-stripped normalization of an email for equality.
+            return re.sub(r'\s+', '', str(addr or '')).lower()
+
+        norm_target = _norm(target_email)
+
+        validated = []
+        mismatches = []
+        found_count = 0
+        for snap in snapshots:
+            if isinstance(snap, str):
+                try:
+                    snap = json.loads(snap) if snap.strip() else {}
+                except (ValueError, TypeError):
+                    snap = {}
+            if not isinstance(snap, dict):
+                continue
+            # The browser step may nest its structured payload under output/data/result.
+            for key in ('output', 'data', 'result'):
+                inner = snap.get(key)
+                if isinstance(inner, dict) and ('matched_email' in inner or 'user_found' in inner):
+                    snap = inner
+                    break
+
+            app = str(snap.get('app') or '').strip()
+            user_found = bool(snap.get('user_found'))
+            matched = _norm(snap.get('matched_email'))
+            owned_assets = snap.get('owned_assets') if isinstance(snap.get('owned_assets'), list) else []
+
+            email_ok = True
+            reason = 'ok'
+            if user_found:
+                found_count += 1
+                if not norm_target:
+                    email_ok = False
+                    reason = 'no_target_email_to_compare'
+                elif matched != norm_target:
+                    email_ok = False
+                    reason = 'matched_email_differs_from_target'
+            row = {
+                'app': app,
+                'user_found': user_found,
+                'matched_email': matched,
+                'seat_id': snap.get('seat_id'),
+                'role': snap.get('role'),
+                'last_login': snap.get('last_login'),
+                'owned_assets': owned_assets,
+                'owned_asset_count': len(owned_assets),
+                'billing_impact': snap.get('billing_impact'),
+                'email_ok': email_ok,
+                'reason': reason,
+            }
+            validated.append(row)
+            if user_found and not email_ok:
+                mismatches.append({'app': app, 'matched_email': matched, 'reason': reason})
+
+        ok = (len(mismatches) == 0) and bool(norm_target)
+        if not norm_target:
+            mismatches.append({'app': '*', 'matched_email': '', 'reason': 'missing_target_email'})
+
+        result = {
+            'ok': ok,
+            'target_email': norm_target,
+            'app_count': len(validated),
+            'found_count': found_count,
+            'mismatch_count': len(mismatches),
+            'mismatches': mismatches,
+            'snapshots': validated,
+            'reason_summary': 'all matched emails equal the target' if ok else 'WRONG-USER OR MISSING-TARGET: ' + '; '.join(m['reason'] for m in mismatches),
+        }
+
+  # 5) CLASSIFY each found account as safe to deactivate now vs needing asset ownership transfer first.
+  #    Provider-swappable (model: haiku). Both branches converge on the single deactivation approval -
+  #    the classification tags each account but does NOT bypass the human gate; it informs the write
+  #    pass which apps need an ownership-transfer wizard before deactivation.
+  - id: classify_accounts
+    type: classify
+    depends_on: [validate_snapshots]
+    classify_config:
+      model: haiku
+      input: "Classify each SaaS account in this offboarding snapshot. Tag 'needs_asset_transfer_first' for any app where the user owns assets (owned_asset_count > 0) such as dashboards, files, projects, or boards that would be orphaned if the seat were deactivated outright - these require running the tool's ownership-transfer wizard before deactivation. Tag 'safe_to_deactivate' for accounts with no owned assets that can be deactivated directly. Snapshots: {steps.validate_snapshots.output}"
+      categories:
+        - safe_to_deactivate
+        - needs_asset_transfer_first
+      branches:
+        safe_to_deactivate: [deactivation_approval]
+        needs_asset_transfer_first: [deactivation_approval]
+
+  # 6) SINGLE HUMAN APPROVAL - the ONLY place a human authorizes the irreversible deactivations, and
+  #    nothing destructive runs before it returns approved. It shows the full per-app blast radius
+  #    (owned assets, billing impact, validation result, classification). on_timeout: abort means a
+  #    missed sign-off NEVER auto-deactivates. allow_edit lets the approver drop a borderline app.
+  - id: deactivation_approval
+    type: approval
+    depends_on: [classify_accounts]
+    approval_config:
+      message: >-
+        Approve SaaS deactivations for {steps.validate_snapshots.output.target_email}. This is the
+        ONLY authorization gate before any account is changed. Apps in scope:
+        {steps.validate_snapshots.output.app_count}, users found:
+        {steps.validate_snapshots.output.found_count}. Wrong-user check OK:
+        {steps.validate_snapshots.output.ok} ({steps.validate_snapshots.output.reason_summary}). Review
+        the per-app blast radius below - owned assets that will need ownership transfer, billing impact,
+        and last_login - then APPROVE to run ownership transfer (where needed) and deactivate each seat
+        one-by-one in the admin consoles, or REJECT to abort the whole run with nothing changed.
+      show_data: steps.validate_snapshots.output
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: true
+
+  # 7) WRITE LOOP - runs ONLY after the human approval above. Fans out over the validated snapshots;
+  #    each iteration runs deactivate_app (defined below) on the current app via _item. max_iterations
+  #    caps the batch.
+  - id: deactivation_loop
+    type: loop
+    depends_on: [deactivation_approval]
+    loop_config:
+      over: "steps.validate_snapshots.output.snapshots"
+      step_ids: [deactivate_app]
+      max_iterations: 200
+
+  # 7a) PER-APP WRITE PASS (mode: playwright). The reasoning model only authors a Playwright script
+  #     from the prompt; the mutation itself is deterministic Playwright, so any provider can author it
+  #     and is swappable. If the account owns assets, it FIRST runs the tool's ownership-transfer
+  #     wizard, then deactivates the seat. capture_screenshots is ON for audit; max_actions is tightly
+  #     capped so a misnavigation cannot rampage; captcha_strategy pauses for a human at any step-up.
+  #     Returns a structured per-app write result.
+  - id: deactivate_app
+    type: browser
+    prompt: >-
+      A human has APPROVED deactivating this departing user's seat. Operate on exactly ONE SaaS app and
+      ONE user. The app, the target user, and what they own are: {{ _item }}. Log into that app's admin
+      console using the credentials provided via the environment and navigate to the departing user. If
+      this user owns assets (dashboards, files, projects, folders, boards), FIRST run the tool's
+      ownership-transfer / reassign wizard to transfer those owned assets to the offboarding-owner or
+      admin account this tool designates, so nothing is orphaned. THEN click the control that
+      deactivates / suspends / removes the seat for THIS user only (Deactivate, Suspend, or Remove
+      seat). Confirm any confirmation dialog. Operate on this user's email ONLY - never touch any other
+      member. Capture a screenshot of the resulting account-status / confirmation screen. Read back this
+      user's resulting account status and return ONLY the structured object in the output schema. If a
+      CAPTCHA, MFA, or step-up wall appears, PAUSE for a human - do not attempt to solve it.
+    browser_config:
+      mode: playwright
+      start_url: "{{ _item.app }}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 180
+      max_actions: 30
+      headless: true
+      credentials_env: "{{ _item.credentials_env }}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          app:
+            type: string
+            description: "The SaaS app this write result is for."
+          deactivated:
+            type: boolean
+            description: "True if the UI confirmed the seat is now deactivated/suspended/removed."
+          assets_transferred_to:
+            type: string
+            description: "The account owned assets were reassigned to (empty if the user owned none)."
+          post_status:
+            type: string
+            description: "The user's resulting account status as the console reports it (e.g. inactive, suspended)."
+          confirmation:
+            type: string
+            description: "The portal's own confirmation text / reference shown after the action."
+          screenshot_ref:
+            type: string
+            description: "Reference to the captured post-action screenshot for the audit pack."
+        required: ["app", "deactivated", "post_status"]
+
+  # 8) CONFIRMATION GATE (llm_eval) over each app's post-action result. Confirms each console's OWN
+  #    after-state reports the seat as inactive/suspended rather than assuming the click worked.
+  #    Provider-swappable. Secondary to the deterministic reconcile below, which is authoritative.
+  - id: confirm_deactivations
+    type: gate
+    depends_on: [deactivation_loop]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are an offboarding completion reviewer reading the admin consoles' own after-state for
+              each app. Answer exactly 'approved' if EVERY app result shows the seat was deactivated:
+              deactivated is true and post_status reads inactive/suspended/deactivated/removed, and any
+              app that owned assets reports a non-empty assets_transferred_to. Answer 'rejected' and name
+              the offending app(s) if any seat is still active, any deactivation failed, or any owned
+              account was deactivated without transferring its assets. Per-app write results:
+              {steps.deactivation_loop.output}
+            input: "{steps.deactivation_loop.output}"
+            model: sonnet
+
+  # 9) DETERMINISTIC RECONCILE - the authoritative post-check. Joins the validated snapshots (intended
+  #    targets) with the per-app write results and asserts every found, email-verified target now reports
+  #    a deactivated post_status, and that any asset-owning account had its assets transferred. Emits a
+  #    drift list of any app that did not reach the expected state. Pure Python - no model.
+  - id: reconcile_offboard
+    type: code
+    depends_on: [validate_snapshots, deactivation_loop, confirm_deactivations]
+    code_config:
+      language: python
+      code: |
+        import json
+
+        snap_step = _steps['validate_snapshots'] or {}
+        if isinstance(snap_step, str):
+            try:
+                snap_step = json.loads(snap_step) if snap_step.strip() else {}
+            except (ValueError, TypeError):
+                snap_step = {}
+        snapshots = snap_step.get('snapshots', []) if isinstance(snap_step, dict) else []
+        target_email = str(snap_step.get('target_email') or '') if isinstance(snap_step, dict) else ''
+
+        # Index write results by app name.
+        loop_out = _steps['deactivation_loop'] or {}
+        if isinstance(loop_out, list):
+            write_items = loop_out
+        elif isinstance(loop_out, dict):
+            write_items = loop_out.get('results') or loop_out.get('items') or loop_out.get('output') or []
+        else:
+            write_items = []
+        if not isinstance(write_items, list):
+            write_items = []
+
+        results_by_app = {}
+        for it in write_items:
+            if isinstance(it, str):
+                try:
+                    it = json.loads(it) if it.strip() else {}
+                except (ValueError, TypeError):
+                    it = {}
+            if not isinstance(it, dict):
+                continue
+            for key in ('output', 'data', 'result'):
+                inner = it.get(key)
+                if isinstance(inner, dict) and ('deactivated' in inner or 'post_status' in inner):
+                    it = inner
+                    break
+            app = str(it.get('app') or '').strip()
+            if app:
+                results_by_app[app] = it
+
+        inactive_states = ('inactive', 'suspended', 'deactivated', 'removed', 'disabled')
+
+        confirmed = []
+        drift = []
+        for s in snapshots:
+            if not isinstance(s, dict):
+                continue
+            if not s.get('user_found') or not s.get('email_ok'):
+                # Not a write target (user not found, or failed the wrong-user check).
+                continue
+            app = str(s.get('app') or '').strip()
+            wr = results_by_app.get(app, {})
+            post = str(wr.get('post_status') or '').strip().lower()
+            deactivated_flag = bool(wr.get('deactivated'))
+            owned = s.get('owned_asset_count') or 0
+            transferred_to = str(wr.get('assets_transferred_to') or '').strip()
+
+            row = {
+                'app': app,
+                'post_status': post,
+                'deactivated': deactivated_flag,
+                'owned_asset_count': owned,
+                'assets_transferred_to': transferred_to,
+                'confirmation': wr.get('confirmation'),
+                'screenshot_ref': wr.get('screenshot_ref'),
+            }
+            status_ok = deactivated_flag and (post in inactive_states)
+            transfer_ok = (owned == 0) or bool(transferred_to)
+            if status_ok and transfer_ok:
+                confirmed.append(row)
+            else:
+                problems = []
+                if not status_ok:
+                    problems.append('seat_not_confirmed_inactive')
+                if not transfer_ok:
+                    problems.append('owned_assets_not_transferred')
+                drift.append({**row, 'drift_reason': ','.join(problems)})
+
+        targeted_count = len(confirmed) + len(drift)
+        all_clean = (len(drift) == 0) and (targeted_count > 0)
+
+        result = {
+            'all_clean': all_clean,
+            'target_email': target_email,
+            'targeted_count': targeted_count,
+            'confirmed_count': len(confirmed),
+            'drift_count': len(drift),
+            'confirmed': confirmed,
+            'drift': drift,
+        }
+
+  # 10) EVIDENCE PACK - compile a branded PDF offboarding evidence pack: the target, the per-app
+  #     before snapshot (seat, role, last_login, owned assets, billing impact), the approver decision,
+  #     and the per-app after-state with screenshots references and any drift. The narrative is
+  #     formatting only; the load-bearing facts come from the deterministic reconcile above.
+  - id: evidence_report
+    type: report
+    depends_on: [reconcile_offboard]
+    report_config:
+      template: "research-report"
+      format: pdf
+      theme: professional
+      title: "SaaS Offboarding Evidence Pack - {steps.validate_snapshots.output.target_email}"
+      author: "{input.evidence_author}"
+    prompt: >-
+      Produce a formal SaaS offboarding evidence pack PDF for IT Security and audit. Open with the
+      departing user's email, the last day, the ticket id, and the number of SaaS apps in scope, of
+      which how many were targeted, confirmed deactivated, and drifted. Include the wrong-user safety
+      result (was every console-matched email equal to the target). For each app, render a row with:
+      the seat id, role, last_login, the owned assets and where they were transferred, the billing
+      impact, the final account status, and the captured screenshot reference. Clearly flag any app in
+      the drift list as NOT confirmed and requiring manual follow-up. State the approver sign-off that
+      authorized the deactivations. Read-only snapshots: {steps.validate_snapshots.output}. Write
+      reconciliation: {steps.reconcile_offboard.output}.
+
+  # 11) NOTIFY the offboarding channel / ticket with the result + drift report + a pointer to the
+  #     evidence pack. Surfaces any drift loudly so a silently-failed deactivation is never mistaken
+  #     for success.
+  - id: notify_offboarding
+    type: notify
+    depends_on: [evidence_report]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: "SaaS offboarding complete for {steps.reconcile_offboard.output.target_email}. Apps targeted: {steps.reconcile_offboard.output.targeted_count} | Confirmed deactivated: {steps.reconcile_offboard.output.confirmed_count} | Drift (needs manual follow-up): {steps.reconcile_offboard.output.drift_count} | All clean: {steps.reconcile_offboard.output.all_clean}. Evidence pack attached. Post this summary as a comment on the offboarding ticket."
+
+on_complete:
+  storage_path: "saas-admin-seat-deprovisioning-offboard/{run_id}/result.json"

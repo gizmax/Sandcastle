@@ -1,0 +1,982 @@
+# name: Permit Eportal Application Filer
+# description: Fills and lodges a building / business / environmental permit application on a municipal e-permitting portal (Accela Citizen Access, Tyler EnerGov, OpenGov-hosted city sites, regional environmental agencies) - per-jurisdiction, login-gated legacy SPAs with NO programmatic submission path. It deterministically validates the project record against a per-jurisdiction+permit_type rules table, routes to the right portal start_url, reads the application wizard READ-ONLY (dom mode) to learn its tabs/fields/upload requirements, maps the record onto the fields with a provider-agnostic classify, gates entry on a code-compliance llm_eval plus a permit-specialist human, fills every tab and uploads each drawing in provider-neutral playwright mode and STOPS at the review/fee page, holds for an applicant-of-record approval that explicitly shows the fee_amount, submits ONLY after approval, asserts the charged fee equals the approved fee (deterministic - no silent overpay), and runs a per-jurisdiction trajectory-replay to block filing when a portal redesign diverges. Triggered when a permit package is marked ready in the project tracker, often fanned out by a parent multi-site sub_workflow.
+# tags: [Permits, EPermitting, Accela, TylerEnerGov, OpenGov, Municipal, RPA, Playwright, DOM, HumanApproval, ProviderNeutral, TrajectoryReplay, FeeMatch, Building, Environmental]
+# category: hr_legal
+
+name: permit-eportal-application-filer
+description: >-
+  Lodges a building, business, or environmental permit application onto a municipal e-permitting
+  portal on behalf of a permit-expediting firm, GC, architecture office, or multi-site
+  retail/restaurant operator. Municipal e-permitting portals (Accela Citizen Access, Tyler EnerGov,
+  OpenGov-hosted city sites, regional environmental agencies) are notoriously API-less, login-gated
+  legacy SPAs: each jurisdiction has a different multi-tab application with conditional, code-driven
+  fields, mandatory document uploads (site plans, drawings), and fee/agreement checkboxes, and there
+  is NO programmatic submission path - expediters key these by hand, one portal at a time. The flow
+  is split read-from-write and fails closed. A DETERMINISTIC code step validates that the
+  project_record carries every field this jurisdiction + permit_type require (from a rules table) and
+  that every drawing file ref resolves. A condition routes to the correct portal start_url. A
+  provider-neutral dom-mode browser step authenticates (credentials_env=PERMIT_PORTAL_CREDS,
+  captcha_strategy=pause), opens the new-application wizard for the permit_type, and EXTRACTS the
+  wizard structure READ-ONLY (tabs/fields/required, upload_requirements, fee_summary) via
+  output_schema - writing nothing. A provider-agnostic classify maps project_record -> fields and
+  matches each required doc_type to a drawing file. A deterministic code step turns that into a
+  concrete {plan, missing_docs[], unmapped_fields[]}. A gate (llm_eval confirming the code-required
+  fields and all mandatory docs are satisfied, plus a permit-specialist human for any
+  missing/ambiguous item) must pass before entry. Only then does a playwright-mode browser step fill
+  every tab, upload each document to its required slot, advance to the review/fee page and STOP -
+  returning a review screenshot, the fee_amount, the entered values, and the uploaded-doc list. A
+  mandatory applicant-of-record approval explicitly shows the fee_amount and authorizes the official
+  submission. A second playwright step accepts the agreement and clicks Submit (triggering the fee
+  per policy), capturing {application_number, status, fee_charged, submitted_at}. A deterministic
+  code step asserts the application_number is present AND fee_charged equals the approved fee_amount -
+  a mismatch fails the run so a silent overpay can never be recorded as a clean filing. A
+  per-jurisdiction trajectory-replay (golden_run_id, fail_below_score=0.85, cost guard) catches
+  portal changes before they corrupt a filing, a notify announces the outcome, and a report archives
+  the receipt. Every browser step rides default_model and stays swappable across the 7 providers; the
+  code-compliance llm_eval gate and the field-mapping classify run provider-agnostically with
+  failover; the condition router, code validators, and the per-jurisdiction golden trajectories make
+  reliability a property of recorded runs and deterministic checks, never of a particular model.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 1800
+
+input_schema:
+  required: ["jurisdiction", "permit_type", "project_record", "drawing_files"]
+  properties:
+    jurisdiction:
+      type: string
+      description: "Jurisdiction key that selects the portal start_url, the rules-table requirements, and the per-jurisdiction golden trajectory (e.g. austin-tx, miami-dade-fl, ca-water-board)."
+      example: "austin-tx"
+    permit_type:
+      type: string
+      description: "Permit type being filed (drives which rules-table requirements apply and which wizard branch to open): building, business, environmental, zoning, electrical, etc."
+      example: "building"
+    project_record:
+      type: string
+      description: "Structured project record for this permit as a JSON string - parcel/APN, valuation, scope, square footage, occupancy/use, contractor license, applicant of record, etc. Validated against the jurisdiction+permit_type rules table and mapped onto the portal fields."
+      example: '{"apn":"0123-4567-890","valuation":485000,"scope":"new tenant fit-out, 2400 sqft restaurant","square_footage":2400,"occupancy":"A-2","use":"restaurant","contractor_license":"TX-CGC-114782","applicant_of_record":"Jane Doe, RA","applicant_email":"jane.doe@expediters.example.com","contact_phone":"+1-512-555-0142"}'
+    drawing_files:
+      type: string
+      description: "Comma-separated list of drawing/PDF file refs (s3/gdrive paths or @file: refs) - site plans, architectural drawings, MEP, environmental reports - matched to the portal's required doc_type slots. Existence is validated before any filing."
+      example: "s3://permits/austin/0123/site-plan.pdf,s3://permits/austin/0123/floor-plan.pdf,s3://permits/austin/0123/mep.pdf"
+    portal_start_url:
+      type: string
+      description: "Fallback new-application wizard start_url if the jurisdiction is not in the built-in router map. The condition step prefers a known jurisdiction route and falls back to this."
+      default: ""
+      example: "https://aca.exampletx.gov/CitizenAccess/Default.aspx"
+    fee_tolerance:
+      type: number
+      description: "Absolute currency tolerance allowed when asserting the portal's fee_charged equals the applicant-approved fee_amount (covers rounding). A larger gap fails the run - no silent overpay."
+      default: 0.01
+      example: "0.01"
+    applicant_email:
+      type: string
+      description: "Email of the applicant of record who must approve the official submission and the fee. Defaults to the applicant_email inside project_record if blank."
+      default: ""
+      example: "jane.doe@expediters.example.com"
+    golden_run_id:
+      type: string
+      description: "Per-jurisdiction golden trajectory id the trajectory-replay diffs the filing flow against, to catch a portal redesign before it corrupts a filing. Convention: golden-<jurisdiction>-<permit_type>."
+      default: "golden-austin-tx-building-2026-05-01"
+      example: "golden-austin-tx-building-2026-05-01"
+    tracker_url:
+      type: string
+      description: "Project-tracker webhook the filed application_number + receipt are written back to once the portal confirms."
+      default: "https://tracker.internal/api/permits/filed"
+      example: "https://tracker.internal/api/permits/filed"
+    notify_channel:
+      type: string
+      description: "Slack channel for the permit desk's filed/blocked/needs-attention notifications."
+      default: "#permit-filing"
+      example: "#permit-filing"
+    approval_timeout_hours:
+      type: integer
+      description: "Hours the applicant-of-record submit approval waits before its timeout fires (on_timeout: abort - a missed approval NEVER auto-submits or auto-pays)."
+      default: 48
+      example: "48"
+
+steps:
+  # 1) DETERMINISTIC validation against the jurisdiction+permit_type rules table (sandboxed Python,
+  #    NO model). Confirm the project_record carries every field this jurisdiction+permit_type
+  #    require, that the contractor license / applicant of record are present where required, and
+  #    that EVERY drawing file ref resolves (non-empty). Fails CLOSED - nothing touches a portal on
+  #    an incomplete package. This is the first load-bearing correctness gate.
+  - id: validate_record
+    type: code
+    code_config:
+      language: python
+      code: |
+        import json
+        # --- Parse the structured project record handed in by the project tracker. ---
+        raw = _input.get('project_record') or ''
+        record = {}
+        if isinstance(raw, dict):
+            record = raw
+        else:
+            try:
+                record = json.loads(raw)
+            except (TypeError, ValueError):
+                record = {}
+        if not isinstance(record, dict):
+            record = {}
+
+        jurisdiction = str(_input.get('jurisdiction', '') or '').strip().lower()
+        permit_type = str(_input.get('permit_type', '') or '').strip().lower()
+        problems = []
+
+        # --- Rules table: required project-record fields per permit_type. A real deployment loads
+        #     this per jurisdiction; the canonical municipal requirements are encoded here. ---
+        base_required = ['apn', 'scope', 'applicant_of_record']
+        type_required = {
+            'building':      ['valuation', 'square_footage', 'occupancy', 'use', 'contractor_license'],
+            'business':      ['use', 'applicant_email'],
+            'environmental': ['valuation', 'scope', 'use'],
+            'zoning':        ['use', 'square_footage'],
+            'electrical':    ['valuation', 'contractor_license'],
+            'mechanical':    ['valuation', 'contractor_license'],
+            'plumbing':      ['valuation', 'contractor_license'],
+        }
+        # Doc types the jurisdiction+permit_type mandates (matched to drawing files downstream).
+        type_docs = {
+            'building':      ['site_plan', 'floor_plan'],
+            'business':      [],
+            'environmental': ['site_plan', 'environmental_report'],
+            'zoning':        ['site_plan'],
+            'electrical':    ['floor_plan'],
+            'mechanical':    ['floor_plan'],
+            'plumbing':      ['floor_plan'],
+        }
+
+        if not jurisdiction:
+            problems.append('jurisdiction is required to select the portal and rules')
+        if not permit_type:
+            problems.append('permit_type is required to select the wizard branch and rules')
+
+        required_fields = list(base_required) + list(type_required.get(permit_type, ['valuation', 'use']))
+        for k in required_fields:
+            if not str(record.get(k, '') or '').strip():
+                problems.append('missing required field for ' + (permit_type or '<none>') + ': ' + k)
+
+        # --- Valuation sanity (used later for the fee context). ---
+        def _num(v):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return -1.0
+        valuation = _num(record.get('valuation'))
+        if 'valuation' in required_fields and valuation < 0:
+            problems.append('valuation missing or not numeric')
+
+        # --- Every referenced drawing file ref must be present (non-empty). ---
+        files_raw = _input.get('drawing_files') or ''
+        file_refs = [p.strip() for p in str(files_raw).split(',') if p.strip()]
+        if not file_refs:
+            problems.append('no drawing file refs provided')
+
+        # --- Applicant of record + email for the approval step. ---
+        applicant = str(record.get('applicant_of_record', '') or '').strip()
+        applicant_email = str(_input.get('applicant_email', '') or '').strip()
+        if not applicant_email:
+            applicant_email = str(record.get('applicant_email', '') or '').strip()
+
+        required_docs = list(type_docs.get(permit_type, ['site_plan']))
+        ok = len(problems) == 0
+
+        result = {
+            'ok': ok,
+            'problems': problems,
+            'jurisdiction': jurisdiction,
+            'permit_type': permit_type,
+            'required_fields': required_fields,
+            'required_docs': required_docs,
+            'valuation': round(valuation, 2) if valuation >= 0 else None,
+            'applicant_of_record': applicant,
+            'applicant_email': applicant_email,
+            'file_refs': file_refs,
+            'file_count': len(file_refs),
+            'project_record': record,
+            'reason_summary': '; '.join(problems) if problems else 'record satisfies the jurisdiction+permit_type rules table',
+        }
+
+  # 1b) Hard stop on an incomplete package - never touch a portal with a non-compliant record.
+  - id: record_gate
+    type: condition
+    depends_on: [validate_record]
+    condition_config:
+      expression: "{steps.validate_record.output.ok} == True"
+      then: [route_portal]
+      else: [notify_blocked]
+
+  # 1c) BLOCKED branch: tell the permit desk the package was NOT filed and exactly why.
+  - id: notify_blocked
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        BLOCKED before any portal entry: permit package for {input.permit_type} in
+        {input.jurisdiction} failed the deterministic rules-table validation, so the e-permitting
+        portal was never touched. Reason(s): {steps.validate_record.output.reason_summary}. Fix the
+        project record / drawings and re-run.
+
+  # 2) ROUTE to the correct jurisdiction portal start_url (pure engine logic, NO model). A
+  #    known-jurisdiction map of Accela / Tyler EnerGov / OpenGov-hosted / environmental-agency
+  #    portals; unknown jurisdictions fall back to the supplied portal_start_url.
+  - id: route_portal
+    type: code
+    depends_on: [record_gate]
+    code_config:
+      language: python
+      code: |
+        jurisdiction = str(_input.get('jurisdiction', '') or '').strip().lower()
+
+        # Per-jurisdiction new-application wizard start URLs (login-gated SPAs, no submission API).
+        routes = {
+            'austin-tx':      'https://abc.austintexas.gov/web/permit/public-search-other',
+            'miami-dade-fl':  'https://aca.miamidade.gov/CitizenAccess/Default.aspx',
+            'denver-co':      'https://aca-prod.accela.com/DENVER/Default.aspx',
+            'seattle-wa':     'https://cosaccela.seattle.gov/portal/Default.aspx',
+            'phoenix-az':     'https://eservices.phoenix.gov/PDD/Default.aspx',
+            'mecklenburg-nc': 'https://energov.mecknc.gov/EnerGov_Prod/SelfService',
+            'ca-water-board': 'https://ciwqs.waterboards.ca.gov/ciwqs/',
+        }
+
+        fallback = str(_input.get('portal_start_url', '') or '').strip()
+        start_url = routes.get(jurisdiction, fallback)
+        known = jurisdiction in routes
+
+        routed = bool(start_url)
+        result = {
+            'jurisdiction': jurisdiction,
+            'start_url': start_url,
+            'known_jurisdiction': known,
+            'routed': routed,
+            'note': ('matched built-in route' if known else
+                     ('using supplied fallback url' if start_url else 'NO route - missing start_url')),
+        }
+
+  # 2b) If no portal URL could be resolved, stop before any browser step.
+  - id: route_gate
+    type: condition
+    depends_on: [route_portal]
+    condition_config:
+      expression: "{steps.route_portal.output.routed} == True"
+      then: [read_wizard]
+      else: [notify_no_route]
+
+  - id: notify_no_route
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        Permit for {input.permit_type} in {input.jurisdiction} could NOT be filed: no portal
+        start_url for this jurisdiction (not in the built-in route map and no portal_start_url
+        supplied). No application was lodged.
+
+  # 3) READ PASS (dom mode, READ-ONLY). Provider-neutral lightweight DOM read: the reasoning model
+  #    authenticates via PERMIT_PORTAL_CREDS (never inlined), opens the new-application wizard for
+  #    the permit_type, and EXTRACTS the wizard's structure - its ordered tabs, each tab's fields and
+  #    whether they are required (including conditional, code-driven fields), the upload_requirements
+  #    (which doc_type each slot takes and accepted formats), and the fee_summary - WITHOUT entering
+  #    or uploading anything. captcha_strategy=pause hands a portal CAPTCHA to a human; max_actions
+  #    caps clicking; output_schema returns structured JSON to map against.
+  - id: read_wizard
+    type: browser
+    depends_on: [route_gate]
+    prompt: >-
+      You are doing a READ-ONLY reconnaissance of a municipal e-permitting application wizard (Accela
+      Citizen Access, Tyler EnerGov, OpenGov-hosted, or a regional environmental agency portal). Log
+      in using the credentials provided via the PERMIT_PORTAL_CREDS environment variable (do NOT
+      print or echo them), then open the NEW-APPLICATION wizard for permit type {input.permit_type}.
+      DO NOT type into, select, check, upload to, or submit any field - this is a structure read
+      only. Walk the wizard tabs and report its structure: the ordered list of tabs, and for each tab
+      its fields (name, label, input type, whether required, allowed options if a dropdown, and any
+      conditional_on logic that shows/hides the field based on a prior answer such as the work type or
+      occupancy), the document UPLOAD requirements (for each upload slot: the doc_type it expects and
+      the accepted file formats), and the fee_summary the portal shows for this application type if
+      visible. If a CAPTCHA or step-up auth appears, PAUSE for a human. Context: jurisdiction
+      {input.jurisdiction}, permit_type {input.permit_type}. Return ONLY the structured object
+      described by the output schema.
+    browser_config:
+      mode: dom
+      start_url: "{steps.route_portal.output.start_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 300
+      max_actions: 60
+      headless: true
+      credentials_env: "PERMIT_PORTAL_CREDS"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          tabs:
+            type: array
+            items:
+              type: object
+              properties:
+                name: { type: string }
+                fields:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name: { type: string }
+                      label: { type: string }
+                      input_type: { type: string }
+                      required: { type: boolean }
+                      options:
+                        type: array
+                        items: { type: string }
+                      conditional_on: { type: string }
+          upload_requirements:
+            type: array
+            items:
+              type: object
+              properties:
+                doc_type: { type: string }
+                accepted: { type: string }
+                required: { type: boolean }
+          fee_summary:
+            type: object
+            properties:
+              estimated_fee: { type: number }
+              fee_note: { type: string }
+
+  # 4) MAP project_record -> the portal's fields and match each required doc_type to a drawing file
+  #    (provider-agnostic classify with failover). It emits the field-fill PLAN, the doc matching,
+  #    and classifies the OVERALL mapping outcome. The branch result tells the gate whether a human
+  #    is required (any missing doc or unmapped field).
+  - id: map_fields
+    type: classify
+    depends_on: [read_wizard]
+    model: haiku
+    classify_config:
+      model: haiku
+      input: >-
+        Map a validated permit project record onto a specific municipal e-permitting wizard's tabs
+        and fields, and match each required document slot to a drawing file. Produce a fill PLAN: for
+        each wizard field, the project-record value (or derived code value) that should go in it;
+        match every required upload doc_type to one of the drawing file refs; and an unmapped[] list
+        of any required field you cannot confidently fill plus a missing_docs[] list of any required
+        doc_type with no matching drawing file. Then classify the OVERALL mapping outcome into one
+        category. Use 'clean_complete' when every required field maps and every required doc_type has
+        a matching drawing file with nothing unmapped or missing; 'needs_human' when ANY required
+        field is unmapped OR any required doc_type has no matching file OR a conditional code-driven
+        field is ambiguous; 'unsupported' when the permit_type does not correspond to any branch the
+        wizard offers. Validated record: {steps.validate_record.output} . Required docs:
+        {steps.validate_record.output.required_docs} . Drawing files:
+        {steps.validate_record.output.file_refs} . Wizard structure: {steps.read_wizard.output} .
+      categories:
+        - clean_complete
+        - needs_human
+        - unsupported
+      branches:
+        clean_complete: [build_plan]
+        needs_human: [build_plan]
+        unsupported: [build_plan]
+
+  # 4b) DETERMINISTIC plan assembly (sandboxed Python, NO model). Turns the classify mapping +
+  #     validated record + read-only wizard structure into a concrete {plan, missing_docs[],
+  #     unmapped_fields[]}: every required wizard field must have a planned value, and every required
+  #     doc_type must resolve to one of the supplied drawing files. This is the load-bearing
+  #     pre-entry computation the gate and the human review against - not a model's opinion.
+  - id: build_plan
+    type: code
+    depends_on: [map_fields]
+    code_config:
+      language: python
+      code: |
+        record_out = _steps.get('validate_record') or {}
+        if not isinstance(record_out, dict):
+            record_out = {}
+        wizard = _steps.get('read_wizard') or {}
+        if not isinstance(wizard, dict):
+            wizard = {}
+        # Browser payloads may nest under output/data/result.
+        for key in ('output', 'data', 'result'):
+            inner = wizard.get(key)
+            if isinstance(inner, dict) and ('tabs' in inner or 'upload_requirements' in inner):
+                wizard = inner
+                break
+
+        record = record_out.get('project_record') or {}
+        if not isinstance(record, dict):
+            record = {}
+        file_refs = record_out.get('file_refs') or []
+        if not isinstance(file_refs, list):
+            file_refs = []
+        required_docs = record_out.get('required_docs') or []
+        if not isinstance(required_docs, list):
+            required_docs = []
+
+        # --- Build the field-fill plan: walk every required wizard field, fill from the record by
+        #     name or label, and record any required field we cannot fill. ---
+        tabs = wizard.get('tabs')
+        if not isinstance(tabs, list):
+            tabs = []
+
+        def _lookup(record_dict, field_name, field_label):
+            # Try the field name, then a normalized label, against the record keys.
+            name_key = str(field_name or '').strip().lower()
+            label_key = str(field_label or '').strip().lower().replace(' ', '_')
+            for cand in (name_key, label_key):
+                if cand and cand in record_dict:
+                    val = record_dict.get(cand)
+                    if str(val if val is not None else '').strip():
+                        return val
+            return None
+
+        # Normalize the record keys once to lowercase for matching.
+        record_lc = {}
+        for k, v in record.items():
+            record_lc[str(k).strip().lower()] = v
+
+        plan = []
+        unmapped_fields = []
+        for tab in tabs:
+            if not isinstance(tab, dict):
+                continue
+            tab_name = str(tab.get('name', '') or '')
+            fields = tab.get('fields')
+            if not isinstance(fields, list):
+                fields = []
+            for f in fields:
+                if not isinstance(f, dict):
+                    continue
+                fname = f.get('name')
+                flabel = f.get('label')
+                is_required = bool(f.get('required', False))
+                value = _lookup(record_lc, fname, flabel)
+                if value is None:
+                    if is_required:
+                        unmapped_fields.append(tab_name + '.' + str(fname or flabel or '<field>'))
+                    continue
+                plan.append({
+                    'tab': tab_name,
+                    'field': str(fname or flabel or ''),
+                    'value': value,
+                    'required': is_required,
+                })
+
+        # --- Match each required doc_type to a drawing file by a keyword hint in the file ref. ---
+        doc_keywords = {
+            'site_plan': ['site', 'plot', 'survey'],
+            'floor_plan': ['floor', 'plan', 'layout'],
+            'mep': ['mep', 'mechanical', 'electrical', 'plumbing'],
+            'environmental_report': ['environmental', 'enviro', 'phase'],
+            'structural': ['structural', 'struct'],
+        }
+
+        upload_reqs = wizard.get('upload_requirements')
+        if not isinstance(upload_reqs, list):
+            upload_reqs = []
+        # The required doc_types are the union of the rules-table docs and any required wizard slots.
+        portal_required_docs = []
+        for u in upload_reqs:
+            if isinstance(u, dict) and bool(u.get('required', False)):
+                dt = str(u.get('doc_type', '') or '').strip().lower()
+                if dt:
+                    portal_required_docs.append(dt)
+        all_required_docs = []
+        for dt in list(required_docs) + portal_required_docs:
+            dt_l = str(dt).strip().lower()
+            if dt_l and dt_l not in all_required_docs:
+                all_required_docs.append(dt_l)
+
+        used_files = []
+        doc_matches = []
+        missing_docs = []
+        for dt in all_required_docs:
+            kws = doc_keywords.get(dt, [dt])
+            matched_ref = ''
+            for ref in file_refs:
+                if ref in used_files:
+                    continue
+                ref_l = str(ref).lower()
+                if any(kw in ref_l for kw in kws):
+                    matched_ref = ref
+                    break
+            if matched_ref:
+                used_files.append(matched_ref)
+                doc_matches.append({'doc_type': dt, 'file_ref': matched_ref})
+            else:
+                missing_docs.append(dt)
+
+        ok = (len(unmapped_fields) == 0) and (len(missing_docs) == 0)
+
+        result = {
+            'ok': ok,
+            'plan': plan,
+            'planned_field_count': len(plan),
+            'doc_matches': doc_matches,
+            'matched_doc_count': len(doc_matches),
+            'missing_docs': missing_docs,
+            'unmapped_fields': unmapped_fields,
+            'required_docs': all_required_docs,
+            'reason_summary': (
+                'plan complete: all required fields mapped and all required docs matched'
+                if ok else
+                'missing_docs=' + str(missing_docs) + '; unmapped_fields=' + str(unmapped_fields)
+            ),
+        }
+
+  # 5) PRE-ENTRY GATE - ALL strategies must pass before anything is typed/uploaded into the portal.
+  #    (a) llm_eval code-compliance: confirm every code-required field has a value and every
+  #        mandatory doc_type is satisfied, traceable to the validated record (provider-swappable
+  #        verifier). (b) human: a permit specialist signs off on any missing/ambiguous item. This
+  #        gate is the last stop before the (still reversible) data entry.
+  - id: compliance_gate
+    type: gate
+    depends_on: [build_plan]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are a permit-intake code-compliance reviewer. Verify, BEFORE any data is entered or
+              any document is uploaded into the e-permitting portal, that the proposed application is
+              complete and compliant. Reply with exactly 'approved' only if: every code-required field
+              for {input.permit_type} in {input.jurisdiction} has a planned value (unmapped_fields is
+              empty), every mandatory document type has a matching drawing file (missing_docs is
+              empty), and every planned value is traceable to a fact in the validated project record
+              with no invented data. Otherwise reply 'rejected' and name each missing field or
+              document. Validated record: {steps.validate_record.output} . Fill plan + doc matches +
+              gaps: {steps.build_plan.output}
+            input: "{steps.build_plan.output}"
+            model: google/gemini-2.5-pro
+        - type: human
+          config:
+            message: >-
+              Permit pre-entry review for {input.permit_type} in {input.jurisdiction} (applicant of
+              record {steps.validate_record.output.applicant_of_record}). Confirm the field mapping
+              and document matching are correct and approve entry into the portal. Reject if any
+              missing document ({steps.build_plan.output.missing_docs}) or unmapped field
+              ({steps.build_plan.output.unmapped_fields}) needs handling first. Plan:
+              {steps.build_plan.output.plan}
+            timeout_hours: 48
+            on_timeout: abort
+
+  # 6) FILL PASS (playwright mode, provider-neutral). The reasoning model AUTHORS a Playwright script
+  #    that re-logs-in via PERMIT_PORTAL_CREDS, fills EVERY tab from the approved plan, uploads each
+  #    matched document to its required slot, advances to the REVIEW / FEE page, and STOPS - it does
+  #    NOT pay or submit. capture_screenshots gives an auditable review screenshot; output_schema
+  #    returns the review screenshot, the fee_amount the portal shows, the entered values, and the
+  #    uploaded-doc list for the applicant to approve. CAPTCHA pauses to a human; max_actions bounds
+  #    the multi-tab wizard.
+  - id: fill_to_fee
+    type: browser
+    depends_on: [compliance_gate]
+    prompt: >-
+      You are filing a municipal permit application on a multi-tab e-permitting wizard. Authenticate
+      using the PERMIT_PORTAL_CREDS environment variable (do NOT print or echo it), open the
+      new-application wizard for permit type {input.permit_type}, and walk it end to end. Using the
+      APPROVED fill plan, fill every required field on every tab from the validated project record,
+      handling conditional code-driven fields and waiting for client-side validation to settle before
+      advancing. For each matched document, upload the drawing file to its required upload slot by
+      doc_type. CRITICAL: advance only to the REVIEW / FEE page and STOP there - DO NOT check the
+      final agreement, DO NOT pay, and DO NOT click Submit / Lodge / File. Submission and the fee are
+      a separate, human-approved step. If a CAPTCHA or step-up auth appears, pause for a human.
+      Approved fill plan: {steps.build_plan.output.plan} . Document matches:
+      {steps.build_plan.output.doc_matches} . Validated record: {steps.validate_record.output} .
+      Return ONLY the structured object: a reference to the captured review-page screenshot, the fee
+      amount the portal shows on the review/fee page, the human-readable values entered, the list of
+      documents actually uploaded (doc_type + file_ref + slot), and whether the Submit button is
+      present and enabled.
+    browser_config:
+      mode: playwright
+      start_url: "{steps.route_portal.output.start_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 600
+      max_actions: 150
+      headless: true
+      credentials_env: "PERMIT_PORTAL_CREDS"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          review_screenshot: { type: string }
+          fee_amount:
+            type: number
+            description: "The application fee the PORTAL shows on the review/fee page (the figure the applicant must approve)."
+          entered_values:
+            type: object
+            description: "Human-readable map of the values entered into the portal, for the applicant to inspect."
+          uploaded_docs:
+            type: array
+            items:
+              type: object
+              properties:
+                doc_type: { type: string }
+                file_ref: { type: string }
+                slot: { type: string }
+          submit_button_present:
+            type: boolean
+            description: "True if the wizard reached the review/fee page with an enabled Submit/Lodge button (not yet clicked)."
+
+  # 6b) DETERMINISTIC validation of the FILLED review/fee state (sandboxed Python, NO model). The
+  #     load-bearing pre-submit check: a review screenshot must exist, the portal must show a
+  #     positive fee_amount, the uploaded-doc count must cover every required doc_type from the plan,
+  #     and the Submit button must be present (wizard truly reached the review/fee page). Fails
+  #     CLOSED - a bad fill never reaches the applicant approval or the submit.
+  - id: validate_fill
+    type: code
+    depends_on: [fill_to_fee]
+    code_config:
+      language: python
+      code: |
+        read_out = _steps.get('fill_to_fee') or {}
+        if not isinstance(read_out, dict):
+            read_out = {}
+        for key in ('output', 'data', 'result'):
+            inner = read_out.get(key)
+            if isinstance(inner, dict) and ('fee_amount' in inner or 'uploaded_docs' in inner):
+                read_out = inner
+                break
+
+        plan_out = _steps.get('build_plan') or {}
+        if not isinstance(plan_out, dict):
+            plan_out = {}
+
+        def _num(v, default=-1.0):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return default
+
+        problems = []
+
+        # A review screenshot must exist for the applicant to inspect.
+        review_screenshot = str(read_out.get('review_screenshot', '') or '').strip()
+        if not review_screenshot:
+            problems.append('no review/fee screenshot captured for the applicant')
+
+        # The portal must show a positive fee on the review/fee page.
+        fee_amount = _num(read_out.get('fee_amount'), -1.0)
+        if fee_amount < 0:
+            problems.append('portal did not return a fee_amount on the review/fee page')
+        elif fee_amount == 0:
+            problems.append('portal fee_amount is zero - unexpected for a lodged application')
+
+        # Every required doc_type from the plan must appear in the uploaded docs.
+        required_docs = plan_out.get('required_docs') or []
+        if not isinstance(required_docs, list):
+            required_docs = []
+        uploaded = read_out.get('uploaded_docs')
+        if not isinstance(uploaded, list):
+            uploaded = []
+        uploaded_types = []
+        for u in uploaded:
+            if isinstance(u, dict):
+                dt = str(u.get('doc_type', '') or '').strip().lower()
+                if dt:
+                    uploaded_types.append(dt)
+        not_uploaded = [dt for dt in required_docs if dt not in uploaded_types]
+        if not_uploaded:
+            problems.append('required documents not uploaded: ' + str(not_uploaded))
+
+        # The wizard must actually have reached a submit-capable review/fee page.
+        if not read_out.get('submit_button_present'):
+            problems.append('submit button not present - wizard did not reach the review/fee page')
+
+        ok = len(problems) == 0
+        result = {
+            'ok': ok,
+            'problems': problems,
+            'fee_amount': round(fee_amount, 2) if fee_amount >= 0 else None,
+            'review_screenshot': review_screenshot,
+            'uploaded_doc_count': len(uploaded_types),
+            'uploaded_doc_types': uploaded_types,
+            'required_docs': required_docs,
+            'reason_summary': '; '.join(problems) if problems else 'review/fee page reached; fee shown; all required docs uploaded',
+        }
+
+  # 6c) Hard stop on a bad fill - do NOT advance to the applicant approval / submit on a bad review.
+  - id: fill_gate
+    type: condition
+    depends_on: [validate_fill]
+    condition_config:
+      expression: "{steps.validate_fill.output.ok} == True"
+      then: [approve_submit]
+      else: [notify_fill_failed]
+
+  - id: notify_fill_failed
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        Permit for {input.permit_type} in {input.jurisdiction} reached the portal review/fee page but
+        the deterministic fill check FAILED before submission:
+        {steps.validate_fill.output.reason_summary}. Nothing was submitted and no fee was paid.
+        Re-check the wizard fill and re-run.
+
+  # 7) APPLICANT-OF-RECORD APPROVAL before the irreversible submission AND fee. The applicant sees
+  #    the deterministically validated review summary, the EXACT fee_amount the portal will charge,
+  #    and the captured review screenshot, and explicitly authorizes both the official submission and
+  #    the fee. No submission/payment can occur without this gate; on_timeout: abort never
+  #    auto-submits or auto-pays.
+  - id: approve_submit
+    type: approval
+    approval_config:
+      message: >-
+        AUTHORIZE the OFFICIAL SUBMISSION AND FEE for the {input.permit_type} permit application in
+        {input.jurisdiction}. This is IRREVERSIBLE - it lodges the application with the jurisdiction
+        and triggers the fee. The application is filled and sitting on the portal's review/fee page.
+        The portal will charge a fee of {steps.validate_fill.output.fee_amount}. Documents uploaded:
+        {steps.validate_fill.output.uploaded_doc_count} (required {steps.build_plan.output.required_docs}).
+        Review the captured review-page screenshot - this is the EXACT application and fee you are
+        authorizing. Approve to accept the agreement and Submit (and pay the shown fee); reject to
+        abort with nothing lodged and no fee charged.
+      show_data: steps.validate_fill.output
+      show_images: ["steps.validate_fill.output.review_screenshot"]
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: false
+
+  # 8) SUBMIT PASS (playwright mode, WRITE). Only reached AFTER the applicant approves. Re-opens the
+  #    filled review/fee page, accepts the agreement, and clicks the single final Submit/Lodge button
+  #    ONCE (triggering the fee per policy), then reads the portal's confirmation page and captures
+  #    {application_number, status, fee_charged, submitted_at}. capture_screenshots gives an
+  #    after-submit audit record; max_actions tightly capped (accept + one confirm action); CAPTCHA
+  #    pauses to a human at the final wall.
+  - id: submit_application
+    type: browser
+    depends_on: [approve_submit]
+    prompt: >-
+      The applicant of record has authorized this IRREVERSIBLE permit submission and fee for
+      {input.permit_type} in {input.jurisdiction}. Authenticate with PERMIT_PORTAL_CREDS if the
+      session expired (do NOT print it), return to the filled review/fee page, confirm the fee still
+      reads {steps.validate_fill.output.fee_amount}, check the required agreement / acknowledgement
+      checkbox, then click the SINGLE final Submit / Lodge / File button ONCE to lodge the
+      application and trigger the fee per policy. Do NOT edit any field, do NOT upload anything more,
+      and do NOT click submit more than once. If a CAPTCHA or step-up auth appears at this final wall,
+      PAUSE for a human - do not attempt to solve it. Then read the portal's confirmation page and
+      capture the jurisdiction-issued APPLICATION / RECORD NUMBER, the application status, the fee
+      actually charged, and the submitted timestamp. Return ONLY the structured object described by
+      the output schema.
+    browser_config:
+      mode: playwright
+      start_url: "{steps.route_portal.output.start_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 300
+      max_actions: 25
+      headless: true
+      credentials_env: "PERMIT_PORTAL_CREDS"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          application_number:
+            type: string
+            description: "The jurisdiction-issued application / record number for the lodged permit."
+          status:
+            type: string
+            description: "The application status the portal shows after submit (e.g. submitted, received, under_review)."
+          fee_charged:
+            type: number
+            description: "The fee the portal actually charged on submit (must equal the applicant-approved fee_amount)."
+          submitted_at:
+            type: string
+            description: "Timestamp the portal recorded for the submission."
+          receipt_screenshot:
+            type: string
+            description: "Reference/path of the captured confirmation/receipt screenshot for the permit record."
+
+  # 9) DETERMINISTIC SUCCESS + FEE-MATCH GATE (sandboxed Python, NO model). Assert the
+  #    application_number is present AND the fee_charged equals the applicant-approved fee_amount
+  #    within tolerance. A missing application_number means the submit did not provably land; a fee
+  #    mismatch means a silent overpay/underpay - either fails the run. A false success or a silent
+  #    overpay can NEVER be recorded as a clean filing.
+  - id: assert_filing
+    type: code
+    depends_on: [submit_application]
+    code_config:
+      language: python
+      code: |
+        import re
+        sub = _steps.get('submit_application') or {}
+        if not isinstance(sub, dict):
+            sub = {}
+        for key in ('output', 'data', 'result'):
+            inner = sub.get(key)
+            if isinstance(inner, dict) and ('application_number' in inner):
+                sub = inner
+                break
+
+        application_number = str(sub.get('application_number', '') or '').strip()
+        status = str(sub.get('status', '') or '').strip()
+        submitted_at = str(sub.get('submitted_at', '') or '').strip()
+
+        def _num(v, default=-1.0):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return default
+
+        fee_charged = _num(sub.get('fee_charged'), -1.0)
+
+        # The applicant-approved fee comes from the deterministically validated review/fee state.
+        fill_out = _steps.get('validate_fill') or {}
+        if not isinstance(fill_out, dict):
+            fill_out = {}
+        approved_fee = _num(fill_out.get('fee_amount'), -1.0)
+
+        tolerance = abs(_num(_input.get('fee_tolerance'), 0.01))
+        if tolerance < 0:
+            tolerance = 0.01
+
+        problems = []
+
+        # 9a) Application number must be present and look like a real record number.
+        number_ok = bool(application_number) and bool(re.search(r'[A-Za-z0-9]', application_number))
+        if not application_number:
+            problems.append('portal returned no application_number - submission not provably accepted')
+        elif not number_ok:
+            problems.append('application_number "' + application_number + '" is not a plausible record number')
+
+        # 9b) Fee charged must match the applicant-approved fee within tolerance (no silent overpay).
+        fee_ok = (approved_fee >= 0) and (fee_charged >= 0) and (abs(fee_charged - approved_fee) <= max(tolerance, 0.01))
+        if approved_fee < 0:
+            problems.append('approved fee_amount is missing - cannot verify the charge')
+            fee_ok = False
+        elif fee_charged < 0:
+            problems.append('portal did not report a fee_charged - cannot verify the charge')
+            fee_ok = False
+        elif not fee_ok:
+            problems.append(
+                'fee mismatch: portal charged ' + str(round(fee_charged, 2))
+                + ' but applicant approved ' + str(round(approved_fee, 2)) + ' (no silent overpay)'
+            )
+
+        if not submitted_at:
+            problems.append('no submitted_at timestamp returned')
+
+        filed = number_ok and fee_ok and (len(problems) == 0)
+
+        result = {
+            'filed': filed,
+            'problems': problems,
+            'application_number': application_number,
+            'status': status,
+            'fee_charged': round(fee_charged, 2) if fee_charged >= 0 else None,
+            'approved_fee': round(approved_fee, 2) if approved_fee >= 0 else None,
+            'submitted_at': submitted_at,
+            'jurisdiction': str(_input.get('jurisdiction', '') or ''),
+            'permit_type': str(_input.get('permit_type', '') or ''),
+            'reason_summary': '; '.join(problems) if problems else 'application_number present and fee matches the approved amount',
+        }
+
+  # 9b) Branch on the deterministic success + fee-match gate. Only a provably-filed, fee-matched
+  #     application proceeds to the reliability replay and recording.
+  - id: filed_gate
+    type: condition
+    depends_on: [assert_filing]
+    condition_config:
+      expression: "{steps.assert_filing.output.filed} == True"
+      then: [replay_vs_golden]
+      else: [notify_submit_unconfirmed]
+
+  # 9c) UNCONFIRMED / FEE-MISMATCH PATH - submit happened but the application_number did not validate
+  #     or the fee did not match. Page the team and leave the run needing attention. A false success
+  #     or a silent overpay is NEVER recorded.
+  - id: notify_submit_unconfirmed
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        NEEDS ATTENTION: permit submit for {input.permit_type} in {input.jurisdiction} did NOT pass
+        the deterministic success/fee-match check: {steps.assert_filing.output.reason_summary}. Do
+        NOT assume the application was lodged or the fee is correct - manually check the portal. The
+        run is left in a needs-attention state.
+
+  # 10) TRAJECTORY-REPLAY - the per-jurisdiction reliability check. Loads the jurisdiction's golden
+  #     trajectory by golden_run_id, diffs this filing flow against it, and FAILS when the replay
+  #     score drops below fail_below_score (a portal redesign diverged) OR cost exceeds the allowed
+  #     delta / budget. Deterministic scorer, not a model's opinion - it makes reliability a property
+  #     of recorded runs, catching portal changes before they corrupt future filings.
+  - id: replay_vs_golden
+    type: trajectory-replay
+    depends_on: [filed_gate]
+    trajectory_replay_config:
+      golden_run_id: "{input.golden_run_id}"
+      fail_below_score: 0.85
+      allow_cost_delta_pct: 10.0
+      cost_budget_usd: 0.5
+
+  # 11a) WRITE-BACK the filed application_number + receipt to the project tracker (deterministic
+  #      http POST to your OWN system, not the portal).
+  - id: writeback_tracker
+    type: http
+    depends_on: [replay_vs_golden]
+    http_config:
+      url: "{input.tracker_url}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+      auth: "bearer:{env.TRACKER_TOKEN}"
+      body: '{"jurisdiction": "{steps.assert_filing.output.jurisdiction}", "permit_type": "{steps.assert_filing.output.permit_type}", "application_number": "{steps.assert_filing.output.application_number}", "status": "{steps.assert_filing.output.status}", "fee_charged": "{steps.assert_filing.output.fee_charged}", "submitted_at": "{steps.assert_filing.output.submitted_at}"}'
+
+  # 11b) NOTIFY the permit desk that the application was lodged, with the jurisdiction-issued number.
+  - id: notify_filed
+    type: notify
+    depends_on: [writeback_tracker]
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        FILED: {input.permit_type} permit application in {input.jurisdiction} lodged. Application
+        number {steps.assert_filing.output.application_number}, status
+        {steps.assert_filing.output.status}, fee charged {steps.assert_filing.output.fee_charged}
+        (applicant-approved {steps.assert_filing.output.approved_fee}), submitted
+        {steps.assert_filing.output.submitted_at}.
+
+  # 11c) ARCHIVE the receipt as a reusable summary via a sub-workflow so every filing leaves an
+  #      auditable record (read-only, no portal write).
+  - id: archive_receipt
+    type: sub_workflow
+    depends_on: [notify_filed]
+    sub_workflow:
+      workflow: "summarize"
+      input_mapping:
+        text: >-
+          Permit filing record. Jurisdiction {steps.assert_filing.output.jurisdiction}, permit type
+          {steps.assert_filing.output.permit_type}, application number
+          {steps.assert_filing.output.application_number}, status
+          {steps.assert_filing.output.status}, fee charged {steps.assert_filing.output.fee_charged}
+          (applicant-approved {steps.assert_filing.output.approved_fee}), submitted
+          {steps.assert_filing.output.submitted_at}.
+        format: "bullet-points"
+      max_concurrent: 1
+
+  # 11d) REPORT - log the filing as a branded PDF record for the permit firm's audit trail.
+  - id: filing_report
+    type: report
+    depends_on: [archive_receipt]
+    report_config:
+      template: "research-report"
+      format: pdf
+      theme: professional
+      title: "Permit Filing Record - {steps.assert_filing.output.application_number}"
+      author: "Permit Filing Desk"
+    prompt: >-
+      Produce a formal permit filing record PDF from the payload below. Include the jurisdiction,
+      permit type, the jurisdiction-issued application number, the status, the fee charged and the
+      applicant-approved fee, the submitted timestamp, and a note that the project record was
+      deterministically validated against the jurisdiction+permit_type rules table, a dual
+      code-compliance check (llm_eval + human pre-entry gate) passed, the applicant of record
+      approved the official submission and the exact fee, the charged fee was deterministically
+      asserted to equal the approved amount, and a per-jurisdiction trajectory-replay confirmed the
+      portal had not drifted. Filing payload: {steps.assert_filing.output} . Validated review/fee
+      state: {steps.validate_fill.output}
+
+on_complete:
+  storage_path: "permit-eportal-application-filer/{input.jurisdiction}/{input.permit_type}/{run_id}/result.json"

@@ -1,0 +1,551 @@
+# name: Legacy ERP Order Status Sync
+# description: Logs into a no-API legacy ERP / order portal (old SAP GUI-web, Epicor, or a homegrown 1990s order system exposed only as a session-cookie-authenticated server-rendered web UI), reads each open order's TRUE fulfillment status via a provider-neutral dom-mode browser extraction, deterministically diffs it in sandboxed Python against the desired status from the downstream WMS/CRM system of record, and pushes status updates back into the ERP ONLY after a human approves the per-order old->new diff. The irreversible write is a stateful CSRF-gated multi-field form fill driven in provider-neutral playwright mode, captured with screenshots for audit, then double-checked by an llm_eval gate against the ERP's own confirmation page before success is declared. Read is split from write; the load-bearing correctness (the diff and the extraction validation) is deterministic code, never a single model's opinion.
+# tags: [DevOps, ERP, LegacyIntegration, Browser, Playwright, DOM, RPA, OrderManagement, HumanApproval, NoAPI, ProviderNeutral]
+# category: devops
+
+name: legacy-erp-order-status-sync
+description: >-
+  Keeps a no-API legacy ERP / order portal in sync with the downstream system of
+  record for operations and supply-chain teams running an on-prem 1990s-era order
+  system (old SAP GUI-web, Epicor, or a homegrown portal) that exposes order status
+  ONLY through a session-cookie-authenticated, server-rendered web UI - no REST, no
+  SOAP, no export worth scripting, dynamic field names, and a CSRF token regenerated
+  per page render, so no http/API step can authenticate the proprietary session or
+  POST the form correctly. Triggered every 30 minutes during business hours, or by a
+  webhook from the downstream WMS/CRM when a shipment event needs reflecting back in
+  the ERP. Step 1 (HTTP) pulls the list of order IDs needing a status check from the
+  downstream system of record - that side DOES have an API - along with each order's
+  desired/true status. Step 2 is a LOOP over those order IDs; each iteration runs a
+  BROWSER step in dom mode (the configured reasoning model authors the DOM-extraction
+  logic from the prompt, so any of the providers can drive it and the model is
+  swappable via default_model) that signs in with ERP_PORTAL_CREDS, navigates to the
+  order-detail page, and returns a STRICT structured read {order_id, current_status,
+  last_updated, line_items[], blocked_reason} under a max_actions cap, with
+  captcha_strategy=pause handing any login challenge to a human. Step 3 is the
+  LOAD-BEARING deterministic code: it diffs the live ERP status against the desired
+  downstream status using re.search on normalized status codes, VALIDATES the
+  extraction (rejects on order_id mismatch or schema-empty as a HARD FAIL so nothing
+  is written on a bad read), and builds a normalized change set of only the orders
+  with a real delta. A CONDITION continues only when at least one genuine status delta
+  exists. A mandatory human APPROVAL then shows the per-order old->new change set
+  (allow_edit so the operator can trim or correct rows) and BLOCKS until sign-off -
+  this is the gate before the irreversible record mutation. Only on approval does the
+  WRITE run: a LOOP over the approved change set drives a BROWSER step in playwright
+  mode (the model authors the Playwright form-fill script, provider-neutral) that
+  re-opens each order, fills the stateful CSRF-gated multi-field status form, clicks
+  save once, captures a screenshot for a tamper-evident audit trail, and returns
+  {order_id, write_confirmed, confirmation_number}. A GATE (llm_eval) then reads the
+  post-write confirmation text / screenshot and confirms the ERP actually ACCEPTED the
+  change - on an llm_eval failure the run is NOT marked successful. Finally a NOTIFY
+  posts the per-order write confirmations plus audit references to operations. Secrets
+  live only in ERP_PORTAL_CREDS (never inline); both browser steps ride default_model
+  and stay swappable across providers; the approval and the diff are model-independent.
+
+default_model: sonnet
+default_timeout: 1200
+
+input_schema:
+  required: ["sor_api_url", "erp_order_detail_url", "erp_status_form_url"]
+  properties:
+    sor_api_url:
+      type: string
+      description: >-
+        Base URL of the downstream system-of-record (WMS/CRM) API that returns the
+        order IDs needing a status check and each order's desired/true fulfillment
+        status. This is the side that DOES have an API. Auth via a bearer token from
+        the env (SOR_API_TOKEN), never inlined.
+      example: "https://wms.internal.example/api/v1"
+    erp_order_detail_url:
+      type: string
+      description: >-
+        URL template for the legacy ERP order-detail page. The loop substitutes the
+        current order id; the read browser step opens this to scrape the live status.
+        Use {order_id} as the placeholder the dom prompt fills per iteration.
+      example: "https://erp.onprem.example/orders/detail?id={order_id}"
+    erp_status_form_url:
+      type: string
+      description: >-
+        URL template for the legacy ERP order STATUS edit form (the stateful,
+        CSRF-gated multi-field form). The write loop substitutes the order id; the
+        playwright write step opens this to push the approved status update.
+      example: "https://erp.onprem.example/orders/status/edit?id={order_id}"
+    erp_credentials_env:
+      type: string
+      description: >-
+        Name of the environment variable holding the legacy ERP login credentials.
+        NEVER an inline secret - only the env var NAME is stored. Passed to both
+        browser steps' credentials_env.
+      default: "ERP_PORTAL_CREDS"
+      example: "ERP_PORTAL_CREDS"
+    status_check_endpoint:
+      type: string
+      description: >-
+        Path on the SOR API that lists open orders needing a status check, each with
+        its desired status. Appended to sor_api_url.
+      default: "/orders/needs-status-check"
+      example: "/orders/needs-status-check"
+    allowed_statuses:
+      type: array
+      description: >-
+        Closed set of normalized fulfillment status codes a read or a target status
+        may carry. A scraped current_status or a desired status outside this set is
+        rejected as malformed - no write is built on an unknown status.
+      default: ["open", "picking", "packed", "shipped", "delivered", "backordered", "cancelled", "on_hold"]
+    max_orders:
+      type: integer
+      description: "Safety cap on how many orders a single run will read / write (bounds the loops)."
+      default: 50
+    approval_timeout_hours:
+      type: integer
+      description: "Hours the human write-approval waits before its timeout fires. on_timeout: abort means a missed approval NEVER auto-writes to the ERP."
+      default: 8
+    notify_service:
+      type: string
+      description: "Where to post the write-confirmation digest: slack or teams."
+      default: "slack"
+    notify_channel:
+      type: string
+      description: "Channel for the per-order write-confirmation digest."
+      default: "#erp-order-sync"
+
+steps:
+  # 1) HTTP - pull the list of order IDs needing a status check (and each order's
+  #    desired/true status) from the downstream WMS/CRM system of record. THIS side
+  #    has a real API; the ERP does not. Auth via a bearer token from the env, never
+  #    inlined. (connector: downstream WMS/CRM via http)
+  - id: fetch_orders_to_sync
+    type: http
+    http_config:
+      url: "{input.sor_api_url}{input.status_check_endpoint}?limit={input.max_orders}"
+      method: GET
+      auth: "bearer:{env.SOR_API_TOKEN}"
+      headers:
+        Accept: "application/json"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 1a) CODE - normalize the SOR response into a plain list of order targets the read
+  #     loop can iterate over: [{order_id, desired_status}]. Deterministic, no model.
+  #     Caps at max_orders so a runaway SOR response can never explode the loops.
+  - id: build_order_worklist
+    type: code
+    depends_on: [fetch_orders_to_sync]
+    code_config:
+      language: python
+      code: |
+        resp = _steps.get("fetch_orders_to_sync") or {}
+        if not isinstance(resp, dict):
+            resp = {}
+        # HTTP step output may carry the parsed body under common keys.
+        rows = (
+            resp.get("orders")
+            or resp.get("data")
+            or resp.get("body")
+            or resp.get("json")
+            or resp.get("items")
+        )
+        if isinstance(rows, dict):
+            rows = rows.get("orders") or rows.get("data") or rows.get("items") or []
+        if not isinstance(rows, list):
+            rows = []
+
+        try:
+            cap = int(_input.get("max_orders", 50) or 50)
+        except (TypeError, ValueError):
+            cap = 50
+
+        worklist = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            oid = str(
+                row.get("order_id")
+                or row.get("id")
+                or row.get("number")
+                or ""
+            ).strip()
+            if not oid:
+                continue
+            desired = str(
+                row.get("desired_status")
+                or row.get("true_status")
+                or row.get("status")
+                or ""
+            ).strip().lower()
+            worklist.append({"order_id": oid, "desired_status": desired})
+            if len(worklist) >= cap:
+                break
+
+        result = {
+            "worklist": worklist,
+            "count": len(worklist),
+            "has_work": len(worklist) > 0,
+        }
+
+  # 2) LOOP over the order worklist. Each iteration runs read_order_status, the
+  #    provider-neutral dom-mode browser read. The loop item ({order_id, desired_status})
+  #    arrives on _input['_item'] and is read by the browser prompt via templating.
+  - id: read_order_statuses
+    type: loop
+    depends_on: [build_order_worklist]
+    loop_config:
+      over: "steps.build_order_worklist.output.worklist"
+      step_ids: [read_order_status]
+      max_iterations: 50
+
+  # 2a) BROWSER (dom mode - PROVIDER-NEUTRAL READ pass). The configured reasoning model
+  #     authors the DOM-extraction logic from this prompt - any of the providers can do
+  #     this and the authoring model is swappable via default_model. It signs into the
+  #     legacy ERP with credentials_env (NEVER an inline secret), navigates to the
+  #     order-detail page for the current order id, and returns ONLY the strict
+  #     output_schema below. captcha_strategy=pause hands any login challenge to a human.
+  #     max_actions caps runaway clicking. This is READ ONLY - it never edits or saves.
+  #     (loop child step - defined separately, read via _input['_item'])
+  - id: read_order_status
+    type: browser
+    browser_config:
+      mode: dom
+      start_url: "{input.erp_order_detail_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 120
+      max_actions: 30
+      headless: true
+      credentials_env: "{input.erp_credentials_env}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          order_id: { type: string }
+          current_status: { type: string }
+          last_updated: { type: string }
+          line_items:
+            type: array
+            items:
+              type: object
+              properties:
+                sku: { type: string }
+                description: { type: string }
+                quantity: { type: number }
+                line_status: { type: string }
+          blocked_reason: { type: string }
+    prompt: |
+      You are reading the live fulfillment status of a single order from a legacy,
+      no-API ERP / order portal (e.g. old SAP GUI-web, Epicor, or a homegrown 1990s
+      order system). The ERP exposes status ONLY through this session-cookie-
+      authenticated, server-rendered web UI - there is no REST/SOAP endpoint, so the
+      order-detail page is the only source of truth.
+
+      The current order to read is provided as a JSON object on the loop item:
+      {input._item}. Use its order_id to locate the order.
+
+      Author the DOM-extraction logic to:
+      1. Sign in to the ERP using the credentials supplied via the credentials_env
+         environment variable. NEVER hardcode or echo the secret.
+      2. If a CAPTCHA, MFA, or device-verification login challenge appears, STOP and
+         hand off to a human (captcha_strategy=pause). Do not attempt to solve it.
+      3. Navigate to the order-detail page for this order id (substitute the order id
+         into the order-detail URL).
+      4. Read, from the rendered order-detail DOM: the order_id shown on the page, the
+         current fulfillment status text, the last-updated timestamp, every line item
+         (sku, description, quantity, per-line status), and any blocked/hold reason.
+      5. Perform NO write actions - never click save, submit, update, edit, cancel, or
+         any button that mutates the record. This is extraction only.
+
+      Return ONLY the structured JSON described by the output_schema: order_id,
+      current_status (the portal's literal status text), last_updated, the line_items
+      array, and blocked_reason (empty string if none).
+
+  # 3) CODE - the LOAD-BEARING step: VALIDATE the extraction and DIFF against the
+  #    desired downstream status. Pure deterministic Python, NO model in the path, so
+  #    the change set is reproducible and provider-neutral. For every scraped read it
+  #    confirms the order_id matches the worklist entry (rejects on mismatch), rejects
+  #    schema-empty reads (no current_status), and rejects unknown statuses. It then
+  #    normalizes both sides with re.search on status codes and emits a change set of
+  #    only the orders with a REAL delta. A HARD FAIL (extraction_ok False) means no
+  #    write is ever built on a bad read.
+  - id: diff_and_validate
+    type: code
+    depends_on: [read_order_statuses, build_order_worklist]
+    code_config:
+      language: python
+      code: |
+        reads = _steps.get("read_order_statuses")
+        if not isinstance(reads, list):
+            reads = [reads] if isinstance(reads, dict) else []
+
+        wl = _steps.get("build_order_worklist") or {}
+        if not isinstance(wl, dict):
+            wl = {}
+        worklist = wl.get("worklist") or []
+        if not isinstance(worklist, list):
+            worklist = []
+
+        # Desired status by order id, from the system of record.
+        desired_by_id = {}
+        for w in worklist:
+            if isinstance(w, dict):
+                oid = str(w.get("order_id") or "").strip()
+                if oid:
+                    desired_by_id[oid] = str(w.get("desired_status") or "").strip().lower()
+
+        allowed = _input.get("allowed_statuses") or []
+        if not isinstance(allowed, list):
+            allowed = []
+        allowed_set = {str(s).strip().lower() for s in allowed if isinstance(s, str)}
+
+        # Normalize a raw status string to a known code using a direct pattern search.
+        # We look for any allowed code as a token inside the raw text (covers values
+        # like "SHIPPED - 2026/05/30" or "Status: On Hold").
+        def _normalize(raw):
+            txt = str(raw or "").strip().lower()
+            if not txt:
+                return ""
+            for code in sorted(allowed_set, key=len, reverse=True):
+                token = code.replace("_", "[ _-]?")
+                if re.search(token, txt):
+                    return code
+            return txt  # unknown - will be rejected downstream
+
+        def _unwrap(env):
+            # The browser step may nest its payload under output/data/result.
+            if not isinstance(env, dict):
+                return {}
+            for key in ("output", "data", "result"):
+                inner = env.get(key)
+                if isinstance(inner, dict) and ("current_status" in inner or "order_id" in inner):
+                    return inner
+            return env
+
+        change_set = []
+        rejected = []
+        in_sync = []
+        seen = 0
+
+        for env in reads:
+            rec = _unwrap(env)
+            seen += 1
+            scraped_id = str(rec.get("order_id") or "").strip()
+            raw_status = rec.get("current_status")
+            # HARD VALIDATION: empty read or unknown order id => reject, never write.
+            if not scraped_id:
+                rejected.append({"reason": "empty_order_id_in_read", "raw": str(rec)[:200]})
+                continue
+            if scraped_id not in desired_by_id:
+                rejected.append({"order_id": scraped_id, "reason": "order_id_not_in_worklist"})
+                continue
+            if raw_status is None or str(raw_status).strip() == "":
+                rejected.append({"order_id": scraped_id, "reason": "empty_current_status"})
+                continue
+
+            current = _normalize(raw_status)
+            desired = desired_by_id.get(scraped_id, "")
+
+            # Reject reads/targets whose normalized status is not in the allowed set.
+            if current not in allowed_set:
+                rejected.append({"order_id": scraped_id, "reason": "unknown_current_status", "value": str(raw_status)[:80]})
+                continue
+            if desired and desired not in allowed_set:
+                rejected.append({"order_id": scraped_id, "reason": "unknown_desired_status", "value": desired})
+                continue
+
+            if not desired or current == desired:
+                in_sync.append({"order_id": scraped_id, "status": current})
+                continue
+
+            change_set.append({
+                "order_id": scraped_id,
+                "old_status": current,
+                "new_status": desired,
+                "last_updated": str(rec.get("last_updated") or ""),
+                "blocked_reason": str(rec.get("blocked_reason") or ""),
+            })
+
+        # extraction_ok is False only when we read orders but EVERY read was rejected -
+        # a strong signal of a silent ERP redesign / auth wall. An empty worklist or a
+        # clean "all in sync" result is NOT a failure.
+        extraction_ok = not (seen > 0 and len(rejected) == seen)
+
+        result = {
+            "change_set": change_set,
+            "change_count": len(change_set),
+            "in_sync_count": len(in_sync),
+            "rejected": rejected,
+            "rejected_count": len(rejected),
+            "reads_seen": seen,
+            "extraction_ok": extraction_ok,
+            "has_delta": extraction_ok and len(change_set) > 0,
+        }
+
+  # 4) CONDITION - continue to the human approval ONLY when the extraction was sound
+  #    AND a real status delta exists. If the read was bad (extraction_ok False) or
+  #    there is nothing to change, skip straight to the no-op / failure notify - no
+  #    approval is offered and no write can possibly happen.
+  - id: delta_gate
+    type: condition
+    depends_on: [diff_and_validate]
+    condition_config:
+      expression: "{steps.diff_and_validate.output.has_delta} == True"
+      then: [approve_writes]
+      else: [notify_no_writes]
+
+  # 4a) NO-WRITE PATH - either nothing changed or the extraction failed. Report it and
+  #     STOP. Nothing is ever written to the ERP on this path.
+  - id: notify_no_writes
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        Legacy ERP order status sync: no writes performed. Reads seen
+        {steps.diff_and_validate.output.reads_seen}, in-sync
+        {steps.diff_and_validate.output.in_sync_count}, deltas
+        {steps.diff_and_validate.output.change_count}, rejected reads
+        {steps.diff_and_validate.output.rejected_count}, extraction_ok
+        {steps.diff_and_validate.output.extraction_ok}. If extraction_ok is false the
+        ERP UI may have changed (silent redesign / auth wall) - investigate before
+        trusting the next run.
+
+  # 5) MANDATORY HUMAN APPROVAL before the irreversible ERP record mutation. Shows the
+  #    deterministically-built per-order change set (old_status -> new_status) so the
+  #    operator can see exactly what will be written, with allow_edit so they can trim
+  #    or correct rows. BLOCKS until a person authorizes. on_timeout: abort means a
+  #    missed approval NEVER auto-writes to the ERP.
+  - id: approve_writes
+    type: approval
+    approval_config:
+      message: >-
+        Confirm ERP status writes. The following orders will have their fulfillment
+        status pushed into the legacy ERP (irreversible record mutation):
+        {steps.diff_and_validate.output.change_set}. That is
+        {steps.diff_and_validate.output.change_count} order(s); reads seen
+        {steps.diff_and_validate.output.reads_seen}, rejected
+        {steps.diff_and_validate.output.rejected_count}. Review each old->new row.
+        Approve to write to the ERP; edit to trim/correct the rows; reject to abort
+        with nothing written.
+      show_data: steps.diff_and_validate.output.change_set
+      timeout_hours: 8
+      on_timeout: abort
+      allow_edit: true
+
+  # 6) WRITE LOOP - only reached AFTER human approval. Iterates over the approved
+  #    change set; each iteration runs write_order_status, the provider-neutral
+  #    playwright write. The approved change row arrives on _input['_item'].
+  - id: write_order_statuses
+    type: loop
+    depends_on: [approve_writes]
+    loop_config:
+      over: "steps.diff_and_validate.output.change_set"
+      step_ids: [write_order_status]
+      max_iterations: 50
+
+  # 6a) BROWSER (playwright mode - PROVIDER-NEUTRAL WRITE pass). Only runs after the
+  #     human approval. The model authors a deterministic Playwright form-fill script
+  #     from this prompt (provider-neutral, swappable via default_model). It re-opens
+  #     the order's status-edit form (the stateful, CSRF-token-gated multi-field form),
+  #     sets the new status, and clicks save ONCE. capture_screenshots=true keeps a
+  #     tamper-evident audit trail of the write. captcha_strategy=pause hands any
+  #     challenge to a human. max_actions tightly caps the fill so there is no runaway.
+  #     Acceptance is NOT trusted from here - the gate below re-reads the ERP's own
+  #     confirmation. (loop child step - defined separately, read via _input['_item'])
+  - id: write_order_status
+    type: browser
+    browser_config:
+      mode: playwright
+      start_url: "{input.erp_status_form_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 120
+      max_actions: 30
+      headless: true
+      credentials_env: "{input.erp_credentials_env}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          order_id: { type: string }
+          write_confirmed: { type: boolean }
+          confirmation_number: { type: string }
+          confirmation_text: { type: string }
+    prompt: |
+      A human has APPROVED writing a new fulfillment status into the legacy, no-API
+      ERP / order portal. The approved change for THIS order is provided as a JSON
+      object on the loop item: {input._item} - it contains order_id, old_status, and
+      new_status.
+
+      Author a deterministic, provider-neutral Playwright script that:
+      1. Signs in to the ERP using the credentials supplied via the credentials_env
+         environment variable. NEVER hardcode or echo the secret.
+      2. If a CAPTCHA, MFA, or device-verification challenge appears, STOP and hand
+         off to a human (captcha_strategy=pause). Do not attempt to solve it.
+      3. Opens the order STATUS edit form for this order id (substitute the order id
+         into the status-form URL). The form is stateful and CSRF-token-gated, with a
+         token regenerated per page render - read the live form, capture the current
+         CSRF token from the rendered page, and submit it with the form.
+      4. Verifies the form is bound to the SAME order_id as the approved item before
+         touching anything. If the order id on the form does not match, do NOT submit -
+         abort this iteration.
+      5. Sets the fulfillment status field to new_status from the approved item, leaving
+         all other fields intact, and clicks the single Save/Update button ONCE. Do not
+         click save more than once and do not edit unrelated fields.
+      6. Capture a screenshot of the post-save confirmation screen for the audit trail.
+
+      Return ONLY the structured JSON described by the output_schema: order_id,
+      write_confirmed (true only if the ERP UI accepted the save without an error),
+      confirmation_number (any reference the ERP printed, empty string if none), and
+      confirmation_text (the literal on-screen confirmation message the ERP rendered).
+
+  # 7) GATE (llm_eval) - reads the ERP's OWN post-write confirmation text/number from
+  #    every write and confirms the ERP actually ACCEPTED the change. This is the
+  #    act-then-verify check against the portal's own confirmation page; on an llm_eval
+  #    FAIL it does NOT mark the run successful. The judge only reads the confirmation
+  #    evidence (it does not re-do the diff, which already happened deterministically)
+  #    and its model can be raced across providers.
+  - id: confirm_writes_gate
+    type: gate
+    depends_on: [write_order_statuses]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >
+              You are an ERP write-verification reviewer. You are given the per-order
+              results of status writes into a legacy ERP, each carrying write_confirmed,
+              a confirmation_number, and the literal confirmation_text the ERP rendered
+              after save. Answer exactly 'approved' ONLY if EVERY order shows
+              write_confirmed=true AND its confirmation_text/confirmation_number is
+              consistent with the ERP genuinely accepting the status change (a real
+              success/confirmation message, not an error, validation failure, session
+              timeout, or CSRF rejection). If ANY order lacks a credible confirmation,
+              shows an error, or has write_confirmed=false, answer 'rejected' and name
+              the order_id(s) that were not confirmed. Do not re-do any diff - only
+              judge whether the ERP's own confirmation evidence proves acceptance.
+            input: "{steps.write_order_statuses.output}"
+            model: sonnet
+
+  # 8) NOTIFY - post the per-order write confirmations plus audit references (the
+  #    confirmation numbers; screenshots are captured on the write step for the audit
+  #    trail) to operations. Reached only after the llm_eval gate confirms the ERP
+  #    accepted every change, so this is a confirmed-success digest, never a false win.
+  #    (connectors: slack, teams)
+  - id: notify_confirmations
+    type: notify
+    depends_on: [confirm_writes_gate]
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        Legacy ERP order status sync complete and ERP-confirmed. Wrote
+        {steps.diff_and_validate.output.change_count} order status update(s).
+        Per-order write confirmations (order_id, write_confirmed, confirmation_number):
+        {steps.write_order_statuses.output}. Audit screenshots were captured on each
+        write step. In-sync (no change needed):
+        {steps.diff_and_validate.output.in_sync_count}; rejected reads:
+        {steps.diff_and_validate.output.rejected_count}.
+
+on_complete:
+  storage_path: "legacy-erp-order-status-sync/{run_id}/sync-result.json"

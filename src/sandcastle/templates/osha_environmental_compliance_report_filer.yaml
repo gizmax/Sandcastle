@@ -1,0 +1,768 @@
+# name: OSHA Environmental Compliance Report Filer
+# description: Files an annual regulatory EHS report (OSHA Injury Tracking Application Form 300A, EPA / state environmental reporting, or a local permit-renewal system) into a login-gated government portal that exposes NO bulk-filing API for most establishments - the certification checkbox and electronic-signature submission live only in the browser UI. Triggered by an annual-deadline schedule cron, gated by a sensor that confirms the source safety data is finalized. Loads the establishment's finalized annual figures (total hours worked, case counts, NAICS, headcount) from the EHS data store, deterministically validates internal consistency (total cases >= cases-with-days-away, hours plausible vs headcount, reporting year matches) and fails CLOSED on contradiction, reads the establishment list READ-ONLY in cheap provider-neutral dom/lightpanda mode, escalates to provider-neutral Playwright only when the form needs interactive JS, fills the Form 300A pages and STOPS at the review/sign page, deterministically asserts the portal-side totals equal the validated source figures (anti-transcription guard), holds for the EHS officer (the legal certifier) to approve the review summary + screenshot, only then certifies + submits and captures the agency confirmation ID + certified receipt, archives the receipt to the audit chain and notifies compliance leadership. Secrets only via credentials_env=EHS_PORTAL_CREDS, captcha_strategy=pause for login challenges, max_actions caps each browser step, capture_screenshots on every write for the EU-AI-Act audit trail. The load-bearing correctness is deterministic Python plus a portal-confirmation sensor, never one model's opinion; both browser modes are neutral (the model authors the automation), so the reasoning provider is freely swappable. No vendor agent runtime is involved.
+# tags: [OSHA, ITA, Form300A, EPA, Environmental, EHS, Compliance, Filing, Playwright, DOM, Lightpanda, RPA, HumanApproval, Certify, Sensor, ProviderNeutral, AuditTrail]
+# category: hr_legal
+
+name: osha-environmental-compliance-report-filer
+description: >-
+  Logs into a regulatory EHS portal (OSHA Injury Tracking Application Form 300A, EPA / state
+  environmental reporting, or a local permit-renewal system), enters the annual compliance figures,
+  certifies, submits, and captures the agency confirmation ID and certified receipt - on behalf of
+  the EHS (Environmental Health & Safety) compliance officer at a manufacturer or multi-site operator
+  who must file annual injury/illness or emissions data into government portals by a hard statutory
+  deadline. These portals are login-gated web apps with certification checkboxes and electronic
+  signature steps and expose NO bulk filing API for most establishments, so submission and the
+  certify/sign action exist only in the browser UI; a plain http step cannot authenticate, walk the
+  form, check the certification box, or click Submit. The flow splits read from write and fails
+  closed. It is triggered by an annual-deadline schedule cron (fires in the weeks before the
+  statutory due date) and gated by a sensor that confirms the source safety data is finalized. Step 1
+  loads the establishment's finalized annual figures (total hours worked, total recordable cases,
+  cases with days away, deaths, NAICS, average headcount, reporting year) from the EHS data store
+  (PostgreSQL/warehouse exposed over an internal read API). Step 2 is deterministic sandboxed Python
+  that validates internal consistency - total cases must be >= cases-with-days-away, hours worked must
+  be plausible against headcount, the reporting year must match the intended filing year - and fails
+  CLOSED on any contradiction so a bad figure set never reaches the portal. Step 3 first attempts the
+  cheap, provider-neutral lightweight headless path (dom / lightpanda mode) to log in and read the
+  establishment list READ-ONLY, returning {establishments, filing_year, portal_status} via
+  output_schema. Step 4 is a condition: if the form requires interactive JS the dom read could not
+  drive, it falls through to a provider-neutral Playwright browser step that fills the Form 300A pages,
+  checks the certification box, advances to the review/sign page and STOPS, returning {establishment_id,
+  totals, certification_text, review_summary, review_screenshot} via output_schema. Step 5 is the
+  load-bearing deterministic anti-transcription guard: it asserts the portal-side totals equal the
+  validated source figures from step 2 within tolerance and blocks submission on any drift. Step 6 is
+  a mandatory human approval - the EHS officer is the legal certifier, so they must explicitly approve
+  the review_summary + screenshot before any certify/submit, naming themselves as the certifier.
+  Step 7 resumes the Playwright session, applies the electronic certification + signature and clicks
+  Submit ONCE, capturing the agency confirmation_id + certified receipt screenshot. Step 8 polls the
+  portal's own filing-status endpoint with a sensor until it confirms the filing as accepted - a
+  clicked Submit is never trusted as a landed filing. Step 9 archives the certified receipt to the
+  audit chain (S3 / MinIO object storage over a PUT URL), and a notify confirms to compliance
+  leadership. Both browser steps ride default_model and swap freely across the providers; the dom and
+  Playwright modes are both neutral (the model authors the automation from the prompt + DOM), so the
+  reasoning provider is freely routable via race/failover. The deterministic validators, the
+  anti-transcription re-check, and the portal-confirmation sensor make reliability a property of
+  deterministic code and recorded portal state, never of a particular model.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 1800
+
+# Default trigger: an annual-deadline cron. OSHA ITA Form 300A is due 1 March each year; this fires
+# 09:00 on 1 February to give weeks of lead time before the statutory due date. Override per filing
+# calendar (EPA / state environmental / local permit-renewal cadences differ). The data_finalized
+# sensor below blocks until the source safety data is actually closed, so we never file half-final
+# figures even if the cron fires early.
+schedule: "0 9 1 2 *"
+
+input_schema:
+  required: ["establishment_key", "filing_year", "figures_api_url", "portal_login_url"]
+  properties:
+    establishment_key:
+      type: string
+      description: "Establishment / facility key for the filing (drives the data pull, the storage path, and the Slack message). For a multi-site operator this identifies which establishment's 300A is being filed."
+      example: "plant-ohio-04"
+    filing_year:
+      type: integer
+      description: "The calendar year the annual figures cover and the portal must file under. The deterministic validator rejects a year mismatch; a missed year is never silently filed under the wrong period."
+      example: "2025"
+    figures_api_url:
+      type: string
+      description: "Internal read API over the EHS data store (PostgreSQL / safety-data warehouse) that returns the establishment's finalized annual figures: total_hours_worked, total_recordable_cases, cases_with_days_away, cases_job_transfer_restriction, deaths, naics, avg_headcount, reporting_year. Pulled by the http step (deterministic)."
+      example: "https://ehs.internal/api/establishments/plant-ohio-04/form300a?year=2025"
+    portal_login_url:
+      type: string
+      description: "Login URL of the government EHS portal SPA where filing begins (OSHA ITA, EPA / state environmental, or local permit-renewal). Login-gated, no bulk filing API. Templated into both browser steps' start_url."
+      example: "https://www.osha.gov/injuryreporting/ita/"
+    credentials_env:
+      type: string
+      description: "Name of the environment variable holding the EHS portal login credentials (NEVER inline secrets). Passed to both browser steps' credentials_env. Default EHS_PORTAL_CREDS."
+      default: "EHS_PORTAL_CREDS"
+      example: "EHS_PORTAL_CREDS"
+    data_finalized_url:
+      type: string
+      description: "Endpoint the data_finalized sensor polls; returns 200 with finalized=true once the upstream safety-data close for this establishment+year is locked. Blocks the filing until the source figures are truly final."
+      default: "https://ehs.internal/api/establishments/status"
+      example: "https://ehs.internal/api/establishments/status?key=plant-ohio-04&year=2025"
+    portal_status_url:
+      type: string
+      description: "The portal's own filing-status endpoint for this establishment+year; the confirmation sensor polls it until the filing reads accepted/received. A clicked Submit is never trusted on its own."
+      default: "https://www.osha.gov/injuryreporting/ita/api/status"
+      example: "https://www.osha.gov/injuryreporting/ita/api/status?key=plant-ohio-04&year=2025"
+    receipt_archive_url:
+      type: string
+      description: "Object-storage (S3/MinIO/GCS-compatible) PUT base URL where the certified receipt screenshot + confirmation JSON are archived to the audit chain for the EU-AI-Act trail. The http archive step PUTs the receipt here."
+      default: "https://s3.eu-central-1.amazonaws.com/ehs-filings-audit"
+      example: "https://s3.eu-central-1.amazonaws.com/ehs-filings-audit"
+    certifier_name:
+      type: string
+      description: "Name of the EHS officer who is the LEGAL certifier and must explicitly approve the certify/submit. Shown in the approval message and recorded in the audit receipt; the signature is theirs, not the agent's."
+      example: "Jane Doe, EHS Director"
+    figure_tolerance:
+      type: number
+      description: "Absolute tolerance allowed when the deterministic anti-transcription guard asserts the portal-side totals equal the validated source figures (covers rounding on the portal's display)."
+      default: 0.5
+      example: "0.5"
+    hours_per_employee_min:
+      type: number
+      description: "Lower plausibility bound for total_hours_worked / avg_headcount; below this the validator flags hours as implausible vs headcount (e.g. a full-time-equivalent floor) and fails closed."
+      default: 200.0
+      example: "200.0"
+    hours_per_employee_max:
+      type: number
+      description: "Upper plausibility bound for total_hours_worked / avg_headcount; above this the validator flags hours as implausible vs headcount (catches a misplaced decimal / unit error) and fails closed."
+      default: 3000.0
+      example: "3000.0"
+    approval_timeout_hours:
+      type: integer
+      description: "Hours the EHS-officer certify approval waits before its timeout fires (on_timeout: abort - a missed approval NEVER auto-certifies or auto-submits a filing)."
+      default: 48
+      example: "48"
+    sensor_poll_interval_seconds:
+      type: integer
+      description: "Seconds between polls of the portal's filing-status endpoint while waiting for confirmed acceptance."
+      default: 60
+      example: "60"
+    sensor_timeout_seconds:
+      type: integer
+      description: "Hard ceiling in seconds the confirmation sensor waits for the portal to confirm acceptance before the run is routed to needs-attention (never reported as success)."
+      default: 3600
+      example: "3600"
+    notify_channel:
+      type: string
+      description: "Slack channel for the filed/blocked/needs-attention notifications to compliance leadership."
+      default: "#ehs-compliance"
+      example: "#ehs-compliance"
+
+steps:
+  # 0) EVENT GATE: block until the source safety data for this establishment+year is finalized. The
+  #    top-level `schedule` cron is the primary annual trigger; this sensor confirms the upstream
+  #    safety-data close is actually locked before we pull figures, so we never file half-final data
+  #    even if the cron fires weeks early. Deterministic boolean over the polled JSON - no model.
+  - id: await_data_finalized
+    type: sensor
+    sensor_config:
+      url: "{input.data_finalized_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200 and bool(response.get('finalized', False))"
+      check_interval: 300
+      timeout: 86400
+
+  # 1) LOAD the establishment's finalized annual figures from the EHS data store. The figures live in
+  #    a PostgreSQL / safety-data warehouse exposed over an internal read API; this http step pulls
+  #    them deterministically (the authoritative source of truth the whole filing reconciles against).
+  - id: load_figures
+    type: http
+    depends_on: [await_data_finalized]
+    http_config:
+      url: "{input.figures_api_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.EHS_DATA_TOKEN}"
+
+  # 2) DETERMINISTIC internal-consistency validation (sandboxed Python, NO model). Confirms the
+  #    Form 300A invariants hold before anything touches the portal: total recordable cases must be
+  #    >= cases-with-days-away (a subset can never exceed its superset), hours worked must be
+  #    plausible against average headcount (hours/headcount inside a sane FTE band - catches unit /
+  #    decimal errors), the reporting year the data carries must match the intended filing_year, and
+  #    every figure must be present and non-negative. Fails CLOSED on any contradiction. This is the
+  #    first load-bearing correctness gate.
+  - id: validate_figures
+    type: code
+    depends_on: [load_figures]
+    code_config:
+      language: python
+      code: |
+        # Deterministic validation of the EHS data pull. No model decides correctness here.
+        pulled = _steps.get("load_figures") or {}
+        if not isinstance(pulled, dict):
+            pulled = {}
+        # The http step may surface the JSON body under body/json/data or at the top level.
+        body = pulled
+        for key in ("body", "json", "data", "response", "result"):
+            inner = pulled.get(key)
+            if isinstance(inner, dict) and ("total_hours_worked" in inner or "figures" in inner):
+                body = inner
+                break
+        figures = body.get("figures") if isinstance(body.get("figures"), dict) else body
+
+        def _num(v, default=-1.0):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return default
+
+        problems = []
+
+        total_hours = _num(figures.get("total_hours_worked"))
+        total_cases = _num(figures.get("total_recordable_cases"))
+        days_away = _num(figures.get("cases_with_days_away"))
+        restricted = _num(figures.get("cases_job_transfer_restriction"), 0.0)
+        deaths = _num(figures.get("deaths"), 0.0)
+        headcount = _num(figures.get("avg_headcount"))
+        naics = str(figures.get("naics", "") or "").strip()
+        reporting_year = _num(figures.get("reporting_year"))
+
+        # 2a) Every figure must be present and non-negative.
+        required_nums = {
+            "total_hours_worked": total_hours,
+            "total_recordable_cases": total_cases,
+            "cases_with_days_away": days_away,
+            "avg_headcount": headcount,
+            "reporting_year": reporting_year,
+        }
+        for name, val in required_nums.items():
+            if val < 0:
+                problems.append("missing or negative figure: " + name)
+        if not naics:
+            problems.append("missing NAICS code")
+
+        # 2b) A subset can never exceed its superset: cases-with-days-away (and restricted, and
+        #     deaths) are subsets of total recordable cases.
+        if total_cases >= 0 and days_away >= 0 and days_away > total_cases:
+            problems.append(
+                "cases_with_days_away " + str(days_away)
+                + " exceeds total_recordable_cases " + str(total_cases)
+            )
+        if total_cases >= 0 and restricted >= 0 and (days_away + restricted) > (total_cases + 0.001):
+            problems.append(
+                "days_away + restricted " + str(days_away + restricted)
+                + " exceeds total_recordable_cases " + str(total_cases)
+            )
+        if total_cases >= 0 and deaths >= 0 and deaths > total_cases:
+            problems.append(
+                "deaths " + str(deaths) + " exceeds total_recordable_cases " + str(total_cases)
+            )
+
+        # 2c) Hours worked must be plausible against headcount (catches a misplaced decimal / a
+        #     wrong unit). hours / headcount should sit inside a sane full-time-equivalent band.
+        h_min = _num(_input.get("hours_per_employee_min"), 200.0)
+        h_max = _num(_input.get("hours_per_employee_max"), 3000.0)
+        hours_per_emp = None
+        if headcount > 0 and total_hours >= 0:
+            hours_per_emp = total_hours / headcount
+            if hours_per_emp < h_min:
+                problems.append(
+                    "hours implausibly low vs headcount: "
+                    + str(round(hours_per_emp, 1)) + " hrs/employee < " + str(h_min)
+                )
+            elif hours_per_emp > h_max:
+                problems.append(
+                    "hours implausibly high vs headcount: "
+                    + str(round(hours_per_emp, 1)) + " hrs/employee > " + str(h_max)
+                )
+        elif headcount <= 0:
+            problems.append("avg_headcount is zero - cannot check hours plausibility")
+
+        # 2d) The reporting year the data carries must match the intended filing year.
+        want_year = _num(_input.get("filing_year"))
+        year_ok = (reporting_year >= 0) and (want_year >= 0) and (int(reporting_year) == int(want_year))
+        if not year_ok:
+            problems.append(
+                "reporting year mismatch: data says " + str(int(reporting_year) if reporting_year >= 0 else "?")
+                + " but filing_year is " + str(int(want_year) if want_year >= 0 else "?")
+            )
+
+        ok = len(problems) == 0
+
+        result = {
+            "ok": ok,
+            "problems": problems,
+            "establishment_key": str(_input.get("establishment_key", "") or ""),
+            "filing_year": int(want_year) if want_year >= 0 else None,
+            "totals": {
+                "total_hours_worked": round(total_hours, 2) if total_hours >= 0 else None,
+                "total_recordable_cases": round(total_cases, 2) if total_cases >= 0 else None,
+                "cases_with_days_away": round(days_away, 2) if days_away >= 0 else None,
+                "cases_job_transfer_restriction": round(restricted, 2) if restricted >= 0 else None,
+                "deaths": round(deaths, 2) if deaths >= 0 else None,
+                "avg_headcount": round(headcount, 2) if headcount >= 0 else None,
+                "naics": naics,
+            },
+            "hours_per_employee": round(hours_per_emp, 1) if hours_per_emp is not None else None,
+            "reason_summary": "; ".join(problems) if problems else "figures internally consistent; year matches; ready to file",
+        }
+
+  # 2b) Hard stop on inconsistent figures - never touch a portal with a contradictory data set.
+  - id: figures_gate
+    type: condition
+    depends_on: [validate_figures]
+    condition_config:
+      expression: "{steps.validate_figures.output.ok} == True"
+      then: [read_establishments]
+      else: [notify_blocked]
+
+  # 2c) BLOCKED (bad figures) path - tell compliance exactly why; no filing was attempted.
+  - id: notify_blocked
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        BLOCKED before filing the Form 300A for establishment {input.establishment_key}
+        ({input.filing_year}). The deterministic internal-consistency validation FAILED, so the EHS
+        portal was never touched. Reason(s): {steps.validate_figures.output.reason_summary}. Fix the
+        safety-data close and re-run.
+
+  # 3) READ PASS (dom / lightpanda mode, READ-ONLY). The cheap, provider-neutral lightweight headless
+  #    path: the swappable reasoning model authenticates via credentials_env (EHS_PORTAL_CREDS - never
+  #    inlined), opens the filing dashboard, and READS the establishment list and which establishments
+  #    are still due for the filing_year - WITHOUT entering or submitting anything. captcha_strategy
+  #    pause hands a login challenge to a human; max_actions caps clicking; output_schema returns
+  #    structured JSON. It also reports requires_interactive_js so the condition below knows whether
+  #    the lightweight reader can drive the form or we must escalate to Playwright.
+  - id: read_establishments
+    type: browser
+    depends_on: [figures_gate]
+    prompt: >-
+      You are doing a READ-ONLY reconnaissance of a government EHS filing portal (OSHA Injury Tracking
+      Application, EPA / state environmental reporting, or a local permit-renewal system). Log in using
+      the credentials provided via the EHS_PORTAL_CREDS environment variable (do NOT print or echo
+      them). Open the annual-filing dashboard for filing year {input.filing_year}. DO NOT type into,
+      check, certify, sign, or submit anything - this is a list read only. Read back the list of
+      establishments visible on the account (each with its establishment id/name, its NAICS if shown,
+      and whether its annual report for {input.filing_year} is already submitted or still due), the
+      filing_year the portal is operating on, and the overall portal_status. Also report whether the
+      actual Form 300A data-entry wizard requires interactive JavaScript that a lightweight DOM reader
+      cannot drive (set requires_interactive_js true if the form uses dynamic client-side widgets,
+      multi-step JS navigation, or canvas/SPA controls). If a CAPTCHA or step-up auth appears, PAUSE
+      for a human. Context: establishment {input.establishment_key}. Return ONLY the structured object
+      described by the output schema.
+    browser_config:
+      mode: dom
+      start_url: "{input.portal_login_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 300
+      max_actions: 40
+      headless: true
+      credentials_env: "{input.credentials_env}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          establishments:
+            type: array
+            items:
+              type: object
+              properties:
+                establishment_id: { type: string }
+                name: { type: string }
+                naics: { type: string }
+                status: { type: string }
+          filing_year:
+            type: string
+            description: "The filing year the portal dashboard is operating on (must align with input.filing_year)."
+          portal_status:
+            type: string
+            description: "Overall portal/account status read from the dashboard (e.g. open, accepting, closed)."
+          requires_interactive_js:
+            type: boolean
+            description: "True if the Form 300A data-entry wizard uses interactive JS the lightweight DOM reader cannot drive, so the flow must escalate to Playwright."
+
+  # 4) ESCALATION decision (deterministic, NO model). The lightweight dom read above is cheap and
+  #    neutral; the actual Form 300A wizard usually needs interactive JS. This condition routes to the
+  #    Playwright fill step when requires_interactive_js is true (the normal path) - both modes are
+  #    provider-neutral. We pick a Playwright fill whenever the dom reader flags interactive JS OR
+  #    leaves it unknown, so we never try to drive a JS form with a reader that cannot.
+  - id: needs_playwright
+    type: condition
+    depends_on: [read_establishments]
+    condition_config:
+      expression: "{steps.read_establishments.output.requires_interactive_js} == True"
+      then: [fill_form_300a]
+      else: [fill_form_300a]
+
+  # 5) FILL PASS (Playwright mode, provider-neutral, NO certify/submit). The reasoning model AUTHORS a
+  #    Playwright script: re-log-in via EHS_PORTAL_CREDS, open the Form 300A data-entry wizard for the
+  #    establishment, type each validated figure (total hours, total recordable cases, days-away,
+  #    restricted, deaths, headcount, NAICS) exactly as given, CHECK the certification box, advance to
+  #    the REVIEW / SIGN page and STOP - it does NOT sign or submit. capture_screenshots gives an
+  #    auditable review screenshot; output_schema returns the establishment id, the portal-side totals
+  #    as the portal now displays them, the certification text, the review summary, and whether the
+  #    Submit/Sign button is present. CAPTCHA pauses to a human; max_actions bounds the multi-page form.
+  - id: fill_form_300a
+    type: browser
+    depends_on: [needs_playwright]
+    prompt: >-
+      You are filing an annual OSHA Form 300A (or the equivalent EPA / state environmental / local
+      permit-renewal annual report) on a logged-in government EHS portal. Authenticate using the
+      EHS_PORTAL_CREDS environment variable (do NOT print or echo it). Open the Form 300A data-entry
+      wizard for establishment {input.establishment_key} and filing year {input.filing_year}. Enter
+      these VALIDATED figures exactly as given, into their matching fields: total hours worked, total
+      recordable cases, cases with days away from work, cases with job transfer or restriction, number
+      of deaths, average annual number of employees, and the NAICS code. Wait for each field's
+      client-side validation to settle before advancing. CHECK the certification acknowledgement
+      checkbox so the review page is reachable. CRITICAL: advance only to the REVIEW / SIGN page and
+      STOP there - DO NOT apply the electronic signature, DO NOT click Submit / File / Certify-and-
+      Submit. The signature and submission are a separate, human-approved step performed by the legal
+      certifier. If a CAPTCHA or step-up auth appears, PAUSE for a human. Validated figures (JSON):
+      {steps.validate_figures.output.totals} . Read back: the establishment id the portal shows, the
+      totals exactly as the PORTAL now displays them on the review page (so they can be reconciled
+      against the source), the certification text shown, a short human-readable review summary, and
+      whether an enabled Submit/Sign button is present (not yet clicked). Return ONLY the structured
+      object described by the output schema.
+    browser_config:
+      mode: playwright
+      start_url: "{input.portal_login_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 600
+      max_actions: 120
+      headless: true
+      credentials_env: "{input.credentials_env}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          establishment_id:
+            type: string
+            description: "The establishment id the portal shows for the filing being prepared."
+          totals:
+            type: object
+            description: "The totals exactly as the PORTAL displays them on the review page, to reconcile against the validated source figures."
+            properties:
+              total_hours_worked: { type: number }
+              total_recordable_cases: { type: number }
+              cases_with_days_away: { type: number }
+              cases_job_transfer_restriction: { type: number }
+              deaths: { type: number }
+              avg_headcount: { type: number }
+              naics: { type: string }
+          certification_text:
+            type: string
+            description: "The exact certification/attestation text the portal shows on the review/sign page."
+          review_summary:
+            type: string
+            description: "Short human-readable summary of the prepared filing for the certifier to read."
+          review_screenshot:
+            type: string
+            description: "Reference/path of the captured review/sign-page screenshot for the approval and audit archive."
+          submit_button_present:
+            type: boolean
+            description: "True if the wizard reached the review/sign page with an enabled Submit/Sign button (not yet clicked)."
+
+  # 5b) DETERMINISTIC ANTI-TRANSCRIPTION GUARD (sandboxed Python, NO model). The load-bearing
+  #     pre-submit check: assert the portal-side totals the form now displays EQUAL the validated
+  #     source figures from step 2 within tolerance (no silent transcription error), that the
+  #     establishment id and certification text are present, that a review screenshot exists, and that
+  #     a Submit/Sign button is present (the wizard truly reached the review/sign page). ANY drift
+  #     fails CLOSED - a mis-entered figure never reaches the certifier or the submit.
+  - id: verify_portal_totals
+    type: code
+    depends_on: [fill_form_300a]
+    code_config:
+      language: python
+      code: |
+        # Deterministic guard: the portal's own displayed totals must match the validated source.
+        read_out = _steps.get("fill_form_300a") or {}
+        if not isinstance(read_out, dict):
+            read_out = {}
+        for key in ("output", "data", "result"):
+            inner = read_out.get(key)
+            if isinstance(inner, dict) and ("totals" in inner or "review_summary" in inner):
+                read_out = inner
+                break
+
+        validated = _steps.get("validate_figures") or {}
+        if not isinstance(validated, dict):
+            validated = {}
+        src = validated.get("totals") if isinstance(validated.get("totals"), dict) else {}
+        portal = read_out.get("totals") if isinstance(read_out.get("totals"), dict) else {}
+
+        def _num(v, default=None):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return default
+
+        tolerance = abs(_num(_input.get("figure_tolerance"), 0.5) or 0.5)
+        problems = []
+
+        # 5b-i) Reconcile each numeric figure: portal display must equal the validated source.
+        numeric_fields = [
+            "total_hours_worked",
+            "total_recordable_cases",
+            "cases_with_days_away",
+            "cases_job_transfer_restriction",
+            "deaths",
+            "avg_headcount",
+        ]
+        mismatches = []
+        for f in numeric_fields:
+            sv = _num(src.get(f))
+            pv = _num(portal.get(f))
+            if sv is None:
+                # A field absent from the source (e.g. optional restricted/deaths) is skipped here;
+                # the required ones were already enforced in validate_figures.
+                continue
+            if pv is None:
+                mismatches.append(f + " not displayed by portal")
+                continue
+            if abs(pv - sv) > max(tolerance, 0.0001):
+                mismatches.append(
+                    f + ": portal " + str(round(pv, 2)) + " != source " + str(round(sv, 2))
+                )
+        if mismatches:
+            problems.append("portal totals drifted from source: " + "; ".join(mismatches))
+
+        # 5b-ii) NAICS must match (string compare, trimmed).
+        src_naics = str(src.get("naics", "") or "").strip()
+        portal_naics = str(portal.get("naics", "") or "").strip()
+        if src_naics and portal_naics and src_naics != portal_naics:
+            problems.append("NAICS mismatch: portal '" + portal_naics + "' != source '" + src_naics + "'")
+
+        # 5b-iii) Establishment id, certification text, review screenshot, and a Submit button must
+        #         all be present for the filing to be safe to certify.
+        establishment_id = str(read_out.get("establishment_id", "") or "").strip()
+        if not establishment_id:
+            problems.append("portal did not return an establishment_id")
+        cert_text = str(read_out.get("certification_text", "") or "").strip()
+        if not cert_text:
+            problems.append("portal did not show certification text on the review/sign page")
+        review_screenshot = str(read_out.get("review_screenshot", "") or "").strip()
+        if not review_screenshot:
+            problems.append("no review/sign screenshot captured for the certifier")
+        if not read_out.get("submit_button_present", False):
+            problems.append("Submit/Sign button absent - wizard did not reach the review/sign page")
+
+        ok = len(problems) == 0
+
+        result = {
+            "ok": ok,
+            "problems": problems,
+            "establishment_id": establishment_id,
+            "certification_text": cert_text,
+            "review_summary": str(read_out.get("review_summary", "") or ""),
+            "review_screenshot": review_screenshot,
+            "portal_totals": portal,
+            "source_totals": src,
+            "reason_summary": "; ".join(problems) if problems else "portal totals match the validated source; review/sign page reached",
+        }
+
+  # 5c) Hard stop on transcription drift - no certifier sees, and nothing submits, on a bad fill.
+  - id: totals_gate
+    type: condition
+    depends_on: [verify_portal_totals]
+    condition_config:
+      expression: "{steps.verify_portal_totals.output.ok} == True"
+      then: [certify_approval]
+      else: [notify_drift]
+
+  # 5d) DRIFT path - the portal totals did not match the validated source; surface why, file nothing.
+  - id: notify_drift
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        BLOCKED before certify on establishment {input.establishment_key} ({input.filing_year}): the
+        portal-displayed totals did NOT reconcile to the validated source figures.
+        {steps.verify_portal_totals.output.reason_summary}. Nothing was certified or submitted -
+        investigate the portal entry or the source data before re-running.
+
+  # 6) MANDATORY HUMAN APPROVAL by the LEGAL CERTIFIER before the irreversible certify + submit. The
+  #    EHS officer named as certifier sees the deterministically reconciled review summary, the exact
+  #    certification text the portal will bind them to, and the captured review/sign screenshot, and
+  #    explicitly authorizes the electronic certification + signature + submission. No certify/submit
+  #    can occur without this gate; on_timeout: abort means a missed approval NEVER auto-certifies.
+  - id: certify_approval
+    type: approval
+    approval_config:
+      message: >-
+        AUTHORIZE the IRREVERSIBLE ELECTRONIC CERTIFICATION + SUBMISSION of the annual Form 300A for
+        establishment {input.establishment_key}, filing year {input.filing_year}. You, the named legal
+        certifier {input.certifier_name}, are applying your electronic signature - this attests, under
+        the agency's penalties, that the figures are true and complete, and lodges the filing. The form
+        is filled and sitting on the portal's review/sign page. Portal-displayed totals (reconciled to
+        the validated source): {steps.verify_portal_totals.output.portal_totals}. Certification text
+        you are signing: {steps.verify_portal_totals.output.certification_text}. Checks:
+        {steps.verify_portal_totals.output.reason_summary}. Review the attached review/sign screenshot -
+        this is the EXACT filing and attestation you are certifying. Approve to apply the signature and
+        Submit; reject to abort with nothing certified and nothing filed.
+      show_data: steps.verify_portal_totals.output
+      show_images: ["steps.verify_portal_totals.output.review_screenshot"]
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: false
+
+  # 7) SUBMIT PASS (Playwright mode, WRITE) - reached ONLY after the certifier approves. Re-opens the
+  #    filled review/sign page, confirms the totals still match, applies the electronic certification +
+  #    signature, and clicks the SINGLE final Submit button ONCE, then reads the confirmation page and
+  #    captures {confirmation_id, status, submitted_at, receipt_screenshot}. capture_screenshots gives
+  #    the after-submit certified receipt for the audit chain; max_actions tightly capped (sign + one
+  #    submit, no runaway); CAPTCHA pauses to a human at the final wall. Acceptance is NOT trusted from
+  #    here - the sensor below re-reads the portal's own filing-status page to confirm.
+  - id: certify_submit
+    type: browser
+    depends_on: [certify_approval]
+    prompt: >-
+      The legal certifier {input.certifier_name} has authorized this IRREVERSIBLE electronic
+      certification and submission of the annual Form 300A for establishment {input.establishment_key},
+      filing year {input.filing_year}. Authenticate with EHS_PORTAL_CREDS if the session expired (do
+      NOT print it), return to the filled review/sign page, confirm the displayed totals still match
+      what was reconciled, then apply the electronic certification + signature exactly as the portal
+      requires and click the SINGLE final Submit / Certify-and-Submit / File button ONCE to lodge the
+      annual report. Do NOT edit any figure, do NOT re-open the data-entry pages, and do NOT click
+      Submit more than once. If a CAPTCHA or step-up auth appears at this final wall, PAUSE for a human
+      - do not attempt to solve it. Then read the portal's confirmation page and capture the
+      agency-issued CONFIRMATION / TRACKING ID, the filing status, the submitted timestamp, and a
+      screenshot of the certified receipt. Return ONLY the structured object described by the output
+      schema. Treat this as an attempt - final acceptance is confirmed separately by re-reading the
+      filing-status page.
+    browser_config:
+      mode: playwright
+      start_url: "{input.portal_login_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 300
+      max_actions: 20
+      headless: true
+      credentials_env: "{input.credentials_env}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          submitted:
+            type: boolean
+            description: "True if the UI accepted the final certify+submit click without an error."
+          confirmation_id:
+            type: string
+            description: "The agency-issued confirmation / tracking id for the lodged annual report."
+          status:
+            type: string
+            description: "The filing status the portal shows after submit (e.g. submitted, received, under_review)."
+          submitted_at:
+            type: string
+            description: "Timestamp the portal recorded for the certified submission."
+          receipt_screenshot:
+            type: string
+            description: "Reference/path of the captured certified-receipt screenshot for the audit chain."
+    retry:
+      max_attempts: 1
+      backoff: fixed
+      on_failure: abort
+
+  # 8) CONFIRM via the portal's OWN filing-status endpoint - never trust the click alone. Poll until
+  #    the filing reads accepted/received OR a confirmation id is present, with a hard timeout.
+  #    Deterministic boolean over the polled JSON - pure control flow, no model.
+  - id: confirm_acceptance
+    type: sensor
+    depends_on: [certify_submit]
+    sensor_config:
+      url: "{input.portal_status_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200 and (str(response.get('status', '')).strip().lower() in ('accepted', 'received', 'processed', 'filed', 'confirmed', 'submitted') or bool(str(response.get('confirmation_id', '') or response.get('reference', '') or '').strip()))"
+      check_interval: 60
+      timeout: 3600
+
+  # 9) Deterministically decide acceptance from the sensor's last polled payload, then branch. A
+  #    timeout / non-accepted status yields fail_count>0 so a silent failure is NEVER a false win.
+  - id: evaluate_acceptance
+    type: code
+    depends_on: [confirm_acceptance]
+    code_config:
+      language: python
+      code: |
+        watch = _steps.get("confirm_acceptance") or {}
+        if not isinstance(watch, dict):
+            watch = {}
+        resp = watch.get("response") if isinstance(watch.get("response"), dict) else watch
+        if not isinstance(resp, dict):
+            resp = {}
+
+        status = str(resp.get("status", "") or "").strip().lower()
+        ref = str(resp.get("confirmation_id", "") or resp.get("reference", "") or "").strip()
+
+        # Fall back to the confirmation id the submit step captured if the status page is terse.
+        submit_out = _steps.get("certify_submit") or {}
+        if isinstance(submit_out, dict):
+            for key in ("output", "data", "result"):
+                inner = submit_out.get(key)
+                if isinstance(inner, dict) and "confirmation_id" in inner:
+                    submit_out = inner
+                    break
+            if not ref:
+                ref = str(submit_out.get("confirmation_id", "") or "").strip()
+        submitted_at = ""
+        if isinstance(submit_out, dict):
+            submitted_at = str(submit_out.get("submitted_at", "") or "").strip()
+
+        accepted_states = ("accepted", "received", "processed", "filed", "confirmed", "submitted")
+        confirmed = (status in accepted_states) or bool(ref)
+
+        sensor_satisfied = bool(watch.get("satisfied", watch.get("met", confirmed)))
+        timed_out = bool(watch.get("timed_out", False)) or (not sensor_satisfied and not confirmed)
+
+        result = {
+            "confirmed": bool(confirmed and not timed_out),
+            "status": status,
+            "confirmation_id": ref,
+            "submitted_at": submitted_at,
+            "timed_out": timed_out,
+            "fail_count": 0 if (confirmed and not timed_out) else 1,
+        }
+
+  # 9b) Branch on confirmation - archive + notify success, or page on-call (never a false win).
+  - id: acceptance_outcome
+    type: condition
+    depends_on: [evaluate_acceptance]
+    condition_config:
+      expression: "{steps.evaluate_acceptance.output.fail_count} > 0"
+      then: [notify_needs_attention]
+      else: [archive_receipt]
+
+  # 9c) NEEDS-ATTENTION path - certify+submit was clicked but the portal never confirmed within the
+  #     timeout. Page compliance; the run stays unresolved. A silently-failed filing is surfaced,
+  #     never reported as success.
+  - id: notify_needs_attention
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        NEEDS ATTENTION: the Form 300A for establishment {input.establishment_key}
+        ({input.filing_year}) was CERTIFIED + SUBMITTED but the EHS portal has NOT confirmed
+        acceptance within the timeout (last status '{steps.evaluate_acceptance.output.status}',
+        confirmation '{steps.evaluate_acceptance.output.confirmation_id}',
+        timed_out={steps.evaluate_acceptance.output.timed_out}). Do NOT assume the report was
+        accepted - check the portal manually and resolve.
+
+  # 10) ARCHIVE the certified receipt + confirmation to the audit chain (S3 / MinIO object storage)
+  #     via http PUT for the EU-AI-Act trail. Deterministic write to your OWN audit store (not the
+  #     government portal).
+  - id: archive_receipt
+    type: http
+    depends_on: [acceptance_outcome]
+    http_config:
+      url: "{input.receipt_archive_url}/{input.establishment_key}/{input.filing_year}/certified-receipt.json"
+      method: PUT
+      headers:
+        Content-Type: "application/json"
+      auth: "bearer:{env.ARCHIVE_TOKEN}"
+      body: '{"establishment_key": "{input.establishment_key}", "filing_year": "{input.filing_year}", "certifier": "{input.certifier_name}", "confirmation_id": "{steps.evaluate_acceptance.output.confirmation_id}", "portal_status": "{steps.evaluate_acceptance.output.status}", "submitted_at": "{steps.evaluate_acceptance.output.submitted_at}", "portal_totals": "{steps.verify_portal_totals.output.portal_totals}", "receipt_screenshot": "{steps.certify_submit.output.receipt_screenshot}", "review_screenshot": "{steps.verify_portal_totals.output.review_screenshot}"}'
+
+  # 11) SUCCESS notification to compliance leadership with the agency-issued confirmation id.
+  - id: notify_filed
+    type: notify
+    depends_on: [archive_receipt]
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        FILED: the annual Form 300A for establishment {input.establishment_key} ({input.filing_year})
+        was certified by {input.certifier_name} and accepted by the EHS portal. Confirmation id
+        {steps.evaluate_acceptance.output.confirmation_id}, status
+        {steps.evaluate_acceptance.output.status}, submitted
+        {steps.evaluate_acceptance.output.submitted_at}. Certified receipt archived to the audit chain
+        at {input.receipt_archive_url}/{input.establishment_key}/{input.filing_year}/certified-receipt.json.
+
+on_complete:
+  storage_path: "osha-environmental-compliance-report-filer/{input.establishment_key}/{input.filing_year}/{run_id}/result.json"

@@ -1,0 +1,568 @@
+# name: Legacy Admin Report Export To Warehouse
+# description: Scheduled RPA bridge that logs into an internal/legacy admin tool with NO export API, runs the canonical report for yesterday, scrapes the rendered result grid (or the JS 'Download CSV'), deterministically validates row count / column arity / numeric parse / a daily-total anomaly band, then UPSERTs clean structured rows into the data warehouse - escalating an anomalous total to a human approval before the load so a layout change or a wrong filter can never silently poison the warehouse. The browser drive is provider-neutral playwright mode (the reasoning model authors the filter-set/run/extract script, fully swappable); trajectory-replay against a golden run, the row/total validation, and the warehouse upsert are deterministic and model-independent, so swapping the reasoning model never changes the data contract.
+# tags: [rpa, browser, playwright, legacy-admin, no-api, data-warehouse, etl, trajectory-replay, anomaly-guard, scheduled, provider-neutral]
+# category: data
+
+name: legacy-admin-report-export-to-warehouse
+description: >-
+  A scheduled (daily 06:00, before the morning dashboards refresh) provider-neutral RPA bridge
+  for a data/analytics engineer or RevOps analyst whose critical metric is trapped inside a
+  legacy admin panel, a vendor dashboard, or an internal tool with NO export API and NO
+  server-side scheduled export. http cannot authenticate the proprietary session or click the
+  JS-driven 'Download CSV', and there is no endpoint to GET - the only path to the numbers is to
+  drive the browser. Step 1 (transform) computes the 'yesterday' date-range parameters that feed
+  the report filters deterministically. Step 2 (browser, PLAYWRIGHT mode) is the core: it logs in
+  via credentials_env=ADMIN_TOOL_CREDS (never inline secrets), sets the date filters, runs the
+  canonical report, and reads the rendered result grid (or triggers and parses the session-
+  authenticated CSV download), returning a STRUCTURED export via output_schema
+  (report_date, columns[], rows[[...]], row_count, grid_reported_total, totals) - capture_screenshots
+  on so each load has an audit trail of exactly which filters produced it, captcha_strategy=pause
+  for admin-login challenges, max_actions caps the session. Step 3 (trajectory-replay) wraps the
+  drive against a golden_run_id with fail_below_score=0.9 / allow_cost_delta_pct=15 so a layout
+  change in the admin tool or a wrong filter selection FAILS the load instead of poisoning the
+  warehouse. Step 4 (deterministic sandboxed Python) is the load-bearing correctness gate: it
+  rejects on empty/short reads, checks the scraped row_count matches the grid's own reported total,
+  enforces that every row has the expected column arity, parses the numeric columns, and compares
+  the daily total against the prior load within an anomaly band. Step 5 (condition) routes: a clean,
+  in-band load goes straight to the warehouse UPSERT; a tripped anomaly guard (e.g. the total
+  dropped 80%) escalates to a human approval ('Report total looks anomalous, load anyway?') showing
+  the validated summary, and only on sign-off does it UPSERT - otherwise nothing is written. After
+  the UPSERT, an llm_eval+human gate / the warehouse's own row-count echo confirms the landing
+  before success, and step 6 (notify, slack) reports row_count + totals so the analyst sees the
+  daily landing succeeded. The flow is strictly read-then-load: it NEVER mutates the source admin
+  tool; the only destructive risk is a bad load, which trajectory-replay + the deterministic guard +
+  the human anomaly approval gate. Both reasoning passes ride default_model and stay swappable across
+  providers; the replay scorer, the validation, the warehouse contract, and the approval are
+  engine-native and model-independent.
+
+default_model: sonnet
+default_timeout: 1200
+
+input_schema:
+  required: ["admin_report_url", "warehouse_endpoint", "target_table"]
+  properties:
+    admin_report_url:
+      type: string
+      description: >-
+        URL of the legacy admin tool's report page to drive (logged-in UI, no export API).
+        Templated into the browser step's start_url. The model sets the date filters here and
+        runs the canonical report.
+      example: "https://admin.internal.example/reports/daily-revenue"
+    warehouse_endpoint:
+      type: string
+      description: >-
+        Base URL of the warehouse write API (PostgREST over Postgres / Snowflake SQL API /
+        internal loader). The UPSERT POSTs the validated rows here. Auth via WAREHOUSE_API_TOKEN
+        env, never inline.
+      example: "https://warehouse.internal.example/rest/v1"
+    target_table:
+      type: string
+      description: "Fully-qualified warehouse table the validated rows are UPSERTed into."
+      example: "analytics.daily_revenue"
+    upsert_conflict_key:
+      type: string
+      description: >-
+        Column(s) the warehouse UPSERT uses as the conflict/merge key so a re-run for the same day
+        is idempotent (no duplicate rows). Sent as the PostgREST on_conflict / merge key.
+      default: "report_date,dimension_key"
+      example: "report_date,dimension_key"
+    expected_column_count:
+      type: integer
+      description: >-
+        The exact number of columns every scraped row MUST have. The deterministic guard rejects
+        the load if any row's arity differs (a layout change adds/drops a column).
+      default: 0
+      example: "5"
+    numeric_columns:
+      type: string
+      description: >-
+        Comma-separated 0-based column indexes that MUST parse as numbers (e.g. amount/count
+        columns). The guard rejects the load if any value in these columns fails to parse.
+      default: ""
+      example: "2,3,4"
+    total_column_index:
+      type: integer
+      description: >-
+        0-based index of the column whose daily sum is the canonical metric used for the anomaly
+        band check (and surfaced in the notification).
+      default: -1
+      example: "4"
+    prior_total:
+      type: number
+      description: >-
+        The canonical daily total from the PRIOR successful load. The guard compares today's total
+        against this; a swing beyond anomaly_band_pct trips the human approval before the load.
+        Pass 0 on the very first run to skip the band check (count/arity checks still apply).
+      default: 0
+      example: "184230.55"
+    anomaly_band_pct:
+      type: number
+      description: >-
+        Allowed percent swing of today's total vs prior_total before the load is treated as
+        anomalous and escalated to human approval (e.g. 50 = within +/-50%).
+      default: 50
+      example: "50"
+    min_rows:
+      type: integer
+      description: >-
+        Minimum number of rows a valid report must contain. A read returning fewer rows than this
+        (e.g. the grid failed to render) is rejected before any load.
+      default: 1
+      example: "1"
+    admin_credentials_env:
+      type: string
+      description: >-
+        Name of the environment variable holding the admin-tool login credentials (NEVER inline
+        secrets). Passed to the browser step's credentials_env.
+      default: "ADMIN_TOOL_CREDS"
+      example: "ADMIN_TOOL_CREDS"
+    golden_run_id:
+      type: string
+      description: >-
+        ID of the known-good recorded drive (correct filters, correct grid layout) the live
+        trajectory is diffed against. UI drift or a wrong filter selection drops the replay score
+        below fail_below_score and fails the load.
+      default: "golden-admin-daily-revenue-export-2026-05-01"
+      example: "golden-admin-daily-revenue-export-2026-05-01"
+    approval_timeout_hours:
+      type: integer
+      description: "Hours the anomalous-load approval waits before its timeout fires (on_timeout: abort - never auto-loads a suspect total)."
+      default: 12
+      example: "12"
+    slack_channel:
+      type: string
+      description: "Slack channel the daily landing summary (and any failure) is posted to."
+      default: "#data-loads"
+      example: "#data-loads"
+
+steps:
+  # ---------------------------------------------------------------------------
+  # 1) TRANSFORM - deterministically compute the 'yesterday' date-range params that
+  #    feed the report filters. No model: a pure template so the same calendar day
+  #    is always requested, making the scheduled run reproducible and golden-diffable.
+  # ---------------------------------------------------------------------------
+  - id: compute_date_range
+    type: transform
+    transform_config:
+      template: |
+        {
+          "report_label": "daily-export",
+          "range_hint": "yesterday",
+          "note": "Browser step resolves the concrete yesterday date from the admin tool's own clock/timezone and echoes it back as report_date; this range hint keeps the filter intent explicit and replayable."
+        }
+
+  # ---------------------------------------------------------------------------
+  # 2) BROWSER (READ pass) - the core. PLAYWRIGHT mode = provider-neutral: the model
+  #    AUTHORS the login + filter-set + run + extract Playwright script, fully
+  #    swappable across reasoning providers. Logs in via credentials_env (no inline
+  #    secrets), sets yesterday's date filters, runs the canonical report, and reads
+  #    the rendered result grid (or triggers and parses the session-authenticated
+  #    'Download CSV'). Returns a STRUCTURED export via output_schema so all downstream
+  #    correctness is on JSON, not screen-scraping. capture_screenshots gives an audit
+  #    trail of exactly which filters produced this load; captcha_strategy=pause hands
+  #    admin-login challenges to a human; max_actions caps the session. NO source
+  #    mutation - extract only.
+  # ---------------------------------------------------------------------------
+  - id: drive_admin_export
+    type: browser
+    depends_on: [compute_date_range]
+    prompt: >-
+      Log into the legacy admin tool at the start URL using the credentials provided via the
+      environment (do not echo them). This tool has no export API, so you must drive the UI. Using
+      the report's date filters, set the reporting range to YESTERDAY (the full prior calendar day
+      in the admin tool's own timezone) per this intent: {steps.compute_date_range.output}. Run the
+      canonical report. Then read the FULL rendered result grid: capture the ordered column headers,
+      every data row as an array of cell strings in column order, and - critically - the grid's OWN
+      reported total / row-count summary if it prints one (e.g. a 'N rows' footer or a totals row),
+      because the validator cross-checks the scraped count against it. If the report instead exposes
+      a 'Download CSV' / 'Export' button that triggers a session-authenticated, JS-driven download,
+      click it, parse the downloaded CSV, and return the same structure. Do NOT change any setting,
+      save, delete, or mutate anything in the admin tool - this is read-only. If a CAPTCHA or step-up
+      login wall appears, PAUSE for a human rather than guessing. Return ONLY the structured object
+      described by the output schema (report_date, columns, rows, row_count, grid_reported_total,
+      totals).
+    browser_config:
+      mode: playwright
+      start_url: "{input.admin_report_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 120
+      max_actions: 50
+      headless: true
+      credentials_env: "{input.admin_credentials_env}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          report_date:
+            type: string
+            description: "The concrete date the report was run for (resolved 'yesterday'), ISO YYYY-MM-DD."
+          columns:
+            type: array
+            items:
+              type: string
+            description: "Ordered column headers of the result grid (defines column order for rows)."
+          rows:
+            type: array
+            description: "Every data row as an array of cell strings, in the same column order as `columns`."
+            items:
+              type: array
+              items:
+                type: string
+          row_count:
+            type: integer
+            description: "Number of data rows the scraper actually extracted (len(rows))."
+          grid_reported_total:
+            type: integer
+            description: "The row-count the grid itself prints in its footer/summary (e.g. 'Showing N rows'), if any; used to cross-check row_count."
+          totals:
+            type: object
+            description: "Any totals/subtotals row the grid renders, as a column-name -> value map (for cross-checking the computed daily total)."
+        required: ["report_date", "columns", "rows", "row_count"]
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
+
+  # ---------------------------------------------------------------------------
+  # 3) TRAJECTORY-REPLAY - the reliability layer. Diffs THIS live drive against the
+  #    golden run (correct filters, correct grid layout). A layout change in the admin
+  #    tool or a wrong filter selection drops the replay score below fail_below_score
+  #    (0.9) or blows the cost delta (15%), FAILING the load instead of poisoning the
+  #    warehouse. Deterministic scorer over observable actions / extracted outputs -
+  #    provider-neutral, not a model's opinion.
+  # ---------------------------------------------------------------------------
+  - id: replay_vs_golden
+    type: trajectory-replay
+    depends_on: [drive_admin_export]
+    trajectory_replay_config:
+      golden_run_id: "{input.golden_run_id}"
+      fail_below_score: 0.9
+      allow_cost_delta_pct: 15.0
+      cost_budget_usd: 0.5
+
+  # ---------------------------------------------------------------------------
+  # 4) VALIDATE (deterministic, no model) - the load-bearing correctness gate over the
+  #    browser READ pass. Rejects empty/short reads, checks the scraped row_count
+  #    matches the grid's own reported total, enforces that EVERY row has the expected
+  #    column arity, parses the numeric columns, and compares today's daily total to
+  #    the prior load within the anomaly band. ANY hard failure => ok=False (abort the
+  #    load); an in-shape-but-out-of-band total => anomalous=True (escalate to human).
+  #    Nothing is ever written on a bad read.
+  # ---------------------------------------------------------------------------
+  - id: validate_export
+    type: code
+    depends_on: [replay_vs_golden]
+    code_config:
+      language: python
+      code: |
+        # Deterministic guard over the browser READ pass. No model decides correctness here.
+        export = _steps.get("drive_admin_export") or {}
+        if not isinstance(export, dict):
+            export = {"raw": export}
+        # The browser step may nest its structured payload under output/data/result.
+        for key in ("output", "data", "result"):
+            inner = export.get(key)
+            if isinstance(inner, dict) and ("rows" in inner or "columns" in inner):
+                export = inner
+                break
+
+        reasons = []
+
+        def _to_int(v, default=0):
+            try:
+                return int(v)
+            except (TypeError, ValueError):
+                return default
+
+        def _to_float(v, default=None):
+            try:
+                return float(str(v).replace(",", "").replace("$", "").strip())
+            except (TypeError, ValueError):
+                return default
+
+        columns = export.get("columns")
+        if not isinstance(columns, list):
+            columns = []
+        rows = export.get("rows")
+        if not isinstance(rows, list):
+            rows = []
+        report_date = str(export.get("report_date", "") or "").strip()
+
+        # --- Minimum-shape: a non-empty report with a real date and headers ---
+        min_rows = _to_int(_input.get("min_rows", 1), 1)
+        if not report_date:
+            reasons.append("read returned no report_date (grid likely failed to render)")
+        if len(columns) == 0:
+            reasons.append("read returned zero columns")
+        if len(rows) < max(1, min_rows):
+            reasons.append("read returned " + str(len(rows)) + " rows, below min_rows " + str(min_rows))
+
+        # --- row_count matches the grid's OWN reported total (no silent truncation) ---
+        scraped_count = len(rows)
+        stated_row_count = _to_int(export.get("row_count", scraped_count), scraped_count)
+        grid_total = export.get("grid_reported_total", None)
+        count_ok = (stated_row_count == scraped_count)
+        if not count_ok:
+            reasons.append("row_count " + str(stated_row_count) + " != actually scraped rows " + str(scraped_count))
+        if grid_total is not None:
+            grid_total_i = _to_int(grid_total, -1)
+            if grid_total_i >= 0 and grid_total_i != scraped_count:
+                reasons.append("grid reported " + str(grid_total_i) + " rows but " + str(scraped_count) + " were scraped (truncated/extra)")
+
+        # --- Column arity: every row matches the expected width (layout-change guard) ---
+        expected_cols = _to_int(_input.get("expected_column_count", 0), 0)
+        if expected_cols <= 0:
+            expected_cols = len(columns)
+        bad_arity = [i for i, r in enumerate(rows) if not isinstance(r, list) or len(r) != expected_cols]
+        arity_ok = (len(bad_arity) == 0) and (expected_cols > 0)
+        if expected_cols <= 0:
+            reasons.append("could not determine expected column count")
+        if bad_arity:
+            reasons.append(str(len(bad_arity)) + " row(s) have wrong column count (expected " + str(expected_cols) + "); first at index " + str(bad_arity[0]))
+
+        # --- Numeric columns parse cleanly ---
+        num_spec = str(_input.get("numeric_columns", "") or "").strip()
+        numeric_idxs = []
+        if num_spec:
+            for tok in num_spec.split(","):
+                tok = tok.strip()
+                if tok.lstrip("-").isdigit():
+                    numeric_idxs.append(int(tok))
+        unparseable = []
+        for idx in numeric_idxs:
+            for ri, r in enumerate(rows):
+                if isinstance(r, list) and 0 <= idx < len(r):
+                    if _to_float(r[idx], None) is None:
+                        unparseable.append((ri, idx))
+        numeric_ok = (len(unparseable) == 0)
+        if unparseable:
+            reasons.append(str(len(unparseable)) + " cell(s) in numeric columns failed to parse; first at row " + str(unparseable[0][0]) + " col " + str(unparseable[0][1]))
+
+        # --- Compute today's canonical daily total from the total column ---
+        total_idx = _to_int(_input.get("total_column_index", -1), -1)
+        today_total = 0.0
+        total_computed = False
+        if 0 <= total_idx:
+            total_computed = True
+            for r in rows:
+                if isinstance(r, list) and total_idx < len(r):
+                    v = _to_float(r[total_idx], 0.0)
+                    today_total += (v if v is not None else 0.0)
+
+        # --- Anomaly band: today's total vs the prior successful load ---
+        prior_total = _to_float(_input.get("prior_total", 0), 0.0) or 0.0
+        band_pct = _to_float(_input.get("anomaly_band_pct", 50), 50.0) or 50.0
+        anomalous = False
+        anomaly_detail = ""
+        if total_computed and prior_total > 0:
+            swing_pct = abs(today_total - prior_total) / prior_total * 100.0
+            if swing_pct > band_pct:
+                anomalous = True
+                anomaly_detail = ("today total " + str(round(today_total, 2)) + " swings "
+                                  + str(round(swing_pct, 1)) + "% vs prior " + str(round(prior_total, 2))
+                                  + " (band " + str(round(band_pct, 1)) + "%)")
+        elif total_computed and prior_total <= 0:
+            anomaly_detail = "no prior_total baseline (first run) - band check skipped"
+
+        # Hard-fail checks gate the load entirely; the anomaly band only escalates to a human.
+        ok = bool(
+            (not reasons)
+            and count_ok
+            and arity_ok
+            and numeric_ok
+            and report_date
+            and len(rows) >= max(1, min_rows)
+        )
+
+        result = {
+            "ok": ok,
+            "anomalous": bool(anomalous),
+            "report_date": report_date,
+            "row_count": scraped_count,
+            "expected_column_count": expected_cols,
+            "count_ok": count_ok,
+            "arity_ok": arity_ok,
+            "numeric_ok": numeric_ok,
+            "total_computed": total_computed,
+            "today_total": round(today_total, 2),
+            "prior_total": round(prior_total, 2),
+            "anomaly_detail": anomaly_detail,
+            "reasons": reasons,
+            "reason_summary": "; ".join(reasons) if reasons else "all hard checks passed",
+        }
+
+  # ---------------------------------------------------------------------------
+  # 5) CONDITION - deterministic routing on the guard result.
+  #    ok=False                -> abort path: notify the failure, write NOTHING.
+  #    ok=True  & anomalous    -> human approval BEFORE the irreversible UPSERT.
+  #    ok=True  & not anomalous-> straight to the warehouse UPSERT.
+  #    (handled as two cascading conditions so each branch target is reachable.)
+  # ---------------------------------------------------------------------------
+  - id: route_validity
+    type: condition
+    depends_on: [validate_export]
+    condition_config:
+      expression: "{steps.validate_export.output.ok} == True"
+      then: [route_anomaly]
+      else: [notify_bad_read]
+
+  # 5a) ABORT PATH - the deterministic guard rejected the read (drift, wrong arity,
+  #     unparseable numbers, truncation, empty grid). Page the channel with exactly
+  #     why and STOP. Nothing is written to the warehouse.
+  - id: notify_bad_read
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: >-
+        LOAD ABORTED for {input.target_table} ({steps.validate_export.output.report_date}): the
+        deterministic export guard FAILED, so nothing was loaded. Reason(s):
+        {steps.validate_export.output.reason_summary}. Scraped
+        {steps.validate_export.output.row_count} rows. Check the admin tool layout / filters and
+        re-run; screenshots of the drive are attached to this run for audit.
+
+  # 5b) Second condition - among VALID reads, split anomalous (human gate) vs clean.
+  - id: route_anomaly
+    type: condition
+    depends_on: [route_validity]
+    condition_config:
+      expression: "{steps.validate_export.output.anomalous} == True"
+      then: [approve_anomalous_load]
+      else: [upsert_clean]
+
+  # 5c) HUMAN APPROVAL - the validated rows are in-shape but the daily total swung
+  #     beyond the anomaly band (e.g. dropped 80%). Show the validated summary and
+  #     BLOCK until a person decides; on_timeout: abort means a suspect total is NEVER
+  #     auto-loaded. Only on approval do we proceed to the UPSERT.
+  - id: approve_anomalous_load
+    type: approval
+    approval_config:
+      message: >-
+        Report total looks anomalous, load anyway? Table {input.target_table} for
+        {steps.validate_export.output.report_date}: {steps.validate_export.output.row_count} rows
+        passed shape/arity/numeric checks, but {steps.validate_export.output.anomaly_detail}.
+        Today total {steps.validate_export.output.today_total} vs prior
+        {steps.validate_export.output.prior_total}. Review the attached drive screenshots (the exact
+        filters that produced this), then APPROVE to UPSERT these rows or REJECT to abort the load
+        with nothing written.
+      show_data: steps.validate_export.output
+      timeout_hours: 12
+      on_timeout: abort
+      allow_edit: false
+
+  # ---------------------------------------------------------------------------
+  # 6) UPSERT (WRITE pass) - the only irreversible action, reached EITHER from a clean
+  #    in-band load OR after explicit human approval of an anomalous one. POSTs the
+  #    validated rows to the warehouse write API with an on_conflict/merge key so a
+  #    re-run for the same day is idempotent (no duplicate rows). Auth via
+  #    WAREHOUSE_API_TOKEN env, never inline. Defined ONCE and reached by both upstream
+  #    branches via depends_on so there is a single warehouse contract.
+  # ---------------------------------------------------------------------------
+  - id: upsert_clean
+    type: http
+    depends_on: [route_anomaly]
+    http_config:
+      url: "{input.warehouse_endpoint}/{input.target_table}?on_conflict={input.upsert_conflict_key}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+        Prefer: "resolution=merge-duplicates,return=representation,count=exact"
+      auth: "bearer:{env.WAREHOUSE_API_TOKEN}"
+      body: |
+        {
+          "report_date": "{steps.validate_export.output.report_date}",
+          "row_count": "{steps.validate_export.output.row_count}",
+          "daily_total": "{steps.validate_export.output.today_total}",
+          "source": "legacy-admin-export",
+          "rows": "{steps.drive_admin_export.output.rows}",
+          "columns": "{steps.drive_admin_export.output.columns}"
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  - id: upsert_approved
+    type: http
+    depends_on: [approve_anomalous_load]
+    http_config:
+      url: "{input.warehouse_endpoint}/{input.target_table}?on_conflict={input.upsert_conflict_key}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+        Prefer: "resolution=merge-duplicates,return=representation,count=exact"
+      auth: "bearer:{env.WAREHOUSE_API_TOKEN}"
+      body: |
+        {
+          "report_date": "{steps.validate_export.output.report_date}",
+          "row_count": "{steps.validate_export.output.row_count}",
+          "daily_total": "{steps.validate_export.output.today_total}",
+          "source": "legacy-admin-export-human-approved",
+          "rows": "{steps.drive_admin_export.output.rows}",
+          "columns": "{steps.drive_admin_export.output.columns}"
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # ---------------------------------------------------------------------------
+  # 7) CONFIRM THE LANDING (engine-native gate, no single-model trust) - after the
+  #    write, an llm_eval gate inspects the warehouse's OWN response (it echoes the
+  #    affected-row representation under Prefer: count/return) and a human gate backstop
+  #    asserts the upserted row_count matches what the guard validated, BEFORE we declare
+  #    success. A clean depends_on on the two mutually-exclusive upsert branches: at
+  #    runtime exactly one fired, and the gate reads whichever landed. This prevents a
+  #    half-applied or rejected write from being reported as a win.
+  # ---------------------------------------------------------------------------
+  - id: confirm_landing
+    type: gate
+    depends_on: [upsert_clean, upsert_approved]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              The warehouse UPSERT response is shown. Confirm the load actually landed: the response
+              must indicate a successful write (HTTP 2xx style, a returned representation, or an
+              affected/count value greater than zero) for table {input.target_table} on
+              {steps.validate_export.output.report_date}, and the affected row count should be
+              consistent with the {steps.validate_export.output.row_count} validated rows. Answer
+              PASS only if the warehouse confirms the rows landed; FAIL on any error, empty
+              response, or zero rows affected.
+            input: "{steps.upsert_clean.output}{steps.upsert_approved.output}"
+            model: sonnet
+        - type: human
+          config:
+            message: >-
+              Confirm the warehouse landing for {input.target_table}
+              ({steps.validate_export.output.report_date}, {steps.validate_export.output.row_count}
+              rows, total {steps.validate_export.output.today_total}) before this run is marked
+              successful. Reject if the warehouse did not actually persist the rows.
+            timeout_hours: 6
+            on_timeout: abort
+
+  # ---------------------------------------------------------------------------
+  # 8) NOTIFY - the daily landing summary so the analyst sees fresh numbers before the
+  #    morning dashboards refresh: report date, row_count, and the canonical daily total.
+  #    Only reached after the confirm gate passes, so it can never announce a phantom load.
+  # ---------------------------------------------------------------------------
+  - id: notify_landed
+    type: notify
+    depends_on: [confirm_landing]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: >-
+        Daily load LANDED: {input.target_table} for {steps.validate_export.output.report_date} -
+        {steps.validate_export.output.row_count} rows, daily total
+        {steps.validate_export.output.today_total} (prior {steps.validate_export.output.prior_total}).
+        Source: legacy admin export via browser RPA; warehouse confirmed the upsert. Fresh numbers
+        are ready for the morning dashboards.
+
+on_complete:
+  storage_path: "legacy-admin-report-export-to-warehouse/{run_id}/result.json"

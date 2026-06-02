@@ -1,0 +1,644 @@
+# name: SaaS API Key Rotation Runner
+# description: Rotates or revokes credentials/API keys/webhook secrets across many service accounts in a SaaS admin console that only regenerates keys one-by-one in the UI and exposes no rotation API. A dom-mode browser census lists each account's current key id + last-rotated date; deterministic code builds a rotation_plan (age-over-policy or explicitly listed) and refuses any missing account or open-dependency flag; an llm_eval gate reviews blast radius; ONE human approval authorizes the irreversible batch; a per-account loop drives an authored Playwright regenerate, reads the one-time new secret from the modal via output_schema, and writes it to the vault by the very NEXT http step before continuing so no secret is ever lost on crash; a dom re-census plus deterministic reconcile asserts every old key id is gone and a new key id is present, flagging any survivor. Secrets NEVER enter notify payloads or the audit chain - only key_id transitions are logged.
+# tags: [DevOps, SecretsRotation, ApiKeyRotation, CredentialRotation, RPA, Playwright, DOM, HumanApproval, Vault, ProviderNeutral]
+# category: devops
+
+name: saas-api-key-rotation-runner
+description: >-
+  Runs a credential-rotation campaign - post-incident or a scheduled 90-day rotation - across many
+  SaaS service accounts / integrations whose admin console regenerates API keys, webhook secrets, or
+  service credentials via a UI button and exposes NO programmatic key-rotation endpoint. The new
+  secret is revealed exactly once in a browser modal, so only a driven browser session can click
+  Regenerate, capture the one-time secret to a vault, and prove the old key is dead. The flow splits
+  read from write and fails closed. A parse step loads the target list of {account_id, integration_name}
+  plus the destination vault path. A dom-mode browser CENSUS lists each account's current key id, its
+  last-rotated date, and status via output_schema - it writes nothing. A DETERMINISTIC code step builds
+  the rotation_plan: it selects accounts whose key age exceeds the policy window OR that are explicitly
+  listed, and it REFUSES the run if any requested account is missing from the census or carries an open
+  dependency flag (a downstream system still depends on that key). An llm_eval GATE reviews blast radius
+  and warns if a high-traffic integration is in scope. Then exactly ONE human approval authorizes the
+  irreversible batch - old keys die on regenerate. A LOOP over the rotation_plan runs, per account, an
+  authored PLAYWRIGHT step (max_actions capped, capture_screenshots on for audit) that clicks Regenerate
+  and reads the one-time new_secret from the modal via output_schema {account_id, new_key_id, new_secret,
+  old_key_revoked_flag}; the very NEXT step is an http write that stores that secret to the vault BEFORE
+  the loop advances, so a crash can never lose a freshly minted secret. A dom RE-CENSUS plus a
+  deterministic FINAL RECONCILE asserts every rotated account now shows a NEW key id and the old key id is
+  gone/inactive, flagging any account where the old key survived. Finally a counts-only notify and an audit
+  record log the key_id transitions - never the secret values. The browser steps ride default_model and stay
+  swappable; vaulting and reconciliation are deterministic code/http with zero model dependency, so the
+  reasoning provider only authors the navigation script and can be swapped freely without weakening safety.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 1800
+
+input_schema:
+  required: ["rotation_targets", "admin_keys_url", "vault_write_url"]
+  properties:
+    rotation_targets:
+      type: string
+      description: "The list of accounts to rotate plus the destination vault path, as a JSON string. Each target is {account_id, integration_name}; explicitly-listed accounts are rotated immediately (incident-driven) regardless of key age."
+      example: '{"vault_path":"secret/saas/rotation/2026Q2","targets":[{"account_id":"svc-billing","integration_name":"Stripe webhook"},{"account_id":"svc-analytics","integration_name":"Segment source"},{"account_id":"svc- etl","integration_name":"Snowflake loader"}]}'
+    admin_keys_url:
+      type: string
+      description: "URL of the SaaS admin console's API keys / service-credentials page where keys are listed and the per-account Regenerate button lives (authenticated SPA, no rotation API). Census and re-census read this read-only."
+      example: "https://admin.example-saas.com/settings/api-keys"
+    account_keys_url_template:
+      type: string
+      description: "URL template for a single service account's key-management page used by the per-account regenerate step (e.g. .../accounts/{account_id}/keys). The loop navigates here per item."
+      default: ""
+      example: "https://admin.example-saas.com/settings/api-keys"
+    vault_write_url:
+      type: string
+      description: "HTTPS endpoint of the secret store / vault that each freshly regenerated one-time secret is POSTed to immediately after regeneration (e.g. a Vault KV write API or an internal secret-store webhook). Auth via VAULT_TOKEN env."
+      example: "https://vault.internal.example.com/v1/secret/data/saas/rotation"
+    portal_credentials_env:
+      type: string
+      description: "Name of the environment variable holding the SaaS admin login credentials (NEVER inline secrets). Passed to every browser step's credentials_env."
+      default: "PORTAL_CREDS"
+      example: "PORTAL_CREDS"
+    key_age_policy_days:
+      type: integer
+      description: "Maximum allowed key age in days. Accounts whose last-rotated date is older than this are selected for scheduled rotation. Explicitly-listed accounts are rotated regardless of age."
+      default: 90
+      example: "90"
+    high_traffic_integrations:
+      type: string
+      description: "Comma-separated substrings of integration names considered high-traffic / high-blast-radius. The blast-radius gate warns (and the human must explicitly accept) if any planned account matches."
+      default: "webhook,payments,stripe,production,prod"
+      example: "webhook,payments,stripe,production,prod"
+    approval_timeout_hours:
+      type: integer
+      description: "Hours the single human batch approval waits before its timeout fires (on_timeout: abort - never auto-rotate)."
+      default: 24
+      example: "24"
+    notify_channel:
+      type: string
+      description: "Slack channel for the counts-only rotation summary (NEVER carries secret values)."
+      default: "#secret-rotation"
+      example: "#secret-rotation"
+    audit_sink_url:
+      type: string
+      description: "HTTPS endpoint that the key_id-transition audit record is POSTed to (records old_key_id -> new_key_id transitions, NEVER the secret values). Auth via AUDIT_SINK_TOKEN env."
+      default: "https://audit.internal.example.com/api/events"
+      example: "https://audit.internal.example.com/api/events"
+
+steps:
+  # 1) PARSE the target list + destination vault path handed in by the caller (scheduled window or
+  #    incident-driven on-demand run). parse returns the raw payload; the plan step parses it
+  #    deterministically. No portal is touched yet.
+  - id: load_targets
+    type: parse
+    prompt: "{input.rotation_targets}"
+    parse_config:
+      output: markdown
+
+  # 2) CENSUS (READ pass, dom mode, READ-ONLY). Provider-neutral lightweight DOM read: the reasoning
+  #    model logs into the admin console via credentials_env (never inlined), opens the API keys page,
+  #    and LISTS every service account's current key id, last-rotated date, and status - WITHOUT
+  #    clicking Regenerate or mutating anything. captcha_strategy=pause hands a CAPTCHA to a human;
+  #    max_actions caps clicking; output_schema returns structured JSON to plan against.
+  - id: census_before
+    type: browser
+    depends_on: [load_targets]
+    prompt: >-
+      You are doing a READ-ONLY census of a SaaS admin console's API keys / service-credentials page.
+      Log in using the credentials provided via the environment, then open the API keys page at the
+      start URL. DO NOT click Regenerate, Revoke, Delete, Rotate, or any mutating control - this is a
+      structure/inventory read only. For EVERY service account / integration listed, report its
+      account_id, the integration_name, the CURRENT key id (the visible key identifier or fingerprint,
+      NOT the secret value - never reveal or read a full secret here), the last-rotated / created date as
+      shown, and its status (active/disabled). Also report any account that displays an open-dependency
+      or in-use warning indicating a downstream system still relies on that key. If a CAPTCHA or step-up
+      auth appears, PAUSE for a human. Return ONLY the structured object described by the output schema.
+    browser_config:
+      mode: dom
+      start_url: "{input.admin_keys_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 300
+      max_actions: 60
+      headless: true
+      credentials_env: "{input.portal_credentials_env}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          accounts:
+            type: array
+            items:
+              type: object
+              properties:
+                account_id: { type: string }
+                integration_name: { type: string }
+                key_id: { type: string }
+                last_rotated: { type: string }
+                status: { type: string }
+                open_dependency_flag: { type: boolean }
+
+  # 3) PLAN (DETERMINISTIC, no model). Parse the target payload + the census and build the rotation_plan.
+  #    Select an account if it is explicitly listed in the targets OR its key age exceeds the policy
+  #    window. REFUSE the whole run (ok=False) if any requested target is MISSING from the census or
+  #    carries an open dependency flag - fails closed so nothing is regenerated on a bad/incomplete read.
+  - id: build_plan
+    type: code
+    depends_on: [load_targets, census_before]
+    code_config:
+      language: python
+      code: |
+        import json
+        from datetime import datetime, timezone
+
+        # --- Parse the target list + vault path handed in by the caller. ---
+        raw = _input.get('rotation_targets') or ''
+        payload = {}
+        if isinstance(raw, dict):
+            payload = raw
+        else:
+            try:
+                payload = json.loads(raw)
+            except (TypeError, ValueError):
+                payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+
+        targets = payload.get('targets')
+        if not isinstance(targets, list):
+            targets = []
+        vault_path = str(payload.get('vault_path', '') or '').strip()
+
+        # --- Pull the census (browser READ pass); it may nest under output/data/result. ---
+        census = _steps.get('census_before') or {}
+        if not isinstance(census, dict):
+            census = {}
+        for key in ('output', 'data', 'result'):
+            inner = census.get(key)
+            if isinstance(inner, dict) and ('accounts' in inner):
+                census = inner
+                break
+        accounts = census.get('accounts')
+        if not isinstance(accounts, list):
+            accounts = []
+
+        # Index census rows by account_id for lookup.
+        by_id = {}
+        for row in accounts:
+            if isinstance(row, dict):
+                aid = str(row.get('account_id', '') or '').strip()
+                if aid:
+                    by_id[aid] = row
+
+        problems = []
+        policy_days = int(_input.get('key_age_policy_days', 90) or 90)
+        now = datetime.now(timezone.utc)
+
+        def _age_days(date_str):
+            s = str(date_str or '').strip()
+            if not s:
+                return None
+            # Accept a few common date shapes; treat trailing Z as UTC.
+            s2 = s.replace('Z', '+00:00')
+            for fmt in ('iso',):
+                try:
+                    dt = datetime.fromisoformat(s2)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    return (now - dt).days
+                except (TypeError, ValueError):
+                    pass
+            for fmt in ('%Y-%m-%d', '%Y/%m/%d', '%m/%d/%Y'):
+                try:
+                    dt = datetime.strptime(s[:10], fmt).replace(tzinfo=timezone.utc)
+                    return (now - dt).days
+                except (TypeError, ValueError):
+                    continue
+            return None
+
+        explicit_ids = set()
+        for t in targets:
+            if isinstance(t, dict):
+                tid = str(t.get('account_id', '') or '').strip()
+                if tid:
+                    explicit_ids.add(tid)
+
+        # --- Every explicitly requested target MUST exist in the census (fail closed). ---
+        for tid in sorted(explicit_ids):
+            if tid not in by_id:
+                problems.append('requested account "' + tid + '" missing from console census')
+
+        rotation_plan = []
+        skipped = []
+        for aid, row in by_id.items():
+            integration_name = str(row.get('integration_name', '') or '').strip()
+            key_id = str(row.get('key_id', '') or '').strip()
+            status = str(row.get('status', '') or '').strip().lower()
+            dep_flag = bool(row.get('open_dependency_flag', False))
+            age = _age_days(row.get('last_rotated'))
+
+            explicitly_listed = aid in explicit_ids
+            age_over = (age is not None and age > policy_days)
+            selected = explicitly_listed or age_over
+
+            if not selected:
+                continue
+
+            # An open dependency flag is a hard refusal - a live system still uses this key.
+            if dep_flag:
+                problems.append('account "' + aid + '" has an OPEN DEPENDENCY flag - refusing to rotate')
+                continue
+            if not key_id:
+                problems.append('account "' + aid + '" has no readable current key_id - cannot prove rotation')
+                continue
+
+            rotation_plan.append({
+                'account_id': aid,
+                'integration_name': integration_name,
+                'old_key_id': key_id,
+                'last_rotated': str(row.get('last_rotated', '') or ''),
+                'age_days': age if age is not None else -1,
+                'reason': 'explicit' if explicitly_listed else ('age>' + str(policy_days) + 'd'),
+                'vault_path': vault_path,
+            })
+
+        if not vault_path:
+            problems.append('no vault_path in rotation_targets payload (nowhere to store new secrets)')
+        if len(rotation_plan) == 0 and len(problems) == 0:
+            problems.append('no accounts selected for rotation (none explicit and none over policy age)')
+
+        # Blast-radius signal for the gate: which planned integrations look high-traffic.
+        ht_terms = [s.strip().lower() for s in str(_input.get('high_traffic_integrations', '') or '').split(',') if s.strip()]
+        high_traffic_hits = []
+        for p in rotation_plan:
+            name = (p['integration_name'] + ' ' + p['account_id']).lower()
+            for term in ht_terms:
+                if term and term in name:
+                    high_traffic_hits.append(p['account_id'])
+                    break
+
+        ok = len(problems) == 0 and len(rotation_plan) > 0
+        result = {
+            'ok': ok,
+            'problems': problems,
+            'vault_path': vault_path,
+            'rotation_plan': rotation_plan,
+            'rotation_count': len(rotation_plan),
+            'skipped_count': len(skipped),
+            'high_traffic_hits': sorted(set(high_traffic_hits)),
+            'high_traffic_in_scope': len(high_traffic_hits) > 0,
+            'policy_days': policy_days,
+            'census_account_count': len(by_id),
+        }
+
+  # 3b) Hard stop on a bad/empty/refused plan - never touch a Regenerate button on an incomplete read.
+  - id: plan_gate
+    type: condition
+    depends_on: [build_plan]
+    condition_config:
+      expression: "{steps.build_plan.output.ok} == True"
+      then: [blast_radius_gate]
+      else: [notify_plan_blocked]
+
+  # 3c) BLOCKED branch: tell the team the campaign did NOT run and why. Nothing was rotated.
+  - id: notify_plan_blocked
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        Key-rotation campaign BLOCKED before any regeneration. The deterministic plan FAILED:
+        {steps.build_plan.output.problems}. Census saw {steps.build_plan.output.census_account_count}
+        accounts; {steps.build_plan.output.rotation_count} were selected. No keys were rotated. Fix the
+        target list or resolve the open-dependency flags and re-run.
+
+  # 4) BLAST-RADIUS GATE (llm_eval) - a provider-swappable reviewer reads the validated plan and WARNS
+  #    if a high-traffic integration is in scope, so a person consciously accepts the blast radius before
+  #    the irreversible batch. The gate is advisory review on top of the deterministic plan; ALL
+  #    strategies must pass. It never invents the selection - that is fixed by code above.
+  - id: blast_radius_gate
+    type: gate
+    depends_on: [plan_gate]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are a change-safety reviewer for a credential-rotation campaign. The accounts to rotate
+              are ALREADY fixed by deterministic policy - do not re-select. Your job is to assess BLAST
+              RADIUS and reply with exactly 'approved' only if rotating these keys is reasonable to proceed
+              to a human, or 'rejected' (naming the risk) if the scope is obviously dangerous - for example
+              a production payments/webhook integration is in scope with no indication a maintenance window
+              exists. Note that any high-traffic integrations flagged here will revoke their old key the
+              instant they are regenerated. Validated plan: {steps.build_plan.output} . High-traffic
+              integrations in scope: {steps.build_plan.output.high_traffic_hits}.
+            input: "{steps.build_plan.output}"
+            model: google/gemini-2.5-pro
+
+  # 5) SINGLE HUMAN BATCH APPROVAL before the irreversible rotation. Shows the deterministically built
+  #    plan (counts + key_id transitions, NOT secrets) and BLOCKS until one person authorizes the whole
+  #    batch. on_timeout: abort means a missed approval NEVER auto-rotates. This is the only authorization.
+  - id: approve_batch
+    type: approval
+    depends_on: [blast_radius_gate]
+    approval_config:
+      message: >-
+        AUTHORIZE the IRREVERSIBLE key-rotation batch. Regenerating each key REVOKES its old key
+        immediately. Plan: {steps.build_plan.output.rotation_count} account(s) will be rotated; high-traffic
+        integrations in scope: {steps.build_plan.output.high_traffic_hits}; new secrets will be written to
+        vault path {steps.build_plan.output.vault_path}. Review the per-account plan (old key ids shown,
+        NOT secrets). Approve to run the batch; reject to abort with nothing rotated.
+      show_data: steps.build_plan.output.rotation_plan
+      timeout_hours: 24
+      on_timeout: abort
+      allow_edit: false
+
+  # 6) ROTATION LOOP over the rotation_plan. Runs ONLY after the single human approval. For EACH account
+  #    it runs, in order: (6a) an authored Playwright Regenerate that reads the one-time new secret, then
+  #    immediately (6b) an http write of that secret to the vault BEFORE the loop advances - so a crash can
+  #    never lose a freshly minted secret. max_iterations caps the batch size. Child steps regenerate_one
+  #    and vault_one are defined separately and read the current item via _item; they carry NO depends_on.
+  - id: rotation_loop
+    type: loop
+    depends_on: [approve_batch]
+    loop_config:
+      over: "steps.build_plan.output.rotation_plan"
+      step_ids: [regenerate_one, vault_one]
+      max_iterations: 1000
+
+  # 6a) PER-ACCOUNT REGENERATE (WRITE pass, playwright mode, provider-neutral). The reasoning model only
+  #     AUTHORS a Playwright script from the prompt; the mutation itself is deterministic Playwright, so any
+  #     provider can author it and is swappable. It navigates to THIS one account, clicks Regenerate, and
+  #     reads the ONE-TIME new secret from the modal via output_schema, plus the new key id and whether the
+  #     console confirms the old key is revoked. max_actions is tightly capped so a misnavigation cannot
+  #     rampage; capture_screenshots is ON for audit; captcha_strategy pauses for a human.
+  - id: regenerate_one
+    type: browser
+    prompt: >-
+      A human has authorized this irreversible key rotation. You are rotating exactly ONE service account in
+      the SaaS admin console. The target is: {{ _item }}. Log in using the environment credentials if needed,
+      navigate to THIS account's key-management view (account_id {{ _item.account_id }}, integration
+      {{ _item.integration_name }}) - searching by account_id if necessary - and confirm the current key id
+      matches old_key_id {{ _item.old_key_id }}. Click the Regenerate / Rotate control for THIS account ONLY,
+      confirming any dialog. The console will reveal the NEW secret exactly once in a modal: capture it now.
+      Operate on this one account ONLY - never touch any other account's keys. Read back: this account_id, the
+      NEW key id the console now shows, the one-time NEW secret value from the modal, and whether the console
+      indicates the OLD key is now revoked/inactive. If a CAPTCHA or step-up auth appears, PAUSE for a human -
+      do not attempt to solve it. Return ONLY the structured object described by the output schema.
+    browser_config:
+      mode: playwright
+      start_url: "{input.account_keys_url_template}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 120
+      max_actions: 25
+      headless: true
+      credentials_env: "{input.portal_credentials_env}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          account_id: { type: string }
+          new_key_id: { type: string }
+          new_secret: { type: string }
+          old_key_revoked_flag: { type: boolean }
+          screenshot_ref: { type: string }
+        required: ["account_id", "new_key_id", "new_secret"]
+
+  # 6b) VAULT WRITE (http) - the very NEXT step after regeneration, BEFORE the loop advances. POSTs the
+  #     one-time new secret to the vault keyed by account/path so a crash can never lose it. The new_secret
+  #     is sent ONLY to the vault here; it NEVER enters notify or the audit chain. Auth via VAULT_TOKEN env.
+  #     retry on_failure: abort means a failed vault write stops the run rather than continuing with a lost
+  #     secret. The reconcile + audit downstream log only key_id transitions.
+  - id: vault_one
+    type: http
+    http_config:
+      url: "{input.vault_write_url}"
+      method: POST
+      auth: "bearer:{env.VAULT_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+      body: |
+        {
+          "vault_path": "{_item.vault_path}",
+          "account_id": "{steps.regenerate_one.output.account_id}",
+          "integration_name": "{_item.integration_name}",
+          "new_key_id": "{steps.regenerate_one.output.new_key_id}",
+          "secret": "{steps.regenerate_one.output.new_secret}",
+          "rotated_from_key_id": "{_item.old_key_id}"
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 7) RE-CENSUS (READ pass, dom mode, READ-ONLY). After the whole batch, re-read the same API keys page
+  #    so the reconcile has a fresh post-image: each account's CURRENT key id and status. No mutation.
+  #    Same provider-neutral DOM extraction as the first census.
+  - id: census_after
+    type: browser
+    depends_on: [rotation_loop]
+    prompt: >-
+      You are doing a READ-ONLY re-census of the SaaS admin console's API keys page AFTER a rotation batch.
+      Log in using the environment credentials, open the API keys page at the start URL, and for EVERY
+      service account report its account_id, integration_name, the CURRENT key id now shown (the identifier,
+      NOT the secret value), and its status (active/disabled). DO NOT click Regenerate, Revoke, or any
+      mutating control. If a CAPTCHA or step-up auth appears, PAUSE for a human. Return ONLY the structured
+      object described by the output schema.
+    browser_config:
+      mode: dom
+      start_url: "{input.admin_keys_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 300
+      max_actions: 60
+      headless: true
+      credentials_env: "{input.portal_credentials_env}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          accounts:
+            type: array
+            items:
+              type: object
+              properties:
+                account_id: { type: string }
+                integration_name: { type: string }
+                key_id: { type: string }
+                status: { type: string }
+
+  # 8) FINAL RECONCILE (DETERMINISTIC, no model) - the load-bearing correctness gate. For every account in
+  #    the rotation_plan, assert the re-census shows a NEW key id (different from the recorded old_key_id)
+  #    and the old key id is NO LONGER present/active. Flag any account where the old key survived (drift).
+  #    This proves the rotation landed; a single model's opinion is never trusted for this call. Secrets are
+  #    NOT touched here - only key_id transitions are compared.
+  - id: final_reconcile
+    type: code
+    depends_on: [build_plan, rotation_loop, census_after]
+    code_config:
+      language: python
+      code: |
+        plan = _steps.get('build_plan') or {}
+        if not isinstance(plan, dict):
+            plan = {}
+        rotation_plan = plan.get('rotation_plan')
+        if not isinstance(rotation_plan, list):
+            rotation_plan = []
+
+        # Loop output (per-item regenerate results) may be a list or a wrapper dict.
+        loop_out = _steps.get('rotation_loop')
+        loop_items = loop_out if isinstance(loop_out, list) else (
+            (loop_out.get('results') or loop_out.get('items') or []) if isinstance(loop_out, dict) else []
+        )
+
+        # Post-image re-census, possibly nested under output/data/result.
+        after = _steps.get('census_after') or {}
+        if not isinstance(after, dict):
+            after = {}
+        for key in ('output', 'data', 'result'):
+            inner = after.get(key)
+            if isinstance(inner, dict) and ('accounts' in inner):
+                after = inner
+                break
+        after_accounts = after.get('accounts')
+        if not isinstance(after_accounts, list):
+            after_accounts = []
+
+        after_by_id = {}
+        for row in after_accounts:
+            if isinstance(row, dict):
+                aid = str(row.get('account_id', '') or '').strip()
+                if aid:
+                    after_by_id[aid] = row
+
+        # Map per-item regenerate results by account_id to learn the new_key_id (NOT the secret).
+        regen_by_id = {}
+        for it in loop_items:
+            obj = it if isinstance(it, dict) else {}
+            for key in ('output', 'data', 'result'):
+                inner = obj.get(key)
+                if isinstance(inner, dict) and ('new_key_id' in inner or 'account_id' in inner):
+                    obj = inner
+                    break
+            aid = str(obj.get('account_id', '') or '').strip()
+            if aid:
+                regen_by_id[aid] = obj
+
+        transitions = []
+        drift = []
+        confirmed = 0
+        for p in rotation_plan:
+            aid = str(p.get('account_id', '') or '').strip()
+            old_key_id = str(p.get('old_key_id', '') or '').strip()
+            regen = regen_by_id.get(aid, {})
+            claimed_new = str(regen.get('new_key_id', '') or '').strip()
+
+            now_row = after_by_id.get(aid, {})
+            now_key_id = str(now_row.get('key_id', '') or '').strip()
+            now_status = str(now_row.get('status', '') or '').strip().lower()
+
+            new_present = bool(now_key_id) and (now_key_id != old_key_id)
+            old_gone = (now_key_id != old_key_id)
+            # If the console still surfaces the old key id as active, the old key survived.
+            old_survived = (now_key_id == old_key_id) and (now_status in ('', 'active'))
+
+            account_ok = new_present and old_gone and not old_survived
+            if account_ok:
+                confirmed += 1
+            else:
+                drift.append({
+                    'account_id': aid,
+                    'old_key_id': old_key_id,
+                    'observed_key_id': now_key_id,
+                    'observed_status': now_status,
+                    'reason': 'old key survived' if old_survived else 'no new key id observed',
+                })
+
+            # key_id transition only - NEVER the secret value.
+            transitions.append({
+                'account_id': aid,
+                'integration_name': str(p.get('integration_name', '') or ''),
+                'old_key_id': old_key_id,
+                'new_key_id': now_key_id or claimed_new,
+                'rotated': account_ok,
+            })
+
+        targeted = len(rotation_plan)
+        all_clean = (targeted > 0) and (len(drift) == 0) and (confirmed == targeted)
+        result = {
+            'all_clean': all_clean,
+            'targeted_count': targeted,
+            'confirmed_count': confirmed,
+            'drift_count': len(drift),
+            'drift': drift,
+            'transitions': transitions,
+            'vault_path': str(plan.get('vault_path', '') or ''),
+        }
+
+  # 8b) Branch on the deterministic reconcile. A clean batch proceeds to the audit record; any surviving
+  #     old key routes to the drift notification so a partial rotation is NEVER reported as a clean success.
+  - id: reconcile_gate
+    type: condition
+    depends_on: [final_reconcile]
+    condition_config:
+      expression: "{steps.final_reconcile.output.all_clean} == True"
+      then: [audit_record]
+      else: [notify_drift]
+
+  # 8c) DRIFT PATH - one or more old keys survived (or no new key observed). Page the team with COUNTS and
+  #     the offending account_ids/key_id transitions ONLY (never secrets), and leave the run needing
+  #     attention. A partial rotation is surfaced, never mistaken for success.
+  - id: notify_drift
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        NEEDS ATTENTION: key-rotation batch did NOT fully reconcile. Targeted
+        {steps.final_reconcile.output.targeted_count}, confirmed rotated
+        {steps.final_reconcile.output.confirmed_count}, DRIFT
+        {steps.final_reconcile.output.drift_count}. Offending accounts (key_id transitions only, no
+        secrets): {steps.final_reconcile.output.drift}. New secrets that WERE minted are already in the
+        vault. Manually verify and re-rotate the survivors. The run is left in a needs-attention state.
+
+  # 9a) AUDIT RECORD (http POST, deterministic) - records the key_id TRANSITIONS (old_key_id -> new_key_id)
+  #     for the clean batch. The body carries ONLY transitions/counts and the vault_path - NEVER any secret
+  #     value - satisfying least-exposure. Auth via AUDIT_SINK_TOKEN env.
+  - id: audit_record
+    type: http
+    depends_on: [reconcile_gate]
+    http_config:
+      url: "{input.audit_sink_url}"
+      method: POST
+      auth: "bearer:{env.AUDIT_SINK_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+      body: |
+        {
+          "event": "saas_api_key_rotation_completed",
+          "vault_path": "{steps.final_reconcile.output.vault_path}",
+          "targeted_count": "{steps.final_reconcile.output.targeted_count}",
+          "confirmed_count": "{steps.final_reconcile.output.confirmed_count}",
+          "drift_count": "{steps.final_reconcile.output.drift_count}",
+          "key_id_transitions": "{steps.final_reconcile.output.transitions}"
+        }
+
+  # 9b) SUMMARY NOTIFY (counts only, NEVER secrets). Final success message with the rotation counts and the
+  #     vault path; secret values never appear here by construction (only counts + vault_path are referenced).
+  - id: notify_summary
+    type: notify
+    depends_on: [audit_record]
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        Key-rotation campaign COMPLETE and reconciled clean. Rotated
+        {steps.final_reconcile.output.confirmed_count}/{steps.final_reconcile.output.targeted_count}
+        account(s); every old key is confirmed gone and a new key id is present. New secrets are stored at
+        vault path {steps.final_reconcile.output.vault_path}. Audit chain logged the key_id transitions
+        (no secret values were ever exposed in notifications or the audit record).
+
+on_complete:
+  storage_path: "saas-api-key-rotation-runner/{run_id}/result.json"

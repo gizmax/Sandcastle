@@ -1,0 +1,665 @@
+# name: Utility Municipal Bill Filer
+# description: Runs on each utility account's billing cycle to log into electric/water/gas/municipal and telecom customer portals that are paperless-by-default with NO public API - the bill lives only inside the portal's 'Billing History' behind an authenticated session (often with a CAPTCHA). A per-account sensor polls the billing-history page until this cycle's new bill posts, a provider-neutral browser step (dom/lightpanda for lightweight municipal sites, playwright for JS portals) logs in via credentials_env and downloads the newest bill READ-ONLY via output_schema, parse + deterministic Python validate the amount/due-date and compute the percent change vs the prior period (NORMAL / SPIKE / VALIDATION_FAIL), the bill is filed by property/utility/year-month to the property-management drive, anomalies alert the facilities manager immediately, and the IRREVERSIBLE 'Pay' click is unreachable unless a human approval explicitly authorizes the exact amount and account - the agent never pays autonomously. trajectory-replay (fail_below_score 0.85) fails the run on municipal-portal UI drift so a redesign can never cause a wrong-bill download or a misdirected pay click.
+# tags: [Utilities, Municipal, Billing, PaperlessPortal, RPA, DOM, Lightpanda, Playwright, SpikeDetection, HumanApproval, TrajectoryReplay, ProviderNeutral, PropertyManagement]
+# category: general_ai
+
+name: utility-municipal-bill-filer
+description: >-
+  Files the current-cycle bill for ONE property-utility account whose provider is paperless-by-default
+  and exposes the statement ONLY through its own customer portal's 'Billing History' - the canonical
+  no-API, login-gated case for municipal electric/water/gas and telecom billers. Built for a property /
+  facilities manager or HOA administrator overseeing many units, each with several utility and municipal
+  accounts: there is no API or email to scrape, so retrieving the bill requires an authenticated browser
+  session to the billing-history page (frequently behind a CAPTCHA). The flow splits read from write and
+  fails closed. (1) A per-account sensor polls the billing-history page a few days after the known cycle
+  date until the new bill for this period is posted. (2) A trajectory-replay guards this account's
+  recorded login+download path against the frequent municipal-portal UI changes; on drift the run fails
+  before a wrong bill can be touched. (3) A provider-neutral browser step (dom/lightpanda for the many
+  lightweight municipal sites - no vision model - or playwright for JS portals; the reasoning model
+  AUTHORS the automation either way, fully swappable) logs in via credentials_env, opens Billing History,
+  downloads the NEWEST bill READ-ONLY and returns {property_id, utility_type, account_number_last4,
+  billing_period, usage_value, usage_unit, amount_due, due_date, pdf_path} via output_schema - it writes
+  nothing and never navigates to Pay. (4) A parse step reads the downloaded PDF/HTML. (5) A DETERMINISTIC
+  code step (no model) asserts the parsed amount_due equals the portal output_schema amount_due, validates
+  the due_date is a real future date, and computes the percent change vs the prior period's stored
+  usage/amount, emitting NORMAL / SPIKE / VALIDATION_FAIL. (6) A condition routes SPIKE (amount above the
+  configured multiple of the trailing average - possible leak, meter error, or fraud) or VALIDATION_FAIL
+  to an immediate facilities-manager alert; nothing is paid on a suspicious or unverified bill. (7) The
+  validated bill is filed to the property-management drive under property/utility/year-month/ via a
+  deterministic storage PUT. (8) If, and ONLY if, the account is configured to initiate payment, an
+  approval gate shows the exact amount and account and the captured screenshot - on approval a separate
+  playwright browser step navigates to 'Pay' and pays ONCE; otherwise the run stops at filing plus a
+  due-date reminder. The agent never pays autonomously: the Pay click is unreachable without the human
+  approving the specific amount and account first. (9) After a pay attempt a sensor polls the portal's own
+  payment-status endpoint until it confirms - a clicked Pay is never trusted as a landed payment. Finally
+  a per-property digest notifies the manager. Both browser steps ride default_model and stay swappable;
+  the spike detection and amount validation are pure deterministic Python with zero model coupling; the
+  condition router and trajectory-replay are engine logic - so swapping the reasoning model never changes
+  filing or payment behavior.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 1800
+
+input_schema:
+  required: ["property_id", "utility_type", "billing_portal_url", "billing_period"]
+  properties:
+    property_id:
+      type: string
+      description: "Property / unit identifier this account belongs to. Drives the drive filing path, the digest, and is echoed back from the portal read for cross-check."
+      example: "PROP-RIVERSIDE-12B"
+    utility_type:
+      type: string
+      description: "Utility class for this account (electric, water, gas, municipal, telecom). Drives the filing path and the spike-context message."
+      example: "water"
+    billing_portal_url:
+      type: string
+      description: "Login URL of the utility/municipal customer portal whose Billing History holds the bill (paperless-only, no public API). Templated into both browser steps' start_url and the sensor poll."
+      example: "https://myaccount.citywater.gov/login"
+    billing_period:
+      type: string
+      description: "The billing cycle this run files (the sensor waits for THIS period to post; the validator rejects a period mismatch). Typically YYYY-MM."
+      example: "2026-05"
+    portal_mode:
+      type: string
+      description: "Documents the read-pass browser mode appropriate for THIS portal so an operator cloning the template knows which to pin on the download_bill step: 'dom' or 'lightpanda' for lightweight municipal sites (no vision model), 'playwright' for JS-heavy portals. This template ships the read pass as literal dom (provider-neutral default for the many municipal sites); the reasoning model authors the automation in any mode, so swapping it never changes behavior."
+      default: "dom"
+      example: "dom"
+    credentials_env:
+      type: string
+      description: "Name of the environment variable holding THIS account's portal login credentials (NEVER inline secrets). Convention: UTILITY_<ACCOUNT>_CREDS. Passed to both browser steps' credentials_env."
+      default: "UTILITY_PORTAL_CREDS"
+      example: "UTILITY_CITYWATER_12B_CREDS"
+    account_number_last4:
+      type: string
+      description: "Last 4 of the account number on file, cross-checked against what the portal read returns so a wrong-account bill is rejected before filing or payment."
+      default: ""
+      example: "8841"
+    billing_status_url:
+      type: string
+      description: "Billing-history status endpoint the cycle sensor polls; returns 200 once a bill for {billing_period} is posted. The event trigger - the run starts only when this cycle's bill is actually available."
+      example: "https://myaccount.citywater.gov/api/billing/status?period=2026-05"
+    golden_run_id:
+      type: string
+      description: "ID of the known-good recorded login+download trajectory for THIS portal. trajectory-replay diffs the live drive against it and fails the run on municipal-portal UI drift before a wrong bill can be downloaded."
+      default: "golden-utility-login-download-2026-05"
+      example: "golden-citywater-12b-2026-05"
+    prior_amount_due:
+      type: number
+      description: "The amount_due filed for the PRIOR period for this account; the deterministic spike check computes percent change against it. 0 means no baseline (never flags a spike)."
+      default: 0
+      example: "82.40"
+    prior_usage_value:
+      type: number
+      description: "The usage_value filed for the PRIOR period; used by the deterministic spike check to flag a usage jump (possible leak/meter error) even when the dollar amount looks normal."
+      default: 0
+      example: "4.2"
+    trailing_avg_amount:
+      type: number
+      description: "Trailing-average amount_due across recent periods for this account; a bill above spike_multiple x this average is flagged as a SPIKE for human eyes before any payment is contemplated. 0 means no baseline."
+      default: 0
+      example: "79.10"
+    spike_multiple:
+      type: number
+      description: "Multiple of the trailing average above which a bill is treated as a SPIKE (leak/meter error/fraud). Default 1.5x per the spec."
+      default: 1.5
+      example: "1.5"
+    drive_archive_url:
+      type: string
+      description: "Property-management drive (S3/MinIO/GCS-compatible) base PUT URL. The validated bill is filed under property/utility/year-month/. Provider-neutral object storage - not the utility portal."
+      default: "https://drive.internal/property-bills"
+      example: "https://s3.eu-central-1.amazonaws.com/property-bills"
+    initiate_payment:
+      type: boolean
+      description: "Whether this account is configured to initiate payment from the portal. If false (default) the run STOPS at filing plus a due-date reminder. If true, payment is STILL gated behind an explicit human approval of the exact amount and account - the agent never pays autonomously."
+      default: false
+      example: "false"
+    payment_status_url:
+      type: string
+      description: "The portal's own payment-status endpoint; after a pay attempt the confirmation sensor polls it until the payment reads posted/confirmed. A clicked Pay is never trusted as a landed payment."
+      default: "https://myaccount.citywater.gov/api/payments/status"
+      example: "https://myaccount.citywater.gov/api/payments/status?period=2026-05"
+    approval_timeout_hours:
+      type: integer
+      description: "Hours the human pay-approval waits before its timeout fires (on_timeout: abort - a missed approval NEVER auto-pays a bill)."
+      default: 24
+      example: "24"
+    notify_channel:
+      type: string
+      description: "Slack channel for the spike/validation alerts, the per-property digest, and any needs-attention message."
+      default: "#property-utilities"
+      example: "#property-utilities"
+
+steps:
+  # 1) EVENT TRIGGER / CYCLE SENSOR. Poll THIS account's billing-history status endpoint a few days
+  #    after the known cycle date until a bill for {billing_period} is actually posted. Deterministic
+  #    control flow (no model) - the run never opens the portal to download a bill that isn't there yet.
+  - id: await_bill_posted
+    type: sensor
+    sensor_config:
+      url: "{input.billing_status_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200 and (bool(response.get('bill_posted', False)) or str(response.get('billing_period', '')).strip() != '')"
+      check_interval: 3600
+      timeout: 86400
+
+  # 2) RELIABILITY GUARD - trajectory-replay this account's recorded login+download path against the
+  #    golden run BEFORE the live download is trusted. Municipal portals redesign constantly; on UI
+  #    drift (score < fail_below_score) or cost blowup the run FAILS here, so a redesign can never
+  #    cause a wrong-bill download or a misdirected pay click. Deterministic scorer, not a model opinion.
+  - id: replay_login_download
+    type: trajectory-replay
+    depends_on: [await_bill_posted]
+    trajectory_replay_config:
+      golden_run_id: "{input.golden_run_id}"
+      fail_below_score: 0.85
+      allow_cost_delta_pct: 10.0
+      cost_budget_usd: 0.5
+
+  # 3) READ PASS (provider-neutral, READ-ONLY, NO write, NO pay). The swappable reasoning model AUTHORS
+  #    the automation - dom/lightpanda for lightweight municipal sites (no vision model) or playwright
+  #    for JS portals. It logs in via credentials_env (UTILITY_<ACCOUNT>_CREDS - never inlined), opens
+  #    Billing History, and downloads the NEWEST bill for {billing_period}, returning the structured
+  #    fields via output_schema. It does NOT navigate to Pay, edit anything, or submit. captcha_strategy
+  #    =pause hands the municipal CAPTCHA to a human; max_actions: 45 caps clicking; capture_screenshots
+  #    gives an audit screenshot.
+  - id: download_bill
+    type: browser
+    depends_on: [replay_login_download]
+    prompt: >-
+      You are retrieving the current-cycle bill from a utility / municipal customer portal that is
+      paperless-by-default with NO public API - the statement lives only inside the portal's Billing
+      History behind an authenticated session. Authenticate using the credentials provided via the
+      environment (do NOT print or echo them), then open the Billing History / Statements section for
+      this account. Find the NEWEST bill for billing period {input.billing_period} and download it
+      (the PDF or HTML statement). CRITICAL: this is READ-ONLY. Do NOT navigate to Pay / Make a Payment,
+      do NOT click any pay/submit/autopay button, and do NOT change any setting - download the bill and
+      stop. Read the printed bill and report the property identifier, the utility type, the LAST 4 of the
+      account number, the billing period, the metered usage value and its unit, the amount due, the due
+      date, and the path/reference of the file you downloaded. If a CAPTCHA or step-up auth appears,
+      PAUSE for a human rather than guessing. Context: property {input.property_id}, utility
+      {input.utility_type}, period {input.billing_period}. Return ONLY the structured object described by
+      the output schema.
+    browser_config:
+      # dom mode by default - the many lightweight municipal billing sites need no vision model and
+      # the reasoning model authors a lightweight DOM read (fully provider-neutral, swappable). For a
+      # JS-heavy portal, clone this template and set mode: lightpanda or playwright - the prompt and
+      # output_schema are identical because the model authors the automation either way.
+      mode: dom
+      start_url: "{input.billing_portal_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 300
+      max_actions: 45
+      headless: true
+      credentials_env: "{input.credentials_env}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          property_id:
+            type: string
+            description: "Property/unit identifier as shown on the portal (cross-checked against input.property_id)."
+          utility_type:
+            type: string
+            description: "Utility class read from the bill (electric/water/gas/municipal/telecom)."
+          account_number_last4:
+            type: string
+            description: "Last 4 of the account number shown on the bill (cross-checked so a wrong-account bill is rejected)."
+          billing_period:
+            type: string
+            description: "The billing period printed on the downloaded bill (must match input.billing_period)."
+          usage_value:
+            type: number
+            description: "Metered usage on the bill (kWh, gallons, therms, etc.)."
+          usage_unit:
+            type: string
+            description: "Unit of the usage value (kWh, gal, therm, etc.)."
+          amount_due:
+            type: number
+            description: "The amount due on the bill, as shown on the portal."
+          due_date:
+            type: string
+            description: "The payment due date printed on the bill (ISO YYYY-MM-DD preferred)."
+          pdf_path:
+            type: string
+            description: "Path/reference of the downloaded bill file (PDF or HTML), passed to the parse step."
+          pay_screenshot_ref:
+            type: string
+            description: "Reference/path of the captured billing-history screenshot for the audit trail and the pay-approval."
+        required: ["billing_period", "amount_due", "due_date", "pdf_path"]
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
+
+  # 4) PARSE the downloaded bill file (PDF/HTML) to markdown so the deterministic validator can
+  #    independently re-read the printed amount_due, due_date, and usage - rather than trusting the
+  #    browser read alone. Provider-neutral document parse.
+  - id: parse_bill
+    type: parse
+    depends_on: [download_bill]
+    prompt: "{steps.download_bill.output.pdf_path}"
+    parse_config:
+      output: markdown
+
+  # 5) DETERMINISTIC VALIDATION + SPIKE DETECTION (sandboxed Python, NO model). The load-bearing
+  #    correctness layer: assert the PDF-parsed amount_due equals the portal output_schema amount_due
+  #    (within tolerance), confirm the parsed period and account-last4 match what we intended (no
+  #    wrong-account / wrong-period bill), validate the due_date is a real FUTURE date, and compute the
+  #    percent change vs the prior period and the trailing average - emitting NORMAL / SPIKE /
+  #    VALIDATION_FAIL. Fails CLOSED: a mismatch or unparseable bill is VALIDATION_FAIL, never filed or paid.
+  - id: validate_and_score
+    type: code
+    depends_on: [parse_bill]
+    code_config:
+      language: python
+      code: |
+        import re
+        import json
+        from datetime import date
+
+        # --- Pull the browser READ pass, defending against payload nesting. ---
+        read_out = _steps.get('download_bill') or {}
+        if not isinstance(read_out, dict):
+            read_out = {}
+        for key in ('output', 'data', 'result'):
+            inner = read_out.get(key)
+            if isinstance(inner, dict) and ('amount_due' in inner or 'pdf_path' in inner):
+                read_out = inner
+                break
+
+        # --- Pull the parsed bill text (markdown) the parse step produced. ---
+        parsed = _steps.get('parse_bill') or {}
+        if isinstance(parsed, dict):
+            parsed_text = ''
+            for key in ('markdown', 'text', 'content', 'output', 'result', 'data'):
+                v = parsed.get(key)
+                if isinstance(v, str) and v.strip():
+                    parsed_text = v
+                    break
+            if not parsed_text:
+                parsed_text = json.dumps(parsed)
+        else:
+            parsed_text = str(parsed or '')
+
+        def _num(v, default=0.0):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return default
+
+        # Strip currency formatting from a string into a float via re.sub (no re.compile).
+        def _clean_money(v):
+            s = str(v if v is not None else '')
+            s = re.sub(r'[,$ \t]', '', s)
+            return _num(s, 0.0)
+
+        problems = []
+
+        # --- Portal-read figures. ---
+        portal_amount = _clean_money(read_out.get('amount_due'))
+        portal_period = str(read_out.get('billing_period', '') or '').strip()
+        portal_last4 = str(read_out.get('account_number_last4', '') or '').strip()
+        portal_due = str(read_out.get('due_date', '') or '').strip()
+        usage_value = _num(read_out.get('usage_value'), 0.0)
+        usage_unit = str(read_out.get('usage_unit', '') or '').strip()
+        pdf_path = str(read_out.get('pdf_path', '') or '').strip()
+
+        if not pdf_path:
+            problems.append('no bill file was downloaded (pdf_path empty)')
+
+        # --- Independently re-read the amount from the parsed bill text. A money-shaped number
+        #     near the words total/amount/balance due is the parsed amount_due. ---
+        parsed_amount = 0.0
+        money_hits = re.findall(r'(?:amount\s*due|total\s*due|balance\s*due|total)\D{0,20}\$?\s*([0-9][0-9,]*\.[0-9]{2})', parsed_text.lower())
+        if money_hits:
+            parsed_amount = _clean_money(money_hits[0])
+        else:
+            any_money = re.findall(r'\$\s*([0-9][0-9,]*\.[0-9]{2})', parsed_text)
+            if any_money:
+                parsed_amount = _clean_money(any_money[0])
+
+        # 5a) The PDF-parsed amount must tie to the portal-read amount (within 1 cent tolerance).
+        tolerance = 0.01
+        if parsed_amount <= 0:
+            problems.append('could not parse an amount_due from the downloaded bill text')
+        elif abs(parsed_amount - portal_amount) > tolerance:
+            problems.append('parsed amount ' + str(round(parsed_amount, 2))
+                            + ' != portal amount ' + str(round(portal_amount, 2)))
+
+        if portal_amount <= 0:
+            problems.append('portal amount_due is zero/absent - cannot file or pay')
+
+        # 5b) The bill must be for the period we intended (no stale / wrong-cycle bill).
+        want_period = str(_input.get('billing_period', '') or '').strip()
+        if want_period and portal_period and portal_period != want_period:
+            problems.append('bill period ' + portal_period + ' does not match intended ' + want_period)
+        if not portal_period:
+            problems.append('bill shows no billing period')
+
+        # 5c) Account last-4 must match what we hold on file (no wrong-account bill).
+        want_last4 = str(_input.get('account_number_last4', '') or '').strip()
+        if want_last4 and portal_last4 and portal_last4 != want_last4:
+            problems.append('account last4 ' + portal_last4 + ' does not match on-file ' + want_last4)
+
+        # 5d) Due date must parse and be a real FUTURE date (an already-past due date is a problem).
+        due_is_future = False
+        due_iso = ''
+        dm = re.search(r'(\d{4})-(\d{2})-(\d{2})', portal_due)
+        if dm:
+            y, mo, d = int(dm.group(1)), int(dm.group(2)), int(dm.group(3))
+            try:
+                due_dt = date(y, mo, d)
+                due_iso = due_dt.isoformat()
+                due_is_future = due_dt >= date.today()
+            except ValueError:
+                problems.append('due_date ' + portal_due + ' is not a valid calendar date')
+        else:
+            problems.append('due_date ' + (portal_due or '<empty>') + ' is not in a parseable YYYY-MM-DD form')
+        if due_iso and not due_is_future:
+            problems.append('due_date ' + due_iso + ' is already in the past')
+
+        # 5e) SPIKE detection vs the prior period and the trailing average (deterministic, no model).
+        prior_amount = _num(_input.get('prior_amount_due'), 0.0)
+        prior_usage = _num(_input.get('prior_usage_value'), 0.0)
+        trailing_avg = _num(_input.get('trailing_avg_amount'), 0.0)
+        spike_multiple = _num(_input.get('spike_multiple'), 1.5)
+        if spike_multiple <= 0:
+            spike_multiple = 1.5
+
+        amount_pct_change = None
+        if prior_amount > 0:
+            amount_pct_change = round((portal_amount - prior_amount) / prior_amount * 100.0, 2)
+        usage_pct_change = None
+        if prior_usage > 0:
+            usage_pct_change = round((usage_value - prior_usage) / prior_usage * 100.0, 2)
+
+        spike_reasons = []
+        if trailing_avg > 0 and portal_amount > spike_multiple * trailing_avg:
+            spike_reasons.append('amount ' + str(round(portal_amount, 2)) + ' exceeds '
+                                 + str(spike_multiple) + 'x trailing average ' + str(round(trailing_avg, 2)))
+        if amount_pct_change is not None and amount_pct_change >= (spike_multiple - 1.0) * 100.0:
+            spike_reasons.append('amount up ' + str(amount_pct_change) + '% vs prior period')
+        if usage_pct_change is not None and usage_pct_change >= (spike_multiple - 1.0) * 100.0:
+            spike_reasons.append('usage up ' + str(usage_pct_change) + '% vs prior period (possible leak/meter error)')
+
+        # --- Final verdict. VALIDATION_FAIL dominates; then SPIKE; else NORMAL. ---
+        if problems:
+            verdict = 'VALIDATION_FAIL'
+        elif spike_reasons:
+            verdict = 'SPIKE'
+        else:
+            verdict = 'NORMAL'
+
+        ok = (verdict == 'NORMAL')
+
+        result = {
+            'verdict': verdict,
+            'ok': ok,
+            'problems': problems,
+            'spike_reasons': spike_reasons,
+            'property_id': str(_input.get('property_id', '') or ''),
+            'utility_type': str(_input.get('utility_type', '') or ''),
+            'billing_period': portal_period or want_period,
+            'amount_due': round(portal_amount, 2),
+            'parsed_amount': round(parsed_amount, 2),
+            'usage_value': round(usage_value, 4),
+            'usage_unit': usage_unit,
+            'due_date': due_iso or portal_due,
+            'due_is_future': due_is_future,
+            'amount_pct_change': amount_pct_change,
+            'usage_pct_change': usage_pct_change,
+            'pdf_path': pdf_path,
+            'account_number_last4': portal_last4 or want_last4,
+            'reason_summary': ('; '.join(problems) if problems
+                               else ('; '.join(spike_reasons) if spike_reasons
+                                     else 'amount validated, due date in future, no spike')),
+        }
+
+  # 6) ROUTE on the deterministic verdict. SPIKE or VALIDATION_FAIL -> alert the facilities manager
+  #    immediately and STOP (nothing filed or paid on a suspicious/unverified bill). NORMAL -> file it.
+  - id: verdict_gate
+    type: condition
+    depends_on: [validate_and_score]
+    condition_config:
+      expression: "{steps.validate_and_score.output.ok} == True"
+      then: [file_bill]
+      else: [alert_anomaly]
+
+  # 6a) ANOMALY / FAILURE branch - surface the spike or validation failure to the facilities manager
+  #     immediately for human eyes BEFORE any payment is even contemplated. Nothing was filed or paid.
+  - id: alert_anomaly
+    type: notify
+    depends_on: [verdict_gate]
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        UTILITY BILL ALERT for property {input.property_id} ({input.utility_type}, period
+        {input.billing_period}): verdict {steps.validate_and_score.output.verdict}. Amount
+        {steps.validate_and_score.output.amount_due}, due {steps.validate_and_score.output.due_date}.
+        Reason: {steps.validate_and_score.output.reason_summary}. Nothing was filed or paid - a human
+        must review this bill (possible leak, meter error, fraud, or a misread/wrong-account download)
+        before any payment is contemplated.
+
+  # 7) FILE the validated bill to the property-management drive under property/utility/year-month/.
+  #    Deterministic object-storage PUT (S3/MinIO/GCS-compatible) - the property's own drive, NOT the
+  #    utility portal. Provider-neutral storage; no irreversible portal action here.
+  - id: file_bill
+    type: http
+    depends_on: [verdict_gate]
+    http_config:
+      url: "{input.drive_archive_url}/{input.property_id}/{input.utility_type}/{input.billing_period}/bill.json"
+      method: PUT
+      headers:
+        Content-Type: "application/json"
+      auth: "bearer:{env.DRIVE_TOKEN}"
+      body: '{"property_id": "{steps.validate_and_score.output.property_id}", "utility_type": "{steps.validate_and_score.output.utility_type}", "billing_period": "{steps.validate_and_score.output.billing_period}", "amount_due": "{steps.validate_and_score.output.amount_due}", "usage_value": "{steps.validate_and_score.output.usage_value}", "usage_unit": "{steps.validate_and_score.output.usage_unit}", "due_date": "{steps.validate_and_score.output.due_date}", "account_number_last4": "{steps.validate_and_score.output.account_number_last4}", "bill_file": "{steps.validate_and_score.output.pdf_path}", "verdict": "{steps.validate_and_score.output.verdict}"}'
+
+  # 8) PAYMENT DECISION (deterministic, no model). The Pay click is IRREVERSIBLE. It is reachable ONLY
+  #    when the account is configured to initiate payment AND the bill validated NORMAL. Otherwise the
+  #    run STOPS at filing plus a due-date reminder. This guard makes the autonomous-pay path impossible.
+  - id: payment_decision
+    type: condition
+    depends_on: [file_bill]
+    condition_config:
+      expression: "{input.initiate_payment} == True"
+      then: [approve_payment]
+      else: [reminder_only]
+
+  # 8a) FILED-ONLY path - payment not configured for this account. File + a due-date reminder; no Pay.
+  - id: reminder_only
+    type: notify
+    depends_on: [payment_decision]
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        FILED (no payment): {input.utility_type} bill for property {input.property_id} period
+        {input.billing_period} - amount {steps.validate_and_score.output.amount_due} due
+        {steps.validate_and_score.output.due_date} - archived to the property drive. Payment is NOT
+        configured for this account, so nothing was paid. REMINDER: this bill is due
+        {steps.validate_and_score.output.due_date}; pay it manually or enable payment for this account.
+
+  # 9) HUMAN PAY APPROVAL - the ONLY gate that can unlock the irreversible Pay click. Shows the EXACT
+  #    amount and account and the captured screenshot; BLOCKS until a person authorizes THIS amount on
+  #    THIS account. on_timeout: abort means a missed approval NEVER auto-pays. The agent never pays
+  #    autonomously - this step is the hard wall before any Pay navigation.
+  - id: approve_payment
+    type: approval
+    depends_on: [payment_decision]
+    approval_config:
+      message: >-
+        AUTHORIZE PAYMENT of {steps.validate_and_score.output.amount_due} on the
+        {input.utility_type} account ending {steps.validate_and_score.output.account_number_last4} for
+        property {input.property_id}, billing period {input.billing_period}, due
+        {steps.validate_and_score.output.due_date}. This is IRREVERSIBLE - it pays the utility from the
+        portal. The bill passed deterministic validation (amount tied to the PDF, due date in the
+        future, no spike). Review the captured billing-history screenshot - this is the EXACT bill and
+        account you are paying. Approve to pay this exact amount on this exact account; reject to abort
+        with nothing paid (the bill stays filed).
+      show_data: steps.validate_and_score.output
+      show_images: ["steps.download_bill.output.pay_screenshot_ref"]
+      timeout_hours: 24
+      on_timeout: abort
+      allow_edit: false
+
+  # 10) PAY PASS (playwright, WRITE) - reached ONLY after the human approves the exact amount and
+  #     account. The reasoning model AUTHORS a Playwright script that re-logs in via credentials_env,
+  #     opens this bill, confirms the amount still equals the approved figure, navigates to Pay, and
+  #     clicks Pay ONCE. capture_screenshots gives an after-pay audit record; max_actions tightly capped;
+  #     CAPTCHA pauses to a human. Acceptance is NOT trusted from the click - the sensor below confirms.
+  - id: pay_bill
+    type: browser
+    depends_on: [approve_payment]
+    prompt: >-
+      A human has AUTHORIZED paying {steps.validate_and_score.output.amount_due} on the
+      {input.utility_type} account ending {steps.validate_and_score.output.account_number_last4} for
+      property {input.property_id}, period {input.billing_period}. Authenticate using the environment
+      credentials (do NOT print them), open this exact bill in the portal, and CONFIRM the amount due
+      still reads {steps.validate_and_score.output.amount_due} for this account before doing anything.
+      If the amount or account does NOT match, STOP and pay nothing. Otherwise navigate to Pay / Make a
+      Payment and submit the payment for the EXACT approved amount ONCE. Do NOT change the amount, do NOT
+      enable autopay, and do NOT click Pay more than once. If a CAPTCHA or step-up auth appears at this
+      final wall, PAUSE for a human - do not attempt to solve it. Read the confirmation page and capture
+      the portal-issued payment confirmation number and a receipt screenshot. Treat this as an attempt -
+      final acceptance is confirmed separately by re-reading the payment-status page. Return ONLY the
+      structured object described by the output schema.
+    browser_config:
+      mode: playwright
+      start_url: "{input.billing_portal_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 300
+      max_actions: 25
+      headless: true
+      credentials_env: "{input.credentials_env}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          paid:
+            type: boolean
+            description: "True if the UI accepted the Pay submission without an error."
+          amount_paid:
+            type: number
+            description: "The amount the portal shows as paid (cross-checked against the approved amount)."
+          confirmation_number:
+            type: string
+            description: "The portal-issued payment confirmation/reference number."
+          receipt_screenshot_ref:
+            type: string
+            description: "Reference/path of the captured payment-receipt screenshot for the audit archive."
+        required: ["paid"]
+    retry:
+      max_attempts: 1
+      backoff: fixed
+      on_failure: abort
+
+  # 11) CONFIRM via the portal's OWN payment-status endpoint - never trust the Pay click alone. Poll
+  #     until the payment reads posted/confirmed OR a confirmation number is present, with a hard
+  #     timeout. Deterministic boolean over the polled JSON - pure control flow, no model.
+  - id: confirm_payment
+    type: sensor
+    depends_on: [pay_bill]
+    sensor_config:
+      url: "{input.payment_status_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200 and (str(response.get('status', '')).strip().lower() in ('posted', 'paid', 'confirmed', 'completed', 'processed') or bool(str(response.get('confirmation_number', '') or response.get('reference', '') or '').strip()))"
+      check_interval: 60
+      timeout: 3600
+
+  # 12) Deterministically decide acceptance from the sensor's last polled payload (and the pay step's
+  #     own confirmation as a fallback), then branch. A timeout/non-confirmed status yields fail_count>0
+  #     so a silently-failed payment is NEVER reported as success.
+  - id: evaluate_payment
+    type: code
+    depends_on: [confirm_payment]
+    code_config:
+      language: python
+      code: |
+        watch = _steps.get('confirm_payment') or {}
+        if not isinstance(watch, dict):
+            watch = {}
+        resp = watch.get('response') if isinstance(watch.get('response'), dict) else watch
+        if not isinstance(resp, dict):
+            resp = {}
+
+        status = str(resp.get('status', '') or '').strip().lower()
+        ref = str(resp.get('confirmation_number', '') or resp.get('reference', '') or '').strip()
+
+        # Fall back to the confirmation number the pay step captured if the status page is terse.
+        pay_out = _steps.get('pay_bill') or {}
+        if isinstance(pay_out, dict):
+            for key in ('output', 'data', 'result'):
+                inner = pay_out.get(key)
+                if isinstance(inner, dict) and 'confirmation_number' in inner:
+                    pay_out = inner
+                    break
+            if not ref:
+                ref = str(pay_out.get('confirmation_number', '') or '').strip()
+
+        accepted_states = ('posted', 'paid', 'confirmed', 'completed', 'processed')
+        confirmed = (status in accepted_states) or bool(ref)
+
+        sensor_satisfied = bool(watch.get('satisfied', watch.get('met', confirmed)))
+        timed_out = bool(watch.get('timed_out', False)) or (not sensor_satisfied and not confirmed)
+
+        result = {
+            'confirmed': bool(confirmed and not timed_out),
+            'status': status,
+            'confirmation_number': ref,
+            'timed_out': timed_out,
+            'fail_count': 0 if (confirmed and not timed_out) else 1,
+        }
+
+  # 12b) Branch on payment confirmation - digest on success, page on-call on an unconfirmed payment.
+  - id: payment_outcome
+    type: condition
+    depends_on: [evaluate_payment]
+    condition_config:
+      expression: "{steps.evaluate_payment.output.fail_count} > 0"
+      then: [notify_payment_unconfirmed]
+      else: [notify_digest]
+
+  # 12c) NEEDS-ATTENTION path - Pay was clicked but the portal never confirmed within timeout. Page the
+  #      team; the run stays unresolved. A silently-failed payment is surfaced, never a false win.
+  - id: notify_payment_unconfirmed
+    type: notify
+    depends_on: [payment_outcome]
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        NEEDS ATTENTION: payment for {input.utility_type} on property {input.property_id} period
+        {input.billing_period} was SUBMITTED but the portal has NOT confirmed it within the timeout
+        (last status '{steps.evaluate_payment.output.status}', confirmation
+        '{steps.evaluate_payment.output.confirmation_number}',
+        timed_out={steps.evaluate_payment.output.timed_out}). Do NOT assume the bill was paid - check
+        the portal manually and resolve.
+
+  # 13) PER-PROPERTY DIGEST - filed (and paid, if applicable) summary to the facilities manager. This is
+  #     the success notification on the happy path.
+  - id: notify_digest
+    type: notify
+    depends_on: [payment_outcome]
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        UTILITY DIGEST for property {input.property_id}: {input.utility_type} bill for period
+        {input.billing_period} filed (amount {steps.validate_and_score.output.amount_due}, usage
+        {steps.validate_and_score.output.usage_value} {steps.validate_and_score.output.usage_unit}, due
+        {steps.validate_and_score.output.due_date}) and PAID - confirmation
+        {steps.evaluate_payment.output.confirmation_number}. Bill archived to the property drive under
+        {input.property_id}/{input.utility_type}/{input.billing_period}/.
+
+on_complete:
+  storage_path: "utility-municipal-bill-filer/{input.property_id}/{input.utility_type}/{input.billing_period}/{run_id}/result.json"
