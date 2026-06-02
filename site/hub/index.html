@@ -69,6 +69,9 @@
       --cat-healthcare: #06B6D4;
       --cat-fintech_banking: #6366F1;
       --cat-llmops_ai_eng: #EC4899;
+      --cat-personal: #F59E0B;
+      --cat-research_intel: #A855F7;
+      --cat-finance_ops: #84CC16;
     }
 
     html {
@@ -553,6 +556,9 @@
     .pill[data-cat="healthcare"].active { background: var(--cat-healthcare); color: #000; }
     .pill[data-cat="fintech_banking"].active { background: var(--cat-fintech_banking); }
     .pill[data-cat="llmops_ai_eng"].active { background: var(--cat-llmops_ai_eng); }
+    .pill[data-cat="personal"].active { background: var(--cat-personal); color: #000; }
+    .pill[data-cat="research_intel"].active { background: var(--cat-research_intel); }
+    .pill[data-cat="finance_ops"].active { background: var(--cat-finance_ops); color: #000; }
 
     /* Sort */
     .sort-select {
@@ -634,6 +640,9 @@
     .card[data-cat="healthcare"]::before { background: var(--cat-healthcare); }
     .card[data-cat="fintech_banking"]::before { background: var(--cat-fintech_banking); }
     .card[data-cat="llmops_ai_eng"]::before { background: var(--cat-llmops_ai_eng); }
+    .card[data-cat="personal"]::before { background: var(--cat-personal); }
+    .card[data-cat="research_intel"]::before { background: var(--cat-research_intel); }
+    .card[data-cat="finance_ops"]::before { background: var(--cat-finance_ops); }
 
     .card-header-row {
       display: flex;
@@ -2493,6 +2502,15 @@
           </button>
           <button class="pill" data-cat="llmops_ai_eng">
             <span class="dot" style="background:var(--cat-llmops_ai_eng)"></span>LLMOps &amp; AI Eng
+          </button>
+          <button class="pill" data-cat="personal">
+            <span class="dot" style="background:var(--cat-personal)"></span>Personal &amp; Life Admin
+          </button>
+          <button class="pill" data-cat="research_intel">
+            <span class="dot" style="background:var(--cat-research_intel)"></span>Research &amp; Intel
+          </button>
+          <button class="pill" data-cat="finance_ops">
+            <span class="dot" style="background:var(--cat-finance_ops)"></span>Finance Ops
           </button>
         </div>
         <div class="filter-right">

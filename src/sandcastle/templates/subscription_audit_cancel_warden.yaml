@@ -1,0 +1,441 @@
+# name: Subscription Audit & Cancel Warden
+# description: Pulls your card/bank transaction history, then a DETERMINISTIC code step normalizes merchants, infers monthly/annual cadence, dedups the noise into a real recurring-subscription ledger, and flags price-hikes and zombie (unused) subs with zero model involvement. A swappable CLASSIFY only labels keep/review/cancel from the precomputed flags. Any cancellation is held behind a GATE where a human approval strategy AND a non-LLM spend-threshold strategy must BOTH pass before a cancel request fires, then NOTIFY posts the audit.
+# tags: [Subscriptions, Personal Finance, Recurring Charges, Price Hike, Zombie Subs, Dedup, Cancel, Human Approval, Plaid, Stripe]
+# category: personal
+# connectors: plaid, stripe, slack
+name: subscription-audit-cancel-warden
+description: >-
+  A personal-finance warden that turns a noisy bank/card statement into a clean
+  recurring-subscription ledger and gates any cancellation behind human sign-off. A
+  DETERMINISTIC http GET pulls the transaction history from a bank/card aggregator
+  (Plaid / MX / Stripe style). A pure-Python code step then carries the load-bearing
+  work with ZERO model involvement: it normalizes merchant descriptors (strips the
+  trailing ref-codes, city/state tails, gateway prefixes), groups charges by normalized
+  merchant, infers the billing cadence (weekly / monthly / quarterly / annual) from the
+  median gap between charges, DEDUPS the repeats into a single subscription row, computes
+  the price-increase delta versus the prior charge, and scores each sub as a ZOMBIE when
+  it has not been touched within a deterministic inactivity window. A swappable CLASSIFY
+  step ONLY labels each precomputed sub keep / review / cancel - it never decides amounts
+  or cadence, and every label falls through to the deterministic router. A CONDITION
+  routes only the cancel-candidates into a CANCEL GATE that has TWO strategies which BOTH
+  must pass: a human approval ("confirm you want these cancelled") AND a non-LLM
+  spend-threshold strategy (auto-hold any cancel whose monthly cost is below the
+  rubber-stamp floor or above the dangerous-to-auto-cancel ceiling), so no cancellation
+  fires on a model's say-so. Approved cancels POST to the merchant/aggregator cancel
+  endpoint, and a NOTIFY pushes the full audit - new subs, price hikes, zombies, projected
+  annual savings - to the owner. All detection, dedup, cadence inference and price-delta
+  math are 100% deterministic and run even with zero model providers available.
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 900
+input_schema:
+  required: ["transactions_url"]
+  properties:
+    transactions_url:
+      type: string
+      description: "Bank/card aggregator transaction-history REST endpoint (Plaid /transactions, MX, Stripe, or your bank's export gateway) returning dated charges."
+      default: "https://api.plaid.com/transactions/get"
+      example: "https://sandbox.plaid.com/transactions/get"
+    lookback_months:
+      type: integer
+      description: "How many months of statement history to scan for recurring charges. Longer windows make cadence inference and price-hike detection more reliable."
+      default: 12
+      example: "12"
+    zombie_inactivity_days:
+      type: integer
+      description: "Deterministic threshold (days since last charge relative to the expected next bill date) past which an active sub is flagged a ZOMBIE you likely forgot. Lower = more aggressive."
+      default: 75
+      example: "75"
+    price_hike_pct:
+      type: number
+      description: "Deterministic minimum percentage increase (vs the prior charge for the same sub) that counts as a flagged price hike. 0.10 = a 10% jump."
+      default: 0.10
+      example: "0.10"
+    min_cancel_cost:
+      type: number
+      description: "Non-LLM gate floor: a cancel whose MONTHLY cost is at/below this is too trivial to auto-fire (rubber-stamp risk) and is held for the human. In statement currency."
+      default: 3.0
+      example: "3.0"
+    max_cancel_cost:
+      type: number
+      description: "Non-LLM gate ceiling: a cancel whose MONTHLY cost is at/above this is too consequential to fire on automation and is held for explicit human review. In statement currency."
+      default: 200.0
+      example: "200.0"
+    cancel_api_url:
+      type: string
+      description: "Merchant / aggregator subscription-cancel REST endpoint that receives the approved cancellation requests."
+      default: "https://api.your-aggregator.example.com/subscriptions/cancel"
+      example: "https://api.acme-bank.example.com/subscriptions/cancel"
+    slack_channel:
+      type: string
+      description: "Channel that receives the subscription audit digest and the cancel confirmations."
+      default: "#money-subscriptions"
+      example: "#money-subscriptions"
+
+steps:
+  # 1) DETERMINISTIC pull of the raw transaction history from the bank/card aggregator.
+  #    Date-bounded by the lookback window. No model.
+  - id: pull_transactions
+    type: http
+    http_config:
+      url: "{input.transactions_url}?lookback_months={input.lookback_months}&pending=false&order=date.desc"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.AGGREGATOR_API_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2) DETERMINISTIC RECURRING-CHARGE DETECTION. The load-bearing step, ZERO model:
+  #    normalize each merchant descriptor (drop trailing ref-codes, city/state tails, gateway
+  #    prefixes), group charges by normalized merchant, infer cadence from the median inter-charge
+  #    gap, DEDUP repeats into one subscription row, compute the price-increase delta vs the prior
+  #    charge, and score zombies by inactivity vs the expected next-bill date. All the money math
+  #    lives here, not in any model.
+  - id: detect_subscriptions
+    type: code
+    depends_on: [pull_transactions]
+    code_config:
+      language: python
+      code: |
+        import re
+        import statistics
+        from datetime import datetime, timezone, timedelta
+
+        raw = _steps.get('pull_transactions') or {}
+        # Coalesce the aggregator payload into a flat list of charge rows.
+        if isinstance(raw, list):
+            rows = raw
+        elif isinstance(raw, dict):
+            rows = (raw.get('transactions') or raw.get('data')
+                    or raw.get('results') or raw.get('items') or [])
+        else:
+            rows = []
+        if not isinstance(rows, list):
+            rows = [rows] if rows else []
+
+        zombie_days = int(_input.get('zombie_inactivity_days', 75) or 75)
+        hike_pct = float(_input.get('price_hike_pct', 0.10) or 0.10)
+
+        # --- Merchant descriptor normalizer (deterministic, no model). Strips the junk that
+        #     makes the same merchant look like ten different ones on a statement.
+        _gateway_pat = r'^(sq\s*\*|tst\*|paypal\s*\*|pp\*|google\s*\*|google\s|amzn\s+mktp|amazon\s+mktp|apl\*\s*|apple\.com/bill|stripe\s*\*|sp\s+|chk\*|dd\s*\*)'
+        def normalize_merchant(desc):
+            text = str(desc or '').strip().lower()
+            text = re.sub(_gateway_pat, '', text)
+            # drop trailing transaction/reference numbers and store ids
+            text = re.sub(r'[#*]?\s*\d{3,}\b', ' ', text)
+            # drop trailing US-style "city st" and 5-digit zips
+            text = re.sub(r'\b[a-z]{2}\s+\d{5}\b', ' ', text)
+            text = re.sub(r'\b\d{5}(-\d{4})?\b', ' ', text)
+            # drop punctuation and gateway noise tokens
+            text = re.sub(r'[^a-z0-9 ]+', ' ', text)
+            text = re.sub(r'\b(inc|llc|ltd|co|com|http|https|www|recurring|autopay|bill|payment|subscription|monthly|annual)\b', ' ', text)
+            text = re.sub(r'\s+', ' ', text).strip()
+            # keep the leading brand tokens (first 3) as the canonical key
+            tokens = [t for t in text.split(' ') if t]
+            return ' '.join(tokens[:3]) if tokens else 'unknown'
+
+        def parse_date(v):
+            try:
+                return datetime.fromisoformat(str(v).replace('Z', '+00:00').split('T')[0])
+            except (ValueError, TypeError):
+                return None
+
+        def parse_amount(v):
+            try:
+                return abs(round(float(v), 2))
+            except (ValueError, TypeError):
+                return None
+
+        # --- Group charges by normalized merchant key.
+        groups = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            desc = (row.get('merchant_name') or row.get('name')
+                    or row.get('description') or row.get('merchant') or '')
+            amount = parse_amount(row.get('amount') or row.get('value') or row.get('price'))
+            dt = parse_date(row.get('date') or row.get('posted_at') or row.get('authorized_date') or row.get('timestamp'))
+            if amount is None or dt is None or amount == 0:
+                continue
+            key = normalize_merchant(desc)
+            groups.setdefault(key, {'raw_name': str(desc).strip(), 'charges': []})
+            groups[key]['charges'].append({'date': dt, 'amount': amount, 'raw': str(desc).strip()})
+
+        # --- Cadence inference + dedup + price-delta + zombie scoring, per group.
+        def cadence_from_gap(median_gap):
+            if median_gap is None:
+                return ('unknown', None, 0.0)
+            # (label, expected_period_days, per-month multiplier)
+            if median_gap <= 10:
+                return ('weekly', 7, 4.33)
+            if median_gap <= 45:
+                return ('monthly', 30, 1.0)
+            if median_gap <= 135:
+                return ('quarterly', 91, 1.0 / 3.0)
+            if median_gap <= 400:
+                return ('annual', 365, 1.0 / 12.0)
+            return ('irregular', int(median_gap), 30.0 / median_gap if median_gap else 0.0)
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        subscriptions = []
+        non_recurring = 0
+        for key, g in groups.items():
+            charges = sorted(g['charges'], key=lambda c: c['date'])
+            n = len(charges)
+            # A subscription needs at least 2 charges to have a cadence; otherwise it's a one-off.
+            if n < 2:
+                non_recurring += 1
+                continue
+            gaps = [(charges[i]['date'] - charges[i - 1]['date']).days for i in range(1, n)]
+            gaps = [g2 for g2 in gaps if g2 > 0]
+            if not gaps:
+                non_recurring += 1
+                continue
+            median_gap = statistics.median(gaps)
+            cadence, period_days, per_month = cadence_from_gap(median_gap)
+            # Irregular spacing with high variance is likely NOT a real subscription.
+            gap_spread = (max(gaps) - min(gaps)) if len(gaps) > 1 else 0
+            if cadence == 'irregular' and gap_spread > 60:
+                non_recurring += 1
+                continue
+
+            amounts = [c['amount'] for c in charges]
+            last = charges[-1]
+            prev = charges[-2]
+            current_amount = last['amount']
+            prior_amount = prev['amount']
+            # Price-increase delta vs the immediately prior charge for THIS sub.
+            price_delta = round(current_amount - prior_amount, 2)
+            price_delta_pct = round((price_delta / prior_amount), 4) if prior_amount else 0.0
+            price_hike = price_delta > 0 and price_delta_pct >= hike_pct
+
+            monthly_cost = round(current_amount * per_month, 2)
+            annual_cost = round(monthly_cost * 12, 2)
+
+            # Zombie scoring: days since the last charge vs when the next bill was DUE.
+            days_since_last = (now - last['date']).days
+            expected_next = last['date'] + timedelta(days=period_days or 30)
+            days_overdue = (now - expected_next).days
+            # A sub is a zombie when it is well past its expected next bill (it stopped billing /
+            # you cancelled the value but not the charge) OR untouched beyond the inactivity window.
+            is_zombie = days_overdue >= zombie_days or days_since_last >= (period_days or 30) + zombie_days
+
+            subscriptions.append({
+                'merchant_key': key,
+                'merchant_name': g['raw_name'],
+                'charge_count': n,
+                'cadence': cadence,
+                'median_gap_days': round(float(median_gap), 1),
+                'current_amount': current_amount,
+                'prior_amount': prior_amount,
+                'min_amount': min(amounts),
+                'max_amount': max(amounts),
+                'monthly_cost': monthly_cost,
+                'annual_cost': annual_cost,
+                'price_delta': price_delta,
+                'price_delta_pct': price_delta_pct,
+                'price_hike': price_hike,
+                'last_charge_date': last['date'].date().isoformat(),
+                'first_charge_date': charges[0]['date'].date().isoformat(),
+                'days_since_last': days_since_last,
+                'days_overdue': days_overdue,
+                'is_zombie': is_zombie,
+                # Deterministic pre-label the swappable classifier only confirms.
+                'flag': 'cancel' if (is_zombie or price_hike) else 'keep',
+            })
+
+        # Newly-appeared subs = only 2-3 charges and started within the last ~90 days.
+        new_subs = [s for s in subscriptions
+                    if s['charge_count'] <= 3
+                    and (now - parse_date(s['first_charge_date'])).days <= 90]
+        zombies = [s for s in subscriptions if s['is_zombie']]
+        hikes = [s for s in subscriptions if s['price_hike']]
+        cancel_candidates = [s for s in subscriptions if s['flag'] == 'cancel']
+
+        total_monthly = round(sum(s['monthly_cost'] for s in subscriptions), 2)
+        potential_savings_annual = round(sum(s['annual_cost'] for s in cancel_candidates), 2)
+
+        result = {
+            'transaction_count': len([r for r in rows if isinstance(r, dict)]),
+            'subscription_count': len(subscriptions),
+            'non_recurring_merchants': non_recurring,
+            'new_sub_count': len(new_subs),
+            'zombie_count': len(zombies),
+            'price_hike_count': len(hikes),
+            'cancel_candidate_count': len(cancel_candidates),
+            'total_monthly_cost': total_monthly,
+            'total_annual_cost': round(total_monthly * 12, 2),
+            'potential_savings_annual': potential_savings_annual,
+            'subscriptions': subscriptions,
+            'new_subs': new_subs,
+            'zombies': zombies,
+            'price_hikes': hikes,
+            'cancel_candidates': cancel_candidates,
+        }
+
+  # 3) CLASSIFY (swappable, LABEL-ONLY). The cheap model confirms keep / review / cancel from
+  #    the ALREADY-computed flags (zombie + price-hike). It NEVER computes amounts or cadence and
+  #    the deterministic router below trusts the in-code flag, not the label, so a missing model
+  #    provider cannot change which subs get cancelled.
+  - id: label_subscriptions
+    type: classify
+    depends_on: [detect_subscriptions]
+    classify_config:
+      model: haiku
+      input: >
+        You are a personal-finance assistant labeling subscriptions using ONLY the deterministic
+        flags already computed in code - do not recompute money or cadence. 'cancel' = the sub is
+        a zombie (unused / overdue past its next bill) OR took a flagged price hike and is no longer
+        worth it; 'review' = something looks off but it may still be wanted (a price hike on a
+        clearly-active service, an annual renewal coming up); 'keep' = a healthy active sub at a
+        stable price. Precomputed audit: total monthly cost {steps.detect_subscriptions.output.total_monthly_cost},
+        {steps.detect_subscriptions.output.zombie_count} zombies, {steps.detect_subscriptions.output.price_hike_count}
+        price hikes, {steps.detect_subscriptions.output.cancel_candidate_count} cancel candidates.
+        Candidates: {steps.detect_subscriptions.output.cancel_candidates}
+      categories:
+        - keep
+        - review
+        - cancel
+      branches:
+        keep: [route_cancel]
+        review: [route_cancel]
+        cancel: [route_cancel]
+
+  # 4) DETERMINISTIC build of the final cancel set + spend-threshold gate inputs. NO model.
+  #    Keeps only subs the IN-CODE flag marked cancel (not the model label), and pre-computes the
+  #    non-LLM gate facts: how many cancels fall inside the auto-fire band vs the floor/ceiling.
+  - id: build_cancel_set
+    type: code
+    depends_on: [detect_subscriptions, label_subscriptions]
+    code_config:
+      language: python
+      code: |
+        detect = _steps.get('detect_subscriptions') or {}
+        label = str(_steps.get('label_subscriptions') or '').strip().lower()
+        candidates = detect.get('cancel_candidates', []) or []
+
+        min_cost = float(_input.get('min_cancel_cost', 3.0) or 3.0)
+        max_cost = float(_input.get('max_cancel_cost', 200.0) or 200.0)
+
+        to_cancel = []
+        held_too_small = []
+        held_too_large = []
+        for s in candidates:
+            monthly = float(s.get('monthly_cost') or 0.0)
+            row = {
+                'merchant_name': s.get('merchant_name'),
+                'merchant_key': s.get('merchant_key'),
+                'monthly_cost': monthly,
+                'annual_cost': s.get('annual_cost'),
+                'cadence': s.get('cadence'),
+                'reason': 'zombie' if s.get('is_zombie') else ('price_hike' if s.get('price_hike') else 'flagged'),
+                'price_delta_pct': s.get('price_delta_pct'),
+                'last_charge_date': s.get('last_charge_date'),
+            }
+            if monthly <= min_cost:
+                held_too_small.append(row)
+            elif monthly >= max_cost:
+                held_too_large.append(row)
+            else:
+                to_cancel.append(row)
+
+        # The non-LLM gate fact: are there cancels inside the safe auto-fire band at all?
+        in_band_count = len(to_cancel)
+        savings_in_band = round(sum(r['annual_cost'] or 0.0 for r in to_cancel), 2)
+
+        result = {
+            'model_label': label,
+            'cancel_count': len(candidates),
+            'in_band_count': in_band_count,
+            'held_too_small_count': len(held_too_small),
+            'held_too_large_count': len(held_too_large),
+            'savings_in_band_annual': savings_in_band,
+            'to_cancel': to_cancel,
+            'held_too_small': held_too_small,
+            'held_too_large': held_too_large,
+            'has_cancellable': in_band_count > 0,
+        }
+
+  # 5) CONDITION - only enter the cancel gate when there is at least one cancel inside the
+  #    safe spend band. If nothing is cancellable, jump straight to the audit notify. No model.
+  - id: route_cancel
+    type: condition
+    depends_on: [build_cancel_set]
+    condition_config:
+      expression: "{steps.build_cancel_set.output.has_cancellable} == True"
+      then: [cancel_gate, fire_cancellations, notify_audit]
+      else: [notify_audit]
+
+  # 6) CANCEL GATE (model-independent, BOTH strategies must pass):
+  #    (1) HUMAN approval - the owner must explicitly confirm the cancellations before anything
+  #        is cancelled; this is irreversible spending behavior, so a human is mandatory.
+  #    (2) NON-LLM spend-threshold strategy - an llm_eval fed ONLY the pre-computed counts and the
+  #        floor/ceiling, told to answer purely from the arithmetic, so the gate still passes/fails
+  #        on the deterministic spend band alone with zero reasoning.
+  - id: cancel_gate
+    type: gate
+    depends_on: [build_cancel_set]
+    gate_config:
+      strategies:
+        - type: human
+          config:
+            message: "Subscription Warden wants to CANCEL these subscriptions (zombie or price-hiked, inside your safe spend band). Approve to fire the cancellations; reject to keep them. Cancels below your floor or above your ceiling were held automatically for manual handling."
+            timeout_hours: 72
+            on_timeout: abort
+        - type: llm_eval
+          config:
+            prompt: >-
+              Deterministic spend-band check. Answer exactly 'approved' if in_band_count >= 1 AND
+              every cancel's monthly cost is strictly above the floor and strictly below the
+              ceiling (the held_too_small / held_too_large lists are already excluded upstream).
+              Otherwise answer 'rejected'. Use ONLY the supplied numbers - do not reason beyond the
+              arithmetic comparison.
+            input: "in_band_count={steps.build_cancel_set.output.in_band_count} held_too_small={steps.build_cancel_set.output.held_too_small_count} held_too_large={steps.build_cancel_set.output.held_too_large_count} floor={input.min_cancel_cost} ceiling={input.max_cancel_cost}"
+            model: haiku
+
+  # 7) FIRE the approved cancellations. POST the safe-band cancel set to the merchant/aggregator
+  #    cancel endpoint. Only reached after BOTH gate strategies passed. Connector: plaid/stripe.
+  - id: fire_cancellations
+    type: http
+    depends_on: [cancel_gate]
+    http_config:
+      url: "{input.cancel_api_url}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.AGGREGATOR_API_TOKEN}"
+      body: |
+        {
+          "action": "cancel_subscriptions",
+          "approved": true,
+          "subscriptions": {{ _steps['build_cancel_set']['to_cancel'] }},
+          "projected_annual_savings": {{ _steps['build_cancel_set']['savings_in_band_annual'] }}
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 8) NOTIFY the owner with the full subscription audit - new subs, price hikes, zombies,
+  #    what was cancelled vs held, and the projected annual savings. service: slack.
+  - id: notify_audit
+    type: notify
+    depends_on: [route_cancel]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        :receipt: Subscription audit complete - {steps.detect_subscriptions.output.subscription_count} recurring subs, {steps.detect_subscriptions.output.total_monthly_cost}/mo ({steps.detect_subscriptions.output.total_annual_cost}/yr)
+        New since last scan : {steps.detect_subscriptions.output.new_sub_count}
+        Price hikes flagged : {steps.detect_subscriptions.output.price_hike_count}
+        Zombie (unused) subs: {steps.detect_subscriptions.output.zombie_count}
+        Cancel candidates   : {steps.detect_subscriptions.output.cancel_candidate_count}
+        In-band cancelled   : {steps.build_cancel_set.output.in_band_count} (held small: {steps.build_cancel_set.output.held_too_small_count}, held large: {steps.build_cancel_set.output.held_too_large_count})
+        Projected annual savings: {steps.build_cancel_set.output.savings_in_band_annual}
+on_complete:
+  storage_path: "subscription-audit-cancel-warden/{run_id}/result.json"

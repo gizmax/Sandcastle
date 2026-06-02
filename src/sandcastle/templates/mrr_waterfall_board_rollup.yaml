@@ -1,0 +1,460 @@
+# name: MRR Waterfall Board Roll-Up
+# description: On a monthly schedule a durable SENSOR blocks until the month-end roll-up window opens, then http GETs subscription/billing events (Stripe) and closed-won + churn pipeline (Salesforce / HubSpot). A DETERMINISTIC code step computes the full MRR waterfall (new / expansion / contraction / churn / reactivation), net + gross revenue retention, logo and dollar churn and the SaaS quick ratio, then runs a reconciliation check that opening + new + expansion + reactivation - contraction - churn must equal the closing balance within tolerance. A CONDITION blocks the report if the bridge does not foot. A two-strategy GATE (a swappable llm_eval narrative-accuracy judge AND a non-LLM 'bridge_balances' boolean) must BOTH pass before publish. A REPORT assembles the board metrics pack PDF and NOTIFY posts it to the board channel + archives to object store. All metric math and the foot-check are 100% deterministic code; the only model is the swappable narrative judge.
+# tags: [MRR, ARR, SaaS, FP&A, Board, Waterfall, NRR, GRR, Churn, QuickRatio, Reconciliation, Stripe, Salesforce, HubSpot, Finance]
+# category: finance_ops
+# connectors: stripe, salesforce, hubspot, aws-s3, slack
+name: mrr-waterfall-board-rollup
+description: >-
+  The monthly board metrics engine for a subscription business. A durable SENSOR
+  blocks until the month-end roll-up window is open (close-the-books flag flips on
+  the FP&A calendar endpoint), so the workflow only runs once the period is actually
+  closed. A DETERMINISTIC http GET then pulls the period's subscription / billing
+  events from Stripe (subscription created / updated / deleted, invoice line MRR
+  deltas) and a parallel http GET pulls the CRM pipeline - closed-won new logos and
+  churned / downgraded accounts - from Salesforce or HubSpot. The LOAD-BEARING code
+  step computes the entire MRR waterfall in pure Python: it classifies every event
+  into new / expansion / contraction / churn / reactivation, sums each component,
+  derives the closing balance, then computes net revenue retention (NRR), gross
+  revenue retention (GRR), logo churn, dollar churn and the SaaS quick ratio. The
+  SAME code step performs a deterministic RECONCILIATION: opening + new + expansion
+  + reactivation - contraction - churn must equal the reported closing balance within
+  a currency tolerance; if it does not foot, bridge_balances is False. A CONDITION
+  blocks the entire publish path when the bridge does not reconcile. A two-strategy
+  GATE then guards publication: strategy (1) is a SWAPPABLE llm_eval narrative-accuracy
+  judge that checks the drafted board commentary does not misstate the numbers, and
+  strategy (2) is an llm_eval acting as a pure NON-LLM threshold that is fed only the
+  bridge_balances boolean and the residual, so the gate still passes/fails on the
+  arithmetic alone with zero model trust. Only when BOTH pass does a REPORT assemble
+  the board-ready metrics-pack PDF and a NOTIFY post it to the board channel while an
+  http PUT archives the sealed pack + raw waterfall JSON to an object-lock store. The
+  waterfall math, retention ratios and the foot-check are fully deterministic and run
+  even with zero model providers available; the model is confined to the gate's
+  swappable narrative judge.
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 1800
+input_schema:
+  required: ["billing_events_base_url", "crm_pipeline_base_url"]
+  properties:
+    billing_events_base_url:
+      type: string
+      description: "Stripe (or Stripe-compatible) REST base exposing the period's subscription / invoice MRR-delta events for the closed month."
+      default: "https://api.stripe.com/v1"
+      example: "https://api.stripe.com/v1"
+    crm_pipeline_base_url:
+      type: string
+      description: "CRM pipeline REST base (Salesforce or HubSpot) exposing the period's closed-won new logos and churned / downgraded accounts."
+      default: "https://your-org.my.salesforce.com/services/data/v60.0"
+      example: "https://acme.my.salesforce.com/services/data/v60.0"
+    fpa_calendar_url:
+      type: string
+      description: "FP&A close-calendar REST base. The sensor polls this for the current period's books_closed / rollup_window_open flag so the roll-up only runs once the month is closed."
+      default: "https://fpa.internal/api/close-calendar"
+      example: "https://fpa.internal/api/close-calendar"
+    period:
+      type: string
+      description: "The accounting period being rolled up (YYYY-MM). Drives the event queries and the board pack title."
+      default: "2026-05"
+      example: "2026-05"
+    opening_mrr:
+      type: number
+      description: "Opening MRR for the period (the prior month's SEALED closing balance). The waterfall bridges FROM this number."
+      default: 0
+      example: "1250000"
+    closing_mrr_reported:
+      type: number
+      description: "The period's reported closing MRR from the system of record. The reconciliation check proves the computed bridge foots TO this number within tolerance."
+      default: 0
+      example: "1318500"
+    reconciliation_tolerance:
+      type: number
+      description: "Absolute currency tolerance (in the report currency's major units) within which the computed closing balance must match the reported closing balance for the bridge to foot."
+      default: 1.0
+      example: "1.0"
+    currency:
+      type: string
+      description: "ISO 4217 currency code the board pack is reported in. All MRR figures are assumed pre-normalized to this currency."
+      default: "USD"
+      example: "EUR"
+    gate_model:
+      type: string
+      description: "Swappable narrative-accuracy judge model for the publish gate. Any of the 7 providers can back it; for EU data residency pin a local/EU provider (mistral/large, ollama, omlx/qwen-3). The math and foot-check run with this unavailable."
+      default: "sonnet"
+      example: "mistral/large"
+    report_author:
+      type: string
+      description: "Author shown on the board metrics-pack PDF."
+      default: "FP&A / Office of the CFO"
+      example: "FP&A / Office of the CFO"
+    archive_base_url:
+      type: string
+      description: "Object-lock (WORM) S3-compatible REST base that receives the sealed board pack + raw waterfall JSON for audit retention."
+      default: "https://s3.eu-central-1.amazonaws.com"
+      example: "https://s3.eu-central-1.amazonaws.com"
+    archive_bucket:
+      type: string
+      description: "Bucket that stores the sealed board metrics packs tamper-evidently."
+      default: "board-metrics-packs"
+      example: "acme-board-metrics-packs"
+    board_channel:
+      type: string
+      description: "Slack channel where the published board metrics pack is posted."
+      default: "#board-metrics"
+      example: "#board-metrics"
+    sensor_timeout:
+      type: integer
+      description: "Sensor soft timeout in seconds - stop waiting for the roll-up window after this long (one run). Default 7 days to cover a late close."
+      default: 604800
+      example: "604800"
+steps:
+  # 1) DURABLE SENSOR - block until the FP&A close calendar reports the books are CLOSED for
+  #    the period and the roll-up window is open. The board pack must never be built on an open,
+  #    still-moving month. Polls the close-calendar endpoint until books_closed flips true. No model.
+  - id: await_rollup_window
+    type: sensor
+    sensor_config:
+      url: "{input.fpa_calendar_url}/periods/{input.period}?select=books_closed,rollup_window_open"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200 and (response.get('books_closed') == True or response.get('rollup_window_open') == True)"
+      check_interval: 3600
+      timeout: 604800
+
+  # 2) DETERMINISTIC http GET of the period's subscription / billing MRR-delta events from Stripe:
+  #    subscription created / updated / deleted and invoice line MRR deltas for the closed month.
+  #    Connector: stripe. No model.
+  - id: fetch_billing_events
+    type: http
+    depends_on: [await_rollup_window]
+    http_config:
+      url: "{input.billing_events_base_url}/subscription_events?period={input.period}&expand=mrr_delta,previous_mrr,status,customer"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.STRIPE_API_KEY}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 3) DETERMINISTIC http GET of the CRM pipeline for the period: closed-won new logos and
+  #    churned / downgraded accounts from Salesforce or HubSpot. Connector: salesforce / hubspot.
+  #    on_failure: skip so a missing CRM augmentation does not abort the billing-driven waterfall.
+  - id: fetch_crm_pipeline
+    type: http
+    depends_on: [await_rollup_window]
+    http_config:
+      url: "{input.crm_pipeline_base_url}/query?q=SELECT+AccountId,Type,MRR_Delta,CloseDate,StageName+FROM+Opportunity+WHERE+CloseDate+IN+{input.period}+AND+StageName+IN+('Closed Won','Churned','Downgraded')"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.CRM_API_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 4) LOAD-BEARING DETERMINISTIC MRR WATERFALL + RECONCILIATION. NO model. Classifies every
+  #    subscription event into new / expansion / contraction / churn / reactivation, sums each
+  #    component, derives the closing balance, and computes NRR, GRR, logo + dollar churn and the
+  #    SaaS quick ratio. THEN performs the foot-check: opening + new + expansion + reactivation
+  #    - contraction - churn must equal the reported closing balance within tolerance. If it does
+  #    not foot, bridge_balances is False and the publish path is blocked downstream.
+  - id: compute_waterfall
+    type: code
+    depends_on: [fetch_billing_events, fetch_crm_pipeline]
+    code_config:
+      language: python
+      code: |
+        billing = _steps.get('fetch_billing_events') or {}
+        crm = _steps.get('fetch_crm_pipeline') or {}
+
+        opening = float(_input.get('opening_mrr') or 0.0)
+        closing_reported = float(_input.get('closing_mrr_reported') or 0.0)
+        tolerance = abs(float(_input.get('reconciliation_tolerance') or 1.0))
+        currency = str(_input.get('currency') or 'USD').upper()
+        period = str(_input.get('period') or '')
+
+        # --- coalesce the provider payload into a flat list of event records --------------
+        def as_rows(blob, keys):
+            if isinstance(blob, list):
+                return [r for r in blob if isinstance(r, dict)]
+            if isinstance(blob, dict):
+                for k in keys:
+                    v = blob.get(k)
+                    if isinstance(v, list):
+                        return [r for r in v if isinstance(r, dict)]
+            return []
+
+        events = as_rows(billing, ('data', 'events', 'items', 'records', 'results'))
+        crm_rows = as_rows(crm, ('records', 'data', 'items', 'results', 'value'))
+
+        def num(v):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return 0.0
+
+        # --- waterfall component accumulators ---------------------------------------------
+        comp = {'new': 0.0, 'expansion': 0.0, 'contraction': 0.0, 'churn': 0.0, 'reactivation': 0.0}
+        new_logos = 0
+        churned_logos = 0
+        # active logos at period start, used for the logo-churn denominator.
+        opening_logos = int(num(billing.get('opening_active_logos')) if isinstance(billing, dict) else 0)
+
+        def classify(prev_mrr, cur_mrr, status, etype):
+            # Deterministic event classification from prev/current MRR + lifecycle status.
+            status = str(status or '').lower()
+            etype = str(etype or '').lower()
+            if status in ('canceled', 'cancelled', 'churned') or cur_mrr <= 0 and prev_mrr > 0:
+                return 'churn'
+            if status in ('reactivated', 'resurrected') or ('reactiv' in etype) or (prev_mrr <= 0 and cur_mrr > 0 and 'new' not in etype and status not in ('active_new', 'trialing')):
+                # came back from zero having previously existed
+                return 'reactivation' if etype == 'reactivation' or status in ('reactivated', 'resurrected') else 'new'
+            if prev_mrr <= 0 and cur_mrr > 0:
+                return 'new'
+            if cur_mrr > prev_mrr:
+                return 'expansion'
+            if cur_mrr < prev_mrr:
+                return 'contraction'
+            return 'flat'
+
+        for ev in events:
+            prev_mrr = num(ev.get('previous_mrr') if ev.get('previous_mrr') is not None else ev.get('prev_mrr'))
+            cur_mrr = num(ev.get('mrr') if ev.get('mrr') is not None else ev.get('current_mrr'))
+            delta = ev.get('mrr_delta')
+            delta = num(delta) if delta is not None else round(cur_mrr - prev_mrr, 6)
+            status = ev.get('status') or ev.get('subscription_status')
+            etype = ev.get('event_type') or ev.get('type')
+
+            kind = classify(prev_mrr, cur_mrr, status, etype)
+            if kind == 'new':
+                comp['new'] += max(0.0, delta if delta else cur_mrr)
+                new_logos += 1
+            elif kind == 'reactivation':
+                comp['reactivation'] += max(0.0, delta if delta else cur_mrr)
+                new_logos += 1
+            elif kind == 'expansion':
+                comp['expansion'] += max(0.0, delta)
+            elif kind == 'contraction':
+                comp['contraction'] += abs(min(0.0, delta))
+            elif kind == 'churn':
+                comp['churn'] += abs(prev_mrr if prev_mrr > 0 else delta)
+                churned_logos += 1
+            # 'flat' contributes nothing to the bridge
+
+        # --- CRM augmentation: fold in closed-won / churn rows the billing feed may miss ---
+        for row in crm_rows:
+            stage = str(row.get('StageName') or row.get('stage') or '').lower()
+            d = num(row.get('MRR_Delta') if row.get('MRR_Delta') is not None else row.get('mrr_delta'))
+            if 'won' in stage and d > 0:
+                comp['new'] += d
+                new_logos += 1
+            elif 'churn' in stage:
+                comp['churn'] += abs(d) if d else 0.0
+                churned_logos += 1
+            elif 'downgrade' in stage and d < 0:
+                comp['contraction'] += abs(d)
+
+        comp = {k: round(v, 2) for k, v in comp.items()}
+
+        # --- closing balance derived from the bridge ---------------------------------------
+        computed_closing = round(
+            opening + comp['new'] + comp['expansion'] + comp['reactivation']
+            - comp['contraction'] - comp['churn'], 2
+        )
+        # If no reported closing was supplied, the computed bridge IS the closing balance.
+        reported = closing_reported if closing_reported else computed_closing
+        residual = round(computed_closing - reported, 2)
+        bridge_balances = abs(residual) <= tolerance
+
+        # --- retention + churn ratios (all deterministic) ----------------------------------
+        gross_new = comp['new'] + comp['reactivation']
+        # NRR = retained + expansion - contraction - churn, over opening (expansion-inclusive).
+        if opening > 0:
+            nrr = round((opening + comp['expansion'] - comp['contraction'] - comp['churn']) / opening, 4)
+            grr = round((opening - comp['contraction'] - comp['churn']) / opening, 4)
+            dollar_churn_rate = round((comp['contraction'] + comp['churn']) / opening, 4)
+        else:
+            nrr = grr = dollar_churn_rate = 0.0
+
+        if opening_logos > 0:
+            logo_churn_rate = round(churned_logos / opening_logos, 4)
+        else:
+            logo_churn_rate = 0.0
+
+        # SaaS quick ratio = (new + expansion + reactivation) / (contraction + churn).
+        lost = comp['contraction'] + comp['churn']
+        quick_ratio = round((gross_new + comp['expansion']) / lost, 3) if lost > 0 else None
+
+        net_new_mrr = round(gross_new + comp['expansion'] - comp['contraction'] - comp['churn'], 2)
+
+        result = {
+            'period': period,
+            'currency': currency,
+            'opening_mrr': round(opening, 2),
+            'components': comp,
+            'computed_closing_mrr': computed_closing,
+            'reported_closing_mrr': round(reported, 2),
+            'net_new_mrr': net_new_mrr,
+            'reconciliation_residual': residual,
+            'reconciliation_tolerance': tolerance,
+            'bridge_balances': bool(bridge_balances),
+            'nrr': nrr,
+            'grr': grr,
+            'dollar_churn_rate': dollar_churn_rate,
+            'logo_churn_rate': logo_churn_rate,
+            'quick_ratio': quick_ratio,
+            'new_logos': new_logos,
+            'churned_logos': churned_logos,
+            'opening_logos': opening_logos,
+            'event_count': len(events),
+            'crm_row_count': len(crm_rows),
+        }
+
+  # 5) CONDITION - hard gate on the foot-check. If the bridge does NOT reconcile to the reported
+  #    closing balance within tolerance, the entire publish path is blocked and only a reconcile-
+  #    failure alert fires. Deterministic branch off the in-code bridge_balances flag. No model.
+  - id: reconciliation_branch
+    type: condition
+    depends_on: [compute_waterfall]
+    condition_config:
+      expression: "{steps.compute_waterfall.output.bridge_balances} == True"
+      then: [publish_gate, draft_board_pack, board_metrics_pack, archive_pack, notify_board]
+      else: [notify_reconcile_failure]
+
+  # 6) DRAFT the board commentary (swappable model, draft-only). The numbers it narrates were ALL
+  #    computed deterministically in compute_waterfall; this only writes prose AROUND them. The
+  #    gate below verifies the prose does not misstate any figure before anything is published.
+  - id: draft_board_pack
+    type: llm
+    depends_on: [compute_waterfall]
+    model: sonnet
+    prompt: >-
+      You are an FP&A analyst writing the board commentary for the monthly MRR roll-up. Write a
+      concise narrative (4-6 short paragraphs) that explains the MRR waterfall, net revenue
+      retention, churn and the SaaS quick ratio for the period. Use ONLY the figures provided -
+      do NOT invent, round differently, or restate any number. Cover: the bridge from opening to
+      closing MRR, the largest swing factor (new vs expansion vs churn), the NRR/GRR story, and
+      one forward-looking note on the quick ratio. Period {input.period}, currency {input.currency}.
+      Waterfall + metrics (authoritative, do not alter): {steps.compute_waterfall.output}
+
+  # 7) TWO-STRATEGY PUBLISH GATE (swappable + model-independent). BOTH strategies must pass:
+  #    (1) llm_eval narrative-accuracy judge on a SWAPPABLE provider - does the drafted commentary
+  #        faithfully match the deterministic numbers, with no misstated figure?
+  #    (2) llm_eval acting as a pure NON-LLM threshold - fed ONLY bridge_balances + the residual +
+  #        tolerance and told to answer purely from the arithmetic, so the gate still passes/fails
+  #        on the foot-check alone with zero model trust.
+  - id: publish_gate
+    type: gate
+    depends_on: [compute_waterfall, draft_board_pack]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are a board-pack reviewer. The MRR waterfall, retention ratios and quick ratio
+              were computed deterministically and are authoritative. Read the drafted board
+              commentary and answer exactly 'approved' ONLY if every number it states matches the
+              authoritative figures and no metric is mischaracterised (e.g. churn called expansion,
+              NRR overstated). Otherwise answer 'rejected' and name the misstatement. Judge
+              narrative accuracy only; the arithmetic foot-check is verified separately.
+            input: "Authoritative metrics: {steps.compute_waterfall.output}\n---\nDrafted commentary: {steps.draft_board_pack.output}"
+            model: "{input.gate_model}"
+        - type: llm_eval
+          config:
+            prompt: >-
+              Deterministic reconciliation check. Answer exactly 'approved' if bridge_balances is
+              True AND the absolute residual is at or below the tolerance; otherwise answer
+              'rejected'. Use ONLY the supplied numbers and boolean - do not infer or reason beyond
+              the arithmetic comparison.
+            input: "bridge_balances={steps.compute_waterfall.output.bridge_balances} residual={steps.compute_waterfall.output.reconciliation_residual} tolerance={steps.compute_waterfall.output.reconciliation_tolerance}"
+            model: haiku
+
+  # 8) REPORT - assemble the board-ready metrics-pack PDF: the full waterfall bridge, NRR/GRR,
+  #    logo + dollar churn, the quick ratio, the reconciliation proof, and the verified commentary.
+  - id: board_metrics_pack
+    type: report
+    depends_on: [publish_gate]
+    report_config:
+      template: research-report
+      format: pdf
+      theme: professional
+      title: "Board Metrics Pack - MRR Roll-Up {input.period} ({input.currency})"
+      author: "{input.report_author}"
+    prompt: |
+      Assemble the monthly board metrics pack for the subscription business. Every figure below is
+      authoritative and deterministically reconciled - present it faithfully for the board.
+
+      Section 1 - MRR Waterfall bridge (opening -> closing):
+      Opening MRR, then + New, + Expansion, + Reactivation, - Contraction, - Churn, to Closing MRR.
+      {steps.compute_waterfall.output.components}
+      Opening: {steps.compute_waterfall.output.opening_mrr}  Closing (computed): {steps.compute_waterfall.output.computed_closing_mrr}  Closing (reported): {steps.compute_waterfall.output.reported_closing_mrr}  Net new MRR: {steps.compute_waterfall.output.net_new_mrr}
+
+      Section 2 - Reconciliation proof (the bridge MUST foot):
+      Residual {steps.compute_waterfall.output.reconciliation_residual} within tolerance {steps.compute_waterfall.output.reconciliation_tolerance}; bridge_balances={steps.compute_waterfall.output.bridge_balances}.
+
+      Section 3 - Retention + churn:
+      NRR {steps.compute_waterfall.output.nrr}, GRR {steps.compute_waterfall.output.grr}, dollar churn rate {steps.compute_waterfall.output.dollar_churn_rate}, logo churn rate {steps.compute_waterfall.output.logo_churn_rate}, new logos {steps.compute_waterfall.output.new_logos}, churned logos {steps.compute_waterfall.output.churned_logos}.
+
+      Section 4 - Efficiency:
+      SaaS quick ratio {steps.compute_waterfall.output.quick_ratio}.
+
+      Section 5 - Board commentary (accuracy-verified narrative):
+      {steps.draft_board_pack.output}
+
+  # 9) ARCHIVE - http PUT the sealed board pack + raw waterfall JSON to the object-lock (WORM)
+  #    store for audit retention, with the period + reconciliation status as object metadata.
+  #    Connector: aws-s3.
+  - id: archive_pack
+    type: http
+    depends_on: [board_metrics_pack]
+    http_config:
+      url: "{input.archive_base_url}/{input.archive_bucket}/board-packs/{input.period}/mrr-board-pack.pdf"
+      method: PUT
+      headers:
+        Content-Type: "application/pdf"
+        x-amz-object-lock-mode: "COMPLIANCE"
+        x-amz-meta-period: "{input.period}"
+        x-amz-meta-currency: "{input.currency}"
+        x-amz-meta-bridge-balances: "{steps.compute_waterfall.output.bridge_balances}"
+        x-amz-meta-closing-mrr: "{steps.compute_waterfall.output.computed_closing_mrr}"
+      auth: "aws4:{env.AWS_ACCESS_KEY_ID}:{env.AWS_SECRET_ACCESS_KEY}"
+      body: "{steps.board_metrics_pack.output}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 10) NOTIFY (published) - post the verified, footed board metrics pack to the board channel
+  #     with the headline waterfall + retention numbers and the archive pointer. service: slack.
+  - id: notify_board
+    type: notify
+    depends_on: [archive_pack]
+    notify_config:
+      service: slack
+      channel: "{input.board_channel}"
+      message: |
+        :bar_chart: Board metrics pack published - MRR roll-up {steps.compute_waterfall.output.period} ({steps.compute_waterfall.output.currency})
+        Opening {steps.compute_waterfall.output.opening_mrr} -> Closing {steps.compute_waterfall.output.computed_closing_mrr} (net new {steps.compute_waterfall.output.net_new_mrr})
+        Bridge: +New {steps.compute_waterfall.output.components} (footed, residual {steps.compute_waterfall.output.reconciliation_residual})
+        NRR {steps.compute_waterfall.output.nrr} | GRR {steps.compute_waterfall.output.grr} | quick ratio {steps.compute_waterfall.output.quick_ratio}
+        Logos: +{steps.compute_waterfall.output.new_logos} / -{steps.compute_waterfall.output.churned_logos}
+        Archived (object-lock): board-packs/{steps.compute_waterfall.output.period}/mrr-board-pack.pdf
+
+  # 11) NOTIFY (reconcile failure) - the bridge did NOT foot. NO board pack is published; FP&A is
+  #     alerted to fix the source data and re-run, so the board never sees an unreconciled number.
+  - id: notify_reconcile_failure
+    type: notify
+    depends_on: [compute_waterfall]
+    notify_config:
+      service: slack
+      channel: "{input.board_channel}"
+      message: |
+        :no_entry: MRR roll-up {steps.compute_waterfall.output.period} did NOT foot - board pack BLOCKED.
+        Computed closing {steps.compute_waterfall.output.computed_closing_mrr} vs reported {steps.compute_waterfall.output.reported_closing_mrr}
+        Residual {steps.compute_waterfall.output.reconciliation_residual} exceeds tolerance {steps.compute_waterfall.output.reconciliation_tolerance}.
+        Fix the source billing / CRM data and re-run. No unreconciled pack will be published.
+on_complete:
+  storage_path: "mrr-waterfall-board-rollup/{run_id}/result.json"

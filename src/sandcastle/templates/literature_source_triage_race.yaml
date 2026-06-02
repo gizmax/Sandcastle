@@ -1,0 +1,490 @@
+# name: Multi-Source Literature & Source Triage
+# description: Research-triage engine that RACES the same topic query across several academic/source providers (firecrawl crawl, exa search, an arXiv/Semantic-Scholar-style http endpoint) and takes the first that returns a usable candidate list (provider failover, NOT a vote). A DETERMINISTIC code step normalizes each record, dedups by DOI then by lowercased-punctuation-stripped title, and computes a transparent 0-1 triage score from topic token-overlap + citation count + recency decay - never a model. A swappable CLASSIFY labels on/off/adjacent-topic and a two-strategy GATE pairs an llm_eval relevance reviewer with a mandatory HUMAN analyst sign-off so nothing enters the corpus unreviewed. Kept papers are embedded and upserted to Qdrant.
+# tags: [LiteratureReview, ResearchTriage, Dedup, DOI, Citations, RecencyDecay, arXiv, SemanticScholar, Exa, Firecrawl, Qdrant, VectorStore, race, classify, gate]
+# category: research_intel
+# connectors: firecrawl, exa, qdrant, slack
+name: literature-source-triage-race
+description: >-
+  A provider-neutral research-triage pipeline that turns a topic into a reviewed,
+  embedded shortlist. A cross-provider RACE fans the same topic query out to several
+  source providers in parallel - a firecrawl crawl of a literature index, an exa
+  neural search, and an arXiv / Semantic-Scholar-style http endpoint - and takes the
+  FIRST provider that returns a usable candidate list (provider failover, NOT a vote).
+  A DETERMINISTIC code step then normalizes each record into one shape, dedups first by
+  normalized DOI and then by a lowercased / punctuation-stripped title key, and computes
+  a transparent 0-1 triage score from three model-independent signals: token-overlap with
+  the research topic, a log-scaled citation count, and an exponential recency decay - the
+  load-bearing ranking is pure arithmetic, never a model. A swappable CLASSIFY labels each
+  shortlisted paper on_topic / adjacent_topic / off_topic (the only model in the path, and
+  it only labels). A two-strategy GATE then pairs an llm_eval relevance reviewer with a
+  MANDATORY human analyst sign-off, so no paper enters the corpus unreviewed. Kept papers
+  are embedded and upserted to a Qdrant collection, and a NOTIFY posts the triage digest to
+  the research channel. The dedup and scoring math are 100% deterministic and run even with
+  zero model providers available; the model is confined to the swappable classifier and the
+  gate's swappable relevance judge.
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 1200
+input_schema:
+  required: ["research_topic", "source_provider_urls", "vector_collection"]
+  properties:
+    research_topic:
+      type: string
+      description: "The research topic / question to triage literature for. Drives the race query and the token-overlap relevance signal."
+      default: "retrieval-augmented generation for long-context legal question answering"
+      example: "retrieval-augmented generation for long-context legal question answering"
+    source_provider_urls:
+      type: string
+      description: "Comma-separated source-provider base URLs raced in parallel, in priority order: firecrawl crawl, exa search, an arXiv/Semantic-Scholar-style endpoint. First usable list wins."
+      default: "https://api.firecrawl.dev/v1/crawl,https://api.exa.ai/search,https://api.semanticscholar.org/graph/v1/paper/search"
+      example: "https://api.firecrawl.dev/v1/crawl,https://api.exa.ai/search,https://api.semanticscholar.org/graph/v1/paper/search"
+    min_triage_score:
+      type: number
+      description: "Deterministic triage score (0-1) at or above which a paper is shortlisted for human review. The gate's non-LLM strategy also enforces this floor."
+      default: 0.45
+      example: "0.45"
+    vector_collection:
+      type: string
+      description: "Qdrant collection name the kept, reviewed papers are embedded and upserted into."
+      default: "rag-legal-qa-corpus"
+      example: "rag-legal-qa-corpus"
+    max_shortlist:
+      type: integer
+      description: "Maximum number of top-ranked papers carried into classification + human review (keeps the analyst gate bounded)."
+      default: 25
+      example: "25"
+    recency_half_life_days:
+      type: number
+      description: "Half-life in days for the exponential recency-decay signal. A paper this old contributes half the recency weight of a brand-new one."
+      default: 540
+      example: "540"
+    qdrant_base_url:
+      type: string
+      description: "Qdrant REST base URL the kept papers are upserted to."
+      default: "https://your-cluster.qdrant.io"
+      example: "https://acme-xyz.eu-central-1-0.aws.cloud.qdrant.io:6333"
+    gate_model:
+      type: string
+      description: "Swappable relevance-judge model for the gate. Any provider can back it; for regulated data pin an EU/local provider (mistral/large, ollama, omlx/qwen-3). Triage works with this unavailable."
+      default: "sonnet"
+      example: "mistral/large"
+    slack_channel:
+      type: string
+      description: "Research channel that receives the triage digest."
+      default: "#research-literature-triage"
+      example: "#research-literature-triage"
+steps:
+  # 1) DETERMINISTIC query prep. Split the comma-separated provider URLs into ordered race
+  #    branches, build the topic token set the overlap signal uses, and emit the query string.
+  #    No model.
+  - id: prepare_query
+    type: code
+    code_config:
+      language: python
+      code: |
+        import re
+
+        topic = str(_input.get('research_topic') or '').strip()
+        urls_raw = str(_input.get('source_provider_urls') or '')
+        provider_urls = [u.strip() for u in urls_raw.replace(';', ',').split(',') if u.strip()]
+
+        # --- Topic token set (lowercased, alnum, stopwords dropped) for the overlap signal.
+        stop = {
+            'the', 'a', 'an', 'of', 'for', 'and', 'or', 'to', 'in', 'on', 'with',
+            'using', 'via', 'by', 'from', 'at', 'as', 'is', 'are', 'be',
+        }
+        words = re.sub(r'[^a-z0-9 ]+', ' ', topic.lower()).split()
+        topic_tokens = sorted({w for w in words if w and w not in stop and len(w) > 2})
+
+        result = {
+            'research_topic': topic,
+            'query_string': topic,
+            'topic_tokens': topic_tokens,
+            'provider_urls': provider_urls,
+            'provider_count': len(provider_urls),
+            # Resolve the three priority URLs by position with safe fallbacks.
+            'firecrawl_url': provider_urls[0] if len(provider_urls) > 0 else 'https://api.firecrawl.dev/v1/crawl',
+            'exa_url': provider_urls[1] if len(provider_urls) > 1 else 'https://api.exa.ai/search',
+            'scholar_url': provider_urls[2] if len(provider_urls) > 2 else 'https://api.semanticscholar.org/graph/v1/paper/search',
+        }
+
+  # 2) CROSS-PROVIDER RACE. Fan the SAME topic query across three source providers in parallel;
+  #    the FIRST provider that returns a usable candidate list wins (provider failover, NOT a
+  #    vote). Each branch is a different connector. Branch steps are DEFINED SEPARATELY with no
+  #    depends_on so the race owns their scheduling.
+  - id: crawl_firecrawl
+    type: http
+    http_config:
+      url: "{steps.prepare_query.output.firecrawl_url}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.FIRECRAWL_API_KEY}"
+      body: |
+        {
+          "query": "{steps.prepare_query.output.query_string}",
+          "limit": 30,
+          "scrapeOptions": {"formats": ["markdown"]}
+        }
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  - id: search_exa
+    type: http
+    http_config:
+      url: "{steps.prepare_query.output.exa_url}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.EXA_API_KEY}"
+      body: |
+        {
+          "query": "{steps.prepare_query.output.query_string}",
+          "numResults": 30,
+          "category": "research paper",
+          "type": "neural",
+          "contents": {"text": true}
+        }
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  - id: search_scholar
+    type: http
+    http_config:
+      url: "{steps.prepare_query.output.scholar_url}?query={steps.prepare_query.output.query_string}&limit=30&fields=title,abstract,year,citationCount,externalIds,url"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.SEMANTIC_SCHOLAR_API_KEY}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  - id: source_race
+    type: race
+    depends_on: [prepare_query]
+    race_config:
+      branches:
+        - [crawl_firecrawl]
+        - [search_exa]
+        - [search_scholar]
+      validator: "len(str(output).strip()) > 0"
+
+  # 3) DETERMINISTIC normalize + DEDUP + SCORE. The load-bearing decision. NO model.
+  #    Flatten whichever provider won the race into a uniform record shape, dedup first by
+  #    normalized DOI then by a lowercased / punctuation-stripped title key, then compute a
+  #    transparent 0-1 triage score = 0.5*token_overlap + 0.3*log_citation + 0.2*recency_decay.
+  - id: dedup_and_score
+    type: code
+    depends_on: [source_race, prepare_query]
+    code_config:
+      language: python
+      code: |
+        import re
+        import math
+        from datetime import datetime, timezone
+
+        prep = _steps.get('prepare_query') or {}
+        raw = _steps.get('source_race')
+        topic_tokens = set(prep.get('topic_tokens') or [])
+        half_life = float(_input.get('recency_half_life_days', 540) or 540)
+        max_shortlist = int(_input.get('max_shortlist', 25) or 25)
+        min_score = float(_input.get('min_triage_score', 0.45) or 0.45)
+
+        # The winning provider payload can be a dict or list in several shapes; coalesce.
+        if isinstance(raw, dict):
+            rows = (raw.get('data') or raw.get('results') or raw.get('hits')
+                    or raw.get('papers') or raw.get('content') or [])
+        elif isinstance(raw, list):
+            rows = raw
+        else:
+            rows = []
+        if not isinstance(rows, list):
+            rows = [rows] if rows else []
+
+        now = datetime.now(timezone.utc)
+
+        def norm_doi(value):
+            s = str(value or '').strip().lower()
+            s = re.sub(r'^https?://(dx\.)?doi\.org/', '', s)
+            s = re.sub(r'^doi:', '', s).strip()
+            return s
+
+        def title_key(value):
+            # Lowercase, strip punctuation, collapse whitespace - the secondary dedup key.
+            s = re.sub(r'[^a-z0-9 ]+', ' ', str(value or '').lower())
+            s = re.sub(r'\s+', ' ', s).strip()
+            return s
+
+        def extract_year(rec):
+            y = rec.get('year') or rec.get('publishedYear')
+            if y:
+                try:
+                    return int(str(y)[:4])
+                except (ValueError, TypeError):
+                    pass
+            for k in ('publishedDate', 'published', 'date'):
+                v = rec.get(k)
+                if v:
+                    m = re.search(r'(\d{4})', str(v))
+                    if m:
+                        return int(m.group(1))
+            return None
+
+        def get_doi(rec):
+            ext = rec.get('externalIds') if isinstance(rec.get('externalIds'), dict) else {}
+            return norm_doi(rec.get('doi') or ext.get('DOI') or ext.get('doi') or '')
+
+        normalized = []
+        for rec in rows:
+            if not isinstance(rec, dict):
+                # Bare string/URL result (some crawlers) - keep with empty metadata.
+                rec = {'title': str(rec)[:300], 'url': str(rec)}
+            title = str(rec.get('title') or rec.get('name') or rec.get('heading') or '').strip()
+            if not title:
+                continue
+            abstract = str(rec.get('abstract') or rec.get('summary') or rec.get('text') or rec.get('snippet') or '').strip()
+            url = str(rec.get('url') or rec.get('link') or rec.get('id') or '').strip()
+            try:
+                citations = int(rec.get('citationCount') or rec.get('citations') or rec.get('citation_count') or 0)
+            except (ValueError, TypeError):
+                citations = 0
+            year = extract_year(rec)
+            normalized.append({
+                'title': title,
+                'abstract': abstract[:1200],
+                'url': url,
+                'doi': get_doi(rec),
+                'citations': max(0, citations),
+                'year': year,
+                'title_key': title_key(title),
+            })
+
+        # --- DEDUP: first by normalized DOI, then by title key. Keep the higher-citation copy.
+        by_doi = {}
+        by_title = {}
+        deduped = []
+        for rec in normalized:
+            doi = rec['doi']
+            tkey = rec['title_key']
+            existing_idx = None
+            if doi and doi in by_doi:
+                existing_idx = by_doi[doi]
+            elif tkey and tkey in by_title:
+                existing_idx = by_title[tkey]
+            if existing_idx is not None:
+                # Duplicate: keep whichever has more citations / more metadata.
+                if rec['citations'] > deduped[existing_idx]['citations']:
+                    deduped[existing_idx] = rec
+                    if doi:
+                        by_doi[doi] = existing_idx
+                    if tkey:
+                        by_title[tkey] = existing_idx
+                continue
+            idx = len(deduped)
+            deduped.append(rec)
+            if doi:
+                by_doi[doi] = idx
+            if tkey:
+                by_title[tkey] = idx
+
+        duplicates_removed = len(normalized) - len(deduped)
+
+        # --- TRANSPARENT 0-1 TRIAGE SCORE. Three model-independent signals.
+        for rec in deduped:
+            # (a) token-overlap with the research topic (Jaccard of content tokens vs topic).
+            content = (rec['title'] + ' ' + rec['abstract']).lower()
+            cwords = set(re.sub(r'[^a-z0-9 ]+', ' ', content).split())
+            inter = topic_tokens & cwords
+            overlap = (len(inter) / len(topic_tokens)) if topic_tokens else 0.0
+
+            # (b) log-scaled citation count, capped at 1.0 around ~1000 citations.
+            citation_signal = min(1.0, math.log10(rec['citations'] + 1) / 3.0)
+
+            # (c) exponential recency decay vs now using the configured half-life.
+            if rec['year']:
+                age_days = max(0.0, (now.year - rec['year']) * 365.25)
+                recency = 0.5 ** (age_days / half_life) if half_life > 0 else 0.0
+            else:
+                recency = 0.0
+
+            score = round(0.5 * overlap + 0.3 * citation_signal + 0.2 * recency, 4)
+            rec['token_overlap'] = round(overlap, 4)
+            rec['citation_signal'] = round(citation_signal, 4)
+            rec['recency_signal'] = round(recency, 4)
+            rec['triage_score'] = score
+
+        # --- Rank by score desc, take the top max_shortlist as the human-review shortlist.
+        ranked = sorted(deduped, key=lambda r: r['triage_score'], reverse=True)
+        shortlist = [r for r in ranked if r['triage_score'] >= min_score][:max_shortlist]
+        max_score = ranked[0]['triage_score'] if ranked else 0.0
+
+        result = {
+            'research_topic': prep.get('research_topic'),
+            'raw_count': len(rows),
+            'normalized_count': len(normalized),
+            'deduped_count': len(deduped),
+            'duplicates_removed': duplicates_removed,
+            'shortlist_count': len(shortlist),
+            'max_triage_score': max_score,
+            'min_triage_score': min_score,
+            'shortlist': shortlist,
+            'all_ranked': ranked,
+        }
+
+  # 4) CLASSIFY topical fit. The ONLY model in the path and it ONLY labels: on_topic /
+  #    adjacent_topic / off_topic. Swappable to any provider; every label falls through to the
+  #    deterministic gate, which still enforces the numeric score floor on its own.
+  - id: classify_topicality
+    type: classify
+    depends_on: [dedup_and_score]
+    classify_config:
+      model: sonnet
+      input: >
+        You are a research librarian triaging papers for a literature review. Using ONLY the
+        titles and abstracts, decide the OVERALL topical fit of this shortlist to the research
+        topic. on_topic = most shortlisted papers directly address the topic; adjacent_topic =
+        they are in a neighbouring area (related methods or domain) but not squarely on it;
+        off_topic = most do not address the topic at all. Topic: {steps.prepare_query.output.research_topic}.
+        Shortlist (title + abstract + deterministic triage_score): {steps.dedup_and_score.output.shortlist}
+      categories:
+        - on_topic
+        - adjacent_topic
+        - off_topic
+      branches:
+        on_topic: [analyst_review_gate]
+        adjacent_topic: [analyst_review_gate]
+        off_topic: [analyst_review_gate]
+
+  # 5) TWO-STRATEGY GATE. BOTH must pass before anything enters the corpus:
+  #    (1) a SWAPPABLE llm_eval relevance reviewer ("are these papers genuinely relevant?");
+  #    (2) a mandatory HUMAN analyst sign-off. The non-LLM score floor was already applied by the
+  #        dedup_and_score shortlist, so a paper cannot reach the corpus on the model alone.
+  - id: analyst_review_gate
+    type: gate
+    depends_on: [dedup_and_score, classify_topicality]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are a research relevance reviewer. The shortlist was deterministically
+              deduped and ranked by a transparent triage score; a topicality label was assigned.
+              Answer exactly 'approved' if the shortlisted papers are genuinely relevant to the
+              research topic and worth embedding into the review corpus, otherwise answer
+              'rejected' and name the off-topic items. Judge relevance only; the numeric score
+              floor is enforced separately.
+            input: "Topic: {steps.prepare_query.output.research_topic} | Topicality: {steps.classify_topicality.output} | Shortlist: {steps.dedup_and_score.output.shortlist}"
+            model: "{input.gate_model}"
+        - type: human
+          config:
+            message: "Research analyst: review this deduped, score-ranked literature shortlist. Approve to embed the keepers into the corpus; reject to send back for re-query. Nothing enters the vector store without your sign-off."
+            timeout_hours: 72
+            on_timeout: abort
+
+  # 6) DETERMINISTIC embed-payload builder. NO model. Fold the approved shortlist into Qdrant
+  #    upsert points: a stable SHA-256 point id (from DOI or title key), the triage score + signal
+  #    breakdown as payload, and the title+abstract as the text to embed.
+  - id: build_upsert_payload
+    type: code
+    depends_on: [analyst_review_gate, dedup_and_score]
+    code_config:
+      language: python
+      code: |
+        import hashlib
+
+        scored = _steps.get('dedup_and_score') or {}
+        topic = scored.get('research_topic')
+        shortlist = scored.get('shortlist') or []
+        collection = str(_input.get('vector_collection') or '')
+
+        points = []
+        for rec in shortlist:
+            # Stable id: prefer DOI, else the title key. SHA-256 keeps it deterministic.
+            seed = rec.get('doi') or rec.get('title_key') or rec.get('title') or ''
+            point_id = hashlib.sha256(str(seed).encode('utf-8')).hexdigest()
+            embed_text = (str(rec.get('title') or '') + '. ' + str(rec.get('abstract') or '')).strip()
+            points.append({
+                'id': point_id,
+                'payload': {
+                    'title': rec.get('title'),
+                    'url': rec.get('url'),
+                    'doi': rec.get('doi'),
+                    'year': rec.get('year'),
+                    'citations': rec.get('citations'),
+                    'triage_score': rec.get('triage_score'),
+                    'token_overlap': rec.get('token_overlap'),
+                    'citation_signal': rec.get('citation_signal'),
+                    'recency_signal': rec.get('recency_signal'),
+                    'research_topic': topic,
+                },
+                'text': embed_text,
+            })
+
+        result = {
+            'collection': collection,
+            'point_count': len(points),
+            'has_points': len(points) > 0,
+            'points': points,
+            'research_topic': topic,
+        }
+
+  # 7) CONDITION - only upsert when the analyst approved at least one paper. An empty/ rejected
+  #    shortlist skips the vector write entirely. Deterministic branch off the payload count.
+  - id: route_upsert
+    type: condition
+    depends_on: [build_upsert_payload]
+    condition_config:
+      expression: "{steps.build_upsert_payload.output.has_points} == True"
+      then: [embed_and_upsert, notify_kept]
+      else: [notify_empty]
+
+  # 7a) EMBED + UPSERT the kept papers into Qdrant. The connector embeds the text and writes the
+  #     points with their triage payload into the configured collection. Connector: qdrant.
+  - id: embed_and_upsert
+    type: http
+    http_config:
+      url: "{input.qdrant_base_url}/collections/{input.vector_collection}/points?wait=true"
+      method: PUT
+      headers:
+        Content-Type: "application/json"
+        api-key: "{env.QDRANT_API_KEY}"
+      body: "{steps.build_upsert_payload.output}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 7b) NOTIFY (kept) - post the triage digest with dedup + score stats and the kept count.
+  - id: notify_kept
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        :books: Literature triage for "{steps.dedup_and_score.output.research_topic}"
+        Raw candidates : {steps.dedup_and_score.output.raw_count}
+        Deduped        : {steps.dedup_and_score.output.deduped_count} ({steps.dedup_and_score.output.duplicates_removed} dup(s) removed)
+        Shortlisted    : {steps.dedup_and_score.output.shortlist_count} (score >= {steps.dedup_and_score.output.min_triage_score}, max {steps.dedup_and_score.output.max_triage_score})
+        Topicality     : {steps.classify_topicality.output}
+        Embedded to Qdrant collection {input.vector_collection}: {steps.build_upsert_payload.output.point_count} paper(s).
+
+  # 7c) NOTIFY (empty) - nothing cleared review; no vector write happened.
+  - id: notify_empty
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        :mag: Literature triage for "{steps.dedup_and_score.output.research_topic}" produced no keepers.
+        {steps.dedup_and_score.output.deduped_count} deduped candidates, {steps.dedup_and_score.output.shortlist_count} shortlisted, but the analyst gate approved none. No embedding, no corpus write.
+
+on_complete:
+  storage_path: "literature-source-triage-race/{run_id}/result.json"

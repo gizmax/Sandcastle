@@ -1,0 +1,707 @@
+# name: Topic Share-of-Voice Rank Monitor
+# description: Tracks where your brand and named rivals surface across multiple search / answer engines for a watched keyword set, then computes a DETERMINISTIC share-of-voice and rank-delta versus the last sealed snapshot - entirely in code. A SENSOR runs the sweep on schedule; a LOOP fans parallel http GETs to several providers (Tavily, Exa, a SERP-style endpoint) per keyword; a code step normalizes results, matches brand / competitor mentions, and computes per-keyword rank positions, an aggregate SoV percentage and the rank_delta of who gained or lost positions. A CLASSIFY labels each keyword steady / improving / overtaken, a CONDITION feeds adverse moves into a swappable GATE (llm_eval 'real ranking loss worth acting on?' AND a non-LLM 'rank_delta<=-N or sov_drop_pct>=threshold'). Confirmed losses NOTIFY Slack and append to an Airtable scoreboard, and the new snapshot is sealed back to the store. All SoV and rank-delta math is model-independent.
+# tags: [SEO, ShareOfVoice, RankTracking, AnswerEngine, GEO, CompetitiveIntel, Brand, Tavily, Exa, SERP, Airtable, Slack, monitoring]
+# category: research_intel
+# connectors: tavily, exa, airtable, slack
+name: topic-share-of-voice-rank-monitor
+description: >-
+  An always-on share-of-voice and competitive-rank watchdog for a watched keyword
+  set across multiple search / answer engines. A durable SENSOR blocks until the next
+  scheduled sweep window is due (or a webhook bumps it), then a LOOP iterates every
+  watched keyword and fans out PARALLEL http GETs (via a race) to several providers -
+  Tavily, Exa and a SERP-style endpoint - so a single dead provider never blinds the
+  sweep. A DETERMINISTIC code step normalizes each provider's results into a ranked
+  URL list, matches your brand and each named competitor by domain / alias, and computes
+  per-keyword rank positions plus a 0-100 aggregate share-of-voice percentage and the
+  rank_delta against the last SEALED snapshot (who gained or lost positions) - 100% in
+  code, no model. A CLASSIFY labels each keyword steady / improving / overtaken, and a
+  CONDITION routes only adverse moves into a MATERIALITY GATE with TWO strategies that
+  BOTH must pass: a swappable llm_eval judge ("is this a real ranking loss worth acting
+  on, or normal SERP churn?", backable by any provider) AND a NON-LLM threshold strategy
+  fed only the pre-computed rank_delta / sov_drop_pct, so a keyword passes or fails the
+  gate on the arithmetic alone. After the loop, a deterministic code step aggregates the
+  sweep, seals the new snapshot, and only confirmed overtakes NOTIFY the Slack channel
+  and append a row to the Airtable scoreboard. All SoV and rank-delta math runs even with
+  zero model providers available; the model is confined to the gate's swappable judge.
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 1800
+input_schema:
+  required: ["watch_keywords", "brand_and_competitors"]
+  properties:
+    watch_keywords:
+      type: string
+      description: "Comma- or newline-separated topic keywords / queries to track share-of-voice on (e.g. 'workflow orchestrator, ai agent platform, eu ai act compliance')."
+      default: "ai workflow orchestrator, agent automation platform, eu ai act compliance tool"
+      example: "ai workflow orchestrator, agent automation platform, eu ai act compliance tool"
+    brand_and_competitors:
+      type: string
+      description: "Brand + rivals as 'Label=domain1|alias' entries, semicolon-separated. The FIRST entry is YOUR brand; the rest are tracked competitors. Domains / aliases drive deterministic mention matching."
+      default: "Sandcastle=sandcastle-ai.eu|sandcastle; Zapier=zapier.com; n8n=n8n.io|n8n; Make=make.com|integromat"
+      example: "Sandcastle=sandcastle-ai.eu|sandcastle; Zapier=zapier.com; n8n=n8n.io; Make=make.com|integromat"
+    search_provider_urls:
+      type: string
+      description: "Comma-separated search / answer-engine endpoints queried in parallel per keyword. Order is provider1=Tavily, provider2=Exa, provider3=SERP-style. Leave a slot empty to skip that provider."
+      default: "https://api.tavily.com/search, https://api.exa.ai/search, https://serpapi.com/search"
+      example: "https://api.tavily.com/search, https://api.exa.ai/search, https://serpapi.com/search"
+    rank_delta_threshold:
+      type: integer
+      description: "Deterministic rank-loss threshold (positive integer). The gate's non-LLM strategy treats a keyword as a material overtake when your brand's rank_delta <= -threshold (you fell at least this many positions) OR sov_drop_pct meets the SoV threshold."
+      default: 2
+      example: "3"
+    sov_drop_threshold_pct:
+      type: number
+      description: "Deterministic share-of-voice drop threshold in percentage points. The gate's non-LLM strategy fires when your brand's SoV fell by at least this many points versus the last sealed snapshot."
+      default: 5.0
+      example: "5.0"
+    snapshot_store_url:
+      type: string
+      description: "Snapshot store REST base (PostgREST / S3 REST gateway) holding the last SEALED per-keyword ranks + SoV that rank_delta is measured against."
+      default: "https://sov.internal/snapshots"
+      example: "https://sov.internal/snapshots"
+    sweep_interval:
+      type: integer
+      description: "Seconds between share-of-voice sweeps. The sensor blocks until the scheduler reports the next sweep window is due OR a webhook fires."
+      default: 86400
+      example: "86400"
+    sensor_timeout:
+      type: integer
+      description: "Sensor soft timeout in seconds - stop waiting for the next sweep window after this long (one watch run). Default 7 days."
+      default: 604800
+      example: "604800"
+    result_depth:
+      type: integer
+      description: "How many top ranked results per provider to consider when matching brand / competitor mentions and computing rank positions."
+      default: 10
+      example: "10"
+    gate_model:
+      type: string
+      description: "Swappable ranking-loss judge model for the gate. Any provider can back it; for EU data pin a local / EU provider (mistral/large, ollama, omlx/qwen-3). SoV + rank-delta detection works with this unavailable."
+      default: "sonnet"
+      example: "mistral/large"
+    airtable_base_id:
+      type: string
+      description: "Airtable base id that holds the competitive share-of-voice scoreboard table."
+      default: "appXXXXXXXXXXXXXX"
+      example: "app8sJ2kQfL0qWvZ1"
+    airtable_table:
+      type: string
+      description: "Airtable table name the confirmed overtakes are appended to as scoreboard rows."
+      default: "SoV Scoreboard"
+      example: "SoV Scoreboard"
+    slack_channel:
+      type: string
+      description: "Slack channel that receives the confirmed-overtake alert and the clean-sweep digest."
+      default: "#competitive-intel"
+      example: "#competitive-intel"
+steps:
+  # 1) DURABLE SENSOR - block until the next share-of-voice sweep window is DUE, or a webhook
+  #    has bumped the scheduler's pending flag (event-driven within a schedule). Polls the
+  #    sweep-window status endpoint; until a sweep is due there is nothing new to re-rank.
+  - id: await_sweep_window
+    type: sensor
+    sensor_config:
+      url: "{input.snapshot_store_url}/sweep-window?select=sweep_due,window_changed_since_last_seal"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200 and (response.get('sweep_due') == True or response.get('window_changed_since_last_seal') == True)"
+      check_interval: 3600
+      timeout: 604800
+
+  # 2) DETERMINISTIC parse of the watched-keyword set, the brand/competitor roster, and the
+  #    provider URL slots into a flat loopable plan. The FIRST roster entry is YOUR brand; the
+  #    rest are tracked competitors. Each keyword row carries its snapshot-store key for the
+  #    rank_delta measurement. No model.
+  - id: build_sweep_plan
+    type: code
+    depends_on: [await_sweep_window]
+    code_config:
+      language: python
+      code: |
+        import re
+
+        def split_multi(raw):
+            parts = re.split(r'[\n,;]+', str(raw or ''))
+            return [p.strip() for p in parts if p.strip()]
+
+        # --- keywords -------------------------------------------------------------------
+        keywords = [k for k in split_multi(_input.get('watch_keywords')) if k]
+        # de-dupe while preserving order (case-insensitive)
+        seen = set()
+        kw_clean = []
+        for k in keywords:
+            key = k.lower()
+            if key not in seen:
+                seen.add(key)
+                kw_clean.append(k)
+
+        # --- brand + competitor roster: 'Label=domain|alias; Label2=domain2' --------------
+        roster_raw = str(_input.get('brand_and_competitors') or '')
+        roster = []
+        for ent in roster_raw.split(';'):
+            ent = ent.strip()
+            if not ent:
+                continue
+            if '=' in ent:
+                label, rhs = ent.split('=', 1)
+            else:
+                label, rhs = ent, ent
+            label = label.strip()
+            aliases = [a.strip().lower() for a in rhs.split('|') if a.strip()]
+            if not aliases:
+                aliases = [label.lower()]
+            roster.append({'label': label, 'aliases': aliases})
+        brand = roster[0]['label'] if roster else ''
+
+        # --- provider URL slots (provider1=Tavily, provider2=Exa, provider3=SERP) ----------
+        prov_urls = split_multi(_input.get('search_provider_urls'))
+        providers = []
+        names = ['tavily', 'exa', 'serp']
+        for i, url in enumerate(prov_urls):
+            providers.append({'name': names[i] if i < len(names) else f'provider{i+1}', 'url': url})
+
+        depth = int(_input.get('result_depth', 10) or 10)
+        snap_base = str(_input.get('snapshot_store_url') or '').rstrip('/')
+
+        rows = []
+        for kw in kw_clean:
+            slug = re.sub(r'[^a-z0-9]+', '-', kw.lower()).strip('-')
+            rows.append({
+                'keyword': kw,
+                'keyword_slug': slug,
+                'roster': roster,
+                'brand': brand,
+                'providers': providers,
+                'depth': depth,
+                # snapshot store key holding this keyword's last sealed ranks + SoV.
+                'snapshot_url': f"{snap_base}?keyword=eq.{slug}&order=sealed_at.desc&limit=1",
+            })
+
+        result = {
+            'brand': brand,
+            'competitor_count': max(0, len(roster) - 1),
+            'keyword_count': len(rows),
+            'provider_count': len(providers),
+            'keywords': rows,
+        }
+
+  # 3) LOOP over every watched keyword. Per-keyword child chain: race parallel provider GETs ->
+  #    GET last sealed snapshot -> deterministic rank + SoV + rank_delta -> classify the move ->
+  #    condition routes adverse moves into the materiality gate.
+  - id: per_keyword_loop
+    type: loop
+    depends_on: [build_sweep_plan]
+    loop_config:
+      over: "steps.build_sweep_plan.output.keywords"
+      step_ids:
+        - query_tavily
+        - query_exa
+        - query_serp
+        - providers_race
+        - fetch_last_snapshot
+        - compute_rank_sov
+        - classify_move
+        - move_branch
+      max_iterations: 500
+
+  # 3a) http GET this keyword on TAVILY (provider1). on_failure: skip so one dead provider does
+  #     not abort the keyword - the race below takes whichever provider returns usable results.
+  - id: query_tavily
+    type: http
+    http_config:
+      url: "{input._item.providers[0].url}?query={input._item.keyword}&max_results={input._item.depth}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.TAVILY_API_KEY}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 3b) http GET this keyword on EXA (provider2) in parallel.
+  - id: query_exa
+    type: http
+    http_config:
+      url: "{input._item.providers[1].url}?q={input._item.keyword}&numResults={input._item.depth}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.EXA_API_KEY}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 3c) http GET this keyword on a SERP-style endpoint (provider3) in parallel.
+  - id: query_serp
+    type: http
+    http_config:
+      url: "{input._item.providers[2].url}?q={input._item.keyword}&num={input._item.depth}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.SERP_API_KEY}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 3d) RACE the three parallel provider GETs - FIRST provider that returns a usable ranked
+  #     list wins (provider failover, NOT a vote). The winning payload feeds the deterministic
+  #     rank / SoV math regardless of which vendor answered.
+  - id: providers_race
+    type: race
+    race_config:
+      branches:
+        - [query_tavily]
+        - [query_exa]
+        - [query_serp]
+      validator: "len(str(output).strip()) > 0"
+
+  # 3e) http GET this keyword's LAST SEALED snapshot (prior ranks + SoV) so rank_delta is
+  #     measured against the previously-sealed truth, not re-derived. on_failure: skip -> a
+  #     first-ever sweep simply has no prior and reports first_seal.
+  - id: fetch_last_snapshot
+    type: http
+    http_config:
+      url: "{input._item.snapshot_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.SNAPSHOT_STORE_TOKEN}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 3f) DETERMINISTIC RANK + SHARE-OF-VOICE + RANK_DELTA. NO model. Normalize the winning
+  #     provider payload into a ranked URL list, match brand + each competitor by domain / alias,
+  #     compute each player's best rank position, a 0-100 aggregate share-of-voice percentage
+  #     (presence + position-weighted), and the rank_delta vs the last sealed snapshot - who
+  #     gained or lost positions. This is the load-bearing math the gate's non-LLM strategy reads.
+  - id: compute_rank_sov
+    type: code
+    code_config:
+      language: python
+      code: |
+        import re
+
+        item = _input.get('_item') or {}
+        raw = _steps.get('providers_race')
+        snap_raw = _steps.get('fetch_last_snapshot') or {}
+        roster = item.get('roster') or []
+        brand = item.get('brand') or ''
+        depth = int(item.get('depth', 10) or 10)
+
+        # --- normalize the winning provider payload into a ranked list of result URLs/snippets.
+        def as_rows(blob):
+            if isinstance(blob, list):
+                return [r for r in blob if isinstance(r, dict)]
+            if isinstance(blob, dict):
+                for k in ('results', 'data', 'items', 'hits', 'organic_results', 'web', 'value'):
+                    v = blob.get(k)
+                    if isinstance(v, list):
+                        return [r for r in v if isinstance(r, dict)]
+            return []
+
+        rows = as_rows(raw)[:depth]
+
+        def hay(rec):
+            # searchable text per result: url + title + snippet, lowercased.
+            bits = [
+                rec.get('url'), rec.get('link'), rec.get('href'),
+                rec.get('title'), rec.get('name'),
+                rec.get('snippet'), rec.get('content'), rec.get('description'),
+            ]
+            return ' '.join(str(b) for b in bits if b).lower()
+
+        ranked = [{'position': i + 1, 'text': hay(rec)} for i, rec in enumerate(rows)]
+        total_slots = len(ranked)
+
+        # --- match each roster player by any alias; best (lowest) rank position wins.
+        players = {}
+        for entry in roster:
+            label = entry.get('label')
+            aliases = entry.get('aliases') or [str(label).lower()]
+            best_rank = None
+            appearances = 0
+            for r in ranked:
+                if any(a and a in r['text'] for a in aliases):
+                    appearances += 1
+                    if best_rank is None or r['position'] < best_rank:
+                        best_rank = r['position']
+            # position weight: rank 1 worth most, decaying linearly down the page.
+            weight = 0.0
+            if best_rank is not None and total_slots > 0:
+                weight = (total_slots - best_rank + 1) / total_slots
+            players[label] = {
+                'label': label,
+                'best_rank': best_rank,           # None = absent this sweep
+                'appearances': appearances,
+                'present': best_rank is not None,
+                'weight': round(weight, 4),
+            }
+
+        # --- aggregate share-of-voice: each player's position-weight as a share of the total.
+        total_weight = sum(p['weight'] for p in players.values())
+        for label, p in players.items():
+            p['sov_pct'] = round((p['weight'] / total_weight) * 100, 2) if total_weight > 0 else 0.0
+
+        brand_now = players.get(brand, {})
+        brand_rank_now = brand_now.get('best_rank')
+        brand_sov_now = brand_now.get('sov_pct', 0.0)
+
+        # --- rank_delta vs last SEALED snapshot. positive = improved (rose), negative = lost.
+        snap_rows = snap_raw if isinstance(snap_raw, list) else (
+            snap_raw.get('data') or snap_raw.get('items') or snap_raw.get('records') or [snap_raw]
+        )
+        prev = snap_rows[0] if snap_rows and isinstance(snap_rows[0], dict) else {}
+        prev_players = prev.get('players') if isinstance(prev.get('players'), dict) else {}
+        prev_brand = prev_players.get(brand) if isinstance(prev_players.get(brand), dict) else {}
+
+        def to_int(v):
+            try:
+                return int(v)
+            except (ValueError, TypeError):
+                return None
+
+        def to_float(v):
+            try:
+                return float(v)
+            except (ValueError, TypeError):
+                return None
+
+        prev_brand_rank = to_int(prev_brand.get('best_rank')) if prev_brand else None
+        prev_brand_sov = to_float(prev_brand.get('sov_pct')) if prev_brand else None
+        first_seal = not bool(prev)
+
+        # rank_delta: prev_rank - now_rank. positive = you moved UP; negative = you fell.
+        # absence is treated as worst rank (depth + 1) so dropping off the page counts as a loss.
+        def eff_rank(rk):
+            return rk if isinstance(rk, int) else (total_slots + 1)
+        if prev_brand_rank is not None or brand_rank_now is not None:
+            rank_delta = eff_rank(prev_brand_rank) - eff_rank(brand_rank_now)
+        else:
+            rank_delta = 0
+
+        # sov_drop_pct: how many SoV points the brand LOST since the last seal (0 if it gained/held).
+        if prev_brand_sov is not None:
+            sov_drop_pct = round(max(0.0, prev_brand_sov - brand_sov_now), 2)
+        else:
+            sov_drop_pct = 0.0
+
+        # who overtook us: competitors now ranked ahead of the brand that were behind / absent before.
+        overtakers = []
+        brand_eff = eff_rank(brand_rank_now)
+        for label, p in players.items():
+            if label == brand:
+                continue
+            comp_rank = p.get('best_rank')
+            if comp_rank is not None and comp_rank < brand_eff:
+                prev_comp = prev_players.get(label) if isinstance(prev_players.get(label), dict) else {}
+                prev_comp_rank = to_int(prev_comp.get('best_rank')) if prev_comp else None
+                was_behind = (prev_comp_rank is None) or (
+                    isinstance(prev_brand_rank, int) and prev_comp_rank > prev_brand_rank
+                )
+                if was_behind:
+                    overtakers.append({'label': label, 'rank': comp_rank, 'prev_rank': prev_comp_rank})
+
+        brand_lost = (rank_delta < 0) or (sov_drop_pct > 0) or bool(overtakers)
+
+        result = {
+            'keyword': item.get('keyword'),
+            'keyword_slug': item.get('keyword_slug'),
+            'brand': brand,
+            'total_results': total_slots,
+            'players': players,
+            'brand_rank_now': brand_rank_now,
+            'brand_rank_prev': prev_brand_rank,
+            'brand_sov_now': brand_sov_now,
+            'brand_sov_prev': prev_brand_sov,
+            'rank_delta': rank_delta,
+            'sov_drop_pct': sov_drop_pct,
+            'overtakers': overtakers,
+            'overtaker_count': len(overtakers),
+            'brand_lost': brand_lost,
+            'first_seal': first_seal,
+            # before/after captured for the sealed snapshot.
+            'before_state': {'players': prev_players, 'sealed': bool(prev)},
+            'after_state': {'players': players},
+        }
+
+  # 3g) CLASSIFY the keyword's competitive move. The cheap model only LABELS; the rank / SoV /
+  #     rank_delta decision was ALREADY made deterministically in code. steady (held) /
+  #     improving (gained rank or SoV) / overtaken (a competitor passed us or we lost position).
+  - id: classify_move
+    type: classify
+    classify_config:
+      model: haiku
+      input: "Classify this keyword's competitive move using ONLY the deterministic numbers. overtaken = rank_delta < 0 OR sov_drop_pct > 0 OR overtaker_count > 0; improving = rank_delta > 0 AND no overtakers; steady = none of those. rank_delta={steps.compute_rank_sov.output.rank_delta}, sov_drop_pct={steps.compute_rank_sov.output.sov_drop_pct}, overtaker_count={steps.compute_rank_sov.output.overtaker_count}, brand_lost={steps.compute_rank_sov.output.brand_lost}, first_seal={steps.compute_rank_sov.output.first_seal}."
+      categories:
+        - steady
+        - improving
+        - overtaken
+      branches:
+        steady: [record_keyword_status]
+        improving: [record_keyword_status]
+        overtaken: [move_branch]
+
+  # 3h) CONDITION - route adverse moves (brand lost rank / SoV, or got overtaken) into the
+  #     materiality gate; steady / improving keywords record directly. Deterministic branch off
+  #     the in-code flags (not the model label), so routing survives a missing provider. No model.
+  - id: move_branch
+    type: condition
+    condition_config:
+      expression: "{steps.compute_rank_sov.output.brand_lost} and not {steps.compute_rank_sov.output.first_seal}"
+      then: [materiality_gate, record_keyword_status]
+      else: [record_keyword_status]
+
+  # 3i) MATERIALITY GATE (swappable + model-independent). TWO strategies, BOTH must pass:
+  #     (1) llm_eval ranking-loss judge - "real loss worth acting on, or normal SERP churn?",
+  #         model pinned to a SWAPPABLE provider (any can back it);
+  #     (2) llm_eval acting as a DETERMINISTIC threshold - fed ONLY the pre-computed rank_delta /
+  #         sov_drop_pct / thresholds and told to answer purely from the arithmetic, so a keyword
+  #         still passes / fails the gate on the non-LLM math alone.
+  - id: materiality_gate
+    type: gate
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are a competitive-intelligence reviewer. For a watched keyword, your brand
+              deterministically lost rank or share-of-voice versus the last sealed snapshot, and
+              a code step already computed the magnitude. Decide whether this is a REAL,
+              actionable positioning loss (a competitor genuinely overtook you and is holding) or
+              normal day-to-day SERP / answer-engine churn not worth alerting on. Answer exactly
+              'approved' if it is a material ranking loss worth acting on, otherwise answer
+              'rejected' and name the reason. Judge materiality only; the numeric magnitude is
+              checked separately.
+            input: "Keyword '{steps.compute_rank_sov.output.keyword}': brand_rank_now={steps.compute_rank_sov.output.brand_rank_now} brand_rank_prev={steps.compute_rank_sov.output.brand_rank_prev} rank_delta={steps.compute_rank_sov.output.rank_delta} sov_drop_pct={steps.compute_rank_sov.output.sov_drop_pct} overtakers={steps.compute_rank_sov.output.overtakers}"
+            model: "{input.gate_model}"
+        - type: llm_eval
+          config:
+            prompt: >-
+              Deterministic threshold check. Answer exactly 'approved' if rank_delta <=
+              -{input.rank_delta_threshold} OR sov_drop_pct >= {input.sov_drop_threshold_pct};
+              otherwise answer 'rejected'. Use ONLY the supplied numbers - do not infer or reason
+              beyond the arithmetic comparison.
+            input: "rank_delta={steps.compute_rank_sov.output.rank_delta} rank_delta_threshold={input.rank_delta_threshold} sov_drop_pct={steps.compute_rank_sov.output.sov_drop_pct} sov_drop_threshold_pct={input.sov_drop_threshold_pct}"
+            model: haiku
+
+  # 3j) DETERMINISTIC per-keyword status record. Folds the rank/SoV result, the classify label
+  #     and (when the gate ran) the materiality outcome into one canonical row. A keyword is a
+  #     CONFIRMED overtake only when the brand lost AND the materiality gate passed. No model.
+  - id: record_keyword_status
+    type: code
+    code_config:
+      language: python
+      code: |
+        ev = _steps.get('compute_rank_sov') or {}
+        label = str(_steps.get('classify_move') or '').strip().lower()
+        gate = _steps.get('materiality_gate')
+
+        gate_ran = gate is not None
+        if isinstance(gate, dict):
+            gate_passed = bool(gate.get('passed', gate.get('approved', gate.get('result', False))))
+        else:
+            gate_passed = bool(gate) if gate is not None else False
+
+        brand_lost = bool(ev.get('brand_lost'))
+        rank_delta = ev.get('rank_delta')
+        sov_drop_pct = ev.get('sov_drop_pct')
+
+        if brand_lost and gate_ran and gate_passed:
+            status = 'overtaken'
+        elif brand_lost and gate_ran and not gate_passed:
+            status = 'churn'            # move detected but gate ruled it immaterial
+        elif (rank_delta or 0) > 0:
+            status = 'improving'
+        else:
+            status = 'steady'
+
+        confirmed_overtake = status == 'overtaken'
+
+        result = {
+            'keyword': ev.get('keyword'),
+            'keyword_slug': ev.get('keyword_slug'),
+            'brand': ev.get('brand'),
+            'status': status,
+            'classify_label': label,
+            'brand_rank_now': ev.get('brand_rank_now'),
+            'brand_rank_prev': ev.get('brand_rank_prev'),
+            'brand_sov_now': ev.get('brand_sov_now'),
+            'brand_sov_prev': ev.get('brand_sov_prev'),
+            'rank_delta': rank_delta,
+            'sov_drop_pct': sov_drop_pct,
+            'overtakers': ev.get('overtakers'),
+            'overtaker_count': ev.get('overtaker_count'),
+            'gate_ran': gate_ran,
+            'gate_passed': gate_passed if gate_ran else None,
+            'confirmed_overtake': confirmed_overtake,
+            'players': ev.get('players'),
+            'first_seal': ev.get('first_seal'),
+        }
+
+  # 4) DETERMINISTIC aggregation of every per-keyword status from the loop. Splits steady /
+  #    improving / confirmed-overtake / churn, builds the confirmed-overtake list with overtakers,
+  #    and seals the new per-keyword snapshot payload. fail_count drives the alert path. No model.
+  - id: aggregate_sweep
+    type: code
+    depends_on: [per_keyword_loop]
+    code_config:
+      language: python
+      code: |
+        from datetime import datetime, timezone
+
+        loop_out = _steps.get('per_keyword_loop') or {}
+        plan = _steps.get('build_sweep_plan') or {}
+
+        items = loop_out if isinstance(loop_out, list) else (
+            loop_out.get('results') or loop_out.get('items') or loop_out.get('iterations') or []
+        )
+
+        keywords = []
+        for it in items:
+            row = it
+            if isinstance(it, dict) and 'keyword' not in it:
+                row = it.get('record_keyword_status') or it.get('output') or it
+            if isinstance(row, dict) and row.get('keyword'):
+                keywords.append(row)
+
+        total = len(keywords)
+        confirmed = [k for k in keywords if k.get('confirmed_overtake')]
+        churn = [k for k in keywords if k.get('status') == 'churn']
+        improving = [k for k in keywords if k.get('status') == 'improving']
+        steady = [k for k in keywords if k.get('status') == 'steady']
+
+        # aggregate brand SoV across the watched set (mean of per-keyword SoV).
+        sov_vals = [float(k.get('brand_sov_now') or 0.0) for k in keywords]
+        avg_brand_sov = round(sum(sov_vals) / len(sov_vals), 2) if sov_vals else 0.0
+
+        overtake_events = [
+            {
+                'keyword': k.get('keyword'),
+                'brand_rank_now': k.get('brand_rank_now'),
+                'brand_rank_prev': k.get('brand_rank_prev'),
+                'rank_delta': k.get('rank_delta'),
+                'sov_drop_pct': k.get('sov_drop_pct'),
+                'overtakers': k.get('overtakers'),
+            }
+            for k in confirmed
+        ]
+
+        sealed_at = datetime.now(timezone.utc).isoformat()
+        # new snapshot payload to seal back to the store, one row per keyword.
+        snapshot_rows = [
+            {
+                'keyword': k.get('keyword_slug'),
+                'sealed_at': sealed_at,
+                'players': k.get('players'),
+                'brand_sov': k.get('brand_sov_now'),
+                'brand_rank': k.get('brand_rank_now'),
+            }
+            for k in keywords
+        ]
+
+        result = {
+            'brand': plan.get('brand'),
+            'sealed_at': sealed_at,
+            'total_keywords': total,
+            'steady_count': len(steady),
+            'improving_count': len(improving),
+            'churn_count': len(churn),
+            'confirmed_overtake_count': len(confirmed),
+            'avg_brand_sov': avg_brand_sov,
+            'overtake_events': overtake_events,
+            'snapshot_rows': snapshot_rows,
+            # fail_count > 0 -> confirmed material overtakes to alert + scoreboard.
+            'fail_count': len(confirmed),
+        }
+
+  # 5) CONDITION - only alert Slack + append the Airtable scoreboard when there is at least one
+  #    CONFIRMED material overtake. A clean / improving sweep just re-seals the snapshot quietly.
+  #    Deterministic branch off the aggregate fail_count. No model.
+  - id: route_sweep
+    type: condition
+    depends_on: [aggregate_sweep]
+    condition_config:
+      expression: "{steps.aggregate_sweep.output.fail_count} > 0"
+      then: [seal_snapshot, append_scoreboard, notify_overtaken]
+      else: [seal_snapshot, notify_clean]
+
+  # 5a) SEAL the new per-keyword snapshot back to the store so the NEXT sweep measures its
+  #     rank_delta against this sealed truth. Connector-agnostic REST PUT. Runs every sweep.
+  - id: seal_snapshot
+    type: http
+    http_config:
+      url: "{input.snapshot_store_url}/snapshots"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Prefer: "resolution=merge-duplicates"
+      auth: "bearer:{env.SNAPSHOT_STORE_TOKEN}"
+      body: "{steps.aggregate_sweep.output.snapshot_rows}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 5b) APPEND the confirmed overtakes to the Airtable competitive share-of-voice scoreboard so
+  #     positioning shifts accrue in a durable record the team can review. Connector: airtable.
+  - id: append_scoreboard
+    type: http
+    http_config:
+      url: "https://api.airtable.com/v0/{input.airtable_base_id}/{input.airtable_table}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.AIRTABLE_API_KEY}"
+      body: |
+        {
+          "typecast": true,
+          "records": [
+            {
+              "fields": {
+                "Brand": "{steps.aggregate_sweep.output.brand}",
+                "Sealed At": "{steps.aggregate_sweep.output.sealed_at}",
+                "Confirmed Overtakes": "{steps.aggregate_sweep.output.confirmed_overtake_count}",
+                "Avg Brand SoV": "{steps.aggregate_sweep.output.avg_brand_sov}",
+                "Events": "{steps.aggregate_sweep.output.overtake_events}"
+              }
+            }
+          ]
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 5c) NOTIFY (overtaken) - alert the competitive-intel channel with the confirmed overtakes,
+  #     who passed you, and the SoV / rank moves so positioning shifts surface in real time.
+  - id: notify_overtaken
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        :chart_with_downwards_trend: SHARE-OF-VOICE ALERT - {steps.aggregate_sweep.output.confirmed_overtake_count} keyword(s) where {steps.aggregate_sweep.output.brand} was materially overtaken.
+        Avg brand SoV this sweep: {steps.aggregate_sweep.output.avg_brand_sov}%
+        Improving: {steps.aggregate_sweep.output.improving_count} | Steady: {steps.aggregate_sweep.output.steady_count} | Churn filtered: {steps.aggregate_sweep.output.churn_count}
+        Overtake events: {steps.aggregate_sweep.output.overtake_events}
+        Snapshot sealed at {steps.aggregate_sweep.output.sealed_at}
+
+  # 5d) NOTIFY (clean) - quiet "no material overtakes" digest on a clean / improving sweep.
+  - id: notify_clean
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        :white_check_mark: SoV sweep clean for {steps.aggregate_sweep.output.brand}: 0 confirmed overtakes across {steps.aggregate_sweep.output.total_keywords} keyword(s).
+        {steps.aggregate_sweep.output.improving_count} improving, {steps.aggregate_sweep.output.steady_count} steady, {steps.aggregate_sweep.output.churn_count} immaterial blips filtered. Avg brand SoV {steps.aggregate_sweep.output.avg_brand_sov}%. Snapshot re-sealed.
+on_complete:
+  storage_path: "topic-share-of-voice-rank-monitor/{run_id}/result.json"

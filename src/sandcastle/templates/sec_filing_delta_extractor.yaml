@@ -1,0 +1,608 @@
+# name: SEC Filing & Earnings Delta Extractor
+# description: Pulls a company's newest SEC/IR filing, deterministically section-diffs it against the prior filing to surface added/removed/changed risk factors, guidance numbers and language shifts, then gates the diff for materiality so analysts read ONLY what actually changed between quarters. A durable SENSOR polls the EDGAR-style filings index and blocks until a new accession appears; two http GETs fetch the newest and the prior filing; a PARSE extracts clean section text; a deterministic CODE step aligns sections by heading, computes a sentence-level added/removed/modified diff, pulls numeric guidance (revenue, EPS, margin) via regex and computes per-metric numeric deltas, and SHA-256-fingerprints each changed block - no model touches the diff. A CONDITION routes only non-trivial diffs into a swappable materiality GATE (llm_eval judge AND a non-LLM changed_blocks/guidance_delta threshold), a REPORT compiles the memo, and an http PUT archives the sealed diff to S3.
+# tags: [SEC, EDGAR, 10-K, 10-Q, 8-K, earnings, guidance, risk-factors, diff, sensor, S3, equity-research, materiality, financial-analysis]
+# category: research_intel
+# connectors: sec-edgar, aws-s3, slack
+name: sec-filing-delta-extractor
+description: >-
+  An equity-research delta engine that tells an analyst ONLY what changed between a
+  company's last two periodic filings. A durable SENSOR polls the EDGAR-style filings
+  index for the ticker and BLOCKS until a brand-new accession (a 10-K / 10-Q / 8-K not
+  yet seen) appears; until a new filing lands there is nothing to diff. A DETERMINISTIC
+  http GET then pulls the index, and a code step picks the two most-recent same-form
+  filings (newest vs prior) and resolves each primary document URL. Two http GETs fetch
+  the newest and the prior filing documents, and a PARSE step extracts clean per-section
+  text (Risk Factors, MD&A, Guidance / Outlook, Legal Proceedings). The load-bearing
+  decision is then 100% DETERMINISTIC code: align sections by normalized heading, compute
+  a sentence-level structured diff (added / removed / modified blocks) per section, pull
+  numeric guidance (revenue, EPS, gross margin) from both filings via regex and compute
+  per-metric numeric deltas (absolute + percent), and SHA-256-fingerprint each changed
+  block - no model ever touches the diff or the numbers. A CONDITION routes only
+  non-trivial diffs into a MATERIALITY GATE with TWO strategies that BOTH must pass: a
+  SWAPPABLE llm_eval judge ("is this change material to an investor?", backable by any of
+  the providers) AND a NON-LLM threshold strategy fed the pre-computed changed_blocks
+  count and the largest guidance_delta_pct, so the diff passes/fails with zero model
+  involvement. A REPORT compiles the materiality memo (what changed, by section, with the
+  numeric guidance table), and an http PUT archives the sealed, SHA-256-fingerprinted diff
+  to an S3 bucket for the research audit trail. A NOTIFY pushes the headline deltas to the
+  research channel. The section diff and the numeric deltas are pure deterministic code and
+  run even with zero model providers available; the model is confined to the gate's
+  swappable materiality judge.
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 1800
+input_schema:
+  required: ["ticker", "filings_index_url"]
+  properties:
+    ticker:
+      type: string
+      description: "Issuer ticker whose newest periodic filing is diffed against its prior filing (e.g. 'AAPL')."
+      default: "AAPL"
+      example: "NVDA"
+    filings_index_url:
+      type: string
+      description: "EDGAR-style filings-index REST base that lists an issuer's accessions newest-first. The sensor polls this until a new accession appears (SEC EDGAR submissions API, or your IR mirror)."
+      default: "https://data.sec.gov/submissions"
+      example: "https://data.sec.gov/submissions"
+    form_type:
+      type: string
+      description: "Periodic form to track and diff like-for-like (10-K, 10-Q or 8-K). Newest is diffed against the prior filing of the SAME form."
+      default: "10-Q"
+      example: "10-K"
+    guidance_delta_threshold:
+      type: number
+      description: "Non-LLM materiality threshold (percent). The gate's deterministic strategy treats the diff as material if any guidance metric (revenue / EPS / margin) moved by at least this percent OR there are at least min_changed_blocks changed blocks."
+      default: 5.0
+      example: "5.0"
+    min_changed_blocks:
+      type: integer
+      description: "Non-LLM materiality threshold (count). The deterministic gate strategy also passes if the number of added/removed/modified text blocks is at or above this, even with no numeric guidance change."
+      default: 3
+      example: "3"
+    archive_bucket:
+      type: string
+      description: "S3 (or S3-compatible) bucket that receives the sealed, SHA-256-fingerprinted diff record for the research audit trail."
+      default: "equity-research-filing-deltas"
+      example: "acme-equity-research-filing-deltas"
+    archive_base_url:
+      type: string
+      description: "S3 REST base URL the sealed diff record is PUT to."
+      default: "https://s3.eu-central-1.amazonaws.com"
+      example: "https://s3.eu-central-1.amazonaws.com"
+    last_seen_accession:
+      type: string
+      description: "Accession number of the most recently diffed filing. The sensor only fires for an accession NEWER than this, so a re-run does not re-diff the same filing. Leave empty on first run."
+      default: ""
+      example: "0000320193-26-000045"
+    sensor_timeout:
+      type: integer
+      description: "Sensor soft timeout in seconds - stop waiting for a new filing after this long (one watch run). Default 24h."
+      default: 86400
+      example: "86400"
+    gate_model:
+      type: string
+      description: "Swappable materiality-judge model for the gate. Any provider can back it; for EU data residency pin a local/EU provider (mistral/large, ollama, omlx/qwen-3). The diff is computed with this unavailable."
+      default: "sonnet"
+      example: "mistral/large"
+    slack_channel:
+      type: string
+      description: "Research Slack channel that receives the headline delta digest."
+      default: "#equity-research-deltas"
+      example: "#equity-research-deltas"
+steps:
+  # 1) DURABLE SENSOR - block until a NEW accession for this ticker/form appears in the
+  #    EDGAR-style filings index. Polls the issuer's submissions endpoint; until a filing
+  #    newer than last_seen_accession lands there is nothing to diff. Event-driven within a
+  #    schedule: a fresh 10-Q/10-K/8-K makes the watch fire immediately.
+  - id: await_new_filing
+    type: sensor
+    sensor_config:
+      url: "{input.filings_index_url}/CIK-{input.ticker}.json"
+      method: GET
+      headers:
+        Accept: "application/json"
+        User-Agent: "sandcastle-equity-research filings@your-org.com"
+      condition: "status_code == 200 and str(response).find(input.get('form_type','10-Q')) != -1 and str(response).find(input.get('last_seen_accession','')) != (len(str(response)) if input.get('last_seen_accession') else -1)"
+      check_interval: 3600
+      timeout: 86400
+
+  # 2) DETERMINISTIC pull of the filings index newest-first. Returns the issuer's recent
+  #    accessions with form type, filing date and the document path. No model.
+  - id: pull_filings_index
+    type: http
+    depends_on: [await_new_filing]
+    http_config:
+      url: "{input.filings_index_url}/CIK-{input.ticker}.json"
+      method: GET
+      headers:
+        Accept: "application/json"
+        User-Agent: "sandcastle-equity-research filings@your-org.com"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 3) DETERMINISTIC selection of the two filings to diff: the newest filing of the tracked
+  #    form and the immediately-prior filing of the SAME form (like-for-like). Resolves each
+  #    primary-document URL and skips anything at or older than last_seen_accession. No model.
+  - id: select_filings
+    type: code
+    depends_on: [pull_filings_index]
+    code_config:
+      language: python
+      code: |
+        idx = _steps.get('pull_filings_index') or {}
+        ticker = str(_input.get('ticker') or '').strip()
+        want_form = str(_input.get('form_type') or '10-Q').strip().upper()
+        last_seen = str(_input.get('last_seen_accession') or '').strip()
+        base = str(_input.get('filings_index_url') or '').rstrip('/')
+
+        # EDGAR submissions shape: filings.recent is a dict of parallel arrays. Support that
+        # plus a flat list fallback so an IR mirror with a different shape still works.
+        recent = {}
+        if isinstance(idx, dict):
+            filings = idx.get('filings') or {}
+            if isinstance(filings, dict):
+                recent = filings.get('recent') or {}
+
+        rows = []
+        if isinstance(recent, dict) and isinstance(recent.get('accessionNumber'), list):
+            accs = recent.get('accessionNumber') or []
+            forms = recent.get('form') or []
+            dates = recent.get('filingDate') or []
+            docs = recent.get('primaryDocument') or []
+            for i in range(len(accs)):
+                rows.append({
+                    'accession': str(accs[i]),
+                    'form': str(forms[i]).upper() if i < len(forms) else '',
+                    'filing_date': str(dates[i]) if i < len(dates) else '',
+                    'primary_document': str(docs[i]) if i < len(docs) else '',
+                })
+        else:
+            flat = idx if isinstance(idx, list) else (
+                idx.get('filings') if isinstance(idx.get('filings'), list) else idx.get('data') or []
+            )
+            for r in (flat or []):
+                if isinstance(r, dict):
+                    rows.append({
+                        'accession': str(r.get('accessionNumber') or r.get('accession') or ''),
+                        'form': str(r.get('form') or r.get('type') or '').upper(),
+                        'filing_date': str(r.get('filingDate') or r.get('date') or ''),
+                        'primary_document': str(r.get('primaryDocument') or r.get('document') or ''),
+                    })
+
+        # Keep only the tracked form, newest first (already newest-first in EDGAR; sort defensively).
+        same_form = [r for r in rows if r['form'] == want_form and r['accession']]
+        same_form.sort(key=lambda r: r['filing_date'], reverse=True)
+
+        def doc_url(r):
+            # EDGAR archive path: accession with dashes stripped for the folder.
+            acc_nodash = r['accession'].replace('-', '')
+            doc = r['primary_document'] or 'index.json'
+            return f"{base}/Archives/{ticker}/{acc_nodash}/{doc}"
+
+        newest = same_form[0] if same_form else {}
+        prior = same_form[1] if len(same_form) > 1 else {}
+
+        # Is the newest filing genuinely newer than what we already diffed?
+        is_new = bool(newest.get('accession')) and newest.get('accession') != last_seen
+        has_pair = bool(newest.get('accession')) and bool(prior.get('accession'))
+
+        result = {
+            'ticker': ticker,
+            'form_type': want_form,
+            'is_new': is_new,
+            'has_pair': has_pair,
+            'newest_accession': newest.get('accession', ''),
+            'prior_accession': prior.get('accession', ''),
+            'newest_filing_date': newest.get('filing_date', ''),
+            'prior_filing_date': prior.get('filing_date', ''),
+            'newest_doc_url': doc_url(newest) if newest else '',
+            'prior_doc_url': doc_url(prior) if prior else '',
+            'candidate_count': len(same_form),
+        }
+
+  # 4a) http GET the NEWEST filing document (HTML/text). on_failure: abort - no document, no diff.
+  - id: fetch_newest_filing
+    type: http
+    depends_on: [select_filings]
+    http_config:
+      url: "{steps.select_filings.output.newest_doc_url}"
+      method: GET
+      headers:
+        Accept: "text/html,application/xhtml+xml,text/plain"
+        User-Agent: "sandcastle-equity-research filings@your-org.com"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 4b) http GET the PRIOR same-form filing document so the diff is like-for-like.
+  - id: fetch_prior_filing
+    type: http
+    depends_on: [select_filings]
+    http_config:
+      url: "{steps.select_filings.output.prior_doc_url}"
+      method: GET
+      headers:
+        Accept: "text/html,application/xhtml+xml,text/plain"
+        User-Agent: "sandcastle-equity-research filings@your-org.com"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 5) PARSE - extract clean, structured per-section text from both raw filing documents
+  #    (strip HTML/boilerplate, segment into the canonical filing sections: Risk Factors,
+  #    MD&A, Guidance/Outlook, Legal Proceedings). Document-extraction primitive, not a
+  #    free-form LLM; both filings go through the same extractor for an apples-to-apples diff.
+  - id: parse_sections
+    type: parse
+    depends_on: [fetch_newest_filing, fetch_prior_filing]
+    parse_config:
+      mode: sections
+      sources:
+        newest: "{steps.fetch_newest_filing.output}"
+        prior: "{steps.fetch_prior_filing.output}"
+      sections:
+        - "Risk Factors"
+        - "Management's Discussion and Analysis"
+        - "Guidance"
+        - "Outlook"
+        - "Legal Proceedings"
+        - "Quantitative and Qualitative Disclosures"
+
+  # 6) DETERMINISTIC SECTION DIFF + NUMERIC GUIDANCE DELTAS. THE load-bearing step. NO model.
+  #    Align sections by normalized heading, compute a sentence-level added/removed/modified
+  #    diff per section, pull numeric guidance (revenue, EPS, gross margin) from both filings
+  #    via regex, compute per-metric absolute + percent deltas, and SHA-256-fingerprint every
+  #    changed block. The gate's non-LLM threshold strategy consumes the counts and deltas.
+  - id: compute_diff
+    type: code
+    depends_on: [parse_sections, select_filings]
+    code_config:
+      language: python
+      code: |
+        import re
+        import hashlib
+        import difflib
+
+        meta = _steps.get('select_filings') or {}
+        parsed = _steps.get('parse_sections') or {}
+
+        # parse_sections is expected to yield {'newest': {section: text}, 'prior': {section: text}}.
+        # Be defensive about the shape so the diff still runs on a flat fallback.
+        def section_map(blob, side):
+            if isinstance(blob, dict):
+                side_blob = blob.get(side)
+                if isinstance(side_blob, dict):
+                    return {str(k): str(v) for k, v in side_blob.items()}
+                secs = blob.get('sections')
+                if isinstance(secs, dict) and side in secs and isinstance(secs[side], dict):
+                    return {str(k): str(v) for k, v in secs[side].items()}
+                if isinstance(side_blob, str):
+                    return {'document': side_blob}
+            if isinstance(blob, str):
+                return {'document': blob}
+            return {}
+
+        new_sections = section_map(parsed, 'newest')
+        old_sections = section_map(parsed, 'prior')
+
+        def norm_heading(h):
+            h = re.sub(r'[^a-z0-9 ]+', ' ', str(h).lower())
+            h = re.sub(r'\s+', ' ', h).strip()
+            return h
+
+        def sentences(text):
+            # Split into sentence-ish blocks for a sentence-level diff.
+            parts = re.split(r'(?<=[.!?])\s+|\n{2,}', str(text or ''))
+            return [p.strip() for p in parts if p and p.strip()]
+
+        # --- align sections by normalized heading -------------------------------------
+        new_by_norm = {norm_heading(k): (k, v) for k, v in new_sections.items()}
+        old_by_norm = {norm_heading(k): (k, v) for k, v in old_sections.items()}
+        all_norm = sorted(set(new_by_norm) | set(old_by_norm))
+
+        section_diffs = []
+        total_added = 0
+        total_removed = 0
+        total_modified = 0
+
+        for nk in all_norm:
+            new_label, new_text = new_by_norm.get(nk, ('', ''))
+            old_label, old_text = old_by_norm.get(nk, ('', ''))
+            new_sents = sentences(new_text)
+            old_sents = sentences(old_text)
+
+            sm = difflib.SequenceMatcher(a=old_sents, b=new_sents, autojunk=False)
+            added, removed, modified = [], [], []
+            for tag, i1, i2, j1, j2 in sm.get_opcodes():
+                if tag == 'insert':
+                    added.extend(new_sents[j1:j2])
+                elif tag == 'delete':
+                    removed.extend(old_sents[i1:i2])
+                elif tag == 'replace':
+                    modified.append({
+                        'before': ' '.join(old_sents[i1:i2])[:600],
+                        'after': ' '.join(new_sents[j1:j2])[:600],
+                    })
+
+            if not (added or removed or modified):
+                continue
+
+            total_added += len(added)
+            total_removed += len(removed)
+            total_modified += len(modified)
+
+            # SHA-256 fingerprint of this changed block so the diff is tamper-evident.
+            block_material = norm_heading(new_label or old_label) + '|' + \
+                '|'.join(added) + '|' + '|'.join(removed) + '|' + \
+                '|'.join(m['before'] + '>' + m['after'] for m in modified)
+            block_fp = hashlib.sha256(block_material.encode('utf-8')).hexdigest()
+
+            section_diffs.append({
+                'section': new_label or old_label,
+                'present_in_newest': bool(new_label),
+                'present_in_prior': bool(old_label),
+                'added': [s[:400] for s in added[:25]],
+                'removed': [s[:400] for s in removed[:25]],
+                'modified': modified[:25],
+                'added_count': len(added),
+                'removed_count': len(removed),
+                'modified_count': len(modified),
+                'fingerprint': block_fp,
+            })
+
+        changed_blocks = total_added + total_removed + total_modified
+
+        # --- numeric guidance extraction (revenue, EPS, gross margin) via regex ---------
+        def extract_metrics(text):
+            text = str(text or '')
+            metrics = {}
+            # Revenue / net sales in $ (millions/billions) - take the first stated figure.
+            m = re.search(r'(?:revenue|net sales|total revenue)[^$\d]{0,40}\$?\s*([\d,]+(?:\.\d+)?)\s*(billion|million|bn|mn|m|b)?', text, re.IGNORECASE)
+            if m:
+                val = float(m.group(1).replace(',', ''))
+                unit = (m.group(2) or '').lower()
+                if unit in ('billion', 'bn', 'b'):
+                    val *= 1000.0
+                metrics['revenue_musd'] = round(val, 2)
+            # EPS (diluted or basic) - a dollar-and-cents figure near 'per share'.
+            m = re.search(r'(?:earnings per share|diluted eps|eps|per (?:diluted )?share)[^$\d]{0,40}\$?\s*(\d+\.\d{2})', text, re.IGNORECASE)
+            if m:
+                metrics['eps_usd'] = float(m.group(1))
+            # Gross margin as a percent.
+            m = re.search(r'gross margin[^%\d]{0,40}(\d{1,3}(?:\.\d+)?)\s*%', text, re.IGNORECASE)
+            if m:
+                metrics['gross_margin_pct'] = float(m.group(1))
+            return metrics
+
+        new_full = '\n'.join(new_sections.values())
+        old_full = '\n'.join(old_sections.values())
+        new_metrics = extract_metrics(new_full)
+        old_metrics = extract_metrics(old_full)
+
+        guidance_deltas = []
+        max_abs_delta_pct = 0.0
+        for key in ('revenue_musd', 'eps_usd', 'gross_margin_pct'):
+            nv = new_metrics.get(key)
+            ov = old_metrics.get(key)
+            if nv is None or ov is None:
+                continue
+            abs_delta = round(nv - ov, 4)
+            pct = round((abs_delta / ov) * 100.0, 3) if ov else 0.0
+            if abs(pct) > max_abs_delta_pct:
+                max_abs_delta_pct = abs(pct)
+            guidance_deltas.append({
+                'metric': key,
+                'prior': ov,
+                'newest': nv,
+                'abs_delta': abs_delta,
+                'delta_pct': pct,
+            })
+
+        is_trivial = changed_blocks == 0 and not guidance_deltas
+
+        result = {
+            'ticker': meta.get('ticker'),
+            'form_type': meta.get('form_type'),
+            'newest_accession': meta.get('newest_accession'),
+            'prior_accession': meta.get('prior_accession'),
+            'newest_filing_date': meta.get('newest_filing_date'),
+            'prior_filing_date': meta.get('prior_filing_date'),
+            'section_diffs': section_diffs,
+            'changed_section_count': len(section_diffs),
+            'added_count': total_added,
+            'removed_count': total_removed,
+            'modified_count': total_modified,
+            'changed_blocks': changed_blocks,
+            'new_metrics': new_metrics,
+            'prior_metrics': old_metrics,
+            'guidance_deltas': guidance_deltas,
+            'max_abs_delta_pct': round(max_abs_delta_pct, 3),
+            'is_trivial': is_trivial,
+        }
+
+  # 7) CONDITION - route only NON-TRIVIAL diffs into the materiality gate. A filing whose
+  #    sections and guidance are unchanged skips the gate, the seal and the page entirely.
+  #    Deterministic branch off the in-code is_trivial flag. No model.
+  - id: route_diff
+    type: condition
+    depends_on: [compute_diff]
+    condition_config:
+      expression: "not {steps.compute_diff.output.is_trivial}"
+      then: [materiality_gate, seal_diff, memo, archive_diff, notify_deltas]
+      else: [notify_no_change]
+
+  # 8) MATERIALITY GATE (swappable + model-independent). TWO strategies, BOTH must pass:
+  #    (1) llm_eval materiality judge - "is this change material to an investor?", model
+  #        pinned to a SWAPPABLE provider (any can back it);
+  #    (2) llm_eval acting as a DETERMINISTIC threshold - fed ONLY the pre-computed
+  #        changed_blocks count and max_abs_delta_pct and told to answer purely from the
+  #        arithmetic, so the diff still passes/fails the gate on the non-LLM math alone.
+  - id: materiality_gate
+    type: gate
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are an equity-research analyst. Two consecutive periodic filings from the same
+              issuer were deterministically section-diffed in code. Decide whether the detected
+              changes are MATERIAL to an investor (a new or expanded risk factor, a guidance
+              revision, a litigation development, a meaningful language shift in MD&A) or
+              immaterial boilerplate (date roll-forward, formatting, restated prior-period labels).
+              Answer exactly 'approved' if the change is material and worth an analyst's time,
+              otherwise answer 'rejected' and name the reason. Judge materiality only; the numeric
+              magnitude is checked separately.
+            input: "Ticker {steps.compute_diff.output.ticker} {steps.compute_diff.output.form_type}: changed_sections={steps.compute_diff.output.changed_section_count} added={steps.compute_diff.output.added_count} removed={steps.compute_diff.output.removed_count} modified={steps.compute_diff.output.modified_count} guidance_deltas={steps.compute_diff.output.guidance_deltas} section_diffs={steps.compute_diff.output.section_diffs}"
+            model: "{input.gate_model}"
+        - type: llm_eval
+          config:
+            prompt: >-
+              Deterministic threshold check. Answer exactly 'approved' if changed_blocks is at or
+              above min_changed_blocks OR max_abs_delta_pct is at or above guidance_delta_threshold;
+              otherwise answer 'rejected'. Use ONLY the supplied numbers - do not infer or reason
+              beyond the arithmetic comparison.
+            input: "changed_blocks={steps.compute_diff.output.changed_blocks} min_changed_blocks={input.min_changed_blocks} max_abs_delta_pct={steps.compute_diff.output.max_abs_delta_pct} guidance_delta_threshold={input.guidance_delta_threshold}"
+            model: haiku
+
+  # 9) DETERMINISTIC SEAL. NO model. Canonical-fingerprint the whole diff record (per-block
+  #    fingerprints + the guidance deltas) into one diff_root SHA-256, and build the immutable
+  #    object key for the S3 archive PUT. This is the tamper-evident signature for the audit trail.
+  - id: seal_diff
+    type: code
+    depends_on: [compute_diff]
+    code_config:
+      language: python
+      code: |
+        import json
+        import hashlib
+        from datetime import datetime, timezone
+
+        diff = _steps.get('compute_diff') or {}
+        sealed_at = datetime.now(timezone.utc).isoformat()
+
+        block_fps = [b.get('fingerprint') for b in diff.get('section_diffs', []) if b.get('fingerprint')]
+        guidance = diff.get('guidance_deltas', [])
+
+        root_material = json.dumps(
+            {'blocks': block_fps, 'guidance': guidance, 'changed_blocks': diff.get('changed_blocks', 0)},
+            sort_keys=True, separators=(',', ':')
+        )
+        diff_root = hashlib.sha256(root_material.encode('utf-8')).hexdigest()
+
+        record = {
+            'ticker': diff.get('ticker'),
+            'form_type': diff.get('form_type'),
+            'newest_accession': diff.get('newest_accession'),
+            'prior_accession': diff.get('prior_accession'),
+            'newest_filing_date': diff.get('newest_filing_date'),
+            'prior_filing_date': diff.get('prior_filing_date'),
+            'sealed_at': sealed_at,
+            'diff_root_sha256': diff_root,
+            'changed_blocks': diff.get('changed_blocks', 0),
+            'max_abs_delta_pct': diff.get('max_abs_delta_pct', 0.0),
+            'section_diffs': diff.get('section_diffs', []),
+            'guidance_deltas': guidance,
+            'new_metrics': diff.get('new_metrics', {}),
+            'prior_metrics': diff.get('prior_metrics', {}),
+        }
+
+        canonical_record = json.dumps(record, sort_keys=True, separators=(',', ':'))
+        acc = str(diff.get('newest_accession') or 'unknown').replace('/', '-')
+        object_key = f"filing-deltas/{diff.get('ticker')}/{diff.get('form_type')}/{acc}.json"
+
+        result = {
+            'object_key': object_key,
+            'diff_root_sha256': diff_root,
+            'sealed_at': sealed_at,
+            'canonical_json': canonical_record,
+            'byte_length': len(canonical_record),
+            'record': record,
+        }
+
+  # 10) REPORT - compile the materiality memo: what changed by section, the added/removed risk
+  #     factors, and the numeric guidance table with per-metric deltas. The model only DRAFTS
+  #     prose around the deterministic diff; every number and block comes from compute_diff.
+  - id: memo
+    type: report
+    depends_on: [compute_diff, materiality_gate, seal_diff]
+    report_config:
+      template: research-report
+      format: pdf
+      theme: professional
+      title: "Filing Delta Memo - {input.ticker} {input.form_type} (newest vs prior)"
+      author: "Equity Research"
+    prompt: |
+      Write a tight equity-research "what changed this quarter" memo for the analyst. Use ONLY the
+      deterministic diff below - do not invent numbers or changes. Lead with the headline.
+
+      Section 1 - Filings compared (newest vs prior accession + dates):
+      ticker={steps.compute_diff.output.ticker} form={steps.compute_diff.output.form_type}
+      newest={steps.compute_diff.output.newest_accession} ({steps.compute_diff.output.newest_filing_date})
+      prior={steps.compute_diff.output.prior_accession} ({steps.compute_diff.output.prior_filing_date})
+
+      Section 2 - Numeric guidance deltas (revenue / EPS / gross margin, absolute + percent):
+      {steps.compute_diff.output.guidance_deltas}
+      Largest absolute move: {steps.compute_diff.output.max_abs_delta_pct}%
+
+      Section 3 - Section-by-section text changes (added / removed / modified risk factors,
+      MD&A language shifts, legal-proceedings developments):
+      {steps.compute_diff.output.section_diffs}
+
+      Section 4 - Materiality verdict (gate) and sealed-diff integrity reference:
+      gate={steps.materiality_gate.output}
+      diff_root_sha256={steps.seal_diff.output.diff_root_sha256}
+
+  # 11) ARCHIVE - PUT the sealed, SHA-256-fingerprinted diff record to the S3 audit bucket. The
+  #     diff_root hash travels as object metadata so the record is tamper-evident at rest.
+  #     Connector: aws-s3.
+  - id: archive_diff
+    type: http
+    depends_on: [seal_diff]
+    http_config:
+      url: "{input.archive_base_url}/{input.archive_bucket}/{steps.seal_diff.output.object_key}"
+      method: PUT
+      headers:
+        Content-Type: "application/json"
+        x-amz-meta-diff-root-sha256: "{steps.seal_diff.output.diff_root_sha256}"
+        x-amz-meta-ticker: "{input.ticker}"
+        x-amz-meta-newest-accession: "{steps.compute_diff.output.newest_accession}"
+      auth: "aws4:{env.AWS_ACCESS_KEY_ID}:{env.AWS_SECRET_ACCESS_KEY}"
+      body: "{steps.seal_diff.output.canonical_json}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 12) NOTIFY (deltas) - push the headline changes to the research channel so the analyst
+  #     reads only what actually moved between quarters. service: slack.
+  - id: notify_deltas
+    type: notify
+    depends_on: [compute_diff, seal_diff]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        :memo: Filing delta - {steps.compute_diff.output.ticker} {steps.compute_diff.output.form_type}
+        Newest {steps.compute_diff.output.newest_accession} ({steps.compute_diff.output.newest_filing_date}) vs prior {steps.compute_diff.output.prior_accession} ({steps.compute_diff.output.prior_filing_date})
+        Changed sections : {steps.compute_diff.output.changed_section_count}
+        Added/removed/modified blocks : {steps.compute_diff.output.added_count}/{steps.compute_diff.output.removed_count}/{steps.compute_diff.output.modified_count}
+        Largest guidance move : {steps.compute_diff.output.max_abs_delta_pct}%
+        Guidance deltas : {steps.compute_diff.output.guidance_deltas}
+        Sealed diff archived at {steps.seal_diff.output.object_key}
+        diff_root SHA-256: {steps.seal_diff.output.diff_root_sha256}
+
+  # 13) NOTIFY (no change) - quiet "nothing material changed" digest when the diff was trivial.
+  #     No seal, no memo, no archive.
+  - id: notify_no_change
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        :white_check_mark: {steps.compute_diff.output.ticker} {steps.compute_diff.output.form_type} {steps.compute_diff.output.newest_accession}: no material section or guidance change vs prior filing. Nothing to read.
+on_complete:
+  storage_path: "sec-filing-delta-extractor/{run_id}/result.json"

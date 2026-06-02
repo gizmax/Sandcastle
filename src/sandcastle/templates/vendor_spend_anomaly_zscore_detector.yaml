@@ -1,0 +1,635 @@
+# name: Vendor Spend Anomaly Detector
+# description: Streams the AP transaction ledger, builds a per-vendor spend baseline and computes a robust z-score (median / MAD) plus split-invoice, duplicate-payment and new-vendor-spike detectors in pure code, classifies each outlier by likely cause, then SHA-256 seals a tamper-evident anomaly record before opening a triage ticket. The load-bearing detection is deterministic code (sensor + http + code + loop carry it); the only model is a swappable classify label on precomputed signals. No model ever does the spend math.
+# tags: [FinanceOps, AccountsPayable, AP, anomaly-detection, z-score, MAD, duplicate-payment, split-invoice, maverick-spend, SAP, NetSuite, QuickBooks, Jira, Slack, audit]
+# category: finance_ops
+# connectors: sap, netsuite, quickbooks, jira, linear, slack
+name: vendor-spend-anomaly-zscore-detector
+description: >-
+  An always-on Accounts Payable anomaly detector for FP&A and controllership. A
+  durable SENSOR blocks until the next AP batch posts (or a scheduled nightly
+  sweep is due). A DETERMINISTIC http GET then streams the AP transaction ledger
+  from the ERP / AP system (SAP, NetSuite or QuickBooks AP), and a code step
+  normalizes every payment into a canonical row and groups them per vendor. The
+  workflow LOOPS over each vendor cohort: a single DETERMINISTIC code step builds
+  the per-vendor spend baseline and runs FOUR pure-Python detectors - a robust
+  z-score using the median and the Median Absolute Deviation (MAD, resistant to
+  the very outliers it hunts), a duplicate-payment detector via canonical hashing
+  of (vendor, amount, invoice, near-date), a split-invoice detector that flags
+  clusters of same-day same-vendor invoices each landing just under the approval
+  threshold, and a new-vendor first-spend spike detector. A CLASSIFY step applies
+  a SWAPPABLE label (duplicate / split / spike / seasonal / benign) reading ONLY
+  the precomputed signals - it never touches the arithmetic. A deterministic code
+  step then aggregates every flagged outlier, computes an anomaly score, and
+  SHA-256 SEALS the confirmed anomaly batch into a tamper-evident immutable
+  record with a ledger root hash. A CONDITION opens a ticket ONLY when the batch
+  anomaly score clears the floor, an http PUT archives the sealed record to the
+  audit object store, a NOTIFY files a Jira / Linear triage ticket, and a final
+  NOTIFY pings the AP controller channel. Every detector, baseline and score is
+  100% deterministic and runs with zero model providers available; the model is
+  confined to the swappable classify label on signals it cannot alter.
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 1800
+input_schema:
+  required: ["ap_ledger_base_url"]
+  properties:
+    ap_ledger_base_url:
+      type: string
+      description: "AP / ERP REST base URL exposing posted vendor payments (SAP, NetSuite, QuickBooks AP). The detector GETs the lookback window of transactions from here."
+      default: "https://your-erp.example.com/api/ap"
+      example: "https://acme.netsuite.com/services/rest/record/v1/vendorPayment"
+    batch_id:
+      type: string
+      description: "Identifier for this AP batch / sweep, used in the sealed record and the triage ticket."
+      default: "AP-SWEEP-2026-06"
+      example: "AP-BATCH-2026-06-02"
+    lookback_window:
+      type: integer
+      description: "Days of AP history to pull and build each vendor's baseline against. A larger window stabilizes the median / MAD baseline."
+      default: 180
+      example: "180"
+    zscore_threshold:
+      type: number
+      description: "Robust z-score (modified, median / MAD based) at or above which a single payment is flagged as an amount outlier. 3.5 is the conventional modified-z cutoff."
+      default: 3.5
+      example: "3.5"
+    approval_threshold:
+      type: number
+      description: "The dollar approval threshold. Invoices that land just under this value, clustered same-day same-vendor, are flagged as a likely split-invoice to dodge approval."
+      default: 10000
+      example: "10000"
+    split_band_fraction:
+      type: number
+      description: "How close under the approval threshold counts as 'just under' for split-invoice detection (0-1). 0.1 means invoices within the top 10% band below the threshold."
+      default: 0.1
+      example: "0.1"
+    min_baseline_n:
+      type: integer
+      description: "Minimum number of prior payments a vendor needs before the z-score baseline is trusted. Below this the vendor is treated as new (spike detector applies instead)."
+      default: 5
+      example: "5"
+    spike_multiple:
+      type: number
+      description: "A new vendor's first payment is flagged as a spike when it is at least this multiple of the median first-payment across all new vendors in the batch."
+      default: 3.0
+      example: "3.0"
+    anomaly_score_floor:
+      type: number
+      description: "Batch anomaly score (0-100) at or above which a triage ticket is opened. Below the floor the sweep is logged clean and no ticket is filed."
+      default: 25
+      example: "25"
+    classify_model:
+      type: string
+      description: "Swappable model that LABELS each outlier's likely cause from precomputed signals only - set the classify step's model field to any of the 7 providers (for regulated data pin an EU / local provider like mistral/large or omlx/qwen-3). Detection works with this unavailable."
+      default: "sonnet"
+      example: "mistral/large"
+    ap_triage_project:
+      type: string
+      description: "Jira / Linear project key that receives the AP anomaly triage ticket."
+      default: "APRISK"
+      example: "APRISK"
+    issue_tracker_url:
+      type: string
+      description: "Issue-tracker REST endpoint that creates the triage ticket (Jira /rest/api/3/issue or Linear GraphQL gateway)."
+      default: "https://your-org.atlassian.net/rest/api/3/issue"
+      example: "https://acme.atlassian.net/rest/api/3/issue"
+    record_store_base_url:
+      type: string
+      description: "Object-store (S3-compatible) REST base URL that receives the SHA-256-sealed immutable anomaly record for audit retention."
+      default: "https://s3.eu-central-1.amazonaws.com"
+      example: "https://s3.eu-central-1.amazonaws.com"
+    record_store_bucket:
+      type: string
+      description: "Bucket holding the sealed AP anomaly records tamper-evidently."
+      default: "ap-anomaly-ledger"
+      example: "acme-ap-anomaly-ledger"
+    controller_channel:
+      type: string
+      description: "AP controller Slack channel that receives the anomaly digest / ticket link."
+      default: "#ap-controllership"
+      example: "#ap-controllership"
+    sweep_timeout:
+      type: integer
+      description: "Sensor soft timeout in seconds - stop waiting for the next AP batch after this long (one sweep run). Default 24h."
+      default: 86400
+      example: "86400"
+steps:
+  # 1) DURABLE SENSOR - block until the next AP batch posts or the scheduled nightly sweep is
+  #    due. Polls the AP system's batch-status endpoint; until a batch is ready to scan there is
+  #    nothing to detect. Event-driven within a schedule: a posted batch flips batch_ready true.
+  - id: await_ap_batch
+    type: sensor
+    sensor_config:
+      url: "{input.ap_ledger_base_url}/batch-status?select=batch_ready,sweep_due,batch_id"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200 and (response.get('batch_ready') == True or response.get('sweep_due') == True)"
+      check_interval: 3600
+      timeout: 86400
+
+  # 2) DETERMINISTIC http GET of the AP transaction ledger for the lookback window. Streams
+  #    posted vendor payments straight from the ERP / AP system (SAP / NetSuite / QuickBooks AP).
+  #    Connector: sap / netsuite / quickbooks. No model.
+  - id: pull_ap_ledger
+    type: http
+    depends_on: [await_ap_batch]
+    http_config:
+      url: "{input.ap_ledger_base_url}/payments?window_days={input.lookback_window}&status=posted&expand=vendor,invoice"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.AP_API_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 3) DETERMINISTIC normalization. Flatten whatever shape the ERP returned into canonical
+  #    payment rows (vendor_id, vendor_name, amount, invoice_number, payment_date) and GROUP
+  #    them per vendor into a loopable cohort list. No model - this is the prep the detectors
+  #    consume. Each cohort carries every threshold the per-vendor code step needs.
+  - id: normalize_payments
+    type: code
+    depends_on: [pull_ap_ledger]
+    code_config:
+      language: python
+      code: |
+        import re
+
+        ledger = _steps.get('pull_ap_ledger') or {}
+        rows = ledger if isinstance(ledger, list) else (
+            ledger.get('payments') or ledger.get('items') or ledger.get('data')
+            or ledger.get('records') or ledger.get('results') or []
+        )
+        if not isinstance(rows, list):
+            rows = [rows] if rows else []
+
+        def _num(v):
+            try:
+                return float(str(v).replace(',', '').replace('$', '').strip())
+            except (TypeError, ValueError):
+                return None
+
+        def _date_key(v):
+            # Keep just the yyyy-mm-dd prefix as a sortable, comparable string.
+            s = str(v or '').strip()
+            m = re.match(r'(\d{4})-(\d{2})-(\d{2})', s)
+            return f"{m.group(1)}-{m.group(2)}-{m.group(3)}" if m else s[:10]
+
+        payments = []
+        for rec in rows:
+            if not isinstance(rec, dict):
+                continue
+            amount = _num(rec.get('amount') or rec.get('paid_amount')
+                          or rec.get('total') or rec.get('value'))
+            if amount is None:
+                continue
+            vendor_id = str(rec.get('vendor_id') or rec.get('vendorId')
+                            or rec.get('supplier_id') or rec.get('vendor') or '').strip()
+            vendor_name = str(rec.get('vendor_name') or rec.get('vendorName')
+                              or rec.get('supplier') or vendor_id or 'unknown').strip()
+            if not vendor_id:
+                vendor_id = vendor_name.upper().replace(' ', '_') or 'UNKNOWN'
+            inv = str(rec.get('invoice_number') or rec.get('invoiceNumber')
+                      or rec.get('invoice') or rec.get('reference') or '').strip()
+            pdate = _date_key(rec.get('payment_date') or rec.get('paymentDate')
+                              or rec.get('date') or rec.get('posted_at'))
+            payments.append({
+                'payment_id': str(rec.get('payment_id') or rec.get('id')
+                                  or rec.get('transaction_id') or f"{vendor_id}-{inv}-{pdate}"),
+                'vendor_id': vendor_id,
+                'vendor_name': vendor_name,
+                'amount': round(amount, 2),
+                'invoice_number': inv,
+                'payment_date': pdate,
+            })
+
+        # Group into per-vendor cohorts; attach every threshold the detector step needs so the
+        # loop body is self-contained per item.
+        thresholds = {
+            'zscore_threshold': float(_input.get('zscore_threshold', 3.5) or 3.5),
+            'approval_threshold': float(_input.get('approval_threshold', 10000) or 10000),
+            'split_band_fraction': float(_input.get('split_band_fraction', 0.1) or 0.1),
+            'min_baseline_n': int(_input.get('min_baseline_n', 5) or 5),
+            'spike_multiple': float(_input.get('spike_multiple', 3.0) or 3.0),
+        }
+
+        by_vendor = {}
+        for p in payments:
+            by_vendor.setdefault(p['vendor_id'], []).append(p)
+
+        cohorts = []
+        for vid, plist in by_vendor.items():
+            plist_sorted = sorted(plist, key=lambda r: r['payment_date'])
+            cohorts.append({
+                'vendor_id': vid,
+                'vendor_name': plist_sorted[0]['vendor_name'],
+                'payment_count': len(plist_sorted),
+                'payments': plist_sorted,
+                'thresholds': thresholds,
+            })
+
+        result = {
+            'batch_id': _input.get('batch_id'),
+            'total_payments': len(payments),
+            'vendor_count': len(cohorts),
+            'cohorts': cohorts,
+        }
+
+  # 4) LOOP over every vendor cohort. Per-cohort child chain: one DETERMINISTIC detector code
+  #    step (baseline + robust z-score + duplicate + split + new-vendor spike) -> a SWAPPABLE
+  #    classify that only LABELS the precomputed outliers.
+  - id: per_vendor_loop
+    type: loop
+    depends_on: [normalize_payments]
+    loop_config:
+      over: "steps.normalize_payments.output.cohorts"
+      step_ids:
+        - detect_vendor_anomalies
+        - classify_outlier_cause
+      max_iterations: 5000
+
+  # 4a) THE LOAD-BEARING DETECTION. NO model. For THIS vendor cohort compute, in pure Python:
+  #     (1) a robust baseline = median + MAD of historical amounts (MAD resists the outliers it
+  #         hunts, unlike mean / stdev); (2) a modified z-score per payment = 0.6745 * (x - median)
+  #         / MAD, flagged at zscore_threshold; (3) duplicate payments via a canonical hash of
+  #         (vendor, rounded amount, invoice, payment date) - exact repeats across the batch;
+  #         (4) split invoices = same-vendor same-day clusters of 2+ invoices EACH just under the
+  #         approval threshold whose sum crosses it; (5) new-vendor first-spend spike when a vendor
+  #         has < min_baseline_n history. Emits one outlier list with the signals the classifier reads.
+  - id: detect_vendor_anomalies
+    type: code
+    code_config:
+      language: python
+      code: |
+        import hashlib
+
+        cohort = _input.get('_item') or {}
+        payments = cohort.get('payments') or []
+        th = cohort.get('thresholds') or {}
+        z_thresh = float(th.get('zscore_threshold', 3.5) or 3.5)
+        approval = float(th.get('approval_threshold', 10000) or 10000)
+        band_frac = float(th.get('split_band_fraction', 0.1) or 0.1)
+        min_n = int(th.get('min_baseline_n', 5) or 5)
+        spike_mult = float(th.get('spike_multiple', 3.0) or 3.0)
+
+        amounts = [float(p.get('amount') or 0.0) for p in payments]
+        n = len(amounts)
+
+        def _median(xs):
+            s = sorted(xs)
+            m = len(s)
+            if m == 0:
+                return 0.0
+            mid = m // 2
+            return s[mid] if m % 2 else (s[mid - 1] + s[mid]) / 2.0
+
+        med = _median(amounts)
+        # MAD = median of absolute deviations from the median. Scaled by 1.4826 it estimates
+        # the standard deviation for normal data but is robust to extreme outliers.
+        abs_dev = [abs(x - med) for x in amounts]
+        mad = _median(abs_dev)
+        mad_scaled = mad * 1.4826
+
+        baseline_trusted = n >= min_n and mad_scaled > 0
+
+        outliers = []
+
+        # --- (1) + (2) robust modified z-score per payment (amount outlier) ---------------
+        if baseline_trusted:
+            for p in payments:
+                x = float(p.get('amount') or 0.0)
+                mod_z = round(0.6745 * (x - med) / mad if mad > 0 else 0.0, 3)
+                if abs(mod_z) >= z_thresh:
+                    outliers.append({
+                        'kind': 'amount_outlier',
+                        'payment_id': p.get('payment_id'),
+                        'invoice_number': p.get('invoice_number'),
+                        'payment_date': p.get('payment_date'),
+                        'amount': x,
+                        'modified_z': mod_z,
+                        'baseline_median': round(med, 2),
+                        'baseline_mad_scaled': round(mad_scaled, 2),
+                    })
+
+        # --- (3) duplicate payments via canonical hashing --------------------------------
+        seen = {}
+        for p in payments:
+            key_material = '|'.join([
+                str(cohort.get('vendor_id') or ''),
+                f"{float(p.get('amount') or 0.0):.2f}",
+                str(p.get('invoice_number') or ''),
+                str(p.get('payment_date') or ''),
+            ])
+            dup_hash = hashlib.sha256(key_material.encode('utf-8')).hexdigest()[:16]
+            if dup_hash in seen:
+                outliers.append({
+                    'kind': 'duplicate_payment',
+                    'payment_id': p.get('payment_id'),
+                    'duplicate_of': seen[dup_hash],
+                    'invoice_number': p.get('invoice_number'),
+                    'payment_date': p.get('payment_date'),
+                    'amount': float(p.get('amount') or 0.0),
+                    'dup_hash': dup_hash,
+                })
+            else:
+                seen[dup_hash] = p.get('payment_id')
+
+        # --- (4) split invoice: same-day clusters of 2+ invoices each JUST under approval --
+        band_low = approval * (1.0 - band_frac)
+        by_day = {}
+        for p in payments:
+            amt = float(p.get('amount') or 0.0)
+            if band_low <= amt < approval:
+                by_day.setdefault(p.get('payment_date'), []).append(p)
+        for day, plist in by_day.items():
+            if len(plist) >= 2 and sum(float(q.get('amount') or 0.0) for q in plist) >= approval:
+                outliers.append({
+                    'kind': 'split_invoice',
+                    'payment_date': day,
+                    'invoice_count': len(plist),
+                    'combined_amount': round(sum(float(q.get('amount') or 0.0) for q in plist), 2),
+                    'approval_threshold': approval,
+                    'payment_ids': [q.get('payment_id') for q in plist],
+                    'invoice_numbers': [q.get('invoice_number') for q in plist],
+                })
+
+        # --- (5) new-vendor first-spend spike --------------------------------------------
+        new_vendor = n < min_n
+        first_payment = amounts[0] if amounts else 0.0
+        if new_vendor and amounts:
+            outliers.append({
+                'kind': 'new_vendor_spike',
+                'payment_count': n,
+                'first_payment_amount': round(first_payment, 2),
+                'total_spend': round(sum(amounts), 2),
+                'note': 'vendor below baseline history - judged against batch new-vendor median downstream',
+            })
+
+        result = {
+            'vendor_id': cohort.get('vendor_id'),
+            'vendor_name': cohort.get('vendor_name'),
+            'payment_count': n,
+            'baseline_median': round(med, 2),
+            'baseline_mad_scaled': round(mad_scaled, 2),
+            'baseline_trusted': baseline_trusted,
+            'new_vendor': new_vendor,
+            'outlier_count': len(outliers),
+            'has_outlier': len(outliers) > 0,
+            'outliers': outliers,
+        }
+
+  # 4b) CLASSIFY the outlier's likely cause. The model ONLY LABELS using the precomputed signals;
+  #     the detection / z-score / dedup math was ALREADY done deterministically in code. Swappable
+  #     to any provider. Every category routes to the same downstream record step.
+  - id: classify_outlier_cause
+    type: classify
+    classify_config:
+      model: sonnet
+      input: >-
+        You label the most likely CAUSE of this vendor's AP anomalies using ONLY the precomputed
+        deterministic signals - never recompute any number. duplicate = the outliers include a
+        duplicate_payment kind; split = the outliers include a split_invoice kind (invoices split
+        just under the approval threshold); spike = a new_vendor_spike or a large positive
+        modified_z amount_outlier with no other explanation; seasonal = amount_outlier(s) that
+        plausibly reflect periodic / seasonal buying rather than error or fraud; benign = no
+        outliers at all. Vendor {steps.detect_vendor_anomalies.output.vendor_name}: new_vendor={steps.detect_vendor_anomalies.output.new_vendor},
+        baseline_trusted={steps.detect_vendor_anomalies.output.baseline_trusted},
+        outlier_count={steps.detect_vendor_anomalies.output.outlier_count},
+        outliers={steps.detect_vendor_anomalies.output.outliers}
+      categories:
+        - duplicate
+        - split
+        - spike
+        - seasonal
+        - benign
+
+  # 5) DETERMINISTIC aggregation + anomaly SCORE. NO model. Collect every per-vendor detector
+  #    result from the loop, fold in the classify label, weight each outlier kind, and compute a
+  #    0-100 batch anomaly score. Also resolves new-vendor spikes against the batch-wide
+  #    new-vendor median (the cross-cohort comparison that needs the whole batch). No model does math.
+  - id: aggregate_anomalies
+    type: code
+    depends_on: [per_vendor_loop, normalize_payments]
+    code_config:
+      language: python
+      code: |
+        loop_out = _steps.get('per_vendor_loop') or {}
+        norm = _steps.get('normalize_payments') or {}
+        spike_mult = float(_input.get('spike_multiple', 3.0) or 3.0)
+
+        items = loop_out if isinstance(loop_out, list) else (
+            loop_out.get('results') or loop_out.get('items') or loop_out.get('iterations') or []
+        )
+
+        vendors = []
+        for it in items:
+            det = it
+            label = None
+            if isinstance(it, dict) and 'vendor_id' not in it:
+                det = it.get('detect_vendor_anomalies') or it.get('output') or it
+                label = it.get('classify_outlier_cause')
+            if isinstance(det, dict) and det.get('vendor_id'):
+                row = dict(det)
+                row['cause_label'] = str(label or '').strip().lower() if label else ''
+                vendors.append(row)
+
+        # --- resolve new-vendor spikes against the batch-wide new-vendor first-payment median --
+        first_amts = []
+        for v in vendors:
+            for o in v.get('outliers', []):
+                if o.get('kind') == 'new_vendor_spike':
+                    first_amts.append(float(o.get('first_payment_amount') or 0.0))
+        s = sorted(first_amts)
+        m = len(s)
+        nv_median = (s[m // 2] if m % 2 else (s[m // 2 - 1] + s[m // 2]) / 2.0) if m else 0.0
+
+        # weight per outlier kind; duplicate / split are the costliest (real cash leakage / control evasion)
+        weights = {
+            'duplicate_payment': 30.0,
+            'split_invoice': 25.0,
+            'amount_outlier': 12.0,
+            'new_vendor_spike': 8.0,
+        }
+
+        flagged_vendors = []
+        raw_score = 0.0
+        kind_counts = {'duplicate_payment': 0, 'split_invoice': 0, 'amount_outlier': 0, 'new_vendor_spike': 0}
+
+        for v in vendors:
+            confirmed = []
+            for o in v.get('outliers', []):
+                kind = o.get('kind')
+                if kind == 'new_vendor_spike':
+                    # only a true spike if first payment >= spike_mult * batch new-vendor median
+                    fa = float(o.get('first_payment_amount') or 0.0)
+                    if not (nv_median > 0 and fa >= spike_mult * nv_median):
+                        continue
+                confirmed.append(o)
+                if kind in kind_counts:
+                    kind_counts[kind] += 1
+                    raw_score += weights.get(kind, 5.0)
+            if confirmed:
+                flagged_vendors.append({
+                    'vendor_id': v.get('vendor_id'),
+                    'vendor_name': v.get('vendor_name'),
+                    'cause_label': v.get('cause_label'),
+                    'baseline_median': v.get('baseline_median'),
+                    'baseline_mad_scaled': v.get('baseline_mad_scaled'),
+                    'outliers': confirmed,
+                    'outlier_count': len(confirmed),
+                })
+
+        anomaly_score = round(min(100.0, raw_score), 2)
+        total_outliers = sum(kind_counts.values())
+
+        result = {
+            'batch_id': norm.get('batch_id'),
+            'vendor_count': norm.get('vendor_count'),
+            'total_payments': norm.get('total_payments'),
+            'flagged_vendor_count': len(flagged_vendors),
+            'total_outliers': total_outliers,
+            'kind_counts': kind_counts,
+            'new_vendor_median': round(nv_median, 2),
+            'anomaly_score': anomaly_score,
+            'flagged_vendors': flagged_vendors,
+            'has_anomaly': total_outliers > 0,
+        }
+
+  # 6) DETERMINISTIC SHA-256 SEAL. NO model. Canonical-JSON each flagged vendor's confirmed
+  #    outliers, hash it, then hash the ordered list of per-vendor digests into one ledger root
+  #    hash. This is the tamper-evident signature an auditor verifies. Builds the immutable
+  #    object key for the audit-store PUT.
+  - id: seal_anomaly_record
+    type: code
+    depends_on: [aggregate_anomalies]
+    code_config:
+      language: python
+      code: |
+        import json
+        import hashlib
+        from datetime import datetime, timezone
+
+        agg = _steps.get('aggregate_anomalies') or {}
+        flagged = agg.get('flagged_vendors', [])
+        sealed_at = datetime.now(timezone.utc).isoformat()
+
+        sealed_vendors = []
+        for v in flagged:
+            canonical = json.dumps(v, sort_keys=True, separators=(',', ':'))
+            digest = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+            sealed_vendors.append({
+                'vendor_id': v.get('vendor_id'),
+                'vendor_name': v.get('vendor_name'),
+                'cause_label': v.get('cause_label'),
+                'outlier_count': v.get('outlier_count'),
+                'sha256': digest,
+            })
+
+        # Ledger root binds every per-vendor digest in deterministic order.
+        root_material = json.dumps([e['sha256'] for e in sealed_vendors], separators=(',', ':'))
+        ledger_root = hashlib.sha256(root_material.encode('utf-8')).hexdigest()
+
+        record = {
+            'batch_id': agg.get('batch_id'),
+            'sealed_at': sealed_at,
+            'anomaly_score': agg.get('anomaly_score'),
+            'flagged_vendor_count': agg.get('flagged_vendor_count'),
+            'total_outliers': agg.get('total_outliers'),
+            'kind_counts': agg.get('kind_counts'),
+            'ledger_root_sha256': ledger_root,
+            'vendors': sealed_vendors,
+        }
+
+        canonical_record = json.dumps(record, sort_keys=True, separators=(',', ':'))
+        safe_ts = sealed_at.replace(':', '-')
+        object_key = f"ap-anomaly-ledger/{agg.get('batch_id')}/{safe_ts}.json"
+
+        result = {
+            'object_key': object_key,
+            'ledger_root_sha256': ledger_root,
+            'sealed_at': sealed_at,
+            'record': record,
+            'canonical_json': canonical_record,
+            'byte_length': len(canonical_record),
+            'has_anomaly': bool(sealed_vendors),
+        }
+
+  # 7) CONDITION - open a ticket + seal-to-store + page ONLY when the batch anomaly score clears
+  #    the floor. A quiet sweep (score below floor) skips the ticket and only logs clean. No model.
+  - id: route_anomaly
+    type: condition
+    depends_on: [aggregate_anomalies, seal_anomaly_record]
+    condition_config:
+      expression: "{steps.aggregate_anomalies.output.anomaly_score} >= {input.anomaly_score_floor}"
+      then: [archive_record, open_triage_ticket, notify_controller]
+      else: [notify_clean]
+
+  # 7a) ARCHIVE the sealed record to the audit object store (S3-compatible, immutable retention).
+  #     The ledger root hash travels as object metadata so the record is tamper-evident at rest.
+  #     Connector: aws-s3. Real persistence path.
+  - id: archive_record
+    type: http
+    http_config:
+      url: "{input.record_store_base_url}/{input.record_store_bucket}/{steps.seal_anomaly_record.output.object_key}"
+      method: PUT
+      headers:
+        Content-Type: "application/json"
+        x-amz-object-lock-mode: "COMPLIANCE"
+        x-amz-object-lock-retain-until-date: "2034-01-01T00:00:00Z"
+        x-amz-meta-ledger-root-sha256: "{steps.seal_anomaly_record.output.ledger_root_sha256}"
+        x-amz-meta-batch-id: "{input.batch_id}"
+        x-amz-meta-anomaly-score: "{steps.aggregate_anomalies.output.anomaly_score}"
+      auth: "aws4:{env.AWS_ACCESS_KEY_ID}:{env.AWS_SECRET_ACCESS_KEY}"
+      body: "{steps.seal_anomaly_record.output.canonical_json}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 7b) OPEN the triage ticket - file a Jira / Linear issue so AP controllership investigates the
+  #     flagged vendors. The sealed ledger root hash is embedded for chain-of-custody. Connector:
+  #     jira / linear.
+  - id: open_triage_ticket
+    type: notify
+    notify_config:
+      service: jira
+      project: "{input.ap_triage_project}"
+      title: "AP spend anomalies on {input.batch_id} - {steps.aggregate_anomalies.output.flagged_vendor_count} vendor(s), score {steps.aggregate_anomalies.output.anomaly_score}/100"
+      message: |
+        Deterministic AP anomaly sweep flagged {steps.aggregate_anomalies.output.flagged_vendor_count} vendor(s) on batch {input.batch_id}.
+        Anomaly score: {steps.aggregate_anomalies.output.anomaly_score}/100 (floor {input.anomaly_score_floor}).
+        Detector counts (model touched none of these): {steps.aggregate_anomalies.output.kind_counts}
+        Flagged vendors + outliers: {steps.aggregate_anomalies.output.flagged_vendors}
+        Sealed record (object-lock): {steps.seal_anomaly_record.output.object_key}
+        Ledger root SHA-256: {steps.seal_anomaly_record.output.ledger_root_sha256}
+
+  # 7c) NOTIFY the AP controller channel with the anomaly digest + the sealed ledger reference.
+  #     service: slack.
+  - id: notify_controller
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.controller_channel}"
+      message: |
+        :mag: AP SPEND ANOMALIES - {steps.aggregate_anomalies.output.flagged_vendor_count} vendor(s) on {steps.aggregate_anomalies.output.batch_id}
+        Anomaly score : {steps.aggregate_anomalies.output.anomaly_score}/100 (floor {input.anomaly_score_floor})
+        Duplicates    : {steps.aggregate_anomalies.output.kind_counts}
+        Total outliers: {steps.aggregate_anomalies.output.total_outliers}
+        Triage ticket filed in {input.ap_triage_project}.
+        Sealed (object-lock) at {steps.seal_anomaly_record.output.object_key}
+        Ledger root SHA-256: {steps.seal_anomaly_record.output.ledger_root_sha256}
+
+  # 7d) NOTIFY (clean) - quiet "no material AP anomalies" digest when the score is below the floor.
+  #     No ticket, no seal-to-store. service: slack.
+  - id: notify_clean
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.controller_channel}"
+      message: |
+        :white_check_mark: AP anomaly sweep clean on {steps.aggregate_anomalies.output.batch_id}.
+        {steps.aggregate_anomalies.output.total_outliers} outlier(s) below the score floor ({input.anomaly_score_floor}). No ticket filed, no seal.
+on_complete:
+  storage_path: "vendor-spend-anomaly-zscore-detector/{run_id}/result.json"
