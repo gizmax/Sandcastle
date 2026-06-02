@@ -1,10 +1,13 @@
 """Application configuration loaded from environment variables."""
 
 import logging
+import os
 from pathlib import Path
 
 from pydantic import computed_field, field_validator
 from pydantic_settings import BaseSettings
+
+from sandcastle.engine.spark import get_spark_info
 
 _logger = logging.getLogger(__name__)
 
@@ -262,7 +265,18 @@ class Settings(BaseSettings):
     @field_validator("max_concurrent_sandboxes", mode="after")
     @classmethod
     def _validate_max_concurrent(cls, v: int) -> int:
-        """Ensure max_concurrent_sandboxes is between 1 and 50."""
+        """Ensure max_concurrent_sandboxes is between 1 and 50.
+
+        Spark Mode auto-config: on a detected DGX Spark, bump the default (5) to
+        40 so wide fan-outs use the box's headroom - unless the operator set
+        MAX_CONCURRENT_SANDBOXES explicitly (then their value is respected).
+        """
+        if v == 5 and not os.getenv("MAX_CONCURRENT_SANDBOXES"):
+            try:
+                if get_spark_info().is_spark:
+                    v = 40
+            except Exception:  # noqa: BLE001 - detection must never break config load
+                pass
         if v < 1:
             _logger.warning(
                 "MAX_CONCURRENT_SANDBOXES=%d is invalid (must be >= 1), "
@@ -522,6 +536,24 @@ class Settings(BaseSettings):
     def is_local_mode(self) -> bool:
         """True when running in local mode (SQLite + filesystem + in-process queue)."""
         return not self.database_url or self.database_url.startswith("sqlite")
+
+    @computed_field
+    @property
+    def spark_mode(self) -> bool:
+        """True when running on a DGX Spark (and Spark Mode is not disabled).
+
+        SANDCASTLE_SPARK_MODE=on|off overrides hardware auto-detection. This is the
+        single source of truth other features read; they never re-detect hardware.
+        """
+        override = os.getenv("SANDCASTLE_SPARK_MODE", "").strip().lower()
+        if override in ("on", "true", "1", "yes"):
+            return True
+        if override in ("off", "false", "0", "no"):
+            return False
+        try:
+            return get_spark_info().is_spark
+        except Exception:  # noqa: BLE001 - detection must never break config access
+            return False
 
 
 settings = Settings()

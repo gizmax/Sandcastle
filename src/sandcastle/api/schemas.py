@@ -500,6 +500,7 @@ class RuntimeInfoResponse(BaseModel):
     data_dir: str | None = None  # Only set in local mode
     version: str | None = None
     license: LicenseInfoResponse | None = None
+    spark_mode: bool = False  # True when running on a detected DGX Spark
 
 
 class UpdateCheckResponse(BaseModel):

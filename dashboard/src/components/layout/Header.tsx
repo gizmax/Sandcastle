@@ -74,6 +74,26 @@ function useAdvisorProviderBadge(): string | null {
   return provider;
 }
 
+/** Fetch the Spark Mode flag once and cache in module scope. */
+let _cachedSparkMode: boolean | null = null;
+
+function useSparkModeBadge(): boolean {
+  const [sparkMode, setSparkMode] = useState<boolean>(_cachedSparkMode ?? false);
+  useEffect(() => {
+    if (_cachedSparkMode !== null) return;
+    api
+      .get<{ spark_mode: boolean }>("/runtime")
+      .then((res) => {
+        if (res.data?.spark_mode !== undefined) {
+          _cachedSparkMode = res.data.spark_mode;
+          setSparkMode(res.data.spark_mode);
+        }
+      })
+      .catch(() => undefined);
+  }, []);
+  return sparkMode;
+}
+
 const DISMISS_KEY = "sandcastle_update_banner_dismissed";
 const DISMISS_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
@@ -100,6 +120,7 @@ export function Header({
   const location = useLocation();
   const navigate = useNavigate();
   const advisorProvider = useAdvisorProviderBadge();
+  const sparkMode = useSparkModeBadge();
   const update = useUpdateCheck();
   const [bannerDismissed, setBannerDismissed] = useState(isBannerDismissed);
 
@@ -214,6 +235,14 @@ export function Header({
           {advisorProvider && (
             <span className="hidden sm:inline-flex rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-medium text-accent">
               {PROVIDER_BADGE_LABEL[advisorProvider] ?? advisorProvider}
+            </span>
+          )}
+          {sparkMode && (
+            <span
+              className="hidden sm:inline-flex items-center gap-1 rounded-full border border-purple-500/30 bg-purple-500/15 px-2 py-0.5 text-[10px] font-medium text-purple-600 dark:text-purple-400"
+              title="Running on a DGX Spark — local models, $0/run, data stays on-box"
+            >
+              ⚡ Spark Mode
             </span>
           )}
           <LiveIndicator />

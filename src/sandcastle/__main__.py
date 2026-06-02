@@ -519,6 +519,36 @@ def _stream_run(client: Any, run_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _print_spark_banner() -> None:
+    """Print the Spark Mode unlock banner (only on a detected DGX Spark)."""
+    if not _C.supports_color() or not sys.stdout.isatty():
+        return
+
+    from sandcastle.config import settings
+    from sandcastle.engine.spark import get_spark_info
+
+    info = get_spark_info()
+    RST = "\033[0m"
+    DIM = "\033[2m"
+    MAG = "\033[1;35m"
+    GRN = "\033[1;32m"
+
+    hw = []
+    if info.gpu_name:
+        hw.append(info.gpu_name)
+    if info.unified_mem_gb:
+        hw.append(f"{info.unified_mem_gb}GB unified")
+    hw_line = " · ".join(hw) if hw else "DGX Spark"
+
+    print()
+    print(f"  {MAG}⚡ SPARK MODE{RST}  {DIM}— {hw_line}{RST}")
+    print(f"  {DIM}{'─' * 48}{RST}")
+    workers = settings.max_concurrent_sandboxes
+    print(f"  {GRN}[✓]{RST} Local models · {GRN}$0.00/run{RST} · data stays on-box")
+    print(f"  {GRN}[✓]{RST} Concurrency auto-tuned to {workers} workers")
+    print()
+
+
 def _print_banner() -> None:
     """Print 80s retro startup banner with Knight Rider boot sequence."""
     if not _C.supports_color() or not sys.stdout.isatty():
@@ -837,7 +867,11 @@ def _cmd_serve(args: argparse.Namespace) -> None:
     """Start the Sandcastle API server."""
     import uvicorn
 
+    from sandcastle.config import settings
+
     _print_banner()
+    if settings.spark_mode:
+        _print_spark_banner()
 
     # Non-blocking update check (at most once every 24h)
     try:

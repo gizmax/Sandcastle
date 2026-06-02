@@ -742,6 +742,7 @@ async def runtime_info() -> ApiResponse:
             data_dir=settings.data_dir if settings.is_local_mode else None,
             version=__version__,
             license=license_info,
+            spark_mode=settings.spark_mode,
         )
     )
 
