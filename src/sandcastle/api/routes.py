@@ -5384,6 +5384,7 @@ async def get_run(run_id: str, req: Request) -> ApiResponse:
             pdf_artifact=bool(
                 isinstance(s.output_data, dict) and s.output_data.get("_pdf_artifact")
             ),
+            model=s.model,
         )
         for s in _dedup.values()
     ]

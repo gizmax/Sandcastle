@@ -8,28 +8,18 @@ describe("useTheme", () => {
     document.documentElement.classList.remove("dark");
   });
 
-  it("defaults to light when no preference stored and system is light", () => {
+  it("defaults to dark when no preference stored (dark-first)", () => {
+    const { result } = renderHook(() => useTheme());
+    expect(result.current.theme).toBe("dark");
+  });
+
+  it("restores stored theme", () => {
+    localStorage.setItem("theme", "light");
     const { result } = renderHook(() => useTheme());
     expect(result.current.theme).toBe("light");
   });
 
-  it("restores stored theme", () => {
-    localStorage.setItem("theme", "dark");
-    const { result } = renderHook(() => useTheme());
-    expect(result.current.theme).toBe("dark");
-  });
-
-  it("toggles from light to dark", () => {
-    const { result } = renderHook(() => useTheme());
-    act(() => {
-      result.current.toggleTheme();
-    });
-    expect(result.current.theme).toBe("dark");
-    expect(document.documentElement.classList.contains("dark")).toBe(true);
-  });
-
-  it("toggles from dark to light", () => {
-    localStorage.setItem("theme", "dark");
+  it("toggles from the default (dark) to light", () => {
     const { result } = renderHook(() => useTheme());
     act(() => {
       result.current.toggleTheme();
@@ -38,7 +28,18 @@ describe("useTheme", () => {
     expect(document.documentElement.classList.contains("dark")).toBe(false);
   });
 
+  it("toggles from light to dark", () => {
+    localStorage.setItem("theme", "light");
+    const { result } = renderHook(() => useTheme());
+    act(() => {
+      result.current.toggleTheme();
+    });
+    expect(result.current.theme).toBe("dark");
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+  });
+
   it("persists theme to localStorage", () => {
+    localStorage.setItem("theme", "light");
     const { result } = renderHook(() => useTheme());
     act(() => {
       result.current.toggleTheme();
@@ -46,10 +47,9 @@ describe("useTheme", () => {
     expect(localStorage.getItem("theme")).toBe("dark");
   });
 
-  it("ignores invalid stored values", () => {
+  it("ignores invalid stored values (falls back to dark-first default)", () => {
     localStorage.setItem("theme", "rainbow");
     const { result } = renderHook(() => useTheme());
-    // Falls back to system preference (mocked as light)
-    expect(result.current.theme).toBe("light");
+    expect(result.current.theme).toBe("dark");
   });
 });

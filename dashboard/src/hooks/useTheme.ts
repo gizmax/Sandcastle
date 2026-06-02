@@ -8,9 +8,12 @@ function getInitialTheme(): Theme {
     if (stored === "light" || stored === "dark") return stored;
   } catch {
     // Storage unavailable (private browsing, sandboxed iframe). Fall through
-    // to the system preference.
+    // to the default below.
   }
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  // Dark-first: a stored preference always wins; new visitors default to dark
+  // (the signature look for an AI/dev tool) unless the OS explicitly prefers light.
+  if (window.matchMedia("(prefers-color-scheme: light)").matches) return "light";
+  return "dark";
 }
 
 export function useTheme() {

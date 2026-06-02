@@ -17,6 +17,7 @@ interface Step {
   owner?: string;
   type?: string;
   artifact_url?: string;
+  model?: string | null;
 }
 
 interface StepTimelineProps {
@@ -65,6 +66,7 @@ export function StepTimeline({ steps, runId, onReplay, onFork }: StepTimelinePro
               owner={step.owner}
               stepType={step.type}
               artifactUrl={step.artifact_url}
+              model={step.model}
               runId={runId}
               onReplay={onReplay}
               onFork={onFork}

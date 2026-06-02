@@ -4,10 +4,12 @@ import { Toaster } from "sonner";
 import "./index.css";
 import App from "./App.tsx";
 
-// Apply saved theme immediately to prevent flash
+// Apply the theme immediately to prevent a flash. Dark-first: a stored preference
+// wins; new visitors default to dark unless the OS explicitly prefers light. Keep this
+// in sync with getInitialTheme() in hooks/useTheme.ts.
 const savedTheme = localStorage.getItem("theme");
-const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-if (savedTheme === "dark" || (!savedTheme && prefersDark)) {
+const prefersLight = window.matchMedia("(prefers-color-scheme: light)").matches;
+if (savedTheme === "dark" || (!savedTheme && !prefersLight)) {
   document.documentElement.classList.add("dark");
 }
 

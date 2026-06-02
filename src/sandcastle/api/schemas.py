@@ -467,6 +467,7 @@ class StepStatusResponse(BaseModel):
     error: str | None = None
     started_at: str | None = None
     pdf_artifact: bool = False
+    model: str | None = Field(None, description="Provider/model that ran the step")
 
 
 class HealthResponse(BaseModel):

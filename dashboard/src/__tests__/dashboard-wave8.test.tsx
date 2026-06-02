@@ -1710,9 +1710,9 @@ describe("Constants", () => {
 import { useTheme } from "@/hooks/useTheme";
 
 describe("useTheme", () => {
-  it("defaults to light when no stored preference", () => {
+  it("defaults to dark when no stored preference (dark-first)", () => {
     const { result } = renderHook(() => useTheme());
-    expect(result.current.theme).toBe("light");
+    expect(result.current.theme).toBe("dark");
   });
 
   it("reads stored theme from localStorage", () => {
@@ -1723,20 +1723,21 @@ describe("useTheme", () => {
 
   it("toggles theme", () => {
     const { result } = renderHook(() => useTheme());
-    expect(result.current.theme).toBe("light");
-
-    act(() => {
-      result.current.toggleTheme();
-    });
     expect(result.current.theme).toBe("dark");
 
     act(() => {
       result.current.toggleTheme();
     });
     expect(result.current.theme).toBe("light");
+
+    act(() => {
+      result.current.toggleTheme();
+    });
+    expect(result.current.theme).toBe("dark");
   });
 
   it("persists theme to localStorage", () => {
+    localStorage.setItem("theme", "light");
     const { result } = renderHook(() => useTheme());
     act(() => {
       result.current.toggleTheme();
@@ -1747,8 +1748,8 @@ describe("useTheme", () => {
   it("ignores invalid stored values", () => {
     localStorage.setItem("theme", "invalid");
     const { result } = renderHook(() => useTheme());
-    // Falls back to matchMedia (mocked to false = light)
-    expect(result.current.theme).toBe("light");
+    // Falls back to the dark-first default (matchMedia mocked to false).
+    expect(result.current.theme).toBe("dark");
   });
 });
 

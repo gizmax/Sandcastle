@@ -124,6 +124,7 @@ interface StepCardProps {
   owner?: string;
   stepType?: string;
   artifactUrl?: string;
+  model?: string | null;
   runId?: string;
   onReplay?: (stepId: string) => void;
   onFork?: (stepId: string) => void;
@@ -144,6 +145,7 @@ export function StepCard({
   owner,
   stepType,
   artifactUrl,
+  model,
   runId,
   onReplay,
   onFork,
@@ -194,7 +196,12 @@ export function StepCard({
           {responsibility && (
             <p className="mt-0.5 text-xs italic text-muted">{responsibility}</p>
           )}
-          <div className="mt-0.5 flex items-center gap-3 text-xs text-muted">
+          <div className="mt-0.5 flex flex-wrap items-center gap-3 text-xs text-muted">
+            {model && (
+              <span className="rounded-md bg-running/10 px-1.5 py-0.5 font-mono text-[11px] text-running" title="Provider that ran this step">
+                {model}
+              </span>
+            )}
             <span>{formatDuration(durationSeconds)}</span>
             <span>{formatCost(costUsd)}</span>
             {attempt > 1 && <span>attempt {attempt}</span>}
