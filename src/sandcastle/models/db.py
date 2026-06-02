@@ -115,6 +115,11 @@ class Run(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
+    # Public share token: when set, the run is viewable at /api/r/{share_token} with
+    # secrets and PII scrubbed. None means private (the default).
+    share_token: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, unique=True, index=True
+    )
 
     steps: Mapped[list[RunStep]] = relationship(
         back_populates="run", cascade="all, delete-orphan", foreign_keys="RunStep.run_id"

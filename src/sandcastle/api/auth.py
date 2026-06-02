@@ -27,8 +27,9 @@ PUBLIC_PATHS = {
     "/api/redoc", "/.well-known/agent.json",
 }
 
-# Path prefixes that don't require authentication
-PUBLIC_PREFIXES = ("/api/templates",)
+# Path prefixes that don't require authentication. "/api/r/" serves public, scrubbed
+# shareable run permalinks (the run owner opts in by minting a token).
+PUBLIC_PREFIXES = ("/api/templates", "/api/r/")
 
 # Path suffixes that don't require authentication (e.g. workflow API spec)
 PUBLIC_SUFFIXES = ("/spec",)
