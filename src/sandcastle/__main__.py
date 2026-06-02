@@ -917,21 +917,40 @@ def _cmd_serve(args: argparse.Namespace) -> None:
     )
 
 
-def _run_local(workflow: str, input_data: dict[str, Any], max_cost: float | None) -> None:
+def _run_local(
+    workflow: str,
+    input_data: dict[str, Any],
+    max_cost: float | None,
+    record: str | None = None,
+    replay: str | None = None,
+) -> None:
     """Execute a workflow in-process, without a running server.
 
     Resolves *workflow* as a path to a .yaml file or as a built-in template name,
     builds the plan, and runs it through the engine executor directly. The local
     caller is trusted, so code/transform steps are allowed. Run-step persistence is
-    best-effort and silently skipped when no database is configured.
+    best-effort and silently skipped when no database is configured. With *record* /
+    *replay* the run is taped to / replayed from a deterministic cassette file.
     """
     import asyncio
     import tempfile
     from pathlib import Path
 
+    from sandcastle.engine.cassette import CassetteStore
     from sandcastle.engine.dag import build_plan, parse_yaml_string
     from sandcastle.engine.executor import execute_workflow
     from sandcastle.engine.storage import LocalStorage
+
+    cassette = None
+    cassette_mode: str | None = None
+    try:
+        if record:
+            cassette, cassette_mode = CassetteStore(record, "record"), "record"
+        elif replay:
+            cassette, cassette_mode = CassetteStore(replay, "replay"), "replay"
+    except FileNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
 
     wf_path = Path(workflow)
     try:
@@ -991,6 +1010,8 @@ def _run_local(workflow: str, input_data: dict[str, Any], max_cost: float | None
             storage=storage,
             max_cost_usd=max_cost,
             admin_trusted=True,
+            cassette=cassette,
+            cassette_mode=cassette_mode,
         )
 
         if persisted:
@@ -1032,6 +1053,17 @@ def _run_local(workflow: str, input_data: dict[str, Any], max_cost: float | None
     outputs = _attr(result, "outputs", {}) or {}
 
     print(f"{_status_color(str(status))}  run {run_id}  cost ${float(cost or 0.0):.4f}")
+    if cassette_mode == "record" and cassette is not None:
+        print(_color(f"Recorded cassette -> {record} ({len(cassette.records)} steps)", _C.GREEN))
+    elif cassette_mode == "replay" and cassette is not None:
+        verified = "verified" if cassette.verify() else "SIGNATURE MISMATCH"
+        print(
+            _color(
+                f"Replayed from {replay} ({cassette.replay_hits} hits, "
+                f"{cassette.replay_misses} live misses, signature {verified})",
+                _C.GREEN,
+            )
+        )
     if error:
         print(_color(f"Error: {error}", _C.RED), file=sys.stderr)
     if outputs:
@@ -1057,12 +1089,17 @@ def _cmd_run(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     # Local in-process execution path - no running server required.
-    if getattr(args, "local", False):
+    record = getattr(args, "record", None)
+    replay = getattr(args, "replay", None)
+    if record and replay:
+        print("Error: use only one of --record / --replay.", file=sys.stderr)
+        sys.exit(1)
+    if getattr(args, "local", False) or record or replay:
         input_data: dict[str, Any] = {}
         if args.input_file:
             input_data = _load_input_file(args.input_file)
         input_data.update(_parse_input_pairs(args.input))
-        _run_local(workflow_name, input_data, args.max_cost)
+        _run_local(workflow_name, input_data, args.max_cost, record=record, replay=replay)
         return
 
     client = _get_client(args)
@@ -4511,6 +4548,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "--local",
         action="store_true",
         help="Run the workflow in-process without a server (no `sandcastle serve` needed)",
+    )
+    p_run.add_argument(
+        "--record",
+        metavar="FILE",
+        help="Record every step output to a deterministic cassette file (implies --local)",
+    )
+    p_run.add_argument(
+        "--replay",
+        metavar="FILE",
+        help="Replay a recorded cassette offline at zero cost, no providers called (implies --local)",
     )
     _add_connection_args(p_run)
 

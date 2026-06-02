@@ -99,6 +99,10 @@ class RunContext:
     # Tenant ID is propagated into the run so sub-workflow + delegate steps
     # can inherit it (round 9 multi-tenant memory isolation).
     tenant_id: str | None = field(default=None, repr=False)
+    # Deterministic cassette: record every step output to a portable file, or replay
+    # recorded outputs offline at zero cost. See engine/cassette.py.
+    cassette: Any = field(default=None, repr=False)
+    cassette_mode: str | None = field(default=None, repr=False)  # "record" | "replay" | None
 
     def with_item(self, item: Any, index: int) -> RunContext:
         """Create a child context for a parallel_over item.
@@ -1862,6 +1866,22 @@ async def _execute_step_once(
                 context.workflow_name, step.id, prompt, effective_model or step.model,
                 tenant_id=context.tenant_id,
             )
+            # Deterministic cassette replay: return the recorded output without
+            # touching any provider. A key miss falls through to live execution.
+            if context.cassette is not None and context.cassette_mode == "replay":
+                recorded = context.cassette.get(cache_key)
+                if recorded is not None:
+                    duration = (datetime.now(timezone.utc) - started_at).total_seconds()
+                    logger.info(f"Step '{step.id}' cassette REPLAY (key={cache_key[:12]}...)")
+                    return StepResult(
+                        step_id=step.id,
+                        parallel_index=parallel_index,
+                        output=recorded["output"],
+                        cost_usd=0.0,
+                        duration_seconds=duration,
+                        status="completed",
+                        attempt=attempt,
+                    )
             cached = await _get_cached_result(cache_key)
             if cached:
                 duration = (datetime.now(timezone.utc) - started_at).total_seconds()
@@ -2136,6 +2156,15 @@ async def _execute_step_once(
                 output=output,
                 cost_usd=result.total_cost_usd,
             )
+            # Deterministic cassette: record this step output into the portable file.
+            if context.cassette is not None and context.cassette_mode == "record":
+                context.cassette.put(
+                    cache_key=cache_key,
+                    output=output,
+                    cost_usd=result.total_cost_usd,
+                    model=effective_model or step.model,
+                    step_id=step.id,
+                )
         elif not _step_reads_memory:
             logger.info(f"Step '{step.id}' output not cached (empty or failed)")
 
@@ -7873,6 +7902,8 @@ async def execute_workflow(
     depth: int = 0,
     admin_trusted: bool = False,
     tenant_id: str | None = None,
+    cassette: Any = None,
+    cassette_mode: str | None = None,
 ) -> WorkflowResult:
     """Execute a full workflow with parallel stages and retry logic.
 
@@ -7984,6 +8015,8 @@ async def execute_workflow(
         _step_output_max_tokens=step_output_max_tokens,
         admin_trusted=admin_trusted,
         tenant_id=tenant_id,
+        cassette=cassette,
+        cassette_mode=cassette_mode,
     )
 
     # Set telemetry context for this workflow run
@@ -8416,6 +8449,12 @@ async def execute_workflow(
         async with _cancel_flags_lock:
             _cancel_flags.pop(run_id, None)
         _wf_span_cm.__exit__(None, None, None)
+        # Persist a recorded cassette once the run has finished (record mode).
+        if context.cassette is not None and context.cassette_mode == "record":
+            try:
+                context.cassette.save()
+            except Exception as exc:  # pragma: no cover - best effort
+                logger.warning("Failed to write cassette: %s", exc)
 
 
 async def _save_routing_decision(
