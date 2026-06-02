@@ -33,6 +33,7 @@ interface MockStep {
   owner?: string;
   type?: string;
   artifact_url?: string;
+  model?: string | null;
   agent_template?: string;
   describe?: string;
 }
@@ -58,15 +59,15 @@ const MOCK_RUNS = [
 ];
 
 const MOCK_STEPS: MockStep[] = [
-  { step_id: "scrape", parallel_index: null, status: "completed", output: { url: "https://example.com", title: "Example Corp", employees: 150 }, cost_usd: 0.52, duration_seconds: 12.3, attempt: 1, error: null, started_at: h(0.5), pdf_artifact: false, responsibility: "Fetch raw HTML from target website", owner: "data-team" },
-  { step_id: "enrich", parallel_index: null, status: "completed", output: { company: "Example Corp", revenue: "$50M", industry: "SaaS", decision_makers: ["John CEO", "Jane CTO"] }, cost_usd: 0.89, duration_seconds: 18.7, attempt: 1, error: null, started_at: h(0.49), pdf_artifact: false, responsibility: "Augment scraped data with firmographic info", owner: "ml-ops" },
-  { step_id: "score", parallel_index: null, status: "completed", output: { lead_score: 87, tier: "A", recommendation: "High priority - schedule demo this week" }, cost_usd: 0.43, duration_seconds: 8.2, attempt: 1, error: null, started_at: h(0.48), pdf_artifact: false, owner: "sales-ai" },
-  { step_id: "report", parallel_index: null, status: "completed", output: { summary: "Lead enrichment report generated successfully" }, cost_usd: 0.12, duration_seconds: 3.1, attempt: 1, error: null, started_at: h(0.47), pdf_artifact: true, type: "report", artifact_url: "/api/runs/a1b2c3d4-1111-4000-8000-000000000001/steps/report/pdf", responsibility: "Generate final PDF report", owner: "data-team" },
+  { step_id: "scrape", parallel_index: null, status: "completed", output: { url: "https://example.com", title: "Example Corp", employees: 150 }, cost_usd: 0.52, duration_seconds: 12.3, attempt: 1, error: null, started_at: h(0.5), pdf_artifact: false, responsibility: "Fetch raw HTML from target website", owner: "data-team", model: "haiku" },
+  { step_id: "enrich", parallel_index: null, status: "completed", output: { company: "Example Corp", revenue: "$50M", industry: "SaaS", decision_makers: ["John CEO", "Jane CTO"] }, cost_usd: 0.89, duration_seconds: 18.7, attempt: 1, error: null, started_at: h(0.49), pdf_artifact: false, responsibility: "Augment scraped data with firmographic info", owner: "ml-ops", model: "google/gemini-2.5-pro" },
+  { step_id: "score", parallel_index: null, status: "completed", output: { lead_score: 87, tier: "A", recommendation: "High priority - schedule demo this week" }, cost_usd: 0.43, duration_seconds: 8.2, attempt: 1, error: null, started_at: h(0.48), pdf_artifact: false, owner: "sales-ai", model: "sonnet" },
+  { step_id: "report", parallel_index: null, status: "completed", output: { summary: "Lead enrichment report generated successfully" }, cost_usd: 0.12, duration_seconds: 3.1, attempt: 1, error: null, started_at: h(0.47), pdf_artifact: true, type: "report", artifact_url: "/api/runs/a1b2c3d4-1111-4000-8000-000000000001/steps/report/pdf", responsibility: "Generate final PDF report", owner: "data-team", model: "mistral/large" },
 ];
 
 const MOCK_STEPS_RUNNING: MockStep[] = [
-  { step_id: "fetch-competitors", parallel_index: null, status: "completed", output: { competitors: ["CompA", "CompB", "CompC"] }, cost_usd: 0.02, duration_seconds: 6.1, attempt: 1, error: null, responsibility: "Discover and list competitor domains", owner: "data-team" },
-  { step_id: "analyze", parallel_index: 0, status: "completed", output: { name: "CompA", changes: "New pricing page" }, cost_usd: 0.01, duration_seconds: 9.3, attempt: 1, error: null, owner: "ml-ops" },
+  { step_id: "fetch-competitors", parallel_index: null, status: "completed", output: { competitors: ["CompA", "CompB", "CompC"] }, cost_usd: 0.02, duration_seconds: 6.1, attempt: 1, error: null, responsibility: "Discover and list competitor domains", owner: "data-team", model: "haiku" },
+  { step_id: "analyze", parallel_index: 0, status: "completed", output: { name: "CompA", changes: "New pricing page" }, cost_usd: 0.01, duration_seconds: 9.3, attempt: 1, error: null, owner: "ml-ops", model: "google/gemini-2.5-pro" },
   { step_id: "analyze", parallel_index: 1, status: "running", output: null, cost_usd: 0.0, duration_seconds: 0, attempt: 1, error: null, owner: "ml-ops" },
   { step_id: "analyze", parallel_index: 2, status: "pending", output: null, cost_usd: 0.0, duration_seconds: 0, attempt: 1, error: null, owner: "ml-ops" },
 ];
