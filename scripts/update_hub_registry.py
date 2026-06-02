@@ -30,7 +30,10 @@ RAW_BASE = "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcas
 
 # Categories that should be ingested into the public hub as gizmax/ built-ins so the new
 # category chips show real templates. Extend this as new categories are added.
-NEW_CATEGORIES = {"compliance_grc", "healthcare", "fintech_banking", "llmops_ai_eng", "personal"}
+NEW_CATEGORIES = {
+    "compliance_grc", "healthcare", "fintech_banking", "llmops_ai_eng", "personal",
+    "research_intel", "finance_ops",
+}
 
 # Human labels for category ids (derived bar uses these; falls back to a title-cased slug).
 CATEGORY_LABELS = {
@@ -39,7 +42,8 @@ CATEGORY_LABELS = {
     "devops": "DevOps & SRE", "data": "Data", "creative": "Creative",
     "compliance_grc": "Compliance & GRC", "healthcare": "Healthcare & Life Sciences",
     "fintech_banking": "Fintech & Banking", "llmops_ai_eng": "LLMOps & AI Engineering",
-    "personal": "Personal & Life Admin",
+    "personal": "Personal & Life Admin", "research_intel": "Research & Intelligence",
+    "finance_ops": "Finance & FP&A Operations",
 }
 
 

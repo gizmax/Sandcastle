@@ -1,0 +1,543 @@
+# name: Warranty & Return-Window Tracker
+# description: Watches your purchases and counts down each item's return window and warranty expiry with DETERMINISTIC date math. A cross-source RACE takes the first valid purchase date from two order/receipt providers (retailer order-history API vs an email-receipt parser - provider failover, NOT a vote), a PARSE pulls purchase_date / price / warranty_term out of the winning payload, deterministic CODE computes return_window_days_left and warranty_days_left, buckets urgency, and dedups idempotently, then a CONDITION + NOTIFY ping you ONLY for items whose window is about to close so you never miss a return or a warranty claim.
+# tags: [warranty, returns, personal, life-admin, countdown, receipts, orders, race, parse, deadline, reminder, Slack]
+# category: personal
+# connectors: http, slack
+name: warranty-return-window-tracker
+description: >-
+  A personal "don't-miss-the-window" watchdog for everything you buy. A durable
+  SENSOR blocks until the next daily sweep is due, then a DETERMINISTIC http GET
+  pulls your recent purchases from the order-history endpoint and a code step
+  normalizes them into a loopable list. The workflow LOOPS over each purchase and,
+  per item, runs a cross-source RACE: the retailer/order-history API and a
+  secondary email-receipt parser are queried in parallel and the FIRST one that
+  returns a usable purchase-date payload wins (provider failover, NOT a vote, so a
+  single dead source never blocks the countdown). A PARSE step extracts
+  purchase_date / price / warranty_term from whichever payload won, and a
+  DETERMINISTIC code step does the load-bearing math entirely in Python: it computes
+  return_window_days_left and warranty_days_left from the purchase date plus the
+  return/warranty terms (falling back to your default policy when the source omits
+  them), buckets each item into an urgency tier, and builds a stable idempotency key
+  so the same item is never alerted twice in a sweep. A CONDITION then routes ONLY
+  the items whose return window or warranty is inside the closing-soon threshold,
+  and a NOTIFY pings you with exactly what is about to expire, how many days are
+  left, and the claim/return link. All the date arithmetic, bucketing and dedup are
+  100% deterministic code and run with ZERO model providers available; the only
+  optional model is a swappable one-line summary draft on the digest.
+default_model: sonnet
+default_max_turns: 6
+default_timeout: 1200
+input_schema:
+  required: ["orders_api_url", "receipt_parse_url"]
+  properties:
+    orders_api_url:
+      type: string
+      description: "Retailer / order-history REST base that lists your recent purchases and (per order) the authoritative purchase date. The primary race branch for the purchase date."
+      default: "https://your-retailer.example.com/api/orders"
+      example: "https://www.amazon.com/api/order-history/v1"
+    receipt_parse_url:
+      type: string
+      description: "Secondary receipt / email-receipt parser endpoint raced against the order API. Given an order reference it returns the parsed receipt (purchase_date, price, warranty_term). Provider failover, not a vote."
+      default: "https://receipt-parser.internal/api/parse"
+      example: "https://api.veryfi.com/api/v8/partner/documents"
+    return_window_default_days:
+      type: integer
+      description: "Fallback return-window length in days, applied ONLY when neither source reports an explicit return policy for the item (e.g. retailer default 30)."
+      default: 30
+      example: "30"
+    warranty_default_days:
+      type: integer
+      description: "Fallback warranty length in days, applied ONLY when neither source reports an explicit warranty term (e.g. manufacturer default 365)."
+      default: 365
+      example: "365"
+    closing_soon_days:
+      type: integer
+      description: "Alert threshold in days. An item is 'closing soon' when its return window OR its warranty has this many days (or fewer) left but is not yet expired. Drives the condition + notify."
+      default: 7
+      example: "7"
+    lookback_days:
+      type: integer
+      description: "Only sweep purchases made within this many days back, so very old already-closed orders are not re-evaluated every run."
+      default: 400
+      example: "400"
+    sweep_interval:
+      type: integer
+      description: "Seconds between sweeps. The sensor blocks until the order endpoint reports the next daily sweep window is due. Default 24h."
+      default: 86400
+      example: "86400"
+    sensor_timeout:
+      type: integer
+      description: "Sensor soft timeout in seconds - stop waiting for the next sweep window after this long (one watch run). Default 48h."
+      default: 172800
+      example: "172800"
+    summary_model:
+      type: string
+      description: "Swappable model for the optional one-line digest header (draft_header step). Repoint it to any of the 7 providers - pin an EU/local provider (mistral/large, ollama, omlx/qwen-3) for privacy. The countdown decision is pure code and works with this unavailable."
+      default: "haiku"
+      example: "mistral/large"
+    slack_channel:
+      type: string
+      description: "Channel / DM that receives the closing-soon reminder digest."
+      default: "#purchases-warranty"
+      example: "#purchases-warranty"
+steps:
+  # 1) DURABLE SENSOR - block until the next daily sweep window is due for your account.
+  #    Polls the order endpoint's sweep-status flag; until a sweep is due there is nothing
+  #    new to re-count. Event-driven within a schedule, no busy-looping. No model.
+  - id: await_sweep_window
+    type: sensor
+    sensor_config:
+      url: "{input.orders_api_url}/sweep-window?select=status,sweep_due"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200 and response.get('sweep_due') == True"
+      check_interval: 3600
+      timeout: 172800
+
+  # 2) DETERMINISTIC pull of your recent purchases from the order-history endpoint, limited
+  #    to the lookback window so long-closed orders are not re-swept. No model.
+  - id: pull_orders
+    type: http
+    depends_on: [await_sweep_window]
+    http_config:
+      url: "{input.orders_api_url}?status=delivered&since_days={input.lookback_days}&expand=items"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.ORDERS_API_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 3) DETERMINISTIC normalization of the order payload into a flat, loopable list. Each row
+  #    carries the order reference, the item label, the return/warranty links, and the two
+  #    race URLs (order-detail + receipt-parse) that the per-item race will query. No model.
+  - id: normalize_purchases
+    type: code
+    depends_on: [pull_orders]
+    code_config:
+      language: python
+      code: |
+        raw = _steps.get('pull_orders') or {}
+        rows = raw if isinstance(raw, list) else (
+            raw.get('orders') or raw.get('data') or raw.get('items') or raw.get('results') or []
+        )
+
+        orders_base = str(_input.get('orders_api_url') or '').rstrip('/')
+        receipt_base = str(_input.get('receipt_parse_url') or '').rstrip('/')
+
+        purchases = []
+        for rec in rows:
+            if not isinstance(rec, dict):
+                continue
+            oid = str(rec.get('order_id') or rec.get('id') or rec.get('reference') or '').strip()
+            if not oid:
+                continue
+            # An order may bundle several line items; emit one countdown row per item.
+            line_items = rec.get('items') or rec.get('line_items') or [rec]
+            if not isinstance(line_items, list) or not line_items:
+                line_items = [rec]
+            for li in line_items:
+                if not isinstance(li, dict):
+                    li = {}
+                item_id = str(li.get('item_id') or li.get('sku') or li.get('id') or oid).strip()
+                label = str(li.get('name') or li.get('title') or li.get('product') or oid).strip()
+                purchases.append({
+                    'order_id': oid,
+                    'item_id': item_id,
+                    'label': label,
+                    'retailer': rec.get('retailer') or rec.get('merchant') or 'unknown',
+                    'return_url': li.get('return_url') or rec.get('return_url') or '',
+                    'warranty_url': li.get('warranty_url') or rec.get('warranty_url') or '',
+                    # Race branch A: the order-detail endpoint (authoritative purchase date).
+                    'order_detail_url': f"{orders_base}/{oid}?expand=purchase_date,return_policy,warranty",
+                    # Race branch B: the receipt parser for the same order reference.
+                    'receipt_url': f"{receipt_base}?order_ref={oid}",
+                })
+
+        result = {
+            'purchase_count': len(purchases),
+            'lookback_days': int(_input.get('lookback_days') or 400),
+            'purchases': purchases,
+        }
+
+  # 4) LOOP over every purchase. Per-item child chain: RACE the order API vs the receipt
+  #    parser for the purchase-date payload -> PARSE purchase_date/price/warranty_term ->
+  #    DETERMINISTIC countdown math -> CONDITION routes closing-soon items into a reminder.
+  - id: per_item_loop
+    type: loop
+    depends_on: [normalize_purchases]
+    loop_config:
+      over: "steps.normalize_purchases.output.purchases"
+      step_ids:
+        - fetch_order_detail
+        - fetch_receipt
+        - purchase_date_race
+        - parse_receipt
+        - compute_countdown
+        - closing_branch
+      max_iterations: 1000
+
+  # 4a) RACE BRANCH A - http GET the order-detail from the retailer/order-history API. Carries
+  #     the authoritative purchase date + return policy + warranty term. on_failure: skip so a
+  #     dead order endpoint just lets the receipt parser win the race instead of aborting.
+  - id: fetch_order_detail
+    type: http
+    http_config:
+      url: "{input._item.order_detail_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.ORDERS_API_TOKEN}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 4b) RACE BRANCH B - http GET the parsed receipt for the same order reference from the
+  #     secondary email-receipt parser. Independent vendor; wins the race when the order API
+  #     is slow or omits the purchase date. on_failure: skip.
+  - id: fetch_receipt
+    type: http
+    http_config:
+      url: "{input._item.receipt_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.RECEIPT_PARSER_TOKEN}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 4c) CROSS-SOURCE RACE for the authoritative purchase date. The order-detail API and the
+  #     receipt parser were fired in parallel; the FIRST that returns a usable payload (one that
+  #     actually carries a purchase/order date field) wins. Provider FAILOVER, not a vote - the
+  #     countdown is anchored on whichever source answers first, the other is a hot standby.
+  - id: purchase_date_race
+    type: race
+    race_config:
+      branches:
+        - [fetch_order_detail]
+        - [fetch_receipt]
+      validator: "isinstance(output, dict) and any(k in str(output).lower() for k in ('purchase_date','order_date','purchased_at','date'))"
+
+  # 4d) PARSE the winning race payload into the three fields the math needs: purchase_date,
+  #     price and warranty_term. A schema-guided extraction over whichever vendor shape won;
+  #     the deterministic countdown reads ONE normalized record regardless of source.
+  - id: parse_receipt
+    type: parse
+    prompt: |
+      Extract these fields as JSON from the receipt/order payload below, normalizing across
+      whichever vendor shape won the race:
+        purchase_date     - ISO 8601 yyyy-mm-dd the item was purchased (from purchase_date /
+                            order_date / purchased_at / date), empty if none.
+        price             - item price as a number, 0 if absent.
+        currency          - ISO currency code if present, else empty.
+        warranty_term_days - explicit warranty length in days if the source reports one, else 0.
+        return_window_days - explicit return-window length in days if the source reports one, else 0.
+      Do not invent values - leave a field empty/0 when the payload does not state it.
+      Payload: {steps.purchase_date_race.output}
+    parse_config:
+      output: json
+
+  # 4e) DETERMINISTIC COUNTDOWN. NO model. The load-bearing math: from the parsed purchase_date
+  #     and the explicit-or-default return/warranty terms, compute return_window_days_left and
+  #     warranty_days_left as of today, bucket urgency (expired / closing_soon / open), and build
+  #     a stable idempotency key so the same item is never alerted twice in one sweep. Reads the
+  #     loop item, the parsed receipt and the input thresholds; trusts no model output.
+  - id: compute_countdown
+    type: code
+    code_config:
+      language: python
+      code: |
+        import re
+        import hashlib
+        from datetime import datetime, timezone, timedelta
+
+        item = _input.get('_item') or {}
+        parsed = _steps.get('parse_receipt') or {}
+        if not isinstance(parsed, dict):
+            parsed = {}
+
+        return_default = int(_input.get('return_window_default_days') or 30)
+        warranty_default = int(_input.get('warranty_default_days') or 365)
+        closing_soon = int(_input.get('closing_soon_days') or 7)
+
+        # --- parse the purchase date robustly; accept ISO date or datetime, else None.
+        def _parse_date(v):
+            s = str(v or '').strip()
+            if not s:
+                return None
+            s = s.replace('Z', '+00:00')
+            try:
+                dt = datetime.fromisoformat(s)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt
+            except (ValueError, TypeError):
+                pass
+            # last resort: pull a yyyy-mm-dd substring out of free text
+            m = re.search(r'(\d{4})-(\d{2})-(\d{2})', s)
+            if m:
+                try:
+                    return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), tzinfo=timezone.utc)
+                except ValueError:
+                    return None
+            return None
+
+        def _to_int(v, fallback=0):
+            try:
+                n = int(float(v))
+                return n if n > 0 else fallback
+            except (ValueError, TypeError):
+                return fallback
+
+        purchase_dt = _parse_date(parsed.get('purchase_date'))
+        now = datetime.now(timezone.utc)
+
+        # --- effective terms: explicit from the source, else fall back to the input policy.
+        return_term = _to_int(parsed.get('return_window_days'), return_default)
+        warranty_term = _to_int(parsed.get('warranty_term_days'), warranty_default)
+
+        have_date = purchase_dt is not None
+        if have_date:
+            age_days = (now - purchase_dt).days
+            return_deadline = purchase_dt + timedelta(days=return_term)
+            warranty_deadline = purchase_dt + timedelta(days=warranty_term)
+            return_days_left = (return_deadline - now).days
+            warranty_days_left = (warranty_deadline - now).days
+        else:
+            # No reliable purchase date from EITHER source - cannot count down. Flag for review.
+            age_days = None
+            return_days_left = None
+            warranty_days_left = None
+
+        def _bucket(days_left):
+            if days_left is None:
+                return 'unknown'
+            if days_left < 0:
+                return 'expired'
+            if days_left <= closing_soon:
+                return 'closing_soon'
+            return 'open'
+
+        return_bucket = _bucket(return_days_left)
+        warranty_bucket = _bucket(warranty_days_left)
+
+        # Closing-soon = at least one of the two windows is inside the threshold but not yet gone.
+        return_closing = return_bucket == 'closing_soon'
+        warranty_closing = warranty_bucket == 'closing_soon'
+        is_closing_soon = return_closing or warranty_closing
+
+        # The single soonest deadline drives sort + the headline number in the alert.
+        candidates = [d for d in (return_days_left, warranty_days_left) if d is not None and d >= 0]
+        soonest_days_left = min(candidates) if candidates else None
+
+        # Stable idempotency key: same order+item+sweep-day -> same key, so one alert per item.
+        sweep_day = now.strftime('%Y-%m-%d')
+        key_material = f"{item.get('order_id')}|{item.get('item_id')}|{sweep_day}"
+        idempotency_key = hashlib.sha256(key_material.encode('utf-8')).hexdigest()[:16]
+
+        result = {
+            'order_id': item.get('order_id'),
+            'item_id': item.get('item_id'),
+            'label': item.get('label'),
+            'retailer': item.get('retailer'),
+            'return_url': item.get('return_url'),
+            'warranty_url': item.get('warranty_url'),
+            'have_purchase_date': have_date,
+            'purchase_date': purchase_dt.date().isoformat() if have_date else None,
+            'age_days': age_days,
+            'price': parsed.get('price'),
+            'currency': parsed.get('currency') or '',
+            'return_term_days': return_term,
+            'warranty_term_days': warranty_term,
+            'return_days_left': return_days_left,
+            'warranty_days_left': warranty_days_left,
+            'return_bucket': return_bucket,
+            'warranty_bucket': warranty_bucket,
+            'return_closing': return_closing,
+            'warranty_closing': warranty_closing,
+            'is_closing_soon': is_closing_soon,
+            'soonest_days_left': soonest_days_left,
+            'idempotency_key': idempotency_key,
+        }
+
+  # 4f) CONDITION - route ONLY items whose return window OR warranty is inside the closing
+  #     threshold into the per-item collection list. Deterministic branch off the in-code
+  #     is_closing_soon flag (not any model output). Open / expired items just fall through.
+  - id: closing_branch
+    type: condition
+    condition_config:
+      expression: "{steps.compute_countdown.output.is_closing_soon} == True"
+      then: [record_closing_item]
+      else: [record_open_item]
+
+  # 4g) DETERMINISTIC record of a CLOSING-SOON item, deduped by the idempotency key so the same
+  #     item appears once in the digest. No model.
+  - id: record_closing_item
+    type: code
+    code_config:
+      language: python
+      code: |
+        cd = _steps.get('compute_countdown') or {}
+        result = {
+            'idempotency_key': cd.get('idempotency_key'),
+            'order_id': cd.get('order_id'),
+            'item_id': cd.get('item_id'),
+            'label': cd.get('label'),
+            'retailer': cd.get('retailer'),
+            'return_days_left': cd.get('return_days_left'),
+            'warranty_days_left': cd.get('warranty_days_left'),
+            'soonest_days_left': cd.get('soonest_days_left'),
+            'return_closing': cd.get('return_closing'),
+            'warranty_closing': cd.get('warranty_closing'),
+            'return_url': cd.get('return_url'),
+            'warranty_url': cd.get('warranty_url'),
+            'price': cd.get('price'),
+            'currency': cd.get('currency'),
+            'status': 'closing_soon',
+        }
+
+  # 4h) DETERMINISTIC record of a non-alerting item (open or expired or undated) so the sweep
+  #     totals reconcile. No model.
+  - id: record_open_item
+    type: code
+    code_config:
+      language: python
+      code: |
+        cd = _steps.get('compute_countdown') or {}
+        if not cd.get('have_purchase_date'):
+            status = 'undated'
+        elif cd.get('return_bucket') == 'expired' and cd.get('warranty_bucket') == 'expired':
+            status = 'expired'
+        else:
+            status = 'open'
+        result = {
+            'idempotency_key': cd.get('idempotency_key'),
+            'order_id': cd.get('order_id'),
+            'item_id': cd.get('item_id'),
+            'label': cd.get('label'),
+            'status': status,
+            'return_days_left': cd.get('return_days_left'),
+            'warranty_days_left': cd.get('warranty_days_left'),
+        }
+
+  # 5) DETERMINISTIC aggregation of every per-item record from the loop. Dedups closing-soon
+  #    items by idempotency key, sorts by soonest deadline, and counts each bucket. The
+  #    alert_count drives whether a reminder is sent. No model.
+  - id: aggregate_sweep
+    type: code
+    depends_on: [per_item_loop]
+    code_config:
+      language: python
+      code: |
+        loop_out = _steps.get('per_item_loop') or {}
+        items = loop_out if isinstance(loop_out, list) else (
+            loop_out.get('results') or loop_out.get('items') or loop_out.get('iterations') or []
+        )
+
+        closing = {}
+        open_count = 0
+        expired_count = 0
+        undated_count = 0
+
+        for it in items:
+            row = it
+            if isinstance(it, dict) and 'status' not in it:
+                row = (it.get('record_closing_item') or it.get('record_open_item')
+                       or it.get('output') or it)
+            if not isinstance(row, dict):
+                continue
+            status = str(row.get('status') or '')
+            if status == 'closing_soon':
+                key = row.get('idempotency_key') or f"{row.get('order_id')}|{row.get('item_id')}"
+                # idempotent dedup: keep the soonest view of a given item only once.
+                if key not in closing:
+                    closing[key] = row
+            elif status == 'open':
+                open_count += 1
+            elif status == 'expired':
+                expired_count += 1
+            elif status == 'undated':
+                undated_count += 1
+
+        def _sort_key(r):
+            v = r.get('soonest_days_left')
+            return v if isinstance(v, int) else 10 ** 9
+
+        closing_items = sorted(closing.values(), key=_sort_key)
+
+        # Human-readable lines for the digest, soonest first.
+        lines = []
+        for r in closing_items:
+            parts = []
+            if r.get('return_closing') and isinstance(r.get('return_days_left'), int):
+                parts.append(f"return in {r['return_days_left']}d")
+            if r.get('warranty_closing') and isinstance(r.get('warranty_days_left'), int):
+                parts.append(f"warranty in {r['warranty_days_left']}d")
+            window = ', '.join(parts) if parts else 'closing soon'
+            lines.append(f"- {r.get('label')} ({r.get('retailer')}): {window}")
+
+        result = {
+            'total_items': len(items),
+            'alert_count': len(closing_items),
+            'open_count': open_count,
+            'expired_count': expired_count,
+            'undated_count': undated_count,
+            'closing_items': closing_items,
+            'digest_lines': lines,
+            'has_alerts': len(closing_items) > 0,
+        }
+
+  # 6) Swappable one-line digest header DRAFT. The ONLY model in the path and it is optional +
+  #    provider-agnostic: it just phrases a friendly header from the already-computed counts.
+  #    Every number it shows was decided deterministically in code. Pinnable to any provider.
+  - id: draft_header
+    type: llm
+    depends_on: [aggregate_sweep]
+    model: haiku
+    prompt: >-
+      Write ONE short friendly line (max 18 words) for a purchases reminder. There are
+      {steps.aggregate_sweep.output.alert_count} item(s) whose return window or warranty is
+      about to close. Do not invent numbers - use only the count given. No emoji.
+
+  # 7) CONDITION - only send the reminder when at least one item is actually closing soon.
+  #    A clean sweep (alert_count == 0) stays silent. Deterministic branch off the in-code
+  #    has_alerts flag. No model.
+  - id: route_alert
+    type: condition
+    depends_on: [aggregate_sweep]
+    condition_config:
+      expression: "{steps.aggregate_sweep.output.alert_count} > 0"
+      then: [notify_closing]
+      else: [notify_quiet]
+
+  # 7a) NOTIFY (reminder) - ping you with exactly what is about to expire, how many days are
+  #     left on each, and the return/warranty links so you can act before the window shuts.
+  - id: notify_closing
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        :alarm_clock: {steps.draft_header.output}
+        {steps.aggregate_sweep.output.alert_count} item(s) closing within {input.closing_soon_days} days:
+        {steps.aggregate_sweep.output.digest_lines}
+        ({steps.aggregate_sweep.output.expired_count} already expired, {steps.aggregate_sweep.output.open_count} still open, {steps.aggregate_sweep.output.undated_count} undated)
+
+  # 7b) NOTIFY (quiet) - a silent-ish "nothing closing" confirmation on a clean sweep so you
+  #     know the watch ran. No model required.
+  - id: notify_quiet
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        :white_check_mark: Warranty/return sweep clean - nothing closing within {input.closing_soon_days} days.
+        {steps.aggregate_sweep.output.open_count} window(s) still open, {steps.aggregate_sweep.output.expired_count} already closed.
+on_complete:
+  storage_path: "warranty-return-window-tracker/{run_id}/result.json"

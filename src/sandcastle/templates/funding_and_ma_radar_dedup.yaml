@@ -1,0 +1,684 @@
+# name: Funding & M&A Radar with Cross-Source Dedup
+# description: A scheduled funding / M&A news radar that fans out parallel http GETs to multiple news + search providers so coverage survives any one source being down, then a deterministic CODE step canonicalizes URLs, builds a fuzzy entity+round+amount fingerprint, collapses cross-source duplicates into one event with a source-count, and merges against the last-run ledger so already-seen deals are dropped. A CLASSIFY tags each surviving event (new_round / follow_on / acquisition / rumor), a CONDITION + GATE (swappable llm_eval relevance judge AND a non-LLM amount>=min and not previously_seen threshold) filters, and only genuinely-new rounds are upserted to HubSpot and appended to a Google Sheet. The dedup and prior-seen merge are pure code - the deal team never chases the same headline twice.
+# tags: [Funding, MnA, VentureCapital, DealFlow, NewsRadar, Dedup, Fingerprint, Exa, Tavily, RSS, HubSpot, GoogleSheets, CRM, ResearchIntel]
+# category: research_intel
+# connectors: exa, tavily, hubspot, google-sheets, slack
+name: funding-and-ma-radar-dedup
+description: >-
+  A provider-neutral funding & M&A deal radar. A durable SENSOR fires on the
+  configured schedule (a quiet window between sweeps). Three parallel http GETs
+  then fan out to DIFFERENT providers - an Exa neural search, a Tavily news
+  search, and a plain RSS / news feed - so the radar keeps full coverage even
+  when any one source is down (this is fan-out for resilience, not a vote). A
+  deterministic CODE step does the load-bearing work with zero model
+  involvement: it canonicalizes every article URL (strips utm_* / fbclid / gclid
+  tracking params, lowercases the host, drops the fragment), normalizes the
+  company name (accent-fold, drop legal suffixes), parses the round stage and the
+  USD amount out of the headline, and builds a fuzzy fingerprint from
+  company + stage + amount-bucket. Same-deal articles reported across sources
+  collapse into ONE event carrying a source_count and every source URL, and the
+  event set is then merged against the last-run LEDGER so any deal already seen on
+  a prior sweep is dropped - the dedup and prior-seen merge are pure Python. A
+  CLASSIFY labels each surviving event new_round / follow_on / acquisition /
+  rumor (a swappable LABEL only - the keep/drop decision is already made in code).
+  A CONDITION routes events with material amounts into a relevance GATE with TWO
+  strategies that BOTH must pass: a swappable llm_eval relevance judge ("is this a
+  real, on-thesis funding/M&A event?", backable by any provider) AND a NON-LLM
+  threshold fed the pre-computed amount_usd / previously_seen booleans, so an
+  event passes/fails with zero model involvement. Surviving genuinely-new rounds
+  are upserted to HubSpot and appended to a Google Sheet, the refreshed dedup
+  ledger is written back, and the deal channel is notified. All canonicalization,
+  fingerprinting, dedup and the prior-seen merge run even with zero model
+  providers available; the model is confined to the swappable classify label and
+  the gate's swappable relevance judge.
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 1800
+input_schema:
+  required: ["watch_entities", "news_source_urls"]
+  properties:
+    watch_entities:
+      type: string
+      description: "Comma-separated companies / sectors / investors the deal team is tracking. Used to build the provider queries and as the on-thesis relevance anchor for the gate's judge."
+      default: "fintech, climate tech, Sequoia, a16z, defense tech"
+      example: "fintech, climate tech, Sequoia, a16z, defense tech"
+    news_source_urls:
+      type: string
+      description: "Comma-separated RSS / news feed URLs (TechCrunch, Axios Pro Rata, PitchBook News, etc.) hit as the third independent source alongside Exa and Tavily so coverage survives any one provider being down."
+      default: "https://techcrunch.com/category/venture/feed/,https://news.crunchbase.com/feed/"
+      example: "https://techcrunch.com/category/venture/feed/,https://news.crunchbase.com/feed/"
+    min_round_amount_usd:
+      type: number
+      description: "Minimum disclosed round / deal size in USD for an event to clear the gate's non-LLM threshold. Smaller (or undisclosed-and-immaterial) rounds are filtered before they reach the CRM."
+      default: 5000000
+      example: "5000000"
+    ledger_store_url:
+      type: string
+      description: "REST base of the dedup ledger (S3 REST gateway or Postgres / PostgREST) holding the fingerprints of deals seen on prior sweeps. GET reads last-run fingerprints; PUT writes the refreshed ledger so the same headline is never chased twice."
+      default: "https://deals.internal/dedup-ledger"
+      example: "https://deals.internal/dedup-ledger"
+    exa_search_url:
+      type: string
+      description: "Exa neural-search endpoint queried as source #1 for funding / M&A coverage."
+      default: "https://api.exa.ai/search"
+      example: "https://api.exa.ai/search"
+    tavily_search_url:
+      type: string
+      description: "Tavily news-search endpoint queried as source #2 (different vendor) for resilience."
+      default: "https://api.tavily.com/search"
+      example: "https://api.tavily.com/search"
+    sweep_interval:
+      type: integer
+      description: "Seconds between radar sweeps. The sensor blocks until the next sweep window is due."
+      default: 3600
+      example: "3600"
+    sensor_timeout:
+      type: integer
+      description: "Sensor soft timeout in seconds - stop waiting for the next sweep window after this long (one radar run). Default 24h."
+      default: 86400
+      example: "86400"
+    hubspot_base_url:
+      type: string
+      description: "HubSpot CRM REST base. New rounds are upserted as deal records so the pipeline reflects fresh activity automatically."
+      default: "https://api.hubapi.com"
+      example: "https://api.hubapi.com"
+    sheet_append_url:
+      type: string
+      description: "Google Sheets values:append endpoint (spreadsheet + range baked into the URL) the new rounds are appended to as a shared deal log."
+      default: "https://sheets.googleapis.com/v4/spreadsheets/SHEET_ID/values/Deals!A1:append?valueInputOption=USER_ENTERED"
+      example: "https://sheets.googleapis.com/v4/spreadsheets/1AbCdEf/values/Deals!A1:append?valueInputOption=USER_ENTERED"
+    gate_model:
+      type: string
+      description: "Swappable relevance-judge model for the gate. Any provider can back it; for EU data residency pin a local/EU provider (mistral/large, ollama). Dedup works with this unavailable."
+      default: "sonnet"
+      example: "mistral/large"
+    slack_channel:
+      type: string
+      description: "Deal-team Slack channel that receives the new-deal digest."
+      default: "#deal-radar"
+      example: "#deal-radar"
+steps:
+  # 1) DURABLE SENSOR - block until the next sweep window is due. A funding radar runs on a
+  #    quiet cadence; there is nothing to fetch until the interval elapses. Polls a lightweight
+  #    schedule endpoint on the ledger store; sweep_due flips true when the window is reached.
+  - id: await_sweep_window
+    type: sensor
+    sensor_config:
+      url: "{input.ledger_store_url}/schedule?select=sweep_due,next_sweep_at&interval=eq.{input.sweep_interval}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200 and response.get('sweep_due') == True"
+      check_interval: 3600
+      timeout: 86400
+
+  # 2) READ the last-run dedup LEDGER (fingerprints of deals already seen on prior sweeps). The
+  #    prior-seen set the deterministic merge drops duplicates against. No model. on_failure: skip
+  #    so a cold start (empty ledger) just treats every deal as new.
+  - id: fetch_ledger
+    type: http
+    depends_on: [await_sweep_window]
+    http_config:
+      url: "{input.ledger_store_url}/fingerprints?select=fingerprint,canonical_url,first_seen_at&order=first_seen_at.desc&limit=5000"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.LEDGER_STORE_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 3a) SOURCE #1 - Exa neural search. One of three independent providers; on_failure: skip so a
+  #     dead source never aborts the sweep (coverage survives any one source being down). Connector: exa.
+  - id: query_exa
+    type: http
+    depends_on: [await_sweep_window]
+    http_config:
+      url: "{input.exa_search_url}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.EXA_API_KEY}"
+      body: |
+        {
+          "query": "{input.watch_entities} funding round OR raises OR Series OR seed OR acquisition OR acquires OR merger",
+          "category": "news",
+          "numResults": 25,
+          "type": "neural"
+        }
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 3b) SOURCE #2 - Tavily news search (different vendor for resilience). Connector: tavily.
+  - id: query_tavily
+    type: http
+    depends_on: [await_sweep_window]
+    http_config:
+      url: "{input.tavily_search_url}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.TAVILY_API_KEY}"
+      body: |
+        {
+          "query": "{input.watch_entities} funding round raises Series seed acquisition merger",
+          "topic": "news",
+          "max_results": 25,
+          "search_depth": "advanced"
+        }
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 3c) SOURCE #3 - plain RSS / news feed (TechCrunch / Crunchbase News, etc.). A non-API source
+  #     so the radar survives both search vendors being down at once.
+  - id: query_rss_feed
+    type: http
+    depends_on: [await_sweep_window]
+    http_config:
+      url: "{input.news_source_urls}"
+      method: GET
+      headers:
+        Accept: "application/rss+xml, application/xml, text/xml, application/json"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 4) LOAD-BEARING DETERMINISTIC DEDUP. NO model. Flatten all three sources into a uniform
+  #    article list; canonicalize each URL (strip utm_* / fbclid / gclid tracking params,
+  #    lowercase host, drop fragment); normalize the company name (accent-fold, strip legal
+  #    suffixes); parse round stage + USD amount out of the headline; build a fuzzy fingerprint
+  #    from company + stage + amount-bucket. Same-deal articles reported across sources collapse
+  #    into ONE event with a source_count + every source URL. Then MERGE against the last-run
+  #    ledger so deals seen on a prior sweep are dropped. This is the whole point of the template.
+  - id: dedup_events
+    type: code
+    depends_on: [query_exa, query_tavily, query_rss_feed, fetch_ledger]
+    code_config:
+      language: python
+      code: |
+        import re
+        import unicodedata
+
+        # ---- 1. Coalesce every provider payload into a flat article list -------------------
+        def as_articles(blob, source):
+            arts = []
+            if blob is None:
+                return arts
+            rows = blob
+            if isinstance(blob, dict):
+                rows = (blob.get('results') or blob.get('articles') or blob.get('hits')
+                        or blob.get('items') or blob.get('data') or blob.get('entries') or [])
+            if isinstance(rows, str):
+                # RSS/XML came back as raw text - pull <item> title/link pairs without an XML parser.
+                items = re.findall(r'<item[ >](.*?)</item>', rows, flags=re.DOTALL | re.IGNORECASE)
+                for it in items:
+                    tm = re.search(r'<title[^>]*>(.*?)</title>', it, flags=re.DOTALL | re.IGNORECASE)
+                    lm = re.search(r'<link[^>]*>(.*?)</link>', it, flags=re.DOTALL | re.IGNORECASE)
+                    title = re.sub(r'<!\[CDATA\[|\]\]>', '', tm.group(1)).strip() if tm else ''
+                    link = re.sub(r'<!\[CDATA\[|\]\]>', '', lm.group(1)).strip() if lm else ''
+                    if title or link:
+                        arts.append({'title': title, 'url': link, 'source': source})
+                return arts
+            if not isinstance(rows, list):
+                rows = [rows]
+            for r in rows:
+                if not isinstance(r, dict):
+                    arts.append({'title': str(r), 'url': '', 'source': source})
+                    continue
+                title = str(r.get('title') or r.get('headline') or r.get('name') or '').strip()
+                url = str(r.get('url') or r.get('link') or r.get('href') or '').strip()
+                snippet = str(r.get('text') or r.get('snippet') or r.get('summary')
+                              or r.get('content') or r.get('description') or '')[:500]
+                arts.append({'title': title, 'url': url, 'snippet': snippet, 'source': source})
+            return arts
+
+        articles = []
+        articles += as_articles(_steps.get('query_exa'), 'exa')
+        articles += as_articles(_steps.get('query_tavily'), 'tavily')
+        articles += as_articles(_steps.get('query_rss_feed'), 'rss')
+
+        # ---- 2. Canonicalize a URL: lowercase host, strip tracking params, drop fragment ----
+        TRACKING = ('utm_', 'fbclid', 'gclid', 'mc_cid', 'mc_eid', 'ref', 'ref_src',
+                    'igshid', 'spm', 'cmpid', 'yclid', '_hsenc', '_hsmi')
+        def canonical_url(raw):
+            raw = str(raw or '').strip()
+            if not raw:
+                return ''
+            raw = raw.split('#', 1)[0]  # drop fragment
+            m = re.match(r'^(https?://)?([^/?]+)(/[^?]*)?(\?.*)?$', raw, flags=re.IGNORECASE)
+            if not m:
+                return raw.lower()
+            scheme = (m.group(1) or 'https://').lower()
+            host = (m.group(2) or '').lower()
+            if host.startswith('www.'):
+                host = host[4:]
+            path = (m.group(3) or '').rstrip('/')
+            query = m.group(4) or ''
+            kept = []
+            if query.startswith('?'):
+                for pair in query[1:].split('&'):
+                    key = pair.split('=', 1)[0].lower()
+                    if not key:
+                        continue
+                    if any(key == t or key.startswith(t) for t in TRACKING):
+                        continue
+                    kept.append(pair)
+            kept.sort()
+            qs = ('?' + '&'.join(kept)) if kept else ''
+            return scheme + host + path + qs
+
+        # ---- 3. Normalize a company name: accent-fold, drop legal suffixes / punctuation ----
+        LEGAL = ('inc', 'incorporated', 'llc', 'ltd', 'limited', 'corp', 'corporation',
+                 'co', 'company', 'gmbh', 'plc', 'sa', 'ag', 'bv', 'srl', 'oy', 'ab')
+        def norm_company(name):
+            name = unicodedata.normalize('NFKD', str(name or ''))
+            name = ''.join(c for c in name if not unicodedata.combining(c))
+            name = re.sub(r'[^A-Za-z0-9 ]+', ' ', name).lower()
+            toks = [t for t in name.split() if t and t not in LEGAL]
+            return ' '.join(toks)
+
+        # ---- 4. Parse round stage + USD amount out of a headline ----------------------------
+        STAGE_PATTERNS = [
+            ('pre_seed', r'pre[- ]?seed'),
+            ('seed', r'\bseed\b'),
+            ('series_a', r'series[- ]?a\b'),
+            ('series_b', r'series[- ]?b\b'),
+            ('series_c', r'series[- ]?c\b'),
+            ('series_d', r'series[- ]?d\b'),
+            ('growth', r'\bgrowth round\b'),
+            ('acquisition', r'\bacquir|\bacquisition\b|\bbuys\b|\bbuyout\b'),
+            ('merger', r'\bmerger\b|\bmerges\b'),
+        ]
+        def parse_stage(text):
+            t = str(text or '').lower()
+            for label, pat in STAGE_PATTERNS:
+                if re.search(pat, t):
+                    return label
+            return 'unknown'
+
+        MULT = {'k': 1e3, 'm': 1e6, 'mn': 1e6, 'million': 1e6,
+                'b': 1e9, 'bn': 1e9, 'billion': 1e9}
+        def parse_amount_usd(text):
+            t = str(text or '')
+            m = re.search(r'(?:\$|usd\s*|us\$\s*)\s*([0-9]+(?:\.[0-9]+)?)\s*(k|m|mn|bn|b|million|billion)?',
+                          t, flags=re.IGNORECASE)
+            if not m:
+                return 0.0
+            try:
+                base = float(m.group(1))
+            except (TypeError, ValueError):
+                return 0.0
+            suffix = (m.group(2) or '').lower()
+            return round(base * MULT.get(suffix, 1.0), 2)
+
+        # amount bucket keeps the fingerprint fuzzy: deals within the same order-of-magnitude band
+        # fingerprint together even if one source rounds $52M and another says $50M.
+        def amount_bucket(amount):
+            if amount <= 0:
+                return 'undisclosed'
+            if amount < 1e6:
+                return 'sub_1m'
+            if amount < 1e7:
+                return 'lt_10m'
+            if amount < 1e8:
+                return 'lt_100m'
+            if amount < 1e9:
+                return 'lt_1b'
+            return 'gte_1b'
+
+        # ---- 5. Build per-article enriched records ------------------------------------------
+        enriched = []
+        for a in articles:
+            title = a.get('title') or ''
+            blob = (title + ' ' + (a.get('snippet') or '')).strip()
+            cu = canonical_url(a.get('url'))
+            # crude company guess: leading capitalized phrase before a funding verb.
+            cm = re.search(r'^([A-Z][\w&.\- ]{1,48}?)\s+(?:raises|raised|secures|closes|lands|nabs|bags|acquires|to acquire|merges)',
+                           title)
+            company_guess = cm.group(1) if cm else (title.split(',')[0] if title else '')
+            company = norm_company(company_guess)
+            stage = parse_stage(blob)
+            amount = parse_amount_usd(blob)
+            bucket = amount_bucket(amount)
+            # fuzzy fingerprint: company + stage + amount band. Same deal across sources matches.
+            fp_company = company or canonical_url(a.get('url'))[:40]
+            fingerprint = (fp_company + '|' + stage + '|' + bucket).strip('|')
+            enriched.append({
+                'title': title,
+                'canonical_url': cu,
+                'source': a.get('source'),
+                'company': company,
+                'stage': stage,
+                'amount_usd': amount,
+                'amount_bucket': bucket,
+                'fingerprint': fingerprint,
+                'snippet': a.get('snippet') or '',
+            })
+
+        # ---- 6. Collapse cross-source duplicates by URL first, then by fuzzy fingerprint -----
+        # Two-key dedup: identical canonical URL is the same article; same fingerprint is the
+        # same DEAL reported by different outlets. Both fold into one event with a source_count.
+        by_url = {}
+        for e in enriched:
+            key = e['canonical_url'] or e['fingerprint']
+            if key not in by_url:
+                by_url[key] = dict(e, source_urls=[e['canonical_url']] if e['canonical_url'] else [],
+                                   sources=[e['source']])
+            else:
+                if e['canonical_url'] and e['canonical_url'] not in by_url[key]['source_urls']:
+                    by_url[key]['source_urls'].append(e['canonical_url'])
+                if e['source'] not in by_url[key]['sources']:
+                    by_url[key]['sources'].append(e['source'])
+                # prefer the largest parsed amount when sources disagree.
+                if e['amount_usd'] > by_url[key]['amount_usd']:
+                    by_url[key]['amount_usd'] = e['amount_usd']
+                    by_url[key]['amount_bucket'] = e['amount_bucket']
+
+        by_fp = {}
+        for e in by_url.values():
+            fp = e['fingerprint']
+            if fp not in by_fp:
+                by_fp[fp] = e
+            else:
+                tgt = by_fp[fp]
+                for u in e['source_urls']:
+                    if u not in tgt['source_urls']:
+                        tgt['source_urls'].append(u)
+                for s in e['sources']:
+                    if s not in tgt['sources']:
+                        tgt['sources'].append(s)
+                if e['amount_usd'] > tgt['amount_usd']:
+                    tgt['amount_usd'] = e['amount_usd']
+                    tgt['amount_bucket'] = e['amount_bucket']
+
+        deduped = []
+        for e in by_fp.values():
+            e['source_count'] = len(e['sources'])
+            deduped.append(e)
+
+        # ---- 7. MERGE against the last-run ledger: drop deals already seen on a prior sweep ---
+        led = _steps.get('fetch_ledger') or {}
+        led_rows = led if isinstance(led, list) else (
+            led.get('fingerprints') or led.get('data') or led.get('items') or led.get('records') or []
+        )
+        seen_fps = set()
+        seen_urls = set()
+        for r in led_rows:
+            if isinstance(r, dict):
+                if r.get('fingerprint'):
+                    seen_fps.add(str(r['fingerprint']))
+                if r.get('canonical_url'):
+                    seen_urls.add(str(r['canonical_url']))
+
+        new_events = []
+        for e in deduped:
+            previously_seen = (e['fingerprint'] in seen_fps) or any(u in seen_urls for u in e['source_urls'])
+            e['previously_seen'] = previously_seen
+            if not previously_seen:
+                new_events.append(e)
+
+        result = {
+            'raw_article_count': len(articles),
+            'after_url_dedup': len(by_url),
+            'after_fingerprint_dedup': len(deduped),
+            'previously_seen_dropped': len(deduped) - len(new_events),
+            'new_event_count': len(new_events),
+            'new_events': new_events,
+            'ledger_fingerprint_count': len(seen_fps),
+        }
+
+  # 5) CLASSIFY each surviving event new_round / follow_on / acquisition / rumor. The keep/drop
+  #    decision was ALREADY made in code; the model only LABELS for routing/reporting and is
+  #    swappable to any provider. (When there are zero new events the label is moot.)
+  - id: classify_event
+    type: classify
+    depends_on: [dedup_events]
+    classify_config:
+      model: haiku
+      input: >
+        Label this deduped funding / M&A event using ONLY the parsed fields. 'new_round' = a
+        fresh primary financing (seed / Series A-D / growth). 'follow_on' = an extension or a
+        later round of a company already funded. 'acquisition' = a company is being bought /
+        merged. 'rumor' = reported as in-talks / exploring / considering with no confirmed
+        terms. Stage={steps.dedup_events.output.new_events}. Watch list:
+        {input.watch_entities}.
+      categories:
+        - new_round
+        - follow_on
+        - acquisition
+        - rumor
+      branches:
+        new_round: [route_material]
+        follow_on: [route_material]
+        acquisition: [route_material]
+        rumor: [route_material]
+
+  # 6) DETERMINISTIC materiality pre-filter. NO model. Keep only new events whose parsed amount
+  #    clears min_round_amount_usd (undisclosed rounds are kept ONLY when multi-sourced, as a
+  #    coverage signal) and that were not previously seen. Produces the candidate set the gate
+  #    judges and the booleans the gate's non-LLM threshold strategy consumes.
+  - id: filter_material
+    type: code
+    depends_on: [dedup_events, classify_event]
+    code_config:
+      language: python
+      code: |
+        dd = _steps.get('dedup_events') or {}
+        events = dd.get('new_events', [])
+        label = str(_steps.get('classify_event') or '').strip().lower()
+
+        try:
+            min_amount = float(_input.get('min_round_amount_usd', 5000000) or 0)
+        except (TypeError, ValueError):
+            min_amount = 0.0
+
+        material = []
+        for e in events:
+            amount = float(e.get('amount_usd') or 0.0)
+            multi_sourced = int(e.get('source_count') or 1) >= 2
+            # material if the disclosed amount clears the floor, OR it is undisclosed but
+            # corroborated by 2+ independent sources (a coverage signal worth a human look).
+            is_material = (amount >= min_amount) or (amount <= 0 and multi_sourced)
+            if is_material and not e.get('previously_seen'):
+                material.append(dict(e, event_label=label, is_material=True))
+
+        # gate booleans pre-computed in code so the non-LLM strategy reasons over pure arithmetic.
+        max_amount = max([float(e.get('amount_usd') or 0.0) for e in material], default=0.0)
+        any_above_floor = any(float(e.get('amount_usd') or 0.0) >= min_amount for e in material)
+
+        result = {
+            'min_round_amount_usd': min_amount,
+            'material_count': len(material),
+            'material_events': material,
+            'max_amount_usd': max_amount,
+            'any_above_floor': any_above_floor,
+            'has_material': len(material) > 0,
+            'all_previously_seen': len(material) == 0,
+        }
+
+  # 7) CONDITION - only run the relevance gate + CRM writes when there is at least one material,
+  #    genuinely-new event. A sweep with nothing new skips straight to the quiet digest. No model.
+  - id: route_material
+    type: condition
+    depends_on: [filter_material]
+    condition_config:
+      expression: "{steps.filter_material.output.has_material}"
+      then: [relevance_gate, upsert_hubspot, append_sheet, write_ledger, notify_new_deals]
+      else: [notify_clean]
+
+  # 8) RELEVANCE GATE (swappable + model-independent). TWO strategies, BOTH must pass:
+  #    (1) llm_eval relevance judge - "are these real, on-thesis funding/M&A events, not press
+  #        chatter or off-thesis noise?", model pinned to a SWAPPABLE provider (any of the 7);
+  #    (2) llm_eval acting as a DETERMINISTIC threshold - fed ONLY the pre-computed
+  #        max_amount_usd / any_above_floor / material_count booleans and told to answer purely
+  #        from the arithmetic, so an event set still passes/fails the gate on the non-LLM math.
+  - id: relevance_gate
+    type: gate
+    depends_on: [filter_material]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are a venture deal-flow analyst. The radar has deterministically deduped a set
+              of funding / M&A events and confirmed each is new (not seen on a prior sweep). Decide
+              whether these are REAL, on-thesis financing / acquisition events worth surfacing to
+              the deal team, or off-thesis noise / pure rumor / recycled coverage. Answer exactly
+              'approved' if the set is materially relevant to the watch list, otherwise answer
+              'rejected' and name the reason. Judge relevance only; the dollar threshold is checked
+              separately.
+            input: "Watch list: {input.watch_entities}. Material new events: {steps.filter_material.output.material_events}"
+            model: "{input.gate_model}"
+        - type: llm_eval
+          config:
+            prompt: >-
+              Deterministic threshold check. Answer exactly 'approved' if material_count >= 1 AND
+              (any_above_floor is True OR max_amount_usd >= {input.min_round_amount_usd}); otherwise
+              answer 'rejected'. Use ONLY the supplied numbers and booleans - do not infer or reason
+              beyond the arithmetic comparison.
+            input: "material_count={steps.filter_material.output.material_count} any_above_floor={steps.filter_material.output.any_above_floor} max_amount_usd={steps.filter_material.output.max_amount_usd} floor={input.min_round_amount_usd}"
+            model: haiku
+
+  # 9) UPSERT the new rounds to HubSpot as deal records so the CRM pipeline reflects fresh
+  #    activity automatically. Connector: hubspot. on_failure: skip so a CRM hiccup never loses
+  #    the sheet append + ledger write.
+  - id: upsert_hubspot
+    type: http
+    http_config:
+      url: "{input.hubspot_base_url}/crm/v3/objects/deals/batch/upsert"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.HUBSPOT_API_TOKEN}"
+      body: |
+        {
+          "inputs": [
+            {
+              "idProperty": "deal_fingerprint",
+              "properties": {
+                "dealname": "Funding/M&A radar - {steps.filter_material.output.material_count} new event(s)",
+                "deal_radar_payload": "{steps.filter_material.output.material_events}",
+                "pipeline": "default"
+              }
+            }
+          ]
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 10) APPEND the same new rounds to a shared Google Sheet as a human-readable deal log.
+  #     Connector: google-sheets. on_failure: skip.
+  - id: append_sheet
+    type: http
+    http_config:
+      url: "{input.sheet_append_url}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.GOOGLE_SHEETS_TOKEN}"
+      body: |
+        {
+          "majorDimension": "ROWS",
+          "values": [
+            ["{steps.filter_material.output.material_count} new deals", "max ${steps.filter_material.output.max_amount_usd}", "{steps.filter_material.output.material_events}"]
+          ]
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 11) DETERMINISTIC build of the REFRESHED dedup ledger payload. NO model. Fold every material
+  #     new event's fingerprint + canonical URL into upsert rows so the NEXT sweep treats these
+  #     deals as already-seen and never chases the same headline twice. This closes the loop.
+  - id: build_ledger_update
+    type: code
+    depends_on: [filter_material]
+    code_config:
+      language: python
+      code: |
+        import json
+        from datetime import datetime, timezone
+
+        fm = _steps.get('filter_material') or {}
+        events = fm.get('material_events', [])
+        now = datetime.now(timezone.utc).isoformat()
+
+        rows = []
+        for e in events:
+            rows.append({
+                'fingerprint': e.get('fingerprint'),
+                'canonical_url': (e.get('source_urls') or [''])[0],
+                'company': e.get('company'),
+                'stage': e.get('stage'),
+                'amount_usd': e.get('amount_usd'),
+                'source_count': e.get('source_count'),
+                'first_seen_at': now,
+            })
+
+        result = {
+            'sweep_at': now,
+            'new_fingerprint_count': len(rows),
+            'rows': rows,
+            'payload_json': json.dumps({'fingerprints': rows}, separators=(',', ':')),
+        }
+
+  # 12) WRITE the refreshed ledger back to the dedup store (PUT/upsert). The prior-seen set the
+  #     NEXT sweep merges against. Connector: the ledger store REST gateway. on_failure: abort so
+  #     a failed ledger write surfaces loudly (otherwise the same deals re-fire next sweep).
+  - id: write_ledger
+    type: http
+    depends_on: [build_ledger_update]
+    http_config:
+      url: "{input.ledger_store_url}/fingerprints?on_conflict=fingerprint"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+        Prefer: "resolution=merge-duplicates"
+      auth: "bearer:{env.LEDGER_STORE_TOKEN}"
+      body: "{steps.build_ledger_update.output.payload_json}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 13) NOTIFY (new deals) - push the deduped new-deal digest to the deal channel with the
+  #     dedup stats so the team sees fresh rounds the moment they land. service: slack.
+  - id: notify_new_deals
+    type: notify
+    depends_on: [filter_material]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        :money_with_wings: DEAL RADAR - {steps.filter_material.output.material_count} new funding / M&A event(s)
+        Raw articles pulled : {steps.dedup_events.output.raw_article_count}
+        After dedup         : {steps.dedup_events.output.after_fingerprint_dedup}
+        Already-seen dropped: {steps.dedup_events.output.previously_seen_dropped}
+        Largest round       : ${steps.filter_material.output.max_amount_usd}
+        New events          : {steps.filter_material.output.material_events}
+        Upserted to HubSpot + appended to the deal sheet. Ledger refreshed - these will not re-fire next sweep.
+
+  # 14) NOTIFY (clean) - quiet "nothing new this sweep" digest. No CRM write, no ledger churn.
+  - id: notify_clean
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        :white_check_mark: Deal radar sweep clean - {steps.dedup_events.output.raw_article_count} articles pulled, {steps.dedup_events.output.after_fingerprint_dedup} unique deals, {steps.dedup_events.output.previously_seen_dropped} already-seen dropped, 0 new material rounds. No CRM write.
+on_complete:
+  storage_path: "funding-and-ma-radar-dedup/{run_id}/result.json"

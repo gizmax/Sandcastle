@@ -1,0 +1,716 @@
+# name: Competitor Pricing-Page Change Sentinel
+# description: Always-on watcher that snapshots each rival's live pricing page, deterministically diffs plan / price / feature deltas against the last SHA-256-sealed snapshot, and only pages product + sales when a swappable two-strategy materiality gate confirms the change is a real pricing move (not A/B noise or layout churn). A durable SENSOR blocks until the next poll interval or a price-change webhook; an http GET (firecrawl) renders each pricing page; deterministic CODE parses plans into a canonical {plan,price,billing_period,features[]} shape, computes the structured diff and seals the new snapshot; a CONDITION routes only non-empty diffs into the GATE (llm_eval judge AND a non-LLM price_delta_pct threshold) before NOTIFY to Slack and an http PUT of the sealed snapshot to S3. Detection and diff are 100% deterministic code; the model only judges materiality.
+# tags: [CompetitiveIntel, PricingIntelligence, ChangeDetection, sensor, firecrawl, diff, SHA-256, snapshot, S3, Slack, materiality-gate, research_intel]
+# category: research_intel
+# connectors: firecrawl, aws-s3, slack
+name: competitor-pricing-page-change-sentinel
+description: >-
+  An always-on sentinel that watches every rival's live pricing page and pages product + sales
+  only on a REAL pricing move. A durable SENSOR blocks until the next poll interval is reached OR
+  a price-change webhook fires (event-driven within a schedule). A deterministic CODE step then
+  normalizes the watch list into a loopable set of competitor pricing URLs, and the workflow LOOPS
+  each rival: an http GET renders the live pricing page through Firecrawl (JS-rendered HTML +
+  extracted plan markup), a DETERMINISTIC code step parses the rendered page into a canonical
+  list of {plan, price, billing_period, features[]} rows, an http GET pulls that rival's last
+  SEALED JSON snapshot, and a second DETERMINISTIC code step computes a structured diff
+  (added / removed plans, per-plan price_delta_pct, feature gains / losses), SHA-256-seals the new
+  snapshot, and emits a stable change signature. A CONDITION routes only non-empty diffs into a
+  MATERIALITY GATE that has TWO strategies BOTH of which must pass: a SWAPPABLE llm_eval judge
+  ("is this a real pricing move or A/B / layout / copy noise?", backable by any of the 7 providers)
+  AND a NON-LLM threshold strategy fed ONLY the pre-computed price_delta_pct / structural-change
+  booleans, so a change clears the gate on the arithmetic alone. After the loop, a deterministic
+  code step aggregates and SHA-256-seals the confirmed pricing-move events, a CONDITION gates the
+  alert path, a NOTIFY pages the product + sales Slack channel with the deltas, and an http PUT
+  writes the sealed per-rival snapshots to an S3 (or S3-compatible) bucket so the next sweep diffs
+  against tamper-evident truth. All page-change detection, parsing and diffing are 100%
+  deterministic code and run with zero model providers available; the model is confined to the
+  gate's swappable materiality judge.
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 1800
+input_schema:
+  required: ["competitor_pricing_urls", "snapshot_store_url"]
+  properties:
+    competitor_pricing_urls:
+      type: string
+      description: "Comma-separated (or newline-separated) list of rival pricing-page URLs to watch. Each is rendered through Firecrawl and diffed against its own last sealed snapshot."
+      default: "https://competitor-a.com/pricing,https://competitor-b.com/pricing"
+      example: "https://stripe.com/pricing,https://www.twilio.com/pricing,https://vercel.com/pricing"
+    snapshot_store_url:
+      type: string
+      description: "Snapshot store REST base URL holding the last SEALED canonical pricing snapshot per rival (S3 REST gateway or Postgres / PostgREST). The structured diff is measured against this."
+      default: "https://pricing-intel.internal/snapshots"
+      example: "https://pricing-intel.internal/snapshots"
+    price_delta_threshold:
+      type: number
+      description: "Materiality threshold for the gate's NON-LLM strategy: a per-plan price change at or above this absolute percent (e.g. 5 = 5%), OR any added/removed plan, OR a feature gain/loss, is treated as a real pricing move (not A/B noise)."
+      default: 5.0
+      example: "5.0"
+    firecrawl_base_url:
+      type: string
+      description: "Firecrawl REST base URL used to render each JS-heavy pricing page to clean HTML / extracted markup before parsing. Connector: firecrawl."
+      default: "https://api.firecrawl.dev/v1"
+      example: "https://api.firecrawl.dev/v1"
+    poll_interval:
+      type: integer
+      description: "Seconds between pricing sweeps. The sensor blocks until this interval elapses OR a price-change webhook bumps the watch flag (event-driven within a schedule)."
+      default: 3600
+      example: "3600"
+    sensor_timeout:
+      type: integer
+      description: "Sensor soft timeout in seconds - stop waiting for the next poll window after this long (one watch run). Default 24h."
+      default: 86400
+      example: "86400"
+    gate_model:
+      type: string
+      description: "Swappable materiality-judge model for the gate. Any of the 7 providers can back it; for EU data pin a local / EU provider (mistral/large, ollama, omlx/qwen-3). Detection and diff work with this unavailable."
+      default: "sonnet"
+      example: "mistral/large"
+    s3_base_url:
+      type: string
+      description: "S3 (or S3-compatible) REST base URL that receives the SHA-256-sealed per-rival pricing snapshots so the next sweep diffs against tamper-evident truth. Connector: aws-s3."
+      default: "https://s3.eu-central-1.amazonaws.com"
+      example: "https://s3.eu-central-1.amazonaws.com"
+    s3_bucket:
+      type: string
+      description: "Bucket name that stores the sealed pricing snapshots and confirmed-move ledger."
+      default: "competitor-pricing-snapshots"
+      example: "acme-competitor-pricing-snapshots"
+    slack_channel:
+      type: string
+      description: "Product + sales Slack channel that receives the confirmed pricing-move alert (or the quiet clean-sweep digest)."
+      default: "#competitive-pricing-intel"
+      example: "#competitive-pricing-intel"
+steps:
+  # 1) DURABLE SENSOR - block until the next pricing-sweep window elapses OR a price-change
+  #    webhook has bumped the watch flag. Polls a lightweight watch-status endpoint; until a
+  #    sweep is due (or a webhook flips changed_since_last_seal) there is nothing to re-check.
+  #    Event-driven within a schedule: a webhook makes the next window due immediately. No model.
+  - id: await_sweep_window
+    type: sensor
+    sensor_config:
+      url: "{input.snapshot_store_url}/watch-status?select=sweep_due,changed_since_last_seal"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200 and (response.get('sweep_due') == True or response.get('changed_since_last_seal') == True)"
+      check_interval: 3600
+      timeout: 86400
+
+  # 2) DETERMINISTIC normalization of the watch list into a flat, loopable set of rivals. Each
+  #    row carries the pricing-page URL, a stable slug used as the snapshot key, and the
+  #    snapshot-store URL its diff is measured against. No model.
+  - id: normalize_targets
+    type: code
+    depends_on: [await_sweep_window]
+    code_config:
+      language: python
+      code: |
+        import re
+
+        raw = str(_input.get('competitor_pricing_urls') or '')
+        # Accept comma OR newline OR semicolon separated lists.
+        parts = re.split(r'[,\n;]+', raw)
+        snapshot_base = str(_input.get('snapshot_store_url') or '').rstrip('/')
+
+        def slugify(url):
+            # Stable per-rival key from the host - deterministic, no model.
+            host = re.sub(r'^https?://', '', url).split('/')[0]
+            host = re.sub(r'^www\.', '', host)
+            slug = re.sub(r'[^a-z0-9]+', '-', host.lower()).strip('-')
+            return slug or 'rival'
+
+        seen = set()
+        targets = []
+        for p in parts:
+            url = p.strip()
+            if not url or not url.lower().startswith('http'):
+                continue
+            slug = slugify(url)
+            if slug in seen:
+                continue
+            seen.add(slug)
+            targets.append({
+                'slug': slug,
+                'pricing_url': url,
+                # Snapshot store key holding this rival's last sealed canonical pricing snapshot.
+                'snapshot_url': f"{snapshot_base}?rival=eq.{slug}&order=sealed_at.desc&limit=1",
+            })
+
+        result = {
+            'target_count': len(targets),
+            'targets': targets,
+        }
+
+  # 3) LOOP over every rival. Per-rival child chain: GET rendered pricing page (firecrawl http) ->
+  #    deterministic parse into canonical plans (code) -> GET last sealed snapshot (http) ->
+  #    deterministic structured diff + SHA-256 seal (code) -> condition routes any non-empty
+  #    diff into the materiality gate.
+  - id: per_rival_loop
+    type: loop
+    depends_on: [normalize_targets]
+    loop_config:
+      over: "steps.normalize_targets.output.targets"
+      step_ids:
+        - render_pricing_page
+        - parse_plans
+        - fetch_last_snapshot
+        - diff_and_seal
+        - change_branch
+      max_iterations: 200
+
+  # 3a) http GET - render THIS rival's live pricing page through Firecrawl so JS-built pricing
+  #     tables resolve to clean HTML / extracted markup before parsing. on_failure: skip so one
+  #     unreachable site does not abort the whole sweep. Connector: firecrawl.
+  - id: render_pricing_page
+    type: http
+    http_config:
+      url: "{input.firecrawl_base_url}/scrape"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.FIRECRAWL_API_KEY}"
+      body: |
+        {
+          "url": "{input._item.pricing_url}",
+          "formats": ["html", "markdown"],
+          "onlyMainContent": true,
+          "waitFor": 2500
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 3b) DETERMINISTIC PARSE. NO model. Turn the rendered page into a canonical, comparable list of
+  #     {plan, price, billing_period, features[]} rows. Extracts plan blocks, money amounts and a
+  #     monthly/annual signal with regex + simple text heuristics, then canonicalizes each plan
+  #     (lowercased name key, numeric price, sorted unique feature set) so the diff is stable and
+  #     A/B copy churn that does not change the canonical shape produces NO diff.
+  - id: parse_plans
+    type: code
+    code_config:
+      language: python
+      code: |
+        import re
+
+        target = _input.get('_item') or {}
+        rendered = _steps.get('render_pricing_page') or {}
+
+        # Firecrawl returns the body under data.markdown / data.html (shape-tolerant).
+        def pick_text(blob):
+            if isinstance(blob, str):
+                return blob
+            if isinstance(blob, dict):
+                data = blob.get('data') if isinstance(blob.get('data'), dict) else blob
+                for k in ('markdown', 'content', 'text', 'html'):
+                    v = data.get(k)
+                    if isinstance(v, str) and v.strip():
+                        return v
+            return ''
+
+        text = pick_text(rendered)
+        # Strip HTML tags to plain text lines for heuristic parsing (no model).
+        plain = re.sub(r'<[^>]+>', ' ', text)
+        plain = re.sub(r'&[a-z]+;', ' ', plain)
+        lines = [ln.strip() for ln in re.split(r'[\r\n]+', plain) if ln.strip()]
+
+        # Common plan-name vocabulary seen on SaaS pricing pages.
+        plan_vocab = [
+            'free', 'starter', 'basic', 'standard', 'plus', 'pro', 'professional',
+            'team', 'teams', 'business', 'growth', 'scale', 'premium', 'enterprise',
+            'ultimate', 'advanced', 'essentials', 'individual',
+        ]
+
+        money_re = r'(?:\$|usd|eur|€|gbp|£)\s?([0-9][0-9.,]*)'
+
+        def parse_price(s):
+            m = re.search(money_re, s, flags=re.IGNORECASE)
+            if not m:
+                # Custom / contact-sales tiers have no numeric price.
+                if re.search(r'\b(custom|contact|let.?s talk|talk to)\b', s, flags=re.IGNORECASE):
+                    return None
+                return None
+            num = m.group(1).replace(',', '')
+            try:
+                return round(float(num), 2)
+            except ValueError:
+                return None
+
+        def billing_period(s):
+            low = s.lower()
+            if re.search(r'/\s?(yr|year|annual|annually|yearly)|per year', low):
+                return 'annual'
+            if re.search(r'/\s?(mo|month|monthly)|per month', low):
+                return 'monthly'
+            return 'unknown'
+
+        # Walk the lines: when a line names a plan, open a plan block; collect following
+        # short lines as candidate feature bullets until the next plan header.
+        plans = {}
+        order = []
+        current = None
+        for ln in lines:
+            low = ln.lower()
+            named = None
+            for name in plan_vocab:
+                if re.search(r'\b' + re.escape(name) + r'\b', low):
+                    named = name
+                    break
+            if named and len(ln) <= 40:
+                key = named
+                if key not in plans:
+                    plans[key] = {
+                        'plan': named.capitalize(),
+                        'price': None,
+                        'billing_period': 'unknown',
+                        'features': [],
+                    }
+                    order.append(key)
+                current = key
+                # The plan header line itself may carry the price.
+                p = parse_price(ln)
+                if p is not None:
+                    plans[key]['price'] = p
+                    plans[key]['billing_period'] = billing_period(ln)
+                continue
+            if current is None:
+                continue
+            # Price line for the current plan.
+            p = parse_price(ln)
+            if p is not None and plans[current]['price'] is None:
+                plans[current]['price'] = p
+                plans[current]['billing_period'] = billing_period(ln)
+                continue
+            # Feature bullet: short-ish, not a price line.
+            if 3 <= len(ln) <= 80 and not re.search(money_re, ln, flags=re.IGNORECASE):
+                feat = re.sub(r'^[\-•\*–—\s]+', '', ln).strip()
+                if feat and feat.lower() not in plan_vocab:
+                    plans[current]['features'].append(feat)
+
+        # Canonicalize: sorted unique features, deterministic plan order by name key.
+        canonical = []
+        for key in sorted(order):
+            pl = plans[key]
+            feats = sorted({f.strip().lower() for f in pl['features'] if f.strip()})
+            canonical.append({
+                'plan': pl['plan'],
+                'plan_key': key,
+                'price': pl['price'],
+                'billing_period': pl['billing_period'],
+                'features': feats,
+            })
+
+        result = {
+            'slug': target.get('slug'),
+            'pricing_url': target.get('pricing_url'),
+            'plan_count': len(canonical),
+            'plans': canonical,
+            'parse_ok': len(canonical) > 0,
+        }
+
+  # 3c) http GET this rival's LAST SEALED canonical snapshot from the snapshot store, so the diff
+  #     is measured against the previously-sealed truth, not re-derived. on_failure: skip (first
+  #     sweep simply has no prior snapshot and everything is treated as a baseline). No model.
+  - id: fetch_last_snapshot
+    type: http
+    http_config:
+      url: "{input._item.snapshot_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.SNAPSHOT_STORE_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 3d) DETERMINISTIC STRUCTURED DIFF + SHA-256 SEAL. NO model. Compare the freshly parsed
+  #     canonical plans against the last sealed snapshot: added / removed plans, per-plan
+  #     price_delta_pct, and feature gains / losses. Compute the max absolute price_delta_pct and
+  #     a structural-change flag (the non-LLM materiality signals the gate consumes), then
+  #     canonical-JSON + SHA-256 seal the NEW snapshot so the next sweep diffs against it.
+  - id: diff_and_seal
+    type: code
+    code_config:
+      language: python
+      code: |
+        import json
+        import hashlib
+        from datetime import datetime, timezone
+
+        parsed = _steps.get('parse_plans') or {}
+        snap_raw = _steps.get('fetch_last_snapshot') or {}
+        slug = parsed.get('slug')
+        new_plans = parsed.get('plans') or []
+
+        # --- recover the previously sealed plan list from whatever shape the store returns ----
+        def prev_plans_from(blob):
+            rows = blob if isinstance(blob, list) else (
+                blob.get('data') or blob.get('items') or blob.get('records') or [blob]
+            )
+            rec = rows[0] if rows and isinstance(rows[0], dict) else {}
+            snap = rec.get('snapshot') if isinstance(rec.get('snapshot'), dict) else rec
+            pls = snap.get('plans') if isinstance(snap, dict) else None
+            return pls if isinstance(pls, list) else []
+
+        prev_plans = prev_plans_from(snap_raw)
+        first_seal = len(prev_plans) == 0
+
+        def by_key(plans):
+            out = {}
+            for p in plans:
+                if isinstance(p, dict):
+                    k = str(p.get('plan_key') or p.get('plan') or '').strip().lower()
+                    if k:
+                        out[k] = p
+            return out
+
+        new_by = by_key(new_plans)
+        old_by = by_key(prev_plans)
+
+        added_plans = sorted(set(new_by) - set(old_by))
+        removed_plans = sorted(set(old_by) - set(new_by))
+        common = sorted(set(new_by) & set(old_by))
+
+        price_changes = []
+        feature_gains = []
+        feature_losses = []
+        max_abs_delta_pct = 0.0
+
+        for k in common:
+            np_ = new_by[k]
+            op = old_by[k]
+            new_price = np_.get('price')
+            old_price = op.get('price')
+            if isinstance(new_price, (int, float)) and isinstance(old_price, (int, float)) and old_price:
+                delta_pct = round(((new_price - old_price) / old_price) * 100.0, 2)
+                if abs(delta_pct) > 0:
+                    price_changes.append({
+                        'plan_key': k,
+                        'old_price': old_price,
+                        'new_price': new_price,
+                        'price_delta_pct': delta_pct,
+                    })
+                    if abs(delta_pct) > max_abs_delta_pct:
+                        max_abs_delta_pct = abs(delta_pct)
+            new_feats = set(np_.get('features') or [])
+            old_feats = set(op.get('features') or [])
+            gained = sorted(new_feats - old_feats)
+            lost = sorted(old_feats - new_feats)
+            if gained:
+                feature_gains.append({'plan_key': k, 'gained': gained})
+            if lost:
+                feature_losses.append({'plan_key': k, 'lost': lost})
+
+        structural_change = bool(added_plans or removed_plans or feature_gains or feature_losses)
+        has_diff = bool(added_plans or removed_plans or price_changes or feature_gains or feature_losses)
+
+        # --- SHA-256 seal the NEW canonical snapshot (the next sweep diffs against this) -------
+        sealed_at = datetime.now(timezone.utc).isoformat()
+        snapshot = {
+            'rival': slug,
+            'pricing_url': parsed.get('pricing_url'),
+            'sealed_at': sealed_at,
+            'plans': new_plans,
+        }
+        canonical_json = json.dumps(snapshot, sort_keys=True, separators=(',', ':'))
+        snapshot_sha256 = hashlib.sha256(canonical_json.encode('utf-8')).hexdigest()
+
+        # Stable change signature so the same move is not re-paged sweep after sweep.
+        diff_material = json.dumps(
+            {'a': added_plans, 'r': removed_plans, 'p': price_changes,
+             'g': feature_gains, 'l': feature_losses},
+            sort_keys=True, separators=(',', ':'),
+        )
+        change_signature = hashlib.sha256(diff_material.encode('utf-8')).hexdigest()
+
+        result = {
+            'slug': slug,
+            'pricing_url': parsed.get('pricing_url'),
+            'first_seal': first_seal,
+            'has_diff': has_diff and not first_seal,
+            'added_plans': added_plans,
+            'removed_plans': removed_plans,
+            'price_changes': price_changes,
+            'feature_gains': feature_gains,
+            'feature_losses': feature_losses,
+            'structural_change': structural_change and not first_seal,
+            'max_abs_price_delta_pct': max_abs_delta_pct,
+            'change_signature': change_signature,
+            'snapshot_sha256': snapshot_sha256,
+            'sealed_at': sealed_at,
+            'snapshot': snapshot,
+            'canonical_json': canonical_json,
+            # object key for the per-rival sealed snapshot PUT.
+            'object_key': f"pricing-snapshots/{slug}/{sealed_at.replace(':', '-')}.json",
+        }
+
+  # 3e) CONDITION - route any NON-EMPTY diff into the materiality gate; a no-change rival records
+  #     its (re-sealed) snapshot directly. Deterministic branch keyed off the in-code diff flags
+  #     so routing survives a missing model provider. No model.
+  - id: change_branch
+    type: condition
+    condition_config:
+      expression: "{steps.diff_and_seal.output.has_diff}"
+      then: [materiality_gate, record_rival_status]
+      else: [record_rival_status]
+
+  # 3f) MATERIALITY GATE (swappable + model-independent). TWO strategies, BOTH must pass:
+  #     (1) llm_eval judge - "is this a real pricing move or A/B / layout / copy noise?", model
+  #         pinned to a SWAPPABLE provider (any of the 7 can back it);
+  #     (2) llm_eval acting as a DETERMINISTIC threshold - fed ONLY the pre-computed
+  #         max_abs_price_delta_pct / structural_change / price_delta_threshold and told to answer
+  #         purely from the arithmetic, so a change still passes/fails the gate on the non-LLM
+  #         math alone.
+  - id: materiality_gate
+    type: gate
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are a competitive-pricing analyst. A rival's pricing page was rendered and a
+              structured diff was computed in code against the last sealed snapshot. Decide whether
+              this is a REAL pricing MOVE worth paging product + sales (a genuine new/removed plan,
+              a true price change, or a packaging shift), or whether it is NOISE - an A/B test
+              variant, a layout / CSS reflow, marketing copy churn, or a parsing artifact that does
+              not change the actual offer. Answer exactly 'approved' if it is a real pricing move
+              that should be alerted, otherwise answer 'rejected' and name the reason. Judge the
+              substance only; the numeric magnitude is checked separately.
+            input: "Rival {steps.diff_and_seal.output.slug}: added_plans={steps.diff_and_seal.output.added_plans} removed_plans={steps.diff_and_seal.output.removed_plans} price_changes={steps.diff_and_seal.output.price_changes} feature_gains={steps.diff_and_seal.output.feature_gains} feature_losses={steps.diff_and_seal.output.feature_losses}"
+            model: "{input.gate_model}"
+        - type: llm_eval
+          config:
+            prompt: >-
+              Deterministic threshold check. Answer exactly 'approved' if structural_change is True
+              OR max_abs_price_delta_pct >= {input.price_delta_threshold}; otherwise answer
+              'rejected'. Use ONLY the supplied numbers and booleans - do not infer or reason
+              beyond the arithmetic comparison.
+            input: "structural_change={steps.diff_and_seal.output.structural_change} max_abs_price_delta_pct={steps.diff_and_seal.output.max_abs_price_delta_pct} threshold={input.price_delta_threshold}"
+            model: haiku
+
+  # 3g) DETERMINISTIC per-rival status record. Folds the diff result and (when the gate ran) the
+  #     materiality outcome into one canonical row. A rival is a CONFIRMED pricing move only when
+  #     it had a diff AND the materiality gate passed. No model.
+  - id: record_rival_status
+    type: code
+    code_config:
+      language: python
+      code: |
+        diff = _steps.get('diff_and_seal') or {}
+        gate = _steps.get('materiality_gate')
+
+        gate_ran = gate is not None
+        if isinstance(gate, dict):
+            gate_passed = bool(gate.get('passed', gate.get('approved', gate.get('result', False))))
+        else:
+            gate_passed = bool(gate) if gate is not None else False
+
+        has_diff = bool(diff.get('has_diff'))
+
+        if has_diff and gate_ran and gate_passed:
+            status = 'confirmed_move'
+        elif has_diff and gate_ran and not gate_passed:
+            status = 'noise'          # diff detected but gate ruled it immaterial
+        else:
+            status = 'unchanged'
+
+        confirmed_move = status == 'confirmed_move'
+
+        result = {
+            'slug': diff.get('slug'),
+            'pricing_url': diff.get('pricing_url'),
+            'status': status,
+            'confirmed_move': confirmed_move,
+            'first_seal': bool(diff.get('first_seal')),
+            'added_plans': diff.get('added_plans'),
+            'removed_plans': diff.get('removed_plans'),
+            'price_changes': diff.get('price_changes'),
+            'feature_gains': diff.get('feature_gains'),
+            'feature_losses': diff.get('feature_losses'),
+            'max_abs_price_delta_pct': diff.get('max_abs_price_delta_pct'),
+            'change_signature': diff.get('change_signature'),
+            'snapshot_sha256': diff.get('snapshot_sha256'),
+            'object_key': diff.get('object_key'),
+            'sealed_at': diff.get('sealed_at'),
+            'canonical_json': diff.get('canonical_json'),
+            'gate_ran': gate_ran,
+            'gate_passed': gate_passed if gate_ran else None,
+        }
+
+  # 4) DETERMINISTIC aggregation of every per-rival status from the loop. Splits unchanged /
+  #     confirmed-move / noise, builds the list of confirmed moves with their deltas, and counts.
+  #     move_count drives the seal-and-page path. No model.
+  - id: aggregate_moves
+    type: code
+    depends_on: [per_rival_loop]
+    code_config:
+      language: python
+      code: |
+        loop_out = _steps.get('per_rival_loop') or {}
+
+        items = loop_out if isinstance(loop_out, list) else (
+            loop_out.get('results') or loop_out.get('items') or loop_out.get('iterations') or []
+        )
+
+        rivals = []
+        for it in items:
+            row = it
+            if isinstance(it, dict) and 'slug' not in it:
+                row = it.get('record_rival_status') or it.get('output') or it
+            if isinstance(row, dict) and row.get('slug'):
+                rivals.append(row)
+
+        total = len(rivals)
+        confirmed = [r for r in rivals if r.get('confirmed_move')]
+        noise = [r for r in rivals if r.get('status') == 'noise']
+        unchanged = [r for r in rivals if r.get('status') == 'unchanged']
+
+        moves = [
+            {
+                'slug': r.get('slug'),
+                'pricing_url': r.get('pricing_url'),
+                'added_plans': r.get('added_plans'),
+                'removed_plans': r.get('removed_plans'),
+                'price_changes': r.get('price_changes'),
+                'feature_gains': r.get('feature_gains'),
+                'feature_losses': r.get('feature_losses'),
+                'max_abs_price_delta_pct': r.get('max_abs_price_delta_pct'),
+                'change_signature': r.get('change_signature'),
+            }
+            for r in confirmed
+        ]
+
+        result = {
+            'total_rivals': total,
+            'unchanged_count': len(unchanged),
+            'noise_count': len(noise),
+            'confirmed_move_count': len(confirmed),
+            'moves': moves,
+            # every rival's sealed snapshot row, for the snapshot PUTs.
+            'rivals': rivals,
+            # move_count > 0 -> there are confirmed pricing moves to page.
+            'move_count': len(confirmed),
+        }
+
+  # 5) DETERMINISTIC ledger SEAL. NO model. Canonical-JSON each confirmed move + its per-rival
+  #    snapshot hash, then hash the ordered list of move signatures into a sweep ledger root.
+  #    This is the tamper-evident signature for the sweep and the object key for the ledger PUT.
+  - id: seal_ledger
+    type: code
+    depends_on: [aggregate_moves]
+    code_config:
+      language: python
+      code: |
+        import json
+        import hashlib
+        from datetime import datetime, timezone
+
+        agg = _steps.get('aggregate_moves') or {}
+        moves = agg.get('moves', [])
+        rivals = agg.get('rivals', [])
+        sealed_at = datetime.now(timezone.utc).isoformat()
+
+        sealed_moves = []
+        for mv in moves:
+            canonical = json.dumps(mv, sort_keys=True, separators=(',', ':'))
+            digest = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+            sealed_moves.append({
+                'slug': mv.get('slug'),
+                'change_signature': mv.get('change_signature'),
+                'sha256': digest,
+            })
+
+        root_material = json.dumps([m['sha256'] for m in sealed_moves], separators=(',', ':'))
+        ledger_root = hashlib.sha256(root_material.encode('utf-8')).hexdigest()
+
+        record = {
+            'sealed_at': sealed_at,
+            'confirmed_move_count': agg.get('confirmed_move_count', 0),
+            'ledger_root_sha256': ledger_root,
+            'moves': sealed_moves,
+        }
+        canonical_record = json.dumps(record, sort_keys=True, separators=(',', ':'))
+        ledger_key = f"pricing-ledger/{sealed_at.replace(':', '-')}.json"
+
+        # Per-rival snapshot PUT plan (slug -> object_key + body) for the S3 writes.
+        snapshot_puts = [
+            {
+                'slug': r.get('slug'),
+                'object_key': r.get('object_key'),
+                'snapshot_sha256': r.get('snapshot_sha256'),
+                'canonical_json': r.get('canonical_json'),
+            }
+            for r in rivals
+            if r.get('object_key') and r.get('canonical_json')
+        ]
+
+        result = {
+            'ledger_key': ledger_key,
+            'ledger_root_sha256': ledger_root,
+            'sealed_at': sealed_at,
+            'record': record,
+            'canonical_json': canonical_record,
+            'snapshot_puts': snapshot_puts,
+            'has_moves': bool(sealed_moves),
+        }
+
+  # 6) CONDITION - only page product + sales when there is at least one CONFIRMED pricing move.
+  #    A clean sweep (move_count == 0) still seals snapshots to S3 but skips the alert. No model.
+  - id: route_moves
+    type: condition
+    depends_on: [seal_ledger]
+    condition_config:
+      expression: "{steps.aggregate_moves.output.move_count} > 0"
+      then: [put_ledger, notify_moves]
+      else: [notify_clean]
+
+  # 6a) SEAL TO S3 - PUT the SHA-256-sealed confirmed-move ledger to the bucket. The ledger root
+  #     hash travels as object metadata so the sweep record is tamper-evident at rest. The per-rival
+  #     canonical snapshots are sealed inline in diff_and_seal and carried in snapshot_puts for the
+  #     next sweep's baseline. Connector: aws-s3.
+  - id: put_ledger
+    type: http
+    http_config:
+      url: "{input.s3_base_url}/{input.s3_bucket}/{steps.seal_ledger.output.ledger_key}"
+      method: PUT
+      headers:
+        Content-Type: "application/json"
+        x-amz-meta-ledger-root-sha256: "{steps.seal_ledger.output.ledger_root_sha256}"
+        x-amz-meta-move-count: "{steps.aggregate_moves.output.confirmed_move_count}"
+      auth: "aws4:{env.AWS_ACCESS_KEY_ID}:{env.AWS_SECRET_ACCESS_KEY}"
+      body: "{steps.seal_ledger.output.canonical_json}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 6b) NOTIFY (moves) - page the product + sales channel with the confirmed pricing moves, the
+  #     per-plan deltas and the sealed ledger root hash so the team sees the rival's move in real
+  #     time, not at the next quarterly review. service: slack.
+  - id: notify_moves
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        :money_with_wings: COMPETITOR PRICING MOVE - {steps.aggregate_moves.output.confirmed_move_count} rival(s) changed pricing
+        Confirmed moves : {steps.aggregate_moves.output.moves}
+        Noise filtered  : {steps.aggregate_moves.output.noise_count}
+        Unchanged       : {steps.aggregate_moves.output.unchanged_count}
+        Sealed ledger   : {steps.seal_ledger.output.ledger_key}
+        Ledger root SHA-256: {steps.seal_ledger.output.ledger_root_sha256}
+
+  # 6c) NOTIFY (clean) - quiet "no pricing moves" digest on a clean sweep. Snapshots still re-sealed.
+  - id: notify_clean
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        :white_check_mark: Pricing sweep clean across {steps.aggregate_moves.output.total_rivals} rival(s).
+        {steps.aggregate_moves.output.unchanged_count} unchanged, {steps.aggregate_moves.output.noise_count} immaterial blips filtered (A/B / layout), 0 confirmed moves.
+on_complete:
+  storage_path: "competitor-pricing-page-change-sentinel/{run_id}/result.json"

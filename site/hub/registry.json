@@ -1,6 +1,6 @@
 {
  "version": 2,
- "generated_at": "2026-06-02T11:00:00Z",
+ "generated_at": "2026-06-02T14:00:00Z",
  "templates": [
   {
    "slug": "amira-dev/freelancer-proposal",
@@ -14969,6 +14969,1750 @@
    "review_count": 4,
    "sha256": "86570492906468a02f8d470e0beec23e2ecd21f1a535b8001e13b658bc8471b8",
    "input_schema": null
+  },
+  {
+   "slug": "gizmax/ar-collections-dunning-prioritizer",
+   "name": "AR Collections Dunning Prioritizer",
+   "description": "Sorts the entire open-invoice AR ledger into deterministic aging buckets, computes a transparent collection-priority score per account (days-overdue x balance x prior-late-rate), drafts the right-tone dunning message via a cross-provider race so it survives any single LLM outage, and gates every send through a credit-policy threshold plus optional human sign-off on large balances. The aging math, DSO, priority score and dunning-stage selection are all carried by deterministic code; race + gate keep it model-independent.",
+   "author": "gizmax",
+   "author_url": "https://github.com/gizmax",
+   "version": "1.0.0",
+   "category": "finance_ops",
+   "tags": [
+    "AR",
+    "Collections",
+    "Dunning",
+    "Aging",
+    "DSO",
+    "QuickBooks",
+    "Stripe",
+    "CreditPolicy",
+    "FinanceOps",
+    "Gmail",
+    "Resend",
+    "CRM"
+   ],
+   "models_used": [
+    "mistral/large",
+    "sonnet"
+   ],
+   "tools_used": [],
+   "step_count": 14,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/ar_collections_dunning_prioritizer.yaml",
+   "source": "built-in",
+   "created_at": "2026-06-02T00:00:00Z",
+   "updated_at": "2026-06-02T00:00:00Z",
+   "estimated_cost_per_run": 0.28,
+   "avg_execution_time": 420,
+   "downloads": 0,
+   "remix_count": 0,
+   "forked_from": null,
+   "license": "BSL-1.1",
+   "rating": 0.0,
+   "review_count": 0,
+   "sha256": "5b8d594cebff0257fa6862b64c7284c9b11824f4d46a3e3c071b8fbb55e34b7f",
+   "input_schema": {
+    "required": [
+     "ar_ledger_base_url"
+    ],
+    "properties": {
+     "ar_ledger_base_url": {
+      "type": "string",
+      "description": "AR system REST base exposing open invoices + per-customer payment history (QuickBooks Online or Stripe AR / Invoicing).",
+      "default": "https://quickbooks.api.intuit.com/v3/company",
+      "example": "https://api.stripe.com/v1"
+     },
+     "company_id": {
+      "type": "string",
+      "description": "Tenant / company id used to scope the open-invoice query (QuickBooks realm id or Stripe account id).",
+      "default": "ACME-CO-001",
+      "example": "9130350000000123456"
+     },
+     "aging_bucket_boundaries": {
+      "type": "string",
+      "description": "Comma-separated day boundaries for the deterministic aging buckets. Default 30,60,90 yields 0-30 / 31-60 / 61-90 / 90+.",
+      "default": "30,60,90",
+      "example": "30,60,90"
+     },
+     "priority_weights": {
+      "type": "string",
+      "description": "Comma-separated overdue-day -> weight multipliers as day:weight pairs feeding the priority score. Default ramps the weight up with age.",
+      "default": "0:0.5,30:1.0,60:2.0,90:3.5",
+      "example": "0:0.5,30:1.0,60:2.0,90:3.5"
+     },
+     "hold_for_review_balance": {
+      "type": "number",
+      "description": "Account balance (in ledger currency) at or above which the gate forces a human credit-manager sign-off before any dunning email is sent.",
+      "default": 5000,
+      "example": "5000"
+     },
+     "min_dunnable_balance": {
+      "type": "number",
+      "description": "Accounts with a total overdue balance strictly below this are skipped (immaterial to chase). No email, no touch.",
+      "default": 25,
+      "example": "25"
+     },
+     "grace_days": {
+      "type": "integer",
+      "description": "Days past the due date before an invoice is considered overdue / dunnable (a deterministic courtesy grace window).",
+      "default": 0,
+      "example": "3"
+     },
+     "dunning_from_address": {
+      "type": "string",
+      "description": "From address the dunning email is sent from (AR / billing mailbox).",
+      "default": "billing@your-company.example.com",
+      "example": "ar@acme.example.com"
+     },
+     "email_send_url": {
+      "type": "string",
+      "description": "Transactional email send endpoint used by the notify step (Gmail API messages.send or Resend /emails).",
+      "default": "https://api.resend.com/emails",
+      "example": "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
+     },
+     "crm_endpoint": {
+      "type": "string",
+      "description": "CRM REST endpoint that records the dunning touch as a logged activity (HubSpot engagements or Salesforce Task).",
+      "default": "https://api.hubapi.com/crm/v3/objects/notes",
+      "example": "https://your-instance.salesforce.com/services/data/v60.0/sobjects/Task"
+     },
+     "tone_judge_model": {
+      "type": "string",
+      "description": "Swappable model backing the gate's tone / escalation-appropriateness judge. Any provider can back it; for EU data residency pin mistral/large or a local model. The send still passes/fails on the non-LLM balance threshold without it.",
+      "default": "sonnet",
+      "example": "mistral/large"
+     },
+     "slack_channel": {
+      "type": "string",
+      "description": "Collections Slack channel that receives the run digest (queued / held-for-review / sent counts).",
+      "default": "#ar-collections",
+      "example": "#ar-collections"
+     }
+    }
+   }
+  },
+  {
+   "slug": "gizmax/bill-renewal-late-fee-sentinel",
+   "name": "Bill & Renewal Late-Fee Sentinel",
+   "description": "An always-on sentinel that watches every bill and subscription renewal and pings you BEFORE a late fee or silent auto-renewal hits. A durable SENSOR blocks until the next daily check-in window, an http GET pulls the live biller/aggregator statement feed listing each bill with its amount + due_date, and DETERMINISTIC code does the load-bearing date math - days_until_due, in-lead-time-window detection, and cross-run dedup so you are never pinged twice for the same bill. A CONDITION routes only the due-soon items to NOTIFY; everything else stays quiet. All detection is pure code and runs with zero model providers; a model only drafts the human-readable reminder copy.",
+   "author": "gizmax",
+   "author_url": "https://github.com/gizmax",
+   "version": "1.0.0",
+   "category": "personal",
+   "tags": [
+    "Bills",
+    "Subscriptions",
+    "Renewals",
+    "LateFee",
+    "DueDate",
+    "Sensor",
+    "PersonalFinance",
+    "LifeAdmin",
+    "Reminder",
+    "Dedup",
+    "Plaid",
+    "Slack"
+   ],
+   "models_used": [
+    "sonnet"
+   ],
+   "tools_used": [],
+   "step_count": 9,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/bill_renewal_late_fee_sentinel.yaml",
+   "source": "built-in",
+   "created_at": "2026-06-02T00:00:00Z",
+   "updated_at": "2026-06-02T00:00:00Z",
+   "estimated_cost_per_run": 0.18,
+   "avg_execution_time": 270,
+   "downloads": 0,
+   "remix_count": 0,
+   "forked_from": null,
+   "license": "BSL-1.1",
+   "rating": 0.0,
+   "review_count": 0,
+   "sha256": "0a736e0f40e3f39d5a40d75146e397c3ad8ebddb0c4659c320a69f043097cba4",
+   "input_schema": {
+    "required": [
+     "accounts_feed_url"
+    ],
+    "properties": {
+     "accounts_feed_url": {
+      "type": "string",
+      "description": "Biller / account-aggregator statements REST endpoint listing each bill + subscription renewal with its amount and due_date (Plaid liabilities, Tink, or a bank statement feed).",
+      "default": "https://api.aggregator.example.com/v1/bills",
+      "example": "https://production.plaid.com/liabilities/get"
+     },
+     "lead_time_days": {
+      "type": "integer",
+      "description": "Notify this many days before a bill's due date or a subscription's auto-renewal date. Anything due within this many days (and not in the past) is surfaced.",
+      "default": 5,
+      "example": "5"
+     },
+     "check_interval": {
+      "type": "integer",
+      "description": "Sensor cadence in seconds - how often the sentinel checks in for the next bill sweep. Default daily (86400s).",
+      "default": 86400,
+      "example": "86400"
+     },
+     "sensor_timeout": {
+      "type": "integer",
+      "description": "Sensor soft timeout in seconds - stop waiting for the next check-in window after this long (one watch run). Default 25h so a daily cadence always fires once.",
+      "default": 90000,
+      "example": "90000"
+     },
+     "ledger_url": {
+      "type": "string",
+      "description": "REST base of the alerted-bill ledger (the dedup memory). GET returns the bills already alerted in prior runs; a PUT writes back the updated set. PostgREST / S3 REST / KV gateway style.",
+      "default": "https://api.aggregator.example.com/v1/alert-ledger",
+      "example": "https://your-kv.example.com/bill-alert-ledger"
+     },
+     "grace_period_days": {
+      "type": "integer",
+      "description": "How many days a just-past-due bill is still surfaced (so a bill that slipped past midnight is not silently dropped). 0 = only future bills.",
+      "default": 1,
+      "example": "1"
+     },
+     "draft_model": {
+      "type": "string",
+      "description": "Documents which model DRAFTS the human-readable reminder text - set the draft_reminder step's `model:` to this. Any of the providers can back it; pin an EU/local one (mistral/large, ollama, omlx/qwen-3) for privacy. Detection works with this unavailable; the model only writes copy, never decides what is due.",
+      "default": "sonnet",
+      "example": "mistral/large"
+     },
+     "slack_channel": {
+      "type": "string",
+      "description": "Slack channel (or DM) that receives the due-soon reminder digest.",
+      "default": "#money-reminders",
+      "example": "#money-reminders"
+     }
+    }
+   }
+  },
+  {
+   "slug": "gizmax/budget-variance-materiality-sentinel",
+   "name": "Budget vs Actual Variance Sentinel",
+   "description": "Always-on FP&A sentinel that wakes on the period-close / actuals-posted webhook, pulls LIVE actuals from the accounting system (QuickBooks / NetSuite) and the LOCKED plan from the FP&A model (Google Sheets) over real http connectors, then computes per-cost-center variance ($ delta, % delta, run-rate burn, YTD pacing) in 100% deterministic Python. It LOOPS each cost center, CLASSIFIES favorable/unfavorable/on_plan from precomputed flags only, a CONDITION routes only candidate-material variances into a two-strategy MATERIALITY GATE (a swappable llm_eval judge AND a non-LLM dollar+percent floor threshold), and NOTIFY pages the budget owner only on confirmed material variance, never on rounding noise. The variance math and the threshold are model-independent; the model is confined to the swappable gate judge.",
+   "author": "gizmax",
+   "author_url": "https://github.com/gizmax",
+   "version": "1.0.0",
+   "category": "finance_ops",
+   "tags": [
+    "FP&A",
+    "Budget",
+    "Variance",
+    "BvA",
+    "Actuals",
+    "Plan",
+    "CostCenter",
+    "Materiality",
+    "RunRate",
+    "YTD",
+    "QuickBooks",
+    "NetSuite",
+    "GoogleSheets",
+    "Slack",
+    "finance",
+    "sensor"
+   ],
+   "models_used": [
+    "sonnet"
+   ],
+   "tools_used": [],
+   "step_count": 14,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/budget_variance_materiality_sentinel.yaml",
+   "source": "built-in",
+   "created_at": "2026-06-02T00:00:00Z",
+   "updated_at": "2026-06-02T00:00:00Z",
+   "estimated_cost_per_run": 0.28,
+   "avg_execution_time": 420,
+   "downloads": 0,
+   "remix_count": 0,
+   "forked_from": null,
+   "license": "BSL-1.1",
+   "rating": 0.0,
+   "review_count": 0,
+   "sha256": "3a389b31ee2954130b21b6238676f0a17f041f51d114a4a1fa0d12ae10ca52b0",
+   "input_schema": {
+    "required": [
+     "entity_id",
+     "accounting_actuals_base_url",
+     "fpa_plan_sheet_url"
+    ],
+    "properties": {
+     "entity_id": {
+      "type": "string",
+      "description": "Legal entity / company id whose period close is watched (the accounting subsidiary or book).",
+      "default": "ACME-US",
+      "example": "ACME-US"
+     },
+     "period": {
+      "type": "string",
+      "description": "Fiscal period being closed in YYYY-MM form. Drives which plan column and which actuals window are pulled.",
+      "default": "2026-05",
+      "example": "2026-05"
+     },
+     "accounting_actuals_base_url": {
+      "type": "string",
+      "description": "Accounting-system REST base that returns posted actuals (P&L / expense) by cost center for the period (QuickBooks Online or NetSuite REST / SuiteQL gateway).",
+      "default": "https://quickbooks.api.intuit.com/v3/company",
+      "example": "https://acme.suitetalk.api.netsuite.com/services/rest"
+     },
+     "fpa_plan_sheet_url": {
+      "type": "string",
+      "description": "Google Sheets (Sheets API v4 values) URL of the LOCKED FP&A budget model returning the planned amount per cost center for the period.",
+      "default": "https://sheets.googleapis.com/v4/spreadsheets/SHEET_ID/values/Budget!A2:F500",
+      "example": "https://sheets.googleapis.com/v4/spreadsheets/1AbC.../values/Budget!A2:F500"
+     },
+     "materiality_dollar_floor": {
+      "type": "number",
+      "description": "Absolute dollar floor (>=) below which a variance is treated as immaterial rounding/timing noise by the gate's non-LLM threshold strategy.",
+      "default": 5000,
+      "example": "5000"
+     },
+     "materiality_pct_floor": {
+      "type": "number",
+      "description": "Absolute percent floor (>=, in percent points) below which a variance is treated as immaterial by the gate's non-LLM threshold strategy. A variance is candidate-material when abs($)>=dollar_floor OR abs(%)>=pct_floor.",
+      "default": 10,
+      "example": "10"
+     },
+     "period_elapsed_fraction": {
+      "type": "number",
+      "description": "Fraction of the fiscal period elapsed (0-1) used to compute run-rate burn and YTD pacing deterministically. 1.0 at full close; e.g. 0.5 mid-period.",
+      "default": 1.0,
+      "example": "0.5"
+     },
+     "close_poll_interval": {
+      "type": "integer",
+      "description": "Seconds between sensor polls of the close-status endpoint while waiting for the period-close / actuals-posted webhook to flip the period to posted.",
+      "default": 1800,
+      "example": "1800"
+     },
+     "sensor_timeout": {
+      "type": "integer",
+      "description": "Sensor soft timeout in seconds - stop waiting for the close webhook after this long (one watch run). Default 24h.",
+      "default": 86400,
+      "example": "86400"
+     },
+     "gate_model": {
+      "type": "string",
+      "description": "Swappable materiality-judge model for the gate. Any of the 7 providers can back it; for regulated financials pin an EU/local provider (mistral/large, ollama, omlx/qwen-3). Variance detection works with this unavailable.",
+      "default": "sonnet",
+      "example": "mistral/large"
+     },
+     "pagerduty_routing_key": {
+      "type": "string",
+      "description": "Optional PagerDuty Events v2 routing key to page on a confirmed material variance. Leave empty to skip paging and only notify Slack.",
+      "default": "",
+      "example": "R0ABCD1234EFGH5678IJKL"
+     },
+     "slack_channel": {
+      "type": "string",
+      "description": "FP&A Slack channel that receives the material-variance digest / page.",
+      "default": "#fpa-budget-variance",
+      "example": "#fpa-budget-variance"
+     }
+    }
+   }
+  },
+  {
+   "slug": "gizmax/competitor-pricing-page-change-sentinel",
+   "name": "Competitor Pricing-Page Change Sentinel",
+   "description": "Always-on watcher that snapshots each rival's live pricing page, deterministically diffs plan / price / feature deltas against the last SHA-256-sealed snapshot, and only pages product + sales when a swappable two-strategy materiality gate confirms the change is a real pricing move (not A/B noise or layout churn). A durable SENSOR blocks until the next poll interval or a price-change webhook; an http GET (firecrawl) renders each pricing page; deterministic CODE parses plans into a canonical {plan,price,billing_period,features[]} shape, computes the structured diff and seals the new snapshot; a CONDITION routes only non-empty diffs into the GATE (llm_eval judge AND a non-LLM price_delta_pct threshold) before NOTIFY to Slack and an http PUT of the sealed snapshot to S3. Detection and diff are 100% deterministic code; the model only judges materiality.",
+   "author": "gizmax",
+   "author_url": "https://github.com/gizmax",
+   "version": "1.0.0",
+   "category": "research_intel",
+   "tags": [
+    "CompetitiveIntel",
+    "PricingIntelligence",
+    "ChangeDetection",
+    "sensor",
+    "firecrawl",
+    "diff",
+    "SHA-256",
+    "snapshot",
+    "S3",
+    "Slack",
+    "materiality-gate",
+    "research_intel"
+   ],
+   "models_used": [
+    "sonnet"
+   ],
+   "tools_used": [],
+   "step_count": 16,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/competitor_pricing_page_change_sentinel.yaml",
+   "source": "built-in",
+   "created_at": "2026-06-02T00:00:00Z",
+   "updated_at": "2026-06-02T00:00:00Z",
+   "estimated_cost_per_run": 0.32,
+   "avg_execution_time": 480,
+   "downloads": 0,
+   "remix_count": 0,
+   "forked_from": null,
+   "license": "BSL-1.1",
+   "rating": 0.0,
+   "review_count": 0,
+   "sha256": "9cf40fc03daa40b7bc66e9a8cc0d4f628950936135fa129f5c39dfc2ec2530e2",
+   "input_schema": {
+    "required": [
+     "competitor_pricing_urls",
+     "snapshot_store_url"
+    ],
+    "properties": {
+     "competitor_pricing_urls": {
+      "type": "string",
+      "description": "Comma-separated (or newline-separated) list of rival pricing-page URLs to watch. Each is rendered through Firecrawl and diffed against its own last sealed snapshot.",
+      "default": "https://competitor-a.com/pricing,https://competitor-b.com/pricing",
+      "example": "https://stripe.com/pricing,https://www.twilio.com/pricing,https://vercel.com/pricing"
+     },
+     "snapshot_store_url": {
+      "type": "string",
+      "description": "Snapshot store REST base URL holding the last SEALED canonical pricing snapshot per rival (S3 REST gateway or Postgres / PostgREST). The structured diff is measured against this.",
+      "default": "https://pricing-intel.internal/snapshots",
+      "example": "https://pricing-intel.internal/snapshots"
+     },
+     "price_delta_threshold": {
+      "type": "number",
+      "description": "Materiality threshold for the gate's NON-LLM strategy: a per-plan price change at or above this absolute percent (e.g. 5 = 5%), OR any added/removed plan, OR a feature gain/loss, is treated as a real pricing move (not A/B noise).",
+      "default": 5.0,
+      "example": "5.0"
+     },
+     "firecrawl_base_url": {
+      "type": "string",
+      "description": "Firecrawl REST base URL used to render each JS-heavy pricing page to clean HTML / extracted markup before parsing. Connector: firecrawl.",
+      "default": "https://api.firecrawl.dev/v1",
+      "example": "https://api.firecrawl.dev/v1"
+     },
+     "poll_interval": {
+      "type": "integer",
+      "description": "Seconds between pricing sweeps. The sensor blocks until this interval elapses OR a price-change webhook bumps the watch flag (event-driven within a schedule).",
+      "default": 3600,
+      "example": "3600"
+     },
+     "sensor_timeout": {
+      "type": "integer",
+      "description": "Sensor soft timeout in seconds - stop waiting for the next poll window after this long (one watch run). Default 24h.",
+      "default": 86400,
+      "example": "86400"
+     },
+     "gate_model": {
+      "type": "string",
+      "description": "Swappable materiality-judge model for the gate. Any of the 7 providers can back it; for EU data pin a local / EU provider (mistral/large, ollama, omlx/qwen-3). Detection and diff work with this unavailable.",
+      "default": "sonnet",
+      "example": "mistral/large"
+     },
+     "s3_base_url": {
+      "type": "string",
+      "description": "S3 (or S3-compatible) REST base URL that receives the SHA-256-sealed per-rival pricing snapshots so the next sweep diffs against tamper-evident truth. Connector: aws-s3.",
+      "default": "https://s3.eu-central-1.amazonaws.com",
+      "example": "https://s3.eu-central-1.amazonaws.com"
+     },
+     "s3_bucket": {
+      "type": "string",
+      "description": "Bucket name that stores the sealed pricing snapshots and confirmed-move ledger.",
+      "default": "competitor-pricing-snapshots",
+      "example": "acme-competitor-pricing-snapshots"
+     },
+     "slack_channel": {
+      "type": "string",
+      "description": "Product + sales Slack channel that receives the confirmed pricing-move alert (or the quiet clean-sweep digest).",
+      "default": "#competitive-pricing-intel",
+      "example": "#competitive-pricing-intel"
+     }
+    }
+   }
+  },
+  {
+   "slug": "gizmax/expense-policy-line-item-auditor",
+   "name": "Expense Policy Line-Item Auditor",
+   "description": "Pulls every line item on a submitted expense report from the expense/ERP system, classifies each into a spend category with a swappable labeler, then runs a 100% deterministic policy rule engine (per-category caps, receipt-required thresholds, per-diem math, weekend/alcohol/duplicate-merchant flags) to decide pass/violation per line. Only the disputed lines are routed to a two-strategy approval gate (llm_eval exception-judge AND a non-LLM rule-hit threshold) and a human finance reviewer, then an itemized verdict is PUT back to the expense system and an auditable summary is filed. Money and policy math never touch a model.",
+   "author": "gizmax",
+   "author_url": "https://github.com/gizmax",
+   "version": "1.0.0",
+   "category": "finance_ops",
+   "tags": [
+    "Expense",
+    "Concur",
+    "ERP",
+    "PolicyEngine",
+    "PerDiem",
+    "Receipts",
+    "DuplicateDetection",
+    "FinanceOps",
+    "Audit",
+    "T&E",
+    "Compliance"
+   ],
+   "models_used": [
+    "sonnet"
+   ],
+   "tools_used": [],
+   "step_count": 14,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/expense_policy_line_item_auditor.yaml",
+   "source": "built-in",
+   "created_at": "2026-06-02T00:00:00Z",
+   "updated_at": "2026-06-02T00:00:00Z",
+   "estimated_cost_per_run": 0.28,
+   "avg_execution_time": 420,
+   "downloads": 0,
+   "remix_count": 0,
+   "forked_from": null,
+   "license": "BSL-1.1",
+   "rating": 0.0,
+   "review_count": 0,
+   "sha256": "13fc57e0e335eb30a254761cf171f8afa0e1757895c7dc625f6b0573eb62d24d",
+   "input_schema": {
+    "required": [
+     "report_id",
+     "expense_api_base_url"
+    ],
+    "properties": {
+     "report_id": {
+      "type": "string",
+      "description": "Expense report id to audit (the submitted report whose line items are pulled and verdicted).",
+      "default": "EXP-2026-004821",
+      "example": "EXP-2026-004821"
+     },
+     "employee_id": {
+      "type": "string",
+      "description": "Employee id who submitted the report (used for per-diem lookup and the audit record).",
+      "default": "",
+      "example": "E-10293"
+     },
+     "expense_api_base_url": {
+      "type": "string",
+      "description": "Expense / ERP REST base URL exposing the report + line items and accepting the per-line verdict (SAP Concur / Coupa / Workday Expenses style).",
+      "default": "https://www.concursolutions.com/api/v3.0/expense",
+      "example": "https://acme.concursolutions.com/api/v3.0/expense"
+     },
+     "policy_caps": {
+      "type": "string",
+      "description": "JSON object of per-category USD caps plus a global receipt-required threshold. Keys: meals, lodging, travel, software, entertainment, receipt_required_over. Drives the deterministic cap + receipt rules.",
+      "default": "{\"meals\": 75, \"lodging\": 350, \"travel\": 1500, \"software\": 500, \"entertainment\": 50, \"receipt_required_over\": 25}",
+      "example": "{\"meals\": 75, \"lodging\": 350, \"travel\": 1500, \"software\": 500, \"entertainment\": 50, \"receipt_required_over\": 25}"
+     },
+     "per_diem_table": {
+      "type": "string",
+      "description": "JSON object of per-diem USD limits per spend category (the daily allowance a single line may not exceed). Empty categories fall back to the matching policy cap.",
+      "default": "{\"meals\": 75, \"lodging\": 350}",
+      "example": "{\"meals\": 75, \"lodging\": 350}"
+     },
+     "allow_alcohol": {
+      "type": "string",
+      "description": "Whether alcohol line items are reimbursable under policy. 'false' raises an alcohol-policy flag on any line whose merchant/description trips the alcohol keyword list.",
+      "default": "false",
+      "example": "false"
+     },
+     "allow_weekend": {
+      "type": "string",
+      "description": "Whether weekend-dated spend is reimbursable. 'false' raises a weekend-spend flag on any Saturday/Sunday line for review.",
+      "default": "false",
+      "example": "false"
+     },
+     "gate_model": {
+      "type": "string",
+      "description": "Swappable exception-judge model for the gate. Any provider can back it; for EU/regulated data pin a local provider (mistral/large, ollama, omlx/qwen-3). The rule engine works with this unavailable.",
+      "default": "sonnet",
+      "example": "mistral/large"
+     },
+     "report_author": {
+      "type": "string",
+      "description": "Author shown on the auditable expense-violation summary report.",
+      "default": "Finance Operations",
+      "example": "Finance Operations"
+     },
+     "archive_base_url": {
+      "type": "string",
+      "description": "Object store (S3-compatible) REST base URL where the audit summary is archived for retention.",
+      "default": "https://s3.eu-central-1.amazonaws.com",
+      "example": "https://s3.eu-central-1.amazonaws.com"
+     },
+     "archive_bucket": {
+      "type": "string",
+      "description": "Bucket that retains the sealed expense-audit summaries.",
+      "default": "expense-audit-records",
+      "example": "acme-expense-audit-records"
+     },
+     "slack_channel": {
+      "type": "string",
+      "description": "Finance-queue Slack channel for the itemized audit result.",
+      "default": "#expense-audit-queue",
+      "example": "#expense-audit-queue"
+     }
+    }
+   }
+  },
+  {
+   "slug": "gizmax/funding-and-ma-radar-dedup",
+   "name": "Funding & M&A Radar with Cross-Source Dedup",
+   "description": "A scheduled funding / M&A news radar that fans out parallel http GETs to multiple news + search providers so coverage survives any one source being down, then a deterministic CODE step canonicalizes URLs, builds a fuzzy entity+round+amount fingerprint, collapses cross-source duplicates into one event with a source-count, and merges against the last-run ledger so already-seen deals are dropped. A CLASSIFY tags each surviving event (new_round / follow_on / acquisition / rumor), a CONDITION + GATE (swappable llm_eval relevance judge AND a non-LLM amount>=min and not previously_seen threshold) filters, and only genuinely-new rounds are upserted to HubSpot and appended to a Google Sheet. The dedup and prior-seen merge are pure code - the deal team never chases the same headline twice.",
+   "author": "gizmax",
+   "author_url": "https://github.com/gizmax",
+   "version": "1.0.0",
+   "category": "research_intel",
+   "tags": [
+    "Funding",
+    "MnA",
+    "VentureCapital",
+    "DealFlow",
+    "NewsRadar",
+    "Dedup",
+    "Fingerprint",
+    "Exa",
+    "Tavily",
+    "RSS",
+    "HubSpot",
+    "GoogleSheets",
+    "CRM",
+    "ResearchIntel"
+   ],
+   "models_used": [
+    "sonnet"
+   ],
+   "tools_used": [],
+   "step_count": 16,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/funding_and_ma_radar_dedup.yaml",
+   "source": "built-in",
+   "created_at": "2026-06-02T00:00:00Z",
+   "updated_at": "2026-06-02T00:00:00Z",
+   "estimated_cost_per_run": 0.32,
+   "avg_execution_time": 480,
+   "downloads": 0,
+   "remix_count": 0,
+   "forked_from": null,
+   "license": "BSL-1.1",
+   "rating": 0.0,
+   "review_count": 0,
+   "sha256": "b2bad405931e0613904a44772254c384c61e5b008440ab66bf5ec89865bb9963",
+   "input_schema": {
+    "required": [
+     "watch_entities",
+     "news_source_urls"
+    ],
+    "properties": {
+     "watch_entities": {
+      "type": "string",
+      "description": "Comma-separated companies / sectors / investors the deal team is tracking. Used to build the provider queries and as the on-thesis relevance anchor for the gate's judge.",
+      "default": "fintech, climate tech, Sequoia, a16z, defense tech",
+      "example": "fintech, climate tech, Sequoia, a16z, defense tech"
+     },
+     "news_source_urls": {
+      "type": "string",
+      "description": "Comma-separated RSS / news feed URLs (TechCrunch, Axios Pro Rata, PitchBook News, etc.) hit as the third independent source alongside Exa and Tavily so coverage survives any one provider being down.",
+      "default": "https://techcrunch.com/category/venture/feed/,https://news.crunchbase.com/feed/",
+      "example": "https://techcrunch.com/category/venture/feed/,https://news.crunchbase.com/feed/"
+     },
+     "min_round_amount_usd": {
+      "type": "number",
+      "description": "Minimum disclosed round / deal size in USD for an event to clear the gate's non-LLM threshold. Smaller (or undisclosed-and-immaterial) rounds are filtered before they reach the CRM.",
+      "default": 5000000,
+      "example": "5000000"
+     },
+     "ledger_store_url": {
+      "type": "string",
+      "description": "REST base of the dedup ledger (S3 REST gateway or Postgres / PostgREST) holding the fingerprints of deals seen on prior sweeps. GET reads last-run fingerprints; PUT writes the refreshed ledger so the same headline is never chased twice.",
+      "default": "https://deals.internal/dedup-ledger",
+      "example": "https://deals.internal/dedup-ledger"
+     },
+     "exa_search_url": {
+      "type": "string",
+      "description": "Exa neural-search endpoint queried as source #1 for funding / M&A coverage.",
+      "default": "https://api.exa.ai/search",
+      "example": "https://api.exa.ai/search"
+     },
+     "tavily_search_url": {
+      "type": "string",
+      "description": "Tavily news-search endpoint queried as source #2 (different vendor) for resilience.",
+      "default": "https://api.tavily.com/search",
+      "example": "https://api.tavily.com/search"
+     },
+     "sweep_interval": {
+      "type": "integer",
+      "description": "Seconds between radar sweeps. The sensor blocks until the next sweep window is due.",
+      "default": 3600,
+      "example": "3600"
+     },
+     "sensor_timeout": {
+      "type": "integer",
+      "description": "Sensor soft timeout in seconds - stop waiting for the next sweep window after this long (one radar run). Default 24h.",
+      "default": 86400,
+      "example": "86400"
+     },
+     "hubspot_base_url": {
+      "type": "string",
+      "description": "HubSpot CRM REST base. New rounds are upserted as deal records so the pipeline reflects fresh activity automatically.",
+      "default": "https://api.hubapi.com",
+      "example": "https://api.hubapi.com"
+     },
+     "sheet_append_url": {
+      "type": "string",
+      "description": "Google Sheets values:append endpoint (spreadsheet + range baked into the URL) the new rounds are appended to as a shared deal log.",
+      "default": "https://sheets.googleapis.com/v4/spreadsheets/SHEET_ID/values/Deals!A1:append?valueInputOption=USER_ENTERED",
+      "example": "https://sheets.googleapis.com/v4/spreadsheets/1AbCdEf/values/Deals!A1:append?valueInputOption=USER_ENTERED"
+     },
+     "gate_model": {
+      "type": "string",
+      "description": "Swappable relevance-judge model for the gate. Any provider can back it; for EU data residency pin a local/EU provider (mistral/large, ollama). Dedup works with this unavailable.",
+      "default": "sonnet",
+      "example": "mistral/large"
+     },
+     "slack_channel": {
+      "type": "string",
+      "description": "Deal-team Slack channel that receives the new-deal digest.",
+      "default": "#deal-radar",
+      "example": "#deal-radar"
+     }
+    }
+   }
+  },
+  {
+   "slug": "gizmax/inbox-to-tasks-triage-router",
+   "name": "Inbox-to-Tasks Triage Router",
+   "description": "Pulls unread mail, DETERMINISTICALLY extracts dates / deadlines / dollar amounts / action verbs, classifies each message into task vs FYI vs spam, and GATES auto-created calendar/task entries so only confidently-actionable items become tasks - the rest just get notified. http GET pulls the unread messages and POSTs new tasks/events; code carries the load-bearing signal extraction, sender allowlist and dedup; a two-strategy gate (llm_eval actionability judge AND a non-LLM rule: has-a-date-OR-explicit-ask AND trusted-sender) must both pass before any task is created.",
+   "author": "gizmax",
+   "author_url": "https://github.com/gizmax",
+   "version": "1.0.0",
+   "category": "personal",
+   "tags": [
+    "inbox",
+    "email",
+    "triage",
+    "tasks",
+    "calendar",
+    "productivity",
+    "GTD",
+    "deadlines",
+    "dedup",
+    "allowlist",
+    "gmail",
+    "todoist",
+    "notify"
+   ],
+   "models_used": [
+    "sonnet"
+   ],
+   "tools_used": [],
+   "step_count": 12,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/inbox_to_tasks_triage_router.yaml",
+   "source": "built-in",
+   "created_at": "2026-06-02T00:00:00Z",
+   "updated_at": "2026-06-02T00:00:00Z",
+   "estimated_cost_per_run": 0.24,
+   "avg_execution_time": 360,
+   "downloads": 0,
+   "remix_count": 0,
+   "forked_from": null,
+   "license": "BSL-1.1",
+   "rating": 0.0,
+   "review_count": 0,
+   "sha256": "1bc3737a5a9e3cf12f6e447badbafe9891d23c12507c3c4ee447ca91d39ff024",
+   "input_schema": {
+    "required": [
+     "mailbox_url",
+     "tasks_api_url"
+    ],
+    "properties": {
+     "mailbox_url": {
+      "type": "string",
+      "description": "Mail provider unread-messages REST endpoint that returns the inbox of unread messages (Gmail API / IMAP-REST gateway / Microsoft Graph style).",
+      "default": "https://gmail.googleapis.com/gmail/v1/users/me/messages?q=is:unread",
+      "example": "https://gmail.googleapis.com/gmail/v1/users/me/messages?q=is:unread"
+     },
+     "tasks_api_url": {
+      "type": "string",
+      "description": "Task / calendar connector REST base that receives the auto-created task / event entries (Todoist / Google Calendar / Notion style).",
+      "default": "https://api.todoist.com/rest/v2",
+      "example": "https://api.todoist.com/rest/v2"
+     },
+     "trusted_senders": {
+      "type": "string",
+      "description": "DETERMINISTIC allowlist for the gate's rule strategy: comma-separated sender email addresses or domains that are trusted enough to auto-create a task. A message from outside this list can never be auto-actioned.",
+      "default": "boss@company.com,@company.com,billing@bank.com,calendar-invite@google.com",
+      "example": "boss@company.com,@company.com,billing@bank.com"
+     },
+     "seen_ids_url": {
+      "type": "string",
+      "description": "Dedup store REST endpoint returning the message ids already triaged on prior runs (key-value / PostgREST / S3 JSON), so the same mail is never turned into a duplicate task.",
+      "default": "https://kv.internal/inbox-triage/seen-ids",
+      "example": "https://kv.internal/inbox-triage/seen-ids"
+     },
+     "gate_model": {
+      "type": "string",
+      "description": "Swappable actionability-judge model for the gate. Any of the 7 providers can back it; pin an EU/local provider (mistral/large, ollama, omlx/qwen-3) for private mail. Triage still works with this unavailable - the non-LLM rule strategy stands alone.",
+      "default": "sonnet",
+      "example": "mistral/large"
+     },
+     "project_id": {
+      "type": "string",
+      "description": "Target project / calendar id in the task connector that new entries are filed under.",
+      "default": "Inbox",
+      "example": "2298765432"
+     },
+     "slack_channel": {
+      "type": "string",
+      "description": "Personal Slack channel / DM that receives the triage digest and the FYI / spam items that were NOT turned into tasks.",
+      "default": "#my-inbox-triage",
+      "example": "#my-inbox-triage"
+     }
+    }
+   }
+  },
+  {
+   "slug": "gizmax/literature-source-triage-race",
+   "name": "Multi-Source Literature & Source Triage",
+   "description": "Research-triage engine that RACES the same topic query across several academic/source providers (firecrawl crawl, exa search, an arXiv/Semantic-Scholar-style http endpoint) and takes the first that returns a usable candidate list (provider failover, NOT a vote). A DETERMINISTIC code step normalizes each record, dedups by DOI then by lowercased-punctuation-stripped title, and computes a transparent 0-1 triage score from topic token-overlap + citation count + recency decay - never a model. A swappable CLASSIFY labels on/off/adjacent-topic and a two-strategy GATE pairs an llm_eval relevance reviewer with a mandatory HUMAN analyst sign-off so nothing enters the corpus unreviewed. Kept papers are embedded and upserted to Qdrant.",
+   "author": "gizmax",
+   "author_url": "https://github.com/gizmax",
+   "version": "1.0.0",
+   "category": "research_intel",
+   "tags": [
+    "LiteratureReview",
+    "ResearchTriage",
+    "Dedup",
+    "DOI",
+    "Citations",
+    "RecencyDecay",
+    "arXiv",
+    "SemanticScholar",
+    "Exa",
+    "Firecrawl",
+    "Qdrant",
+    "VectorStore",
+    "race",
+    "classify",
+    "gate"
+   ],
+   "models_used": [
+    "sonnet"
+   ],
+   "tools_used": [],
+   "step_count": 13,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/literature_source_triage_race.yaml",
+   "source": "built-in",
+   "created_at": "2026-06-02T00:00:00Z",
+   "updated_at": "2026-06-02T00:00:00Z",
+   "estimated_cost_per_run": 0.26,
+   "avg_execution_time": 390,
+   "downloads": 0,
+   "remix_count": 0,
+   "forked_from": null,
+   "license": "BSL-1.1",
+   "rating": 0.0,
+   "review_count": 0,
+   "sha256": "fdc2d2223295a24e8a6eabf7f386e88cb6bef551efb653dd47612b8f266f32c0",
+   "input_schema": {
+    "required": [
+     "research_topic",
+     "source_provider_urls",
+     "vector_collection"
+    ],
+    "properties": {
+     "research_topic": {
+      "type": "string",
+      "description": "The research topic / question to triage literature for. Drives the race query and the token-overlap relevance signal.",
+      "default": "retrieval-augmented generation for long-context legal question answering",
+      "example": "retrieval-augmented generation for long-context legal question answering"
+     },
+     "source_provider_urls": {
+      "type": "string",
+      "description": "Comma-separated source-provider base URLs raced in parallel, in priority order: firecrawl crawl, exa search, an arXiv/Semantic-Scholar-style endpoint. First usable list wins.",
+      "default": "https://api.firecrawl.dev/v1/crawl,https://api.exa.ai/search,https://api.semanticscholar.org/graph/v1/paper/search",
+      "example": "https://api.firecrawl.dev/v1/crawl,https://api.exa.ai/search,https://api.semanticscholar.org/graph/v1/paper/search"
+     },
+     "min_triage_score": {
+      "type": "number",
+      "description": "Deterministic triage score (0-1) at or above which a paper is shortlisted for human review. The gate's non-LLM strategy also enforces this floor.",
+      "default": 0.45,
+      "example": "0.45"
+     },
+     "vector_collection": {
+      "type": "string",
+      "description": "Qdrant collection name the kept, reviewed papers are embedded and upserted into.",
+      "default": "rag-legal-qa-corpus",
+      "example": "rag-legal-qa-corpus"
+     },
+     "max_shortlist": {
+      "type": "integer",
+      "description": "Maximum number of top-ranked papers carried into classification + human review (keeps the analyst gate bounded).",
+      "default": 25,
+      "example": "25"
+     },
+     "recency_half_life_days": {
+      "type": "number",
+      "description": "Half-life in days for the exponential recency-decay signal. A paper this old contributes half the recency weight of a brand-new one.",
+      "default": 540,
+      "example": "540"
+     },
+     "qdrant_base_url": {
+      "type": "string",
+      "description": "Qdrant REST base URL the kept papers are upserted to.",
+      "default": "https://your-cluster.qdrant.io",
+      "example": "https://acme-xyz.eu-central-1-0.aws.cloud.qdrant.io:6333"
+     },
+     "gate_model": {
+      "type": "string",
+      "description": "Swappable relevance-judge model for the gate. Any provider can back it; for regulated data pin an EU/local provider (mistral/large, ollama, omlx/qwen-3). Triage works with this unavailable.",
+      "default": "sonnet",
+      "example": "mistral/large"
+     },
+     "slack_channel": {
+      "type": "string",
+      "description": "Research channel that receives the triage digest.",
+      "default": "#research-literature-triage",
+      "example": "#research-literature-triage"
+     }
+    }
+   }
+  },
+  {
+   "slug": "gizmax/mrr-waterfall-board-rollup",
+   "name": "MRR Waterfall Board Roll-Up",
+   "description": "On a monthly schedule a durable SENSOR blocks until the month-end roll-up window opens, then http GETs subscription/billing events (Stripe) and closed-won + churn pipeline (Salesforce / HubSpot). A DETERMINISTIC code step computes the full MRR waterfall (new / expansion / contraction / churn / reactivation), net + gross revenue retention, logo and dollar churn and the SaaS quick ratio, then runs a reconciliation check that opening + new + expansion + reactivation - contraction - churn must equal the closing balance within tolerance. A CONDITION blocks the report if the bridge does not foot. A two-strategy GATE (a swappable llm_eval narrative-accuracy judge AND a non-LLM 'bridge_balances' boolean) must BOTH pass before publish. A REPORT assembles the board metrics pack PDF and NOTIFY posts it to the board channel + archives to object store. All metric math and the foot-check are 100% deterministic code; the only model is the swappable narrative judge.",
+   "author": "gizmax",
+   "author_url": "https://github.com/gizmax",
+   "version": "1.0.0",
+   "category": "finance_ops",
+   "tags": [
+    "MRR",
+    "ARR",
+    "SaaS",
+    "FP&A",
+    "Board",
+    "Waterfall",
+    "NRR",
+    "GRR",
+    "Churn",
+    "QuickRatio",
+    "Reconciliation",
+    "Stripe",
+    "Salesforce",
+    "HubSpot",
+    "Finance"
+   ],
+   "models_used": [
+    "sonnet"
+   ],
+   "tools_used": [],
+   "step_count": 11,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/mrr_waterfall_board_rollup.yaml",
+   "source": "built-in",
+   "created_at": "2026-06-02T00:00:00Z",
+   "updated_at": "2026-06-02T00:00:00Z",
+   "estimated_cost_per_run": 0.22,
+   "avg_execution_time": 330,
+   "downloads": 0,
+   "remix_count": 0,
+   "forked_from": null,
+   "license": "BSL-1.1",
+   "rating": 0.0,
+   "review_count": 0,
+   "sha256": "7e3c4b8aeb5be4cc32fbec0b33cbb55770b6f4a34234c5f77a95e9b477fbf940",
+   "input_schema": {
+    "required": [
+     "billing_events_base_url",
+     "crm_pipeline_base_url"
+    ],
+    "properties": {
+     "billing_events_base_url": {
+      "type": "string",
+      "description": "Stripe (or Stripe-compatible) REST base exposing the period's subscription / invoice MRR-delta events for the closed month.",
+      "default": "https://api.stripe.com/v1",
+      "example": "https://api.stripe.com/v1"
+     },
+     "crm_pipeline_base_url": {
+      "type": "string",
+      "description": "CRM pipeline REST base (Salesforce or HubSpot) exposing the period's closed-won new logos and churned / downgraded accounts.",
+      "default": "https://your-org.my.salesforce.com/services/data/v60.0",
+      "example": "https://acme.my.salesforce.com/services/data/v60.0"
+     },
+     "fpa_calendar_url": {
+      "type": "string",
+      "description": "FP&A close-calendar REST base. The sensor polls this for the current period's books_closed / rollup_window_open flag so the roll-up only runs once the month is closed.",
+      "default": "https://fpa.internal/api/close-calendar",
+      "example": "https://fpa.internal/api/close-calendar"
+     },
+     "period": {
+      "type": "string",
+      "description": "The accounting period being rolled up (YYYY-MM). Drives the event queries and the board pack title.",
+      "default": "2026-05",
+      "example": "2026-05"
+     },
+     "opening_mrr": {
+      "type": "number",
+      "description": "Opening MRR for the period (the prior month's SEALED closing balance). The waterfall bridges FROM this number.",
+      "default": 0,
+      "example": "1250000"
+     },
+     "closing_mrr_reported": {
+      "type": "number",
+      "description": "The period's reported closing MRR from the system of record. The reconciliation check proves the computed bridge foots TO this number within tolerance.",
+      "default": 0,
+      "example": "1318500"
+     },
+     "reconciliation_tolerance": {
+      "type": "number",
+      "description": "Absolute currency tolerance (in the report currency's major units) within which the computed closing balance must match the reported closing balance for the bridge to foot.",
+      "default": 1.0,
+      "example": "1.0"
+     },
+     "currency": {
+      "type": "string",
+      "description": "ISO 4217 currency code the board pack is reported in. All MRR figures are assumed pre-normalized to this currency.",
+      "default": "USD",
+      "example": "EUR"
+     },
+     "gate_model": {
+      "type": "string",
+      "description": "Swappable narrative-accuracy judge model for the publish gate. Any of the 7 providers can back it; for EU data residency pin a local/EU provider (mistral/large, ollama, omlx/qwen-3). The math and foot-check run with this unavailable.",
+      "default": "sonnet",
+      "example": "mistral/large"
+     },
+     "report_author": {
+      "type": "string",
+      "description": "Author shown on the board metrics-pack PDF.",
+      "default": "FP&A / Office of the CFO",
+      "example": "FP&A / Office of the CFO"
+     },
+     "archive_base_url": {
+      "type": "string",
+      "description": "Object-lock (WORM) S3-compatible REST base that receives the sealed board pack + raw waterfall JSON for audit retention.",
+      "default": "https://s3.eu-central-1.amazonaws.com",
+      "example": "https://s3.eu-central-1.amazonaws.com"
+     },
+     "archive_bucket": {
+      "type": "string",
+      "description": "Bucket that stores the sealed board metrics packs tamper-evidently.",
+      "default": "board-metrics-packs",
+      "example": "acme-board-metrics-packs"
+     },
+     "board_channel": {
+      "type": "string",
+      "description": "Slack channel where the published board metrics pack is posted.",
+      "default": "#board-metrics",
+      "example": "#board-metrics"
+     },
+     "sensor_timeout": {
+      "type": "integer",
+      "description": "Sensor soft timeout in seconds - stop waiting for the roll-up window after this long (one run). Default 7 days to cover a late close.",
+      "default": 604800,
+      "example": "604800"
+     }
+    }
+   }
+  },
+  {
+   "slug": "gizmax/sec-filing-delta-extractor",
+   "name": "SEC Filing & Earnings Delta Extractor",
+   "description": "Pulls a company's newest SEC/IR filing, deterministically section-diffs it against the prior filing to surface added/removed/changed risk factors, guidance numbers and language shifts, then gates the diff for materiality so analysts read ONLY what actually changed between quarters. A durable SENSOR polls the EDGAR-style filings index and blocks until a new accession appears; two http GETs fetch the newest and the prior filing; a PARSE extracts clean section text; a deterministic CODE step aligns sections by heading, computes a sentence-level added/removed/modified diff, pulls numeric guidance (revenue, EPS, margin) via regex and computes per-metric numeric deltas, and SHA-256-fingerprints each changed block - no model touches the diff. A CONDITION routes only non-trivial diffs into a swappable materiality GATE (llm_eval judge AND a non-LLM changed_blocks/guidance_delta threshold), a REPORT compiles the memo, and an http PUT archives the sealed diff to S3.",
+   "author": "gizmax",
+   "author_url": "https://github.com/gizmax",
+   "version": "1.0.0",
+   "category": "research_intel",
+   "tags": [
+    "SEC",
+    "EDGAR",
+    "10-K",
+    "10-Q",
+    "8-K",
+    "earnings",
+    "guidance",
+    "risk-factors",
+    "diff",
+    "sensor",
+    "S3",
+    "equity-research",
+    "materiality",
+    "financial-analysis"
+   ],
+   "models_used": [
+    "sonnet"
+   ],
+   "tools_used": [],
+   "step_count": 14,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/sec_filing_delta_extractor.yaml",
+   "source": "built-in",
+   "created_at": "2026-06-02T00:00:00Z",
+   "updated_at": "2026-06-02T00:00:00Z",
+   "estimated_cost_per_run": 0.28,
+   "avg_execution_time": 420,
+   "downloads": 0,
+   "remix_count": 0,
+   "forked_from": null,
+   "license": "BSL-1.1",
+   "rating": 0.0,
+   "review_count": 0,
+   "sha256": "6a9be6f393042ce51297b48331263462fde106c2327dd4605c1af91657a75a3f",
+   "input_schema": {
+    "required": [
+     "ticker",
+     "filings_index_url"
+    ],
+    "properties": {
+     "ticker": {
+      "type": "string",
+      "description": "Issuer ticker whose newest periodic filing is diffed against its prior filing (e.g. 'AAPL').",
+      "default": "AAPL",
+      "example": "NVDA"
+     },
+     "filings_index_url": {
+      "type": "string",
+      "description": "EDGAR-style filings-index REST base that lists an issuer's accessions newest-first. The sensor polls this until a new accession appears (SEC EDGAR submissions API, or your IR mirror).",
+      "default": "https://data.sec.gov/submissions",
+      "example": "https://data.sec.gov/submissions"
+     },
+     "form_type": {
+      "type": "string",
+      "description": "Periodic form to track and diff like-for-like (10-K, 10-Q or 8-K). Newest is diffed against the prior filing of the SAME form.",
+      "default": "10-Q",
+      "example": "10-K"
+     },
+     "guidance_delta_threshold": {
+      "type": "number",
+      "description": "Non-LLM materiality threshold (percent). The gate's deterministic strategy treats the diff as material if any guidance metric (revenue / EPS / margin) moved by at least this percent OR there are at least min_changed_blocks changed blocks.",
+      "default": 5.0,
+      "example": "5.0"
+     },
+     "min_changed_blocks": {
+      "type": "integer",
+      "description": "Non-LLM materiality threshold (count). The deterministic gate strategy also passes if the number of added/removed/modified text blocks is at or above this, even with no numeric guidance change.",
+      "default": 3,
+      "example": "3"
+     },
+     "archive_bucket": {
+      "type": "string",
+      "description": "S3 (or S3-compatible) bucket that receives the sealed, SHA-256-fingerprinted diff record for the research audit trail.",
+      "default": "equity-research-filing-deltas",
+      "example": "acme-equity-research-filing-deltas"
+     },
+     "archive_base_url": {
+      "type": "string",
+      "description": "S3 REST base URL the sealed diff record is PUT to.",
+      "default": "https://s3.eu-central-1.amazonaws.com",
+      "example": "https://s3.eu-central-1.amazonaws.com"
+     },
+     "last_seen_accession": {
+      "type": "string",
+      "description": "Accession number of the most recently diffed filing. The sensor only fires for an accession NEWER than this, so a re-run does not re-diff the same filing. Leave empty on first run.",
+      "default": "",
+      "example": "0000320193-26-000045"
+     },
+     "sensor_timeout": {
+      "type": "integer",
+      "description": "Sensor soft timeout in seconds - stop waiting for a new filing after this long (one watch run). Default 24h.",
+      "default": 86400,
+      "example": "86400"
+     },
+     "gate_model": {
+      "type": "string",
+      "description": "Swappable materiality-judge model for the gate. Any provider can back it; for EU data residency pin a local/EU provider (mistral/large, ollama, omlx/qwen-3). The diff is computed with this unavailable.",
+      "default": "sonnet",
+      "example": "mistral/large"
+     },
+     "slack_channel": {
+      "type": "string",
+      "description": "Research Slack channel that receives the headline delta digest.",
+      "default": "#equity-research-deltas",
+      "example": "#equity-research-deltas"
+     }
+    }
+   }
+  },
+  {
+   "slug": "gizmax/subscription-audit-cancel-warden",
+   "name": "Subscription Audit & Cancel Warden",
+   "description": "Pulls your card/bank transaction history, then a DETERMINISTIC code step normalizes merchants, infers monthly/annual cadence, dedups the noise into a real recurring-subscription ledger, and flags price-hikes and zombie (unused) subs with zero model involvement. A swappable CLASSIFY only labels keep/review/cancel from the precomputed flags. Any cancellation is held behind a GATE where a human approval strategy AND a non-LLM spend-threshold strategy must BOTH pass before a cancel request fires, then NOTIFY posts the audit.",
+   "author": "gizmax",
+   "author_url": "https://github.com/gizmax",
+   "version": "1.0.0",
+   "category": "personal",
+   "tags": [
+    "Subscriptions",
+    "Personal Finance",
+    "Recurring Charges",
+    "Price Hike",
+    "Zombie Subs",
+    "Dedup",
+    "Cancel",
+    "Human Approval",
+    "Plaid",
+    "Stripe"
+   ],
+   "models_used": [
+    "sonnet"
+   ],
+   "tools_used": [],
+   "step_count": 8,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/subscription_audit_cancel_warden.yaml",
+   "source": "built-in",
+   "created_at": "2026-06-02T00:00:00Z",
+   "updated_at": "2026-06-02T00:00:00Z",
+   "estimated_cost_per_run": 0.16,
+   "avg_execution_time": 240,
+   "downloads": 0,
+   "remix_count": 0,
+   "forked_from": null,
+   "license": "BSL-1.1",
+   "rating": 0.0,
+   "review_count": 0,
+   "sha256": "554c9c2ab39ed38c201847cb02061f4a88078c8bd0d6738d1b60c983fb58c292",
+   "input_schema": {
+    "required": [
+     "transactions_url"
+    ],
+    "properties": {
+     "transactions_url": {
+      "type": "string",
+      "description": "Bank/card aggregator transaction-history REST endpoint (Plaid /transactions, MX, Stripe, or your bank's export gateway) returning dated charges.",
+      "default": "https://api.plaid.com/transactions/get",
+      "example": "https://sandbox.plaid.com/transactions/get"
+     },
+     "lookback_months": {
+      "type": "integer",
+      "description": "How many months of statement history to scan for recurring charges. Longer windows make cadence inference and price-hike detection more reliable.",
+      "default": 12,
+      "example": "12"
+     },
+     "zombie_inactivity_days": {
+      "type": "integer",
+      "description": "Deterministic threshold (days since last charge relative to the expected next bill date) past which an active sub is flagged a ZOMBIE you likely forgot. Lower = more aggressive.",
+      "default": 75,
+      "example": "75"
+     },
+     "price_hike_pct": {
+      "type": "number",
+      "description": "Deterministic minimum percentage increase (vs the prior charge for the same sub) that counts as a flagged price hike. 0.10 = a 10% jump.",
+      "default": 0.1,
+      "example": "0.10"
+     },
+     "min_cancel_cost": {
+      "type": "number",
+      "description": "Non-LLM gate floor: a cancel whose MONTHLY cost is at/below this is too trivial to auto-fire (rubber-stamp risk) and is held for the human. In statement currency.",
+      "default": 3.0,
+      "example": "3.0"
+     },
+     "max_cancel_cost": {
+      "type": "number",
+      "description": "Non-LLM gate ceiling: a cancel whose MONTHLY cost is at/above this is too consequential to fire on automation and is held for explicit human review. In statement currency.",
+      "default": 200.0,
+      "example": "200.0"
+     },
+     "cancel_api_url": {
+      "type": "string",
+      "description": "Merchant / aggregator subscription-cancel REST endpoint that receives the approved cancellation requests.",
+      "default": "https://api.your-aggregator.example.com/subscriptions/cancel",
+      "example": "https://api.acme-bank.example.com/subscriptions/cancel"
+     },
+     "slack_channel": {
+      "type": "string",
+      "description": "Channel that receives the subscription audit digest and the cancel confirmations.",
+      "default": "#money-subscriptions",
+      "example": "#money-subscriptions"
+     }
+    }
+   }
+  },
+  {
+   "slug": "gizmax/topic-share-of-voice-rank-monitor",
+   "name": "Topic Share-of-Voice Rank Monitor",
+   "description": "Tracks where your brand and named rivals surface across multiple search / answer engines for a watched keyword set, then computes a DETERMINISTIC share-of-voice and rank-delta versus the last sealed snapshot - entirely in code. A SENSOR runs the sweep on schedule; a LOOP fans parallel http GETs to several providers (Tavily, Exa, a SERP-style endpoint) per keyword; a code step normalizes results, matches brand / competitor mentions, and computes per-keyword rank positions, an aggregate SoV percentage and the rank_delta of who gained or lost positions. A CLASSIFY labels each keyword steady / improving / overtaken, a CONDITION feeds adverse moves into a swappable GATE (llm_eval 'real ranking loss worth acting on?' AND a non-LLM 'rank_delta<=-N or sov_drop_pct>=threshold'). Confirmed losses NOTIFY Slack and append to an Airtable scoreboard, and the new snapshot is sealed back to the store. All SoV and rank-delta math is model-independent.",
+   "author": "gizmax",
+   "author_url": "https://github.com/gizmax",
+   "version": "1.0.0",
+   "category": "research_intel",
+   "tags": [
+    "SEO",
+    "ShareOfVoice",
+    "RankTracking",
+    "AnswerEngine",
+    "GEO",
+    "CompetitiveIntel",
+    "Brand",
+    "Tavily",
+    "Exa",
+    "SERP",
+    "Airtable",
+    "Slack",
+    "monitoring"
+   ],
+   "models_used": [
+    "sonnet"
+   ],
+   "tools_used": [],
+   "step_count": 19,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/topic_share_of_voice_rank_monitor.yaml",
+   "source": "built-in",
+   "created_at": "2026-06-02T00:00:00Z",
+   "updated_at": "2026-06-02T00:00:00Z",
+   "estimated_cost_per_run": 0.38,
+   "avg_execution_time": 570,
+   "downloads": 0,
+   "remix_count": 0,
+   "forked_from": null,
+   "license": "BSL-1.1",
+   "rating": 0.0,
+   "review_count": 0,
+   "sha256": "1fd8c0a1f8bc25a82437cd6d9889d801de263114b3dccaed1a6696c75592202b",
+   "input_schema": {
+    "required": [
+     "watch_keywords",
+     "brand_and_competitors"
+    ],
+    "properties": {
+     "watch_keywords": {
+      "type": "string",
+      "description": "Comma- or newline-separated topic keywords / queries to track share-of-voice on (e.g. 'workflow orchestrator, ai agent platform, eu ai act compliance').",
+      "default": "ai workflow orchestrator, agent automation platform, eu ai act compliance tool",
+      "example": "ai workflow orchestrator, agent automation platform, eu ai act compliance tool"
+     },
+     "brand_and_competitors": {
+      "type": "string",
+      "description": "Brand + rivals as 'Label=domain1|alias' entries, semicolon-separated. The FIRST entry is YOUR brand; the rest are tracked competitors. Domains / aliases drive deterministic mention matching.",
+      "default": "Sandcastle=sandcastle-ai.eu|sandcastle; Zapier=zapier.com; n8n=n8n.io|n8n; Make=make.com|integromat",
+      "example": "Sandcastle=sandcastle-ai.eu|sandcastle; Zapier=zapier.com; n8n=n8n.io; Make=make.com|integromat"
+     },
+     "search_provider_urls": {
+      "type": "string",
+      "description": "Comma-separated search / answer-engine endpoints queried in parallel per keyword. Order is provider1=Tavily, provider2=Exa, provider3=SERP-style. Leave a slot empty to skip that provider.",
+      "default": "https://api.tavily.com/search, https://api.exa.ai/search, https://serpapi.com/search",
+      "example": "https://api.tavily.com/search, https://api.exa.ai/search, https://serpapi.com/search"
+     },
+     "rank_delta_threshold": {
+      "type": "integer",
+      "description": "Deterministic rank-loss threshold (positive integer). The gate's non-LLM strategy treats a keyword as a material overtake when your brand's rank_delta <= -threshold (you fell at least this many positions) OR sov_drop_pct meets the SoV threshold.",
+      "default": 2,
+      "example": "3"
+     },
+     "sov_drop_threshold_pct": {
+      "type": "number",
+      "description": "Deterministic share-of-voice drop threshold in percentage points. The gate's non-LLM strategy fires when your brand's SoV fell by at least this many points versus the last sealed snapshot.",
+      "default": 5.0,
+      "example": "5.0"
+     },
+     "snapshot_store_url": {
+      "type": "string",
+      "description": "Snapshot store REST base (PostgREST / S3 REST gateway) holding the last SEALED per-keyword ranks + SoV that rank_delta is measured against.",
+      "default": "https://sov.internal/snapshots",
+      "example": "https://sov.internal/snapshots"
+     },
+     "sweep_interval": {
+      "type": "integer",
+      "description": "Seconds between share-of-voice sweeps. The sensor blocks until the scheduler reports the next sweep window is due OR a webhook fires.",
+      "default": 86400,
+      "example": "86400"
+     },
+     "sensor_timeout": {
+      "type": "integer",
+      "description": "Sensor soft timeout in seconds - stop waiting for the next sweep window after this long (one watch run). Default 7 days.",
+      "default": 604800,
+      "example": "604800"
+     },
+     "result_depth": {
+      "type": "integer",
+      "description": "How many top ranked results per provider to consider when matching brand / competitor mentions and computing rank positions.",
+      "default": 10,
+      "example": "10"
+     },
+     "gate_model": {
+      "type": "string",
+      "description": "Swappable ranking-loss judge model for the gate. Any provider can back it; for EU data pin a local / EU provider (mistral/large, ollama, omlx/qwen-3). SoV + rank-delta detection works with this unavailable.",
+      "default": "sonnet",
+      "example": "mistral/large"
+     },
+     "airtable_base_id": {
+      "type": "string",
+      "description": "Airtable base id that holds the competitive share-of-voice scoreboard table.",
+      "default": "appXXXXXXXXXXXXXX",
+      "example": "app8sJ2kQfL0qWvZ1"
+     },
+     "airtable_table": {
+      "type": "string",
+      "description": "Airtable table name the confirmed overtakes are appended to as scoreboard rows.",
+      "default": "SoV Scoreboard",
+      "example": "SoV Scoreboard"
+     },
+     "slack_channel": {
+      "type": "string",
+      "description": "Slack channel that receives the confirmed-overtake alert and the clean-sweep digest.",
+      "default": "#competitive-intel",
+      "example": "#competitive-intel"
+     }
+    }
+   }
+  },
+  {
+   "slug": "gizmax/trip-itinerary-race-planner",
+   "name": "Trip Itinerary Race Planner",
+   "description": "Races two travel itinerary providers (failover across model providers - first that returns a usable day-by-day plan wins), then HTTP-verifies the draft against the live flight-status feed and the destination weather forecast for the exact trip dates. A DETERMINISTIC code step runs the feasibility math - minimum-connection-time gaps between legs, outdoor-activity vs precipitation conflicts, and a budget sum vs your cap - and the plan only lands in your inbox after a GATE where a swappable llm_eval quality judge AND a non-LLM feasibility-threshold strategy BOTH pass. All the go/no-go math is model-independent.",
+   "author": "gizmax",
+   "author_url": "https://github.com/gizmax",
+   "version": "1.0.0",
+   "category": "personal",
+   "tags": [
+    "Travel",
+    "Itinerary",
+    "Trip",
+    "Flights",
+    "Weather",
+    "Race",
+    "Failover",
+    "Feasibility",
+    "Personal",
+    "Planner",
+    "Layover",
+    "Budget"
+   ],
+   "models_used": [
+    "google/gemini-2.5-pro",
+    "sonnet"
+   ],
+   "tools_used": [],
+   "step_count": 14,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/trip_itinerary_race_planner.yaml",
+   "source": "built-in",
+   "created_at": "2026-06-02T00:00:00Z",
+   "updated_at": "2026-06-02T00:00:00Z",
+   "estimated_cost_per_run": 0.28,
+   "avg_execution_time": 420,
+   "downloads": 0,
+   "remix_count": 0,
+   "forked_from": null,
+   "license": "BSL-1.1",
+   "rating": 0.0,
+   "review_count": 0,
+   "sha256": "86d5b3fa98d5f771b052670e29bfabbbe048a93c7593ef0afa4946a78867fd17",
+   "input_schema": {
+    "required": [
+     "destination",
+     "date_range",
+     "flight_status_url",
+     "weather_api_url"
+    ],
+    "properties": {
+     "destination": {
+      "type": "string",
+      "description": "Destination city name or IATA airport code the trip is built around.",
+      "default": "Lisbon (LIS)",
+      "example": "Lisbon (LIS)"
+     },
+     "date_range": {
+      "type": "string",
+      "description": "Trip start and end dates as 'YYYY-MM-DD..YYYY-MM-DD' (or 'start to end'). Drives the per-day plan, the weather window and the flight-status dates.",
+      "default": "2026-07-10..2026-07-14",
+      "example": "2026-07-10..2026-07-14"
+     },
+     "flight_status_url": {
+      "type": "string",
+      "description": "Live flight-status REST endpoint (FlightAware AeroAPI / Aviationstack style) returning the booked legs with scheduled/estimated times and status for the trip dates.",
+      "default": "https://aeroapi.flightaware.com/aeroapi/flights",
+      "example": "https://aeroapi.flightaware.com/aeroapi/flights/search?query=dest LIS"
+     },
+     "weather_api_url": {
+      "type": "string",
+      "description": "Destination weather-forecast REST endpoint (OpenWeather / Open-Meteo style) returning a daily forecast (precipitation probability, condition) covering the trip dates.",
+      "default": "https://api.openweathermap.org/data/2.5/forecast/daily",
+      "example": "https://api.open-meteo.com/v1/forecast?daily=precipitation_probability_max"
+     },
+     "budget_cap": {
+      "type": "number",
+      "description": "Total activity/excursion budget cap in your currency. The deterministic feasibility step sums the drafted activity costs and fails the plan if it exceeds this.",
+      "default": 800,
+      "example": "800"
+     },
+     "min_connection_minutes": {
+      "type": "integer",
+      "description": "Minimum legal/comfortable connection time in minutes between two consecutive flight legs. A drafted layover shorter than this is a hard feasibility failure.",
+      "default": 45,
+      "example": "45"
+     },
+     "rain_threshold": {
+      "type": "number",
+      "description": "Precipitation-probability threshold (0-100). A forecast day at or above this is treated as a wash-out; an outdoor activity scheduled that day is a feasibility conflict.",
+      "default": 70,
+      "example": "70"
+     },
+     "min_feasibility_score": {
+      "type": "number",
+      "description": "Deterministic feasibility score (0-1) the plan must reach for the gate's non-LLM strategy to approve it. Computed purely from the layover/weather/budget checks.",
+      "default": 1.0,
+      "example": "1.0"
+     },
+     "judge_model": {
+      "type": "string",
+      "description": "Swappable plan-quality judge model for the gate. Any of the providers can back it; the feasibility math passes/fails without it. The two race drafters run on DIFFERENT providers (sonnet and google/gemini-2.5-pro) for genuine cross-provider failover.",
+      "default": "sonnet",
+      "example": "ollama/qwen-3"
+     },
+     "recipient_email": {
+      "type": "string",
+      "description": "Inbox that receives the final itinerary (or the bounce-back with blocking reasons).",
+      "default": "me@example.com",
+      "example": "traveler@example.com"
+     },
+     "slack_channel": {
+      "type": "string",
+      "description": "Optional Slack channel for a short trip-planned ping alongside the email.",
+      "default": "#my-trips",
+      "example": "#my-trips"
+     }
+    }
+   }
+  },
+  {
+   "slug": "gizmax/vendor-spend-anomaly-zscore-detector",
+   "name": "Vendor Spend Anomaly Detector",
+   "description": "Streams the AP transaction ledger, builds a per-vendor spend baseline and computes a robust z-score (median / MAD) plus split-invoice, duplicate-payment and new-vendor-spike detectors in pure code, classifies each outlier by likely cause, then SHA-256 seals a tamper-evident anomaly record before opening a triage ticket. The load-bearing detection is deterministic code (sensor + http + code + loop carry it); the only model is a swappable classify label on precomputed signals. No model ever does the spend math.",
+   "author": "gizmax",
+   "author_url": "https://github.com/gizmax",
+   "version": "1.0.0",
+   "category": "finance_ops",
+   "tags": [
+    "FinanceOps",
+    "AccountsPayable",
+    "AP",
+    "anomaly-detection",
+    "z-score",
+    "MAD",
+    "duplicate-payment",
+    "split-invoice",
+    "maverick-spend",
+    "SAP",
+    "NetSuite",
+    "QuickBooks",
+    "Jira",
+    "Slack",
+    "audit"
+   ],
+   "models_used": [
+    "sonnet"
+   ],
+   "tools_used": [],
+   "step_count": 13,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/vendor_spend_anomaly_zscore_detector.yaml",
+   "source": "built-in",
+   "created_at": "2026-06-02T00:00:00Z",
+   "updated_at": "2026-06-02T00:00:00Z",
+   "estimated_cost_per_run": 0.26,
+   "avg_execution_time": 390,
+   "downloads": 0,
+   "remix_count": 0,
+   "forked_from": null,
+   "license": "BSL-1.1",
+   "rating": 0.0,
+   "review_count": 0,
+   "sha256": "229a6d7514f041bce830d4e07978e2d0c9ce0135eb2e85a374488f95c4c6132b",
+   "input_schema": {
+    "required": [
+     "ap_ledger_base_url"
+    ],
+    "properties": {
+     "ap_ledger_base_url": {
+      "type": "string",
+      "description": "AP / ERP REST base URL exposing posted vendor payments (SAP, NetSuite, QuickBooks AP). The detector GETs the lookback window of transactions from here.",
+      "default": "https://your-erp.example.com/api/ap",
+      "example": "https://acme.netsuite.com/services/rest/record/v1/vendorPayment"
+     },
+     "batch_id": {
+      "type": "string",
+      "description": "Identifier for this AP batch / sweep, used in the sealed record and the triage ticket.",
+      "default": "AP-SWEEP-2026-06",
+      "example": "AP-BATCH-2026-06-02"
+     },
+     "lookback_window": {
+      "type": "integer",
+      "description": "Days of AP history to pull and build each vendor's baseline against. A larger window stabilizes the median / MAD baseline.",
+      "default": 180,
+      "example": "180"
+     },
+     "zscore_threshold": {
+      "type": "number",
+      "description": "Robust z-score (modified, median / MAD based) at or above which a single payment is flagged as an amount outlier. 3.5 is the conventional modified-z cutoff.",
+      "default": 3.5,
+      "example": "3.5"
+     },
+     "approval_threshold": {
+      "type": "number",
+      "description": "The dollar approval threshold. Invoices that land just under this value, clustered same-day same-vendor, are flagged as a likely split-invoice to dodge approval.",
+      "default": 10000,
+      "example": "10000"
+     },
+     "split_band_fraction": {
+      "type": "number",
+      "description": "How close under the approval threshold counts as 'just under' for split-invoice detection (0-1). 0.1 means invoices within the top 10% band below the threshold.",
+      "default": 0.1,
+      "example": "0.1"
+     },
+     "min_baseline_n": {
+      "type": "integer",
+      "description": "Minimum number of prior payments a vendor needs before the z-score baseline is trusted. Below this the vendor is treated as new (spike detector applies instead).",
+      "default": 5,
+      "example": "5"
+     },
+     "spike_multiple": {
+      "type": "number",
+      "description": "A new vendor's first payment is flagged as a spike when it is at least this multiple of the median first-payment across all new vendors in the batch.",
+      "default": 3.0,
+      "example": "3.0"
+     },
+     "anomaly_score_floor": {
+      "type": "number",
+      "description": "Batch anomaly score (0-100) at or above which a triage ticket is opened. Below the floor the sweep is logged clean and no ticket is filed.",
+      "default": 25,
+      "example": "25"
+     },
+     "classify_model": {
+      "type": "string",
+      "description": "Swappable model that LABELS each outlier's likely cause from precomputed signals only - set the classify step's model field to any of the 7 providers (for regulated data pin an EU / local provider like mistral/large or omlx/qwen-3). Detection works with this unavailable.",
+      "default": "sonnet",
+      "example": "mistral/large"
+     },
+     "ap_triage_project": {
+      "type": "string",
+      "description": "Jira / Linear project key that receives the AP anomaly triage ticket.",
+      "default": "APRISK",
+      "example": "APRISK"
+     },
+     "issue_tracker_url": {
+      "type": "string",
+      "description": "Issue-tracker REST endpoint that creates the triage ticket (Jira /rest/api/3/issue or Linear GraphQL gateway).",
+      "default": "https://your-org.atlassian.net/rest/api/3/issue",
+      "example": "https://acme.atlassian.net/rest/api/3/issue"
+     },
+     "record_store_base_url": {
+      "type": "string",
+      "description": "Object-store (S3-compatible) REST base URL that receives the SHA-256-sealed immutable anomaly record for audit retention.",
+      "default": "https://s3.eu-central-1.amazonaws.com",
+      "example": "https://s3.eu-central-1.amazonaws.com"
+     },
+     "record_store_bucket": {
+      "type": "string",
+      "description": "Bucket holding the sealed AP anomaly records tamper-evidently.",
+      "default": "ap-anomaly-ledger",
+      "example": "acme-ap-anomaly-ledger"
+     },
+     "controller_channel": {
+      "type": "string",
+      "description": "AP controller Slack channel that receives the anomaly digest / ticket link.",
+      "default": "#ap-controllership",
+      "example": "#ap-controllership"
+     },
+     "sweep_timeout": {
+      "type": "integer",
+      "description": "Sensor soft timeout in seconds - stop waiting for the next AP batch after this long (one sweep run). Default 24h.",
+      "default": 86400,
+      "example": "86400"
+     }
+    }
+   }
+  },
+  {
+   "slug": "gizmax/warranty-return-window-tracker",
+   "name": "Warranty & Return-Window Tracker",
+   "description": "Watches your purchases and counts down each item's return window and warranty expiry with DETERMINISTIC date math. A cross-source RACE takes the first valid purchase date from two order/receipt providers (retailer order-history API vs an email-receipt parser - provider failover, NOT a vote), a PARSE pulls purchase_date / price / warranty_term out of the winning payload, deterministic CODE computes return_window_days_left and warranty_days_left, buckets urgency, and dedups idempotently, then a CONDITION + NOTIFY ping you ONLY for items whose window is about to close so you never miss a return or a warranty claim.",
+   "author": "gizmax",
+   "author_url": "https://github.com/gizmax",
+   "version": "1.0.0",
+   "category": "personal",
+   "tags": [
+    "warranty",
+    "returns",
+    "personal",
+    "life-admin",
+    "countdown",
+    "receipts",
+    "orders",
+    "race",
+    "parse",
+    "deadline",
+    "reminder",
+    "Slack"
+   ],
+   "models_used": [
+    "haiku",
+    "sonnet"
+   ],
+   "tools_used": [],
+   "step_count": 17,
+   "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/src/sandcastle/templates/warranty_return_window_tracker.yaml",
+   "source": "built-in",
+   "created_at": "2026-06-02T00:00:00Z",
+   "updated_at": "2026-06-02T00:00:00Z",
+   "estimated_cost_per_run": 0.34,
+   "avg_execution_time": 510,
+   "downloads": 0,
+   "remix_count": 0,
+   "forked_from": null,
+   "license": "BSL-1.1",
+   "rating": 0.0,
+   "review_count": 0,
+   "sha256": "f7dfb3129ea105793dbc5f8f14f85a046a3c13d243c23d60bbb4aa438d1e9681",
+   "input_schema": {
+    "required": [
+     "orders_api_url",
+     "receipt_parse_url"
+    ],
+    "properties": {
+     "orders_api_url": {
+      "type": "string",
+      "description": "Retailer / order-history REST base that lists your recent purchases and (per order) the authoritative purchase date. The primary race branch for the purchase date.",
+      "default": "https://your-retailer.example.com/api/orders",
+      "example": "https://www.amazon.com/api/order-history/v1"
+     },
+     "receipt_parse_url": {
+      "type": "string",
+      "description": "Secondary receipt / email-receipt parser endpoint raced against the order API. Given an order reference it returns the parsed receipt (purchase_date, price, warranty_term). Provider failover, not a vote.",
+      "default": "https://receipt-parser.internal/api/parse",
+      "example": "https://api.veryfi.com/api/v8/partner/documents"
+     },
+     "return_window_default_days": {
+      "type": "integer",
+      "description": "Fallback return-window length in days, applied ONLY when neither source reports an explicit return policy for the item (e.g. retailer default 30).",
+      "default": 30,
+      "example": "30"
+     },
+     "warranty_default_days": {
+      "type": "integer",
+      "description": "Fallback warranty length in days, applied ONLY when neither source reports an explicit warranty term (e.g. manufacturer default 365).",
+      "default": 365,
+      "example": "365"
+     },
+     "closing_soon_days": {
+      "type": "integer",
+      "description": "Alert threshold in days. An item is 'closing soon' when its return window OR its warranty has this many days (or fewer) left but is not yet expired. Drives the condition + notify.",
+      "default": 7,
+      "example": "7"
+     },
+     "lookback_days": {
+      "type": "integer",
+      "description": "Only sweep purchases made within this many days back, so very old already-closed orders are not re-evaluated every run.",
+      "default": 400,
+      "example": "400"
+     },
+     "sweep_interval": {
+      "type": "integer",
+      "description": "Seconds between sweeps. The sensor blocks until the order endpoint reports the next daily sweep window is due. Default 24h.",
+      "default": 86400,
+      "example": "86400"
+     },
+     "sensor_timeout": {
+      "type": "integer",
+      "description": "Sensor soft timeout in seconds - stop waiting for the next sweep window after this long (one watch run). Default 48h.",
+      "default": 172800,
+      "example": "172800"
+     },
+     "summary_model": {
+      "type": "string",
+      "description": "Swappable model for the optional one-line digest header (draft_header step). Repoint it to any of the 7 providers - pin an EU/local provider (mistral/large, ollama, omlx/qwen-3) for privacy. The countdown decision is pure code and works with this unavailable.",
+      "default": "haiku",
+      "example": "mistral/large"
+     },
+     "slack_channel": {
+      "type": "string",
+      "description": "Channel / DM that receives the closing-soon reminder digest.",
+      "default": "#purchases-warranty",
+      "example": "#purchases-warranty"
+     }
+    }
+   }
   }
  ],
  "categories": [
@@ -15021,13 +16765,28 @@
    "id": "healthcare",
    "name": "Healthcare & Life Sciences",
    "count": 7
+  },
+  {
+   "id": "finance_ops",
+   "name": "Finance & FP&A Operations",
+   "count": 5
+  },
+  {
+   "id": "personal",
+   "name": "Personal & Life Admin",
+   "count": 5
+  },
+  {
+   "id": "research_intel",
+   "name": "Research & Intelligence",
+   "count": 5
   }
  ],
  "stats": {
-  "total_templates": 235,
+  "total_templates": 250,
   "total_authors": 41,
   "total_downloads": 50845,
-  "last_updated": "2026-06-02T11:00:00Z"
+  "last_updated": "2026-06-02T14:00:00Z"
  },
  "collections": [
   {

@@ -1,0 +1,350 @@
+# name: Bill & Renewal Late-Fee Sentinel
+# description: An always-on sentinel that watches every bill and subscription renewal and pings you BEFORE a late fee or silent auto-renewal hits. A durable SENSOR blocks until the next daily check-in window, an http GET pulls the live biller/aggregator statement feed listing each bill with its amount + due_date, and DETERMINISTIC code does the load-bearing date math - days_until_due, in-lead-time-window detection, and cross-run dedup so you are never pinged twice for the same bill. A CONDITION routes only the due-soon items to NOTIFY; everything else stays quiet. All detection is pure code and runs with zero model providers; a model only drafts the human-readable reminder copy.
+# tags: [Bills, Subscriptions, Renewals, LateFee, DueDate, Sensor, PersonalFinance, LifeAdmin, Reminder, Dedup, Plaid, Slack]
+# category: personal
+# connectors: slack
+name: bill-renewal-late-fee-sentinel
+description: >-
+  A personal-finance watchdog that stops you ever paying a late fee or getting
+  silently auto-renewed. A durable SENSOR blocks until the next daily check-in
+  window is reached (a real schedule that sleeps between checks instead of busy
+  -looping). An http GET then pulls the live biller / account-aggregator statement
+  feed (Plaid / Tink / bank statement REST) listing every bill and subscription
+  renewal with its amount and due_date. A DETERMINISTIC code step does ALL the
+  load-bearing work with zero model involvement: it parses each due_date, computes
+  days_until_due against the check-in date, flags the bills whose due date falls
+  inside the lead-time window, and DEDUPES against the prior run's already-alerted
+  ledger (pulled by http) so the same bill is never surfaced twice across daily
+  runs. A CONDITION routes ONLY the genuinely due-soon, not-yet-alerted items into
+  the NOTIFY path; a clean check-in stays silent. The reminder copy is drafted by a
+  swappable model purely for human readability - the decision of WHAT is due and
+  WHEN to ping is 100% deterministic date arithmetic. Finally the alerted-bill
+  ledger is PUT back so tomorrow's run remembers what it already told you about.
+default_model: sonnet
+default_max_turns: 6
+default_timeout: 1800
+input_schema:
+  required: ["accounts_feed_url"]
+  properties:
+    accounts_feed_url:
+      type: string
+      description: "Biller / account-aggregator statements REST endpoint listing each bill + subscription renewal with its amount and due_date (Plaid liabilities, Tink, or a bank statement feed)."
+      default: "https://api.aggregator.example.com/v1/bills"
+      example: "https://production.plaid.com/liabilities/get"
+    lead_time_days:
+      type: integer
+      description: "Notify this many days before a bill's due date or a subscription's auto-renewal date. Anything due within this many days (and not in the past) is surfaced."
+      default: 5
+      example: "5"
+    check_interval:
+      type: integer
+      description: "Sensor cadence in seconds - how often the sentinel checks in for the next bill sweep. Default daily (86400s)."
+      default: 86400
+      example: "86400"
+    sensor_timeout:
+      type: integer
+      description: "Sensor soft timeout in seconds - stop waiting for the next check-in window after this long (one watch run). Default 25h so a daily cadence always fires once."
+      default: 90000
+      example: "90000"
+    ledger_url:
+      type: string
+      description: "REST base of the alerted-bill ledger (the dedup memory). GET returns the bills already alerted in prior runs; a PUT writes back the updated set. PostgREST / S3 REST / KV gateway style."
+      default: "https://api.aggregator.example.com/v1/alert-ledger"
+      example: "https://your-kv.example.com/bill-alert-ledger"
+    grace_period_days:
+      type: integer
+      description: "How many days a just-past-due bill is still surfaced (so a bill that slipped past midnight is not silently dropped). 0 = only future bills."
+      default: 1
+      example: "1"
+    draft_model:
+      type: string
+      description: "Documents which model DRAFTS the human-readable reminder text - set the draft_reminder step's `model:` to this. Any of the providers can back it; pin an EU/local one (mistral/large, ollama, omlx/qwen-3) for privacy. Detection works with this unavailable; the model only writes copy, never decides what is due."
+      default: "sonnet"
+      example: "mistral/large"
+    slack_channel:
+      type: string
+      description: "Slack channel (or DM) that receives the due-soon reminder digest."
+      default: "#money-reminders"
+      example: "#money-reminders"
+steps:
+  # 1) DURABLE SENSOR - block until the next daily check-in window. This is a real schedule
+  #    that SLEEPS between checks (check_interval) rather than busy-looping; it polls the
+  #    aggregator's lightweight health/cursor endpoint and proceeds once the feed is reachable
+  #    and a new check-in window is due. Nothing downstream runs until the window opens.
+  - id: await_checkin_window
+    type: sensor
+    sensor_config:
+      url: "{input.accounts_feed_url}?select=feed_status,next_checkin_due"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200"
+      check_interval: 86400
+      timeout: 90000
+
+  # 2) DETERMINISTIC http GET of the LIVE bill + subscription-renewal feed. Returns every bill
+  #    and renewal with amount + due_date for the user's linked accounts. No model. Connector:
+  #    account aggregator (Plaid liabilities / Tink / bank statement REST).
+  - id: pull_bills_feed
+    type: http
+    depends_on: [await_checkin_window]
+    http_config:
+      url: "{input.accounts_feed_url}?include=subscriptions,renewals&status=open"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.AGGREGATOR_API_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 3) DETERMINISTIC http GET of the alerted-bill LEDGER - the dedup memory. Returns the set of
+  #    (bill key) already surfaced in prior runs so today's sweep does not re-ping the same bill.
+  #    on_failure: skip so a cold/empty ledger (first ever run) does not abort the sweep. No model.
+  - id: pull_alert_ledger
+    type: http
+    depends_on: [await_checkin_window]
+    http_config:
+      url: "{input.ledger_url}?select=bill_key,due_date,alerted_at"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.LEDGER_API_TOKEN}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 4) THE LOAD-BEARING STEP - 100% DETERMINISTIC DATE MATH, NO MODEL. For each bill in the feed:
+  #    parse its due_date, compute days_until_due relative to the check-in date, decide whether it
+  #    falls inside the lead-time window [-(grace_period_days) .. lead_time_days], build a stable
+  #    bill_key, and DEDUP against the prior-run ledger so a bill already alerted (for the same
+  #    due_date) is suppressed. Outputs the due-soon list + the refreshed ledger to write back.
+  - id: compute_due_soon
+    type: code
+    depends_on: [pull_bills_feed, pull_alert_ledger]
+    code_config:
+      language: python
+      code: |
+        import re
+        import hashlib
+        from datetime import datetime, timezone, date, timedelta
+
+        feed_raw = _steps.get('pull_bills_feed') or {}
+        ledger_raw = _steps.get('pull_alert_ledger') or {}
+
+        lead_days = int(_input.get('lead_time_days', 5) or 5)
+        grace_days = int(_input.get('grace_period_days', 1) or 1)
+
+        # --- The check-in date is "today" in UTC; all date math is measured from here.
+        today = datetime.now(timezone.utc).date()
+
+        # --- Coalesce the feed payload (dict-with-list or bare list) into bill rows.
+        def as_rows(blob):
+            if isinstance(blob, list):
+                return [r for r in blob if isinstance(r, dict)]
+            if isinstance(blob, dict):
+                for k in ('bills', 'liabilities', 'items', 'data', 'results', 'accounts', 'records'):
+                    v = blob.get(k)
+                    if isinstance(v, list):
+                        return [r for r in v if isinstance(r, dict)]
+            return []
+
+        rows = as_rows(feed_raw)
+        ledger_rows = as_rows(ledger_raw)
+
+        # --- Robust ISO-ish date parser. Accepts yyyy-mm-dd, full ISO, or yyyy/mm/dd.
+        def parse_due(value):
+            s = str(value or '').strip()
+            if not s:
+                return None
+            s = s.replace('/', '-')
+            m = re.match(r'^(\d{4})-(\d{2})-(\d{2})', s)
+            if not m:
+                return None
+            try:
+                return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            except ValueError:
+                return None
+
+        # --- A stable key for a bill so the same recurring charge dedupes across runs. Built from
+        #     the biller name + account + the specific due_date (a new due_date is a new alert).
+        def bill_key(biller, account, due_iso):
+            material = '|'.join([
+                str(biller or '').strip().lower(),
+                str(account or '').strip().lower(),
+                str(due_iso or ''),
+            ])
+            return hashlib.sha256(material.encode('utf-8')).hexdigest()[:24]
+
+        # --- Build the set of already-alerted keys from the ledger (dedup memory).
+        already_alerted = set()
+        for lr in ledger_rows:
+            k = str(lr.get('bill_key') or '').strip()
+            if k:
+                already_alerted.add(k)
+
+        due_soon = []
+        upcoming = []          # in window but already alerted (suppressed) - kept for the ledger
+        all_keys_seen = []
+
+        for rec in rows:
+            biller = (rec.get('name') or rec.get('biller') or rec.get('merchant')
+                      or rec.get('description') or rec.get('payee') or 'bill')
+            account = (rec.get('account') or rec.get('account_id') or rec.get('account_name') or '')
+            kind = str(rec.get('type') or rec.get('category') or 'bill').strip().lower()
+            is_renewal = ('subscription' in kind or 'renewal' in kind
+                          or bool(rec.get('auto_renew')) or bool(rec.get('is_subscription')))
+
+            # Amount is informational for the reminder - never gates the decision.
+            amount = rec.get('amount') or rec.get('balance') or rec.get('minimum_payment') or rec.get('price')
+            try:
+                amount = round(float(amount), 2) if amount is not None else None
+            except (TypeError, ValueError):
+                amount = None
+            currency = str(rec.get('currency') or rec.get('iso_currency_code') or 'USD').upper()
+
+            due_raw = (rec.get('due_date') or rec.get('next_payment_due_date')
+                       or rec.get('renewal_date') or rec.get('next_billing_date') or rec.get('due'))
+            due = parse_due(due_raw)
+            if due is None:
+                continue
+
+            days_until_due = (due - today).days
+            due_iso = due.isoformat()
+            key = bill_key(biller, account, due_iso)
+            all_keys_seen.append({'bill_key': key, 'due_date': due_iso})
+
+            # --- IN-WINDOW: due within lead_time_days ahead, and not older than the grace period.
+            in_window = (-grace_days) <= days_until_due <= lead_days
+            if not in_window:
+                continue
+
+            item = {
+                'bill_key': key,
+                'biller': str(biller),
+                'account': str(account),
+                'kind': 'renewal' if is_renewal else 'bill',
+                'amount': amount,
+                'currency': currency,
+                'due_date': due_iso,
+                'days_until_due': days_until_due,
+                'is_overdue': days_until_due < 0,
+                'is_renewal': is_renewal,
+            }
+
+            if key in already_alerted:
+                upcoming.append(item)          # suppressed: already pinged in a prior run
+            else:
+                due_soon.append(item)
+
+        # --- Sort the surfaced bills by urgency (soonest / most overdue first).
+        due_soon.sort(key=lambda x: x['days_until_due'])
+
+        # --- Refreshed ledger = previously-alerted keys still relevant + the ones we alert now.
+        #     (Prune ledger entries whose due_date is well in the past so it does not grow forever.)
+        cutoff = (today - timedelta(days=max(grace_days, 1) + 30)).isoformat()
+        refreshed_ledger = [
+            {'bill_key': lr.get('bill_key'), 'due_date': lr.get('due_date'),
+             'alerted_at': lr.get('alerted_at')}
+            for lr in ledger_rows
+            if str(lr.get('due_date') or '') >= cutoff and lr.get('bill_key')
+        ]
+        now_iso = datetime.now(timezone.utc).isoformat()
+        for it in due_soon:
+            refreshed_ledger.append({
+                'bill_key': it['bill_key'],
+                'due_date': it['due_date'],
+                'alerted_at': now_iso,
+            })
+
+        overdue = [it for it in due_soon if it['is_overdue']]
+        renewals = [it for it in due_soon if it['is_renewal']]
+
+        result = {
+            'checkin_date': today.isoformat(),
+            'lead_time_days': lead_days,
+            'grace_period_days': grace_days,
+            'total_bills_scanned': len(rows),
+            'due_soon': due_soon,
+            'due_soon_count': len(due_soon),
+            'suppressed_count': len(upcoming),
+            'overdue_count': len(overdue),
+            'renewal_count': len(renewals),
+            'has_due_soon': len(due_soon) > 0,
+            'refreshed_ledger': refreshed_ledger,
+            'ledger_size': len(refreshed_ledger),
+        }
+
+  # 5) CONDITION - route ONLY when there is at least one genuinely due-soon, not-yet-alerted bill.
+  #    A clean check-in (nothing due in window, or all already pinged) takes the quiet path and
+  #    skips the notification entirely. Deterministic branch off the in-code flag. No model.
+  - id: route_due_soon
+    type: condition
+    depends_on: [compute_due_soon]
+    condition_config:
+      expression: "{steps.compute_due_soon.output.has_due_soon}"
+      then: [draft_reminder, write_ledger, notify_due_soon]
+      else: [write_ledger, notify_clean]
+
+  # 5a) DRAFT the reminder copy (swappable model, readability ONLY). The model NEVER decides what
+  #     is due - it just turns the already-computed due-soon list into a friendly digest. Pin any
+  #     provider via draft_model; the workflow still pings correctly if this is unavailable.
+  - id: draft_reminder
+    type: llm
+    model: sonnet
+    prompt: >-
+      You are a calm personal-finance assistant. Below is a DETERMINISTICALLY computed list of
+      bills and subscription renewals that fall inside the user's lead-time window (already
+      filtered and deduped in code - do not add, remove, or re-judge any item). Write a short,
+      friendly reminder digest. Lead with anything overdue, then by soonest due date. For each
+      item give the biller, amount + currency if present, the due date, and "in N days" (or
+      "OVERDUE by N days"). End with a one-line nudge to pay or cancel before the late fee /
+      auto-renewal. Keep it under 12 lines. Do NOT invent amounts or dates.
+      Check-in date: {steps.compute_due_soon.output.checkin_date}.
+      Due-soon items: {steps.compute_due_soon.output.due_soon}
+
+  # 5b) DETERMINISTIC http PUT of the refreshed alerted-bill ledger (the dedup memory) so
+  #     tomorrow's run remembers exactly what it already told the user about. Runs on BOTH
+  #     branches (clean + due-soon) so the pruned ledger is always persisted. No model.
+  - id: write_ledger
+    type: http
+    http_config:
+      url: "{input.ledger_url}"
+      method: PUT
+      headers:
+        Content-Type: "application/json"
+        Prefer: "resolution=merge-duplicates"
+      auth: "bearer:{env.LEDGER_API_TOKEN}"
+      body: "{steps.compute_due_soon.output.refreshed_ledger}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 5c) NOTIFY (due-soon) - send the reminder digest to the user's Slack channel/DM so they pay
+  #     or cancel before the late fee or silent auto-renewal lands. Carries the model-drafted copy
+  #     plus the hard deterministic counts. Connector: slack.
+  - id: notify_due_soon
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        :alarm_clock: Bills & renewals due soon ({steps.compute_due_soon.output.due_soon_count}) - check-in {steps.compute_due_soon.output.checkin_date}
+        Overdue: {steps.compute_due_soon.output.overdue_count} | Renewals: {steps.compute_due_soon.output.renewal_count} | Already-pinged (suppressed): {steps.compute_due_soon.output.suppressed_count}
+
+        {steps.draft_reminder.output}
+
+  # 5d) NOTIFY (clean) - quiet "nothing due, you are all caught up" check-in. No reminder spam on
+  #     a clean sweep; the ledger was still refreshed in 5b. Connector: slack.
+  - id: notify_clean
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        :white_check_mark: Bill check-in clean ({steps.compute_due_soon.output.checkin_date}). Scanned {steps.compute_due_soon.output.total_bills_scanned} bills/renewals, nothing due within {steps.compute_due_soon.output.lead_time_days} days that you have not already been reminded about. No action needed.
+on_complete:
+  storage_path: "bill-renewal-late-fee-sentinel/{run_id}/result.json"

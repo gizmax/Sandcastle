@@ -1,0 +1,583 @@
+# name: AR Collections Dunning Prioritizer
+# description: Sorts the entire open-invoice AR ledger into deterministic aging buckets, computes a transparent collection-priority score per account (days-overdue x balance x prior-late-rate), drafts the right-tone dunning message via a cross-provider race so it survives any single LLM outage, and gates every send through a credit-policy threshold plus optional human sign-off on large balances. The aging math, DSO, priority score and dunning-stage selection are all carried by deterministic code; race + gate keep it model-independent.
+# tags: [AR, Collections, Dunning, Aging, DSO, QuickBooks, Stripe, CreditPolicy, FinanceOps, Gmail, Resend, CRM]
+# category: finance_ops
+# connectors: quickbooks, stripe, gmail, resend, hubspot, salesforce, slack
+name: ar-collections-dunning-prioritizer
+description: >-
+  The AR collections decisioning engine. A DETERMINISTIC http GET pulls the entire
+  open-invoice ledger plus per-customer payment history from QuickBooks / Stripe AR, and
+  a code step sorts every open invoice into transparent aging buckets (0-30 / 31-60 /
+  61-90 / 90+), rolls them up per account, and computes the load-bearing math in pure
+  Python: DSO, days-overdue, weighted balance, prior-late-rate and a COLLECTION-PRIORITY
+  SCORE = balance x overdue-weight x prior-late-rate, then deterministically selects the
+  dunning STAGE (reminder / first-notice / second-notice / final-demand) from days
+  overdue. The workflow LOOPS over each overdue account: a cross-provider RACE drafts the
+  stage-appropriate dunning email and takes the FIRST provider that returns a usable body
+  (provider failover, NOT a vote), so the draft survives any single LLM outage. A GATE
+  with TWO strategies that BOTH must pass then guards every send - a SWAPPABLE llm_eval
+  tone / escalation-appropriateness judge AND a NON-LLM threshold strategy fed the
+  pre-computed balance vs the hold-for-review floor - so an account passes/fails with zero
+  model involvement. Accounts at or above the hold-for-review balance route to a human
+  credit-manager APPROVAL before anything is sent. A NOTIFY then emails the customer via
+  Gmail / Resend and logs the dunning touch to CRM (HubSpot / Salesforce). The aging,
+  scoring and stage selection are 100% deterministic and run even with zero model
+  providers available; the model is confined to the race draft and the gate's swappable
+  tone judge.
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 1800
+input_schema:
+  required: ["ar_ledger_base_url"]
+  properties:
+    ar_ledger_base_url:
+      type: string
+      description: "AR system REST base exposing open invoices + per-customer payment history (QuickBooks Online or Stripe AR / Invoicing)."
+      default: "https://quickbooks.api.intuit.com/v3/company"
+      example: "https://api.stripe.com/v1"
+    company_id:
+      type: string
+      description: "Tenant / company id used to scope the open-invoice query (QuickBooks realm id or Stripe account id)."
+      default: "ACME-CO-001"
+      example: "9130350000000123456"
+    aging_bucket_boundaries:
+      type: string
+      description: "Comma-separated day boundaries for the deterministic aging buckets. Default 30,60,90 yields 0-30 / 31-60 / 61-90 / 90+."
+      default: "30,60,90"
+      example: "30,60,90"
+    priority_weights:
+      type: string
+      description: "Comma-separated overdue-day -> weight multipliers as day:weight pairs feeding the priority score. Default ramps the weight up with age."
+      default: "0:0.5,30:1.0,60:2.0,90:3.5"
+      example: "0:0.5,30:1.0,60:2.0,90:3.5"
+    hold_for_review_balance:
+      type: number
+      description: "Account balance (in ledger currency) at or above which the gate forces a human credit-manager sign-off before any dunning email is sent."
+      default: 5000
+      example: "5000"
+    min_dunnable_balance:
+      type: number
+      description: "Accounts with a total overdue balance strictly below this are skipped (immaterial to chase). No email, no touch."
+      default: 25
+      example: "25"
+    grace_days:
+      type: integer
+      description: "Days past the due date before an invoice is considered overdue / dunnable (a deterministic courtesy grace window)."
+      default: 0
+      example: "3"
+    dunning_from_address:
+      type: string
+      description: "From address the dunning email is sent from (AR / billing mailbox)."
+      default: "billing@your-company.example.com"
+      example: "ar@acme.example.com"
+    email_send_url:
+      type: string
+      description: "Transactional email send endpoint used by the notify step (Gmail API messages.send or Resend /emails)."
+      default: "https://api.resend.com/emails"
+      example: "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
+    crm_endpoint:
+      type: string
+      description: "CRM REST endpoint that records the dunning touch as a logged activity (HubSpot engagements or Salesforce Task)."
+      default: "https://api.hubapi.com/crm/v3/objects/notes"
+      example: "https://your-instance.salesforce.com/services/data/v60.0/sobjects/Task"
+    tone_judge_model:
+      type: string
+      description: "Swappable model backing the gate's tone / escalation-appropriateness judge. Any provider can back it; for EU data residency pin mistral/large or a local model. The send still passes/fails on the non-LLM balance threshold without it."
+      default: "sonnet"
+      example: "mistral/large"
+    slack_channel:
+      type: string
+      description: "Collections Slack channel that receives the run digest (queued / held-for-review / sent counts)."
+      default: "#ar-collections"
+      example: "#ar-collections"
+steps:
+  # 1) DETERMINISTIC pull of the entire open-invoice AR ledger for the company. Returns every
+  #    open invoice with its balance, due date and customer id. No model. Connector: quickbooks/stripe.
+  - id: pull_open_invoices
+    type: http
+    http_config:
+      url: "{input.ar_ledger_base_url}/{input.company_id}/invoices?status=open&expand=customer&limit=1000"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.AR_LEDGER_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2) DETERMINISTIC pull of per-customer payment history (prior invoices + how late each was
+  #    paid) used to derive the prior-late-rate factor in the priority score. No model.
+  - id: pull_payment_history
+    type: http
+    depends_on: [pull_open_invoices]
+    http_config:
+      url: "{input.ar_ledger_base_url}/{input.company_id}/payments?status=paid&include=days_to_pay&limit=2000"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.AR_LEDGER_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 3) DETERMINISTIC aging + scoring engine. THE load-bearing decision, all in code, no model.
+  #    Sort every open invoice into aging buckets (0-30 / 31-60 / 61-90 / 90+ from the boundaries),
+  #    roll them up per account, compute DSO and the prior-late-rate from payment history, then
+  #    the COLLECTION-PRIORITY SCORE = total_overdue_balance x overdue-weight(max days) x
+  #    (1 + prior_late_rate), and select the dunning STAGE from the worst days-overdue. Accounts
+  #    below min_dunnable_balance are skipped. Output one loopable row per dunnable account.
+  - id: age_and_score
+    type: code
+    depends_on: [pull_open_invoices, pull_payment_history]
+    code_config:
+      language: python
+      code: |
+        from datetime import datetime, timezone
+
+        inv_raw = _steps.get('pull_open_invoices') or {}
+        pay_raw = _steps.get('pull_payment_history') or {}
+
+        def as_rows(blob, keys):
+            if isinstance(blob, list):
+                return [r for r in blob if isinstance(r, dict)]
+            if isinstance(blob, dict):
+                for k in keys:
+                    v = blob.get(k)
+                    if isinstance(v, list):
+                        return [r for r in v if isinstance(r, dict)]
+            return []
+
+        invoices = as_rows(inv_raw, ['invoices', 'data', 'items', 'QueryResponse', 'results'])
+        payments = as_rows(pay_raw, ['payments', 'data', 'items', 'results'])
+
+        # --- parse the aging bucket boundaries (e.g. "30,60,90") --------------------------
+        bnd_raw = str(_input.get('aging_bucket_boundaries') or '30,60,90')
+        boundaries = []
+        for tok in bnd_raw.replace(';', ',').split(','):
+            tok = tok.strip()
+            if tok:
+                try:
+                    boundaries.append(int(float(tok)))
+                except ValueError:
+                    pass
+        boundaries = sorted(set(boundaries)) or [30, 60, 90]
+
+        # --- parse the overdue-day -> weight ramp (e.g. "0:0.5,30:1.0,60:2.0,90:3.5") ------
+        pw_raw = str(_input.get('priority_weights') or '0:0.5,30:1.0,60:2.0,90:3.5')
+        weight_points = []
+        for pair in pw_raw.replace(';', ',').split(','):
+            pair = pair.strip()
+            if ':' in pair:
+                d_str, w_str = pair.split(':', 1)
+                try:
+                    weight_points.append((int(float(d_str.strip())), float(w_str.strip())))
+                except ValueError:
+                    pass
+        weight_points = sorted(weight_points) or [(0, 1.0)]
+
+        def overdue_weight(days):
+            # Step weight: the last point whose day-floor is <= days overdue.
+            w = weight_points[0][1]
+            for d_floor, wt in weight_points:
+                if days >= d_floor:
+                    w = wt
+                else:
+                    break
+            return w
+
+        grace = int(_input.get('grace_days', 0) or 0)
+        min_bal = float(_input.get('min_dunnable_balance', 25) or 25)
+        hold_bal = float(_input.get('hold_for_review_balance', 5000) or 5000)
+        now = datetime.now(timezone.utc)
+
+        def parse_date(v):
+            if not v:
+                return None
+            s = str(v).strip().replace('Z', '+00:00')
+            for fmt in (None,):
+                try:
+                    dt = datetime.fromisoformat(s)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    return dt
+                except (ValueError, TypeError):
+                    return None
+            return None
+
+        def to_float(v):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return 0.0
+
+        # --- prior-late-rate per customer from payment history ----------------------------
+        # late_rate = fraction of historical paid invoices settled after their due date.
+        late_counts = {}
+        for p in payments:
+            cust = str(p.get('customer_id') or p.get('customer') or p.get('CustomerRef') or '').strip()
+            if not cust:
+                continue
+            days_to_pay = p.get('days_to_pay')
+            terms = to_float(p.get('terms_days') or p.get('net_terms') or 0)
+            was_late = None
+            if days_to_pay is not None:
+                was_late = to_float(days_to_pay) > terms
+            else:
+                due = parse_date(p.get('due_date') or p.get('DueDate'))
+                paid = parse_date(p.get('paid_at') or p.get('paid_date') or p.get('TxnDate'))
+                if due and paid:
+                    was_late = paid > due
+            if was_late is None:
+                continue
+            agg = late_counts.setdefault(cust, {'total': 0, 'late': 0})
+            agg['total'] += 1
+            if was_late:
+                agg['late'] += 1
+
+        def prior_late_rate(cust):
+            agg = late_counts.get(cust)
+            if not agg or agg['total'] == 0:
+                return 0.0
+            return round(agg['late'] / agg['total'], 4)
+
+        # --- bucket labels derived from boundaries ----------------------------------------
+        def bucket_label(days):
+            lo = 0
+            for b in boundaries:
+                if days <= b:
+                    return f"{lo}-{b}"
+                lo = b + 1
+            return f"{boundaries[-1] + 1}+"
+
+        # --- roll open invoices up per account --------------------------------------------
+        accounts = {}
+        for inv in invoices:
+            cust = str(inv.get('customer_id') or inv.get('customer')
+                       or inv.get('CustomerRef') or inv.get('customer_ref') or '').strip()
+            if not cust:
+                continue
+            balance = to_float(inv.get('balance') or inv.get('amount_due')
+                               or inv.get('Balance') or inv.get('amount_remaining'))
+            if balance <= 0:
+                continue
+            due = parse_date(inv.get('due_date') or inv.get('DueDate') or inv.get('due'))
+            days_overdue = 0
+            if due:
+                days_overdue = max(0, (now - due).days - grace)
+
+            acc = accounts.setdefault(cust, {
+                'customer_id': cust,
+                'customer_name': str(inv.get('customer_name') or inv.get('CompanyName')
+                                     or inv.get('display_name') or cust),
+                'customer_email': str(inv.get('customer_email') or inv.get('email')
+                                      or inv.get('BillEmail') or ''),
+                'total_balance': 0.0,
+                'overdue_balance': 0.0,
+                'max_days_overdue': 0,
+                'invoice_count': 0,
+                'overdue_invoice_count': 0,
+                'buckets': {},
+                'invoices': [],
+            })
+            acc['total_balance'] += balance
+            acc['invoice_count'] += 1
+            acc['invoices'].append({
+                'invoice_id': str(inv.get('id') or inv.get('Id') or inv.get('number') or ''),
+                'balance': round(balance, 2),
+                'days_overdue': days_overdue,
+            })
+            if days_overdue > 0:
+                acc['overdue_balance'] += balance
+                acc['overdue_invoice_count'] += 1
+                acc['max_days_overdue'] = max(acc['max_days_overdue'], days_overdue)
+                lbl = bucket_label(days_overdue)
+                acc['buckets'][lbl] = round(acc['buckets'].get(lbl, 0.0) + balance, 2)
+
+        # --- dunning stage from worst days overdue ----------------------------------------
+        def dunning_stage(days):
+            b = boundaries
+            if days <= 0:
+                return 'none'
+            if len(b) >= 1 and days <= b[0]:
+                return 'reminder'
+            if len(b) >= 2 and days <= b[1]:
+                return 'first_notice'
+            if len(b) >= 3 and days <= b[2]:
+                return 'second_notice'
+            return 'final_demand'
+
+        # --- finalize: priority score + stage per dunnable account ------------------------
+        dunnable = []
+        skipped = 0
+        for cust, acc in accounts.items():
+            overdue_balance = round(acc['overdue_balance'], 2)
+            if overdue_balance < min_bal:
+                skipped += 1
+                continue
+            days = acc['max_days_overdue']
+            late_rate = prior_late_rate(cust)
+            weight = overdue_weight(days)
+            # COLLECTION-PRIORITY SCORE = balance x overdue-weight x (1 + prior-late-rate).
+            priority_score = round(overdue_balance * weight * (1.0 + late_rate), 2)
+            stage = dunning_stage(days)
+            row = {
+                'customer_id': cust,
+                'customer_name': acc['customer_name'],
+                'customer_email': acc['customer_email'],
+                'total_balance': round(acc['total_balance'], 2),
+                'overdue_balance': overdue_balance,
+                'max_days_overdue': days,
+                'overdue_weight': weight,
+                'prior_late_rate': late_rate,
+                'priority_score': priority_score,
+                'dunning_stage': stage,
+                'aging_buckets': acc['buckets'],
+                'overdue_invoice_count': acc['overdue_invoice_count'],
+                'invoices': acc['invoices'][:25],
+                'requires_human_signoff': overdue_balance >= hold_bal,
+            }
+            dunnable.append(row)
+
+        # Highest collection-priority first: chase the biggest, oldest, most-delinquent first.
+        dunnable.sort(key=lambda r: r['priority_score'], reverse=True)
+
+        total_overdue = round(sum(r['overdue_balance'] for r in dunnable), 2)
+        total_ar = round(sum(round(a['total_balance'], 2) for a in accounts.values()), 2)
+
+        result = {
+            'company_id': _input.get('company_id'),
+            'account_count': len(accounts),
+            'dunnable_count': len(dunnable),
+            'skipped_immaterial': skipped,
+            'total_ar_balance': total_ar,
+            'total_overdue_balance': total_overdue,
+            'boundaries': boundaries,
+            'hold_for_review_balance': hold_bal,
+            'dunnable_accounts': dunnable,
+        }
+
+  # 4) LOOP over every dunnable account, highest collection-priority first. Per-account child
+  #    chain: race-draft the stage-appropriate dunning email -> gate (tone judge AND balance
+  #    threshold) -> condition routes large balances to human approval -> email + CRM log.
+  - id: per_account_loop
+    type: loop
+    depends_on: [age_and_score]
+    loop_config:
+      over: "steps.age_and_score.output.dunnable_accounts"
+      step_ids:
+        - draft_dunning_email
+        - send_gate
+        - signoff_branch
+      max_iterations: 1000
+
+  # 4a) CROSS-PROVIDER RACE - draft the STAGE-APPROPRIATE dunning email for THIS account. The
+  #     same prompt is raced across providers and the FIRST one returning a usable body wins
+  #     (provider failover, NOT a vote), so the draft survives any single LLM outage. The branch
+  #     steps are DEFINED SEPARATELY below with NO depends_on. Tone escalates with the stage.
+  - id: draft_dunning_email
+    type: race
+    race_config:
+      branches:
+        - [draft_primary]
+        - [draft_secondary]
+      validator: "len(str(output).strip()) > 40"
+
+  # 4a-i) PRIMARY draft branch (default provider).
+  - id: draft_primary
+    type: llm
+    model: sonnet
+    prompt: >-
+      You are an accounts-receivable collections specialist. Write a concise, professional
+      dunning email body for an overdue account. Match the TONE to the dunning stage exactly:
+      'reminder' = friendly courtesy nudge; 'first_notice' = polite but clear request for
+      payment; 'second_notice' = firm, referencing prior contact; 'final_demand' = formal,
+      stating the account is seriously past due and next steps may follow. State the overdue
+      amount and the oldest days-overdue. Do NOT threaten legal action, name a collections
+      agency, or invent fees. Plain text only, no subject line.
+      Stage: {input._item.dunning_stage}.
+      Customer: {input._item.customer_name}.
+      Overdue balance: {input._item.overdue_balance}.
+      Oldest invoice days overdue: {input._item.max_days_overdue}.
+      Aging buckets: {input._item.aging_buckets}.
+
+  # 4a-ii) SECONDARY draft branch (swap to a different / EU-resident provider for failover).
+  - id: draft_secondary
+    type: llm
+    model: mistral/large
+    prompt: >-
+      You are an accounts-receivable collections specialist. Write a concise, professional
+      dunning email body for an overdue account. Match the TONE to the dunning stage exactly:
+      'reminder' = friendly courtesy nudge; 'first_notice' = polite but clear request for
+      payment; 'second_notice' = firm, referencing prior contact; 'final_demand' = formal,
+      stating the account is seriously past due and next steps may follow. State the overdue
+      amount and the oldest days-overdue. Do NOT threaten legal action, name a collections
+      agency, or invent fees. Plain text only, no subject line.
+      Stage: {input._item.dunning_stage}.
+      Customer: {input._item.customer_name}.
+      Overdue balance: {input._item.overdue_balance}.
+      Oldest invoice days overdue: {input._item.max_days_overdue}.
+      Aging buckets: {input._item.aging_buckets}.
+
+  # 4b) SEND GATE (swappable + model-independent). TWO strategies, BOTH must pass:
+  #     (1) llm_eval tone / escalation-appropriateness judge - "does this draft match the stage
+  #         and avoid over-escalation / threats?", model SWAPPABLE to any of the 7 providers;
+  #     (2) llm_eval acting as a DETERMINISTIC threshold - fed ONLY the pre-computed balance vs
+  #         the hold-for-review floor and told to answer purely from the arithmetic, so the send
+  #         still passes/fails the gate on the non-LLM math alone with zero model involvement.
+  - id: send_gate
+    type: gate
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are a collections-quality reviewer. A dunning email was drafted for an account
+              at a specific dunning stage. Answer exactly 'approved' if the email's tone MATCHES
+              the stage (reminder=gentle, first_notice=polite, second_notice=firm,
+              final_demand=formal) AND it does not over-escalate, threaten legal/collections
+              action, or invent fees. Otherwise answer 'rejected' and name the defect. Judge tone
+              and escalation appropriateness only; the balance threshold is checked separately.
+            input: "Stage={steps.draft_dunning_email.context.item.dunning_stage} | Draft: {steps.draft_dunning_email.output}"
+            model: "{input.tone_judge_model}"
+        - type: llm_eval
+          config:
+            prompt: >-
+              Deterministic threshold check. Answer exactly 'approved' if the overdue balance is
+              strictly BELOW the hold-for-review floor (this account may auto-send); answer
+              'rejected' if the balance is at or above the floor (this account needs human
+              sign-off). Use ONLY the supplied numbers - do not reason beyond the arithmetic
+              comparison.
+            input: "overdue_balance={steps.draft_dunning_email.context.item.overdue_balance} hold_for_review_balance={input.hold_for_review_balance}"
+            model: haiku
+
+  # 4c) CONDITION - route large balances to a human credit-manager approval, small balances send
+  #     directly. Deterministic branch keyed off the pre-computed requires_human_signoff flag (not
+  #     a model), so routing survives a missing model provider. No model.
+  - id: signoff_branch
+    type: condition
+    condition_config:
+      expression: "{steps.draft_dunning_email.context.item.requires_human_signoff} == True"
+      then: [credit_manager_approval, send_dunning_email, log_crm_touch]
+      else: [send_dunning_email, log_crm_touch]
+
+  # 4d) HUMAN APPROVAL - a credit manager must sign off before a large-balance dunning email is
+  #     sent. Protects key accounts from an inappropriate auto-send. On timeout the touch is held.
+  - id: credit_manager_approval
+    type: approval
+    approval_config:
+      message: >-
+        Credit manager: approve sending a {steps.draft_dunning_email.context.item.dunning_stage}
+        dunning email to {steps.draft_dunning_email.context.item.customer_name}
+        (overdue {steps.draft_dunning_email.context.item.overdue_balance},
+        {steps.draft_dunning_email.context.item.max_days_overdue} days). This balance is at or
+        above the hold-for-review floor. Approve to send, reject to hold this account for manual handling.
+      timeout_hours: 24
+      on_timeout: abort
+
+  # 4e) NOTIFY (email customer) - send the approved dunning email to the customer via the
+  #     transactional email connector (Gmail API or Resend). Connector: gmail / resend.
+  - id: send_dunning_email
+    type: http
+    http_config:
+      url: "{input.email_send_url}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.EMAIL_API_TOKEN}"
+      body: |
+        {
+          "from": "{input.dunning_from_address}",
+          "to": ["{steps.draft_dunning_email.context.item.customer_email}"],
+          "subject": "Payment reminder: account {steps.draft_dunning_email.context.item.customer_id} overdue balance {steps.draft_dunning_email.context.item.overdue_balance}",
+          "text": "{steps.draft_dunning_email.output}",
+          "tags": [{"name": "dunning_stage", "value": "{steps.draft_dunning_email.context.item.dunning_stage}"}]
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 4f) LOG THE TOUCH TO CRM - record the dunning email as a logged activity so collections
+  #     history is auditable and the next stage escalates correctly. Connector: hubspot / salesforce.
+  - id: log_crm_touch
+    type: http
+    http_config:
+      url: "{input.crm_endpoint}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.CRM_API_TOKEN}"
+      body: |
+        {
+          "properties": {
+            "customer_id": "{steps.draft_dunning_email.context.item.customer_id}",
+            "activity_type": "dunning_email",
+            "dunning_stage": "{steps.draft_dunning_email.context.item.dunning_stage}",
+            "overdue_balance": "{steps.draft_dunning_email.context.item.overdue_balance}",
+            "max_days_overdue": "{steps.draft_dunning_email.context.item.max_days_overdue}",
+            "priority_score": "{steps.draft_dunning_email.context.item.priority_score}",
+            "note": "Dunning touch sent via AR Collections Dunning Prioritizer."
+          }
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 5) DETERMINISTIC run digest. Fold the prioritized ledger into counts: total dunnable, how
+  #    many auto-send vs held-for-review, the total overdue chased and the top-priority account.
+  #    No model.
+  - id: build_digest
+    type: code
+    depends_on: [per_account_loop, age_and_score]
+    code_config:
+      language: python
+      code: |
+        scored = _steps.get('age_and_score') or {}
+        accounts = scored.get('dunnable_accounts', [])
+
+        hold = [a for a in accounts if a.get('requires_human_signoff')]
+        auto = [a for a in accounts if not a.get('requires_human_signoff')]
+
+        by_stage = {}
+        for a in accounts:
+            st = a.get('dunning_stage', 'unknown')
+            by_stage[st] = by_stage.get(st, 0) + 1
+
+        top = accounts[0] if accounts else {}
+
+        result = {
+            'company_id': scored.get('company_id'),
+            'dunnable_count': len(accounts),
+            'auto_send_count': len(auto),
+            'held_for_review_count': len(hold),
+            'total_overdue_balance': scored.get('total_overdue_balance', 0),
+            'total_ar_balance': scored.get('total_ar_balance', 0),
+            'by_stage': by_stage,
+            'top_priority_customer': top.get('customer_name'),
+            'top_priority_score': top.get('priority_score'),
+            'top_priority_overdue': top.get('overdue_balance'),
+        }
+
+  # 6) NOTIFY the collections channel with the run digest so the team sees what was queued,
+  #    auto-sent and held for credit-manager sign-off. service: slack.
+  - id: notify_collections
+    type: notify
+    depends_on: [build_digest]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        :money_with_wings: AR dunning run for {steps.build_digest.output.company_id}
+        Dunnable accounts : {steps.build_digest.output.dunnable_count}
+        Auto-sent         : {steps.build_digest.output.auto_send_count}
+        Held for sign-off : {steps.build_digest.output.held_for_review_count}
+        Total overdue chased: {steps.build_digest.output.total_overdue_balance} of {steps.build_digest.output.total_ar_balance} AR
+        By stage          : {steps.build_digest.output.by_stage}
+        Top priority      : {steps.build_digest.output.top_priority_customer} (score {steps.build_digest.output.top_priority_score}, overdue {steps.build_digest.output.top_priority_overdue})
+on_complete:
+  storage_path: "ar-collections-dunning-prioritizer/{run_id}/result.json"

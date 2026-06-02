@@ -1,0 +1,477 @@
+# name: Inbox-to-Tasks Triage Router
+# description: Pulls unread mail, DETERMINISTICALLY extracts dates / deadlines / dollar amounts / action verbs, classifies each message into task vs FYI vs spam, and GATES auto-created calendar/task entries so only confidently-actionable items become tasks - the rest just get notified. http GET pulls the unread messages and POSTs new tasks/events; code carries the load-bearing signal extraction, sender allowlist and dedup; a two-strategy gate (llm_eval actionability judge AND a non-LLM rule: has-a-date-OR-explicit-ask AND trusted-sender) must both pass before any task is created.
+# tags: [inbox, email, triage, tasks, calendar, productivity, GTD, deadlines, dedup, allowlist, gmail, todoist, notify]
+# category: personal
+# connectors: gmail, todoist, google-calendar, slack
+name: inbox-to-tasks-triage-router
+description: >-
+  A personal inbox triage engine that turns unread mail into a clean task list
+  without trusting a model to act on its own. A DETERMINISTIC http GET pulls the
+  unread messages from the mail provider (Gmail / IMAP-REST / Microsoft Graph
+  style), then a code step DETERMINISTICALLY extracts the load-bearing signals
+  from every message in pure Python: date / deadline regexes, dollar-amount
+  detection, action-verb / explicit-ask detection, a sender allowlist check
+  against the trusted_senders list, and a dedup of message ids already seen on a
+  prior run. A swappable CLASSIFY step LABELS each message task / fyi / spam, but
+  the create-or-not decision is NOT left to it. A two-strategy GATE must BOTH
+  pass before any calendar/task entry is auto-created: (1) a swappable llm_eval
+  actionability judge ("is this genuinely something the user must DO?", backable
+  by any provider) AND (2) a NON-LLM rule strategy fed only the pre-computed
+  booleans - it approves only when the message has a date OR an explicit ask AND
+  the sender is on the trusted allowlist. A CONDITION then routes confidently-
+  actionable messages to an http POST that creates the task/event in the task
+  connector, while everything else is only NOTIFIED to the user. A final code
+  step persists the seen message ids so the next run dedups. All extraction, the
+  allowlist, the dedup and the rule strategy are 100% deterministic and run even
+  with zero model providers available; the model is confined to the swappable
+  classifier label and the swappable gate judge.
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 900
+input_schema:
+  required: ["mailbox_url", "tasks_api_url"]
+  properties:
+    mailbox_url:
+      type: string
+      description: "Mail provider unread-messages REST endpoint that returns the inbox of unread messages (Gmail API / IMAP-REST gateway / Microsoft Graph style)."
+      default: "https://gmail.googleapis.com/gmail/v1/users/me/messages?q=is:unread"
+      example: "https://gmail.googleapis.com/gmail/v1/users/me/messages?q=is:unread"
+    tasks_api_url:
+      type: string
+      description: "Task / calendar connector REST base that receives the auto-created task / event entries (Todoist / Google Calendar / Notion style)."
+      default: "https://api.todoist.com/rest/v2"
+      example: "https://api.todoist.com/rest/v2"
+    trusted_senders:
+      type: string
+      description: "DETERMINISTIC allowlist for the gate's rule strategy: comma-separated sender email addresses or domains that are trusted enough to auto-create a task. A message from outside this list can never be auto-actioned."
+      default: "boss@company.com,@company.com,billing@bank.com,calendar-invite@google.com"
+      example: "boss@company.com,@company.com,billing@bank.com"
+    seen_ids_url:
+      type: string
+      description: "Dedup store REST endpoint returning the message ids already triaged on prior runs (key-value / PostgREST / S3 JSON), so the same mail is never turned into a duplicate task."
+      default: "https://kv.internal/inbox-triage/seen-ids"
+      example: "https://kv.internal/inbox-triage/seen-ids"
+    gate_model:
+      type: string
+      description: "Swappable actionability-judge model for the gate. Any of the 7 providers can back it; pin an EU/local provider (mistral/large, ollama, omlx/qwen-3) for private mail. Triage still works with this unavailable - the non-LLM rule strategy stands alone."
+      default: "sonnet"
+      example: "mistral/large"
+    project_id:
+      type: string
+      description: "Target project / calendar id in the task connector that new entries are filed under."
+      default: "Inbox"
+      example: "2298765432"
+    slack_channel:
+      type: string
+      description: "Personal Slack channel / DM that receives the triage digest and the FYI / spam items that were NOT turned into tasks."
+      default: "#my-inbox-triage"
+      example: "#my-inbox-triage"
+steps:
+  # 1) DETERMINISTIC http GET of the unread messages from the mail provider. No model.
+  #    Returns the raw unread inbox the rest of the pipeline normalizes and triages.
+  - id: fetch_unread_mail
+    type: http
+    http_config:
+      url: "{input.mailbox_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.MAILBOX_API_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2) DETERMINISTIC http GET of the already-seen message ids from the dedup store, so a
+  #    message that was triaged on a prior run is never turned into a duplicate task. No model.
+  - id: fetch_seen_ids
+    type: http
+    depends_on: [fetch_unread_mail]
+    http_config:
+      url: "{input.seen_ids_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.SEEN_STORE_TOKEN}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 3) DETERMINISTIC signal extraction - the load-bearing prep. NO model. For every unread
+  #    message: parse dates / deadlines (regex), detect dollar amounts, detect action verbs /
+  #    explicit asks, check the sender against the trusted_senders allowlist, and DROP any
+  #    message id already in the seen-ids dedup set. Emits one normalized, scored row per
+  #    fresh message that the classifier labels and the gate's rule strategy consumes.
+  - id: extract_signals
+    type: code
+    depends_on: [fetch_unread_mail, fetch_seen_ids]
+    code_config:
+      language: python
+      code: |
+        import re
+
+        raw = _steps.get('fetch_unread_mail') or {}
+        seen_raw = _steps.get('fetch_seen_ids') or {}
+
+        # --- coalesce the provider payload into a list of message dicts (vendor-agnostic).
+        if isinstance(raw, list):
+            rows = raw
+        elif isinstance(raw, dict):
+            rows = (raw.get('messages') or raw.get('value') or raw.get('data')
+                    or raw.get('items') or raw.get('results') or [])
+        else:
+            rows = []
+        if not isinstance(rows, list):
+            rows = [rows] if rows else []
+
+        # --- already-seen ids for dedup (accepts a bare list or a wrapped dict).
+        if isinstance(seen_raw, list):
+            seen_list = seen_raw
+        elif isinstance(seen_raw, dict):
+            seen_list = (seen_raw.get('seen_ids') or seen_raw.get('ids')
+                         or seen_raw.get('data') or seen_raw.get('value') or [])
+        else:
+            seen_list = []
+        seen_ids = {str(s).strip() for s in seen_list if str(s).strip()}
+
+        # --- trusted-sender allowlist (emails OR @domains), lowercased.
+        allow_raw = str(_input.get('trusted_senders') or '')
+        allowlist = {a.strip().lower() for a in allow_raw.replace(';', ',').split(',') if a.strip()}
+
+        # --- deterministic detectors --------------------------------------------------
+        # Dates: ISO 8601, slash dates, and month-name dates. Pattern strings only (no compile).
+        date_patterns = [
+            r'\b\d{4}-\d{2}-\d{2}\b',
+            r'\b\d{1,2}/\d{1,2}/\d{2,4}\b',
+            r'\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?\b',
+        ]
+        deadline_words = ('deadline', 'due', 'by eod', 'by end of', 'no later than',
+                          'expires', 'expiry', 'last day', 'before', 'asap', 'rsvp')
+        # Action verbs / explicit asks - the "you must DO something" signal.
+        ask_words = ('please', 'can you', 'could you', 'need you to', 'action required',
+                     'review', 'approve', 'sign', 'submit', 'send', 'confirm', 'schedule',
+                     'pay', 'complete', 'respond', 'reply', 'call', 'book', 'register')
+        # Dollar amounts: $1,234.56  /  1234 USD  /  EUR 99
+        amount_patterns = [
+            r'[$€£]\s?\d[\d,]*(?:\.\d{1,2})?',
+            r'\b\d[\d,]*(?:\.\d{1,2})?\s?(?:usd|eur|gbp|czk|dollars|euros)\b',
+        ]
+
+        def _sender_of(rec):
+            for k in ('from', 'sender', 'from_email', 'fromAddress', 'reply_to'):
+                v = rec.get(k)
+                if isinstance(v, dict):
+                    v = v.get('email') or v.get('address') or v.get('value') or ''
+                if v:
+                    return str(v).strip().lower()
+            return ''
+
+        def _trusted(sender):
+            if not sender or not allowlist:
+                return False
+            if sender in allowlist:
+                return True
+            dom = sender.split('@')[-1] if '@' in sender else ''
+            return ('@' + dom) in allowlist or dom in allowlist
+
+        messages = []
+        skipped_dupes = 0
+        for rec in rows:
+            if not isinstance(rec, dict):
+                continue
+            mid = str(rec.get('id') or rec.get('message_id') or rec.get('uid') or '').strip()
+            if mid and mid in seen_ids:
+                skipped_dupes += 1
+                continue
+
+            subject = str(rec.get('subject') or rec.get('title') or '').strip()
+            body = str(rec.get('snippet') or rec.get('body') or rec.get('text')
+                       or rec.get('preview') or '').strip()
+            sender = _sender_of(rec)
+            hay = (subject + ' ' + body).lower()
+
+            # date / deadline detection
+            found_dates = []
+            for pat in date_patterns:
+                found_dates.extend(re.findall(pat, hay, flags=re.IGNORECASE))
+            has_date = bool(found_dates)
+            has_deadline = any(w in hay for w in deadline_words)
+
+            # dollar-amount detection
+            found_amounts = []
+            for pat in amount_patterns:
+                found_amounts.extend(re.findall(pat, hay, flags=re.IGNORECASE))
+            has_amount = bool(found_amounts)
+
+            # action-verb / explicit-ask detection
+            matched_asks = [w for w in ask_words if w in hay]
+            has_ask = bool(matched_asks)
+
+            trusted = _trusted(sender)
+
+            # Deterministic rule-strategy verdict, pre-computed for the gate:
+            # actionable_by_rule = (has a date/deadline OR an explicit ask) AND trusted sender.
+            actionable_by_rule = bool((has_date or has_deadline or has_ask) and trusted)
+
+            # Lightweight signal score for ordering / the classifier prompt.
+            signal_score = (
+                (2 if has_date else 0) + (2 if has_deadline else 0)
+                + (2 if has_ask else 0) + (1 if has_amount else 0)
+                + (1 if trusted else 0)
+            )
+
+            messages.append({
+                'id': mid,
+                'subject': subject,
+                'snippet': body[:400],
+                'sender': sender,
+                'trusted_sender': trusted,
+                'has_date': has_date,
+                'dates': found_dates[:5],
+                'has_deadline': has_deadline,
+                'has_amount': has_amount,
+                'amounts': [str(a).strip() for a in found_amounts[:5]],
+                'has_ask': has_ask,
+                'matched_asks': matched_asks[:8],
+                'signal_score': signal_score,
+                'actionable_by_rule': actionable_by_rule,
+            })
+
+        messages.sort(key=lambda m: m['signal_score'], reverse=True)
+
+        result = {
+            'fetched_count': len(rows),
+            'skipped_duplicates': skipped_dupes,
+            'fresh_count': len(messages),
+            'messages': messages,
+            'has_messages': len(messages) > 0,
+        }
+
+  # 4) LOOP over each fresh message: a swappable CLASSIFY labels it, then a CONDITION on the
+  #    deterministic rule verdict routes it into the actionability gate or straight to the
+  #    FYI/notify bucket. Per-message child chain runs once per message.
+  - id: per_message_loop
+    type: loop
+    depends_on: [extract_signals]
+    loop_config:
+      over: "steps.extract_signals.output.messages"
+      step_ids:
+        - classify_message
+        - route_message
+      max_iterations: 500
+
+  # 4a) CLASSIFY (swappable) - LABEL the message task / fyi / spam. The model only LABELS;
+  #     the create-or-not decision is made by the deterministic rule + the gate, not here.
+  - id: classify_message
+    type: classify
+    classify_config:
+      model: haiku
+      input: >-
+        Classify this unread email into exactly one bucket using the pre-computed
+        deterministic signals. task = the recipient must DO something (it has a date /
+        deadline or an explicit ask). fyi = informational, no action required. spam =
+        promotional / unsolicited / junk. Subject: {input._item.subject} | From:
+        {input._item.sender} | has_date={input._item.has_date}
+        has_deadline={input._item.has_deadline} has_ask={input._item.has_ask}
+        has_amount={input._item.has_amount} trusted_sender={input._item.trusted_sender} |
+        Snippet: {input._item.snippet}
+      categories:
+        - task
+        - fyi
+        - spam
+      branches:
+        task: [route_message]
+        fyi: [route_message]
+        spam: [route_message]
+
+  # 4b) CONDITION - route on the DETERMINISTIC rule verdict (not the model label), so routing
+  #     survives a missing model provider. Only messages the rule strategy already deemed
+  #     actionable enter the gate; everything else goes straight to the FYI/notify bucket. No model.
+  - id: route_message
+    type: condition
+    condition_config:
+      expression: "{steps.extract_signals.output} and {input._item.actionable_by_rule}"
+      then: [actionability_gate, create_task]
+      else: [collect_message]
+
+  # 4c) ACTIONABILITY GATE (swappable + model-independent). TWO strategies, BOTH must pass
+  #     before a task is auto-created: (1) a swappable llm_eval actionability judge -
+  #     "is this genuinely something the user must DO?" (any of the 7 providers can back it);
+  #     (2) an llm_eval acting as a DETERMINISTIC rule check, fed ONLY the pre-computed booleans
+  #     (has_date / has_deadline / has_ask + trusted_sender) and told to answer purely from the
+  #     rule, so a message still passes/fails the gate on the non-LLM rule alone.
+  - id: actionability_gate
+    type: gate
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are a personal-assistant actionability judge. A message was flagged as
+              possibly requiring action. Decide whether it is GENUINELY something the user
+              must DO (a real task with an outcome), versus noise that merely mentions a date
+              or a polite word. Answer exactly 'approved' if it should become a real task,
+              otherwise 'rejected' and name the reason. Judge actionability only; the rule
+              eligibility is checked separately.
+            input: "Subject: {input._item.subject} | From: {input._item.sender} | dates={input._item.dates} amounts={input._item.amounts} asks={input._item.matched_asks} | Snippet: {input._item.snippet}"
+            model: "{input.gate_model}"
+        - type: llm_eval
+          config:
+            prompt: >-
+              Deterministic rule check. Answer exactly 'approved' if (has_date is True OR
+              has_deadline is True OR has_ask is True) AND trusted_sender is True; otherwise
+              answer 'rejected'. Use ONLY the supplied booleans - do not infer or reason
+              beyond the logical comparison.
+            input: "has_date={input._item.has_date} has_deadline={input._item.has_deadline} has_ask={input._item.has_ask} trusted_sender={input._item.trusted_sender}"
+            model: haiku
+
+  # 4d) http POST - CREATE the task / calendar entry in the task connector. Only reached when
+  #     the message was rule-eligible AND both gate strategies passed. Connector: todoist / gcal.
+  - id: create_task
+    type: http
+    http_config:
+      url: "{input.tasks_api_url}/tasks"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.TASKS_API_TOKEN}"
+      body: |
+        {
+          "project_id": "{input.project_id}",
+          "content": "{input._item.subject}",
+          "description": "Auto-triaged from inbox. From: {input._item.sender}. {input._item.snippet}",
+          "labels": ["inbox-triage"],
+          "source_message_id": "{input._item.id}"
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 4e) DETERMINISTIC per-message collector. Folds the classify label, the rule verdict and
+  #     whether a task was created into one canonical row the post-loop aggregator reads. No model.
+  - id: collect_message
+    type: code
+    code_config:
+      language: python
+      code: |
+        msg = _input.get('_item') or {}
+        label = str(_steps.get('classify_message') or '').strip().lower()
+        gate = _steps.get('actionability_gate')
+        created = _steps.get('create_task')
+
+        # Did the gate run, and did all strategies pass?
+        gate_ran = gate is not None
+        if isinstance(gate, dict):
+            gate_passed = bool(gate.get('passed', gate.get('approved', gate.get('result', False))))
+        else:
+            gate_passed = bool(gate) if gate is not None else False
+
+        task_created = created is not None
+
+        if task_created and gate_ran and gate_passed:
+            outcome = 'task_created'
+        elif gate_ran and not gate_passed:
+            outcome = 'gate_rejected'      # rule-eligible but the gate ruled it not actionable
+        else:
+            outcome = 'fyi'                # never entered the gate: informational / spam
+
+        result = {
+            'id': msg.get('id'),
+            'subject': msg.get('subject'),
+            'sender': msg.get('sender'),
+            'classify_label': label,
+            'actionable_by_rule': bool(msg.get('actionable_by_rule')),
+            'trusted_sender': bool(msg.get('trusted_sender')),
+            'has_date': bool(msg.get('has_date')),
+            'has_deadline': bool(msg.get('has_deadline')),
+            'has_ask': bool(msg.get('has_ask')),
+            'has_amount': bool(msg.get('has_amount')),
+            'gate_ran': gate_ran,
+            'gate_passed': gate_passed if gate_ran else None,
+            'outcome': outcome,
+        }
+
+  # 5) DETERMINISTIC aggregation of every per-message outcome from the loop. Splits
+  #     created-tasks / FYI / gate-rejected, and rebuilds the FULL fresh-id set so the dedup
+  #     store can be updated to never re-triage these messages. No model.
+  - id: aggregate_triage
+    type: code
+    depends_on: [per_message_loop, extract_signals]
+    code_config:
+      language: python
+      code: |
+        loop_out = _steps.get('per_message_loop') or {}
+        extracted = _steps.get('extract_signals') or {}
+
+        items = loop_out if isinstance(loop_out, list) else (
+            loop_out.get('results') or loop_out.get('items') or loop_out.get('iterations') or []
+        )
+
+        rows = []
+        for it in items:
+            row = it
+            if isinstance(it, dict) and 'outcome' not in it:
+                row = it.get('collect_message') or it.get('output') or it
+            if isinstance(row, dict) and row.get('id') is not None:
+                rows.append(row)
+
+        created = [r for r in rows if r.get('outcome') == 'task_created']
+        rejected = [r for r in rows if r.get('outcome') == 'gate_rejected']
+        fyi = [r for r in rows if r.get('outcome') == 'fyi']
+
+        # Every fresh message id triaged this run, to append to the dedup store.
+        fresh_messages = extracted.get('messages', [])
+        all_fresh_ids = [str(m.get('id')) for m in fresh_messages if m.get('id')]
+
+        result = {
+            'fresh_count': extracted.get('fresh_count', 0),
+            'skipped_duplicates': extracted.get('skipped_duplicates', 0),
+            'created_count': len(created),
+            'rejected_count': len(rejected),
+            'fyi_count': len(fyi),
+            'created_tasks': created,
+            'fyi_items': fyi + rejected,
+            'seen_ids': all_fresh_ids,
+            'has_created': len(created) > 0,
+        }
+
+  # 6) DETERMINISTIC persist of the seen message ids to the dedup store so the NEXT run skips
+  #     these messages. http PUT of the full fresh-id set. No model.
+  - id: persist_seen_ids
+    type: http
+    depends_on: [aggregate_triage]
+    http_config:
+      url: "{input.seen_ids_url}"
+      method: PUT
+      headers:
+        Content-Type: "application/json"
+      auth: "bearer:{env.SEEN_STORE_TOKEN}"
+      body: |
+        {
+          "seen_ids": {{ _steps['aggregate_triage']['seen_ids'] }}
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 7) NOTIFY the user with the triage digest: how many tasks were auto-created, and the
+  #     FYI / not-actioned items that were deliberately NOT turned into tasks. service: slack.
+  - id: notify_digest
+    type: notify
+    depends_on: [persist_seen_ids]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        :inbox_tray: Inbox triage complete - {steps.aggregate_triage.output.fresh_count} fresh, {steps.aggregate_triage.output.skipped_duplicates} dupes skipped
+        :white_check_mark: Auto-created tasks : {steps.aggregate_triage.output.created_count}
+        :no_entry_sign: Gate-rejected (not actionable): {steps.aggregate_triage.output.rejected_count}
+        :information_source: FYI / not actioned : {steps.aggregate_triage.output.fyi_count}
+        Tasks: {steps.aggregate_triage.output.created_tasks}
+        FYI items (review manually): {steps.aggregate_triage.output.fyi_items}
+on_complete:
+  storage_path: "inbox-to-tasks-triage-router/{run_id}/result.json"

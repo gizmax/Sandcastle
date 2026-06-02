@@ -1,0 +1,578 @@
+# name: Budget vs Actual Variance Sentinel
+# description: Always-on FP&A sentinel that wakes on the period-close / actuals-posted webhook, pulls LIVE actuals from the accounting system (QuickBooks / NetSuite) and the LOCKED plan from the FP&A model (Google Sheets) over real http connectors, then computes per-cost-center variance ($ delta, % delta, run-rate burn, YTD pacing) in 100% deterministic Python. It LOOPS each cost center, CLASSIFIES favorable/unfavorable/on_plan from precomputed flags only, a CONDITION routes only candidate-material variances into a two-strategy MATERIALITY GATE (a swappable llm_eval judge AND a non-LLM dollar+percent floor threshold), and NOTIFY pages the budget owner only on confirmed material variance, never on rounding noise. The variance math and the threshold are model-independent; the model is confined to the swappable gate judge.
+# tags: [FP&A, Budget, Variance, BvA, Actuals, Plan, CostCenter, Materiality, RunRate, YTD, QuickBooks, NetSuite, GoogleSheets, Slack, finance, sensor]
+# category: finance_ops
+# connectors: quickbooks, netsuite, google-sheets, slack, pagerduty
+name: budget-variance-materiality-sentinel
+description: >-
+  An always-on Budget-vs-Actual variance sentinel for FP&A close. A durable SENSOR
+  blocks until the period-close / actuals-posted webhook fires (the accounting system
+  reports the period's actuals are posted and the close is in progress), so the workflow
+  only runs on real data, not on a half-posted ledger. A DETERMINISTIC http GET then pulls
+  the LIVE actuals from the accounting system (QuickBooks Online / NetSuite REST P&L by
+  cost center) and a second http GET pulls the LOCKED plan from the FP&A model
+  (Google Sheets budget tab). A pure-Python code step joins actuals to plan per cost center
+  and computes the load-bearing variance math - dollar delta (actual - plan), percent delta,
+  run-rate burn (actual / fraction-of-period-elapsed), and YTD pacing - all 100% deterministic
+  with zero model involvement, and pre-flags each row favorable / unfavorable / on_plan plus a
+  candidate-material boolean against the dollar + percent floors. The workflow LOOPS every cost
+  center: a CLASSIFY labels favorable / unfavorable / on_plan using ONLY the precomputed flags,
+  and a CONDITION routes only candidate-material variances into a MATERIALITY GATE. The gate has
+  TWO strategies that BOTH must pass: a swappable llm_eval materiality judge ("is this a real
+  budget overrun worth paging an owner, or a timing / accrual artifact?", backable by any of the
+  7 providers) AND a NON-LLM threshold strategy fed ONLY the precomputed abs($) and abs(%) so a
+  variance passes/fails the gate on the dollar + percent floor arithmetic alone. After the loop a
+  deterministic code step aggregates confirmed material variances per owner, a CONDITION gates the
+  page, and NOTIFY pages each budget owner with their material overruns / underruns and the period
+  rollup. All variance math and the materiality floor are model-independent and run with zero
+  providers available; the model is confined to the gate's swappable judge.
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 1800
+input_schema:
+  required: ["entity_id", "accounting_actuals_base_url", "fpa_plan_sheet_url"]
+  properties:
+    entity_id:
+      type: string
+      description: "Legal entity / company id whose period close is watched (the accounting subsidiary or book)."
+      default: "ACME-US"
+      example: "ACME-US"
+    period:
+      type: string
+      description: "Fiscal period being closed in YYYY-MM form. Drives which plan column and which actuals window are pulled."
+      default: "2026-05"
+      example: "2026-05"
+    accounting_actuals_base_url:
+      type: string
+      description: "Accounting-system REST base that returns posted actuals (P&L / expense) by cost center for the period (QuickBooks Online or NetSuite REST / SuiteQL gateway)."
+      default: "https://quickbooks.api.intuit.com/v3/company"
+      example: "https://acme.suitetalk.api.netsuite.com/services/rest"
+    fpa_plan_sheet_url:
+      type: string
+      description: "Google Sheets (Sheets API v4 values) URL of the LOCKED FP&A budget model returning the planned amount per cost center for the period."
+      default: "https://sheets.googleapis.com/v4/spreadsheets/SHEET_ID/values/Budget!A2:F500"
+      example: "https://sheets.googleapis.com/v4/spreadsheets/1AbC.../values/Budget!A2:F500"
+    materiality_dollar_floor:
+      type: number
+      description: "Absolute dollar floor (>=) below which a variance is treated as immaterial rounding/timing noise by the gate's non-LLM threshold strategy."
+      default: 5000
+      example: "5000"
+    materiality_pct_floor:
+      type: number
+      description: "Absolute percent floor (>=, in percent points) below which a variance is treated as immaterial by the gate's non-LLM threshold strategy. A variance is candidate-material when abs($)>=dollar_floor OR abs(%)>=pct_floor."
+      default: 10
+      example: "10"
+    period_elapsed_fraction:
+      type: number
+      description: "Fraction of the fiscal period elapsed (0-1) used to compute run-rate burn and YTD pacing deterministically. 1.0 at full close; e.g. 0.5 mid-period."
+      default: 1.0
+      example: "0.5"
+    close_poll_interval:
+      type: integer
+      description: "Seconds between sensor polls of the close-status endpoint while waiting for the period-close / actuals-posted webhook to flip the period to posted."
+      default: 1800
+      example: "1800"
+    sensor_timeout:
+      type: integer
+      description: "Sensor soft timeout in seconds - stop waiting for the close webhook after this long (one watch run). Default 24h."
+      default: 86400
+      example: "86400"
+    gate_model:
+      type: string
+      description: "Swappable materiality-judge model for the gate. Any of the 7 providers can back it; for regulated financials pin an EU/local provider (mistral/large, ollama, omlx/qwen-3). Variance detection works with this unavailable."
+      default: "sonnet"
+      example: "mistral/large"
+    pagerduty_routing_key:
+      type: string
+      description: "Optional PagerDuty Events v2 routing key to page on a confirmed material variance. Leave empty to skip paging and only notify Slack."
+      default: ""
+      example: "R0ABCD1234EFGH5678IJKL"
+    slack_channel:
+      type: string
+      description: "FP&A Slack channel that receives the material-variance digest / page."
+      default: "#fpa-budget-variance"
+      example: "#fpa-budget-variance"
+steps:
+  # 1) DURABLE SENSOR - block until the accounting system reports the period's actuals are
+  #    POSTED and the close is in progress (the period-close / actuals-posted webhook). Polls
+  #    the close-status endpoint; until actuals are posted there is nothing real to compare.
+  #    Event-driven within a schedule: the close flips the period to posted and unblocks.
+  - id: await_close
+    type: sensor
+    sensor_config:
+      url: "{input.accounting_actuals_base_url}/{input.entity_id}/periods/{input.period}/close-status?select=actuals_posted,close_state"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200 and (response.get('actuals_posted') == True or response.get('close_state') in ('in_progress', 'closed'))"
+      check_interval: 1800
+      timeout: 86400
+
+  # 2) DETERMINISTIC http GET of the LIVE actuals by cost center from the accounting system
+  #    (QuickBooks Online / NetSuite REST P&L for the period). No model. Connector: quickbooks / netsuite.
+  - id: fetch_actuals
+    type: http
+    depends_on: [await_close]
+    http_config:
+      url: "{input.accounting_actuals_base_url}/{input.entity_id}/reports/profit-and-loss?period={input.period}&group_by=cost_center&columns=cost_center,account,actual_amount"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.ACCOUNTING_API_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 3) DETERMINISTIC http GET of the LOCKED plan per cost center from the FP&A model
+  #    (Google Sheets Sheets API v4 values). No model. Connector: google-sheets.
+  - id: fetch_plan
+    type: http
+    depends_on: [await_close]
+    http_config:
+      url: "{input.fpa_plan_sheet_url}?majorDimension=ROWS&valueRenderOption=UNFORMATTED_VALUE"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.GOOGLE_SHEETS_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 4) DETERMINISTIC variance math. NO model. Join actuals to plan per cost center and compute
+  #    the load-bearing numbers: dollar delta (actual - plan), percent delta, run-rate burn
+  #    (actual scaled to a full period by the elapsed fraction), YTD pacing, and a candidate
+  #    materiality boolean against the dollar + percent floors. Pre-flags favorable / unfavorable
+  #    / on_plan so the classify and gate downstream consume booleans, never re-derive the math.
+  - id: compute_variance
+    type: code
+    depends_on: [fetch_actuals, fetch_plan]
+    code_config:
+      language: python
+      code: |
+        actuals_raw = _steps.get('fetch_actuals') or {}
+        plan_raw = _steps.get('fetch_plan') or {}
+
+        dollar_floor = abs(float(_input.get('materiality_dollar_floor', 5000) or 0))
+        pct_floor = abs(float(_input.get('materiality_pct_floor', 10) or 0))
+        try:
+            elapsed = float(_input.get('period_elapsed_fraction', 1.0) or 1.0)
+        except (TypeError, ValueError):
+            elapsed = 1.0
+        if elapsed <= 0:
+            elapsed = 1.0
+        if elapsed > 1:
+            elapsed = 1.0
+
+        def _num(v):
+            # Tolerant numeric parse: handles "1,234.50", "$1,234", "(1,234)" as negative, blanks.
+            if v is None:
+                return 0.0
+            if isinstance(v, (int, float)):
+                return float(v)
+            s = str(v).strip()
+            if not s:
+                return 0.0
+            neg = s.startswith('(') and s.endswith(')')
+            s = s.replace('(', '').replace(')', '').replace('$', '').replace(',', '').replace('%', '').strip()
+            try:
+                val = float(s)
+            except (TypeError, ValueError):
+                return 0.0
+            return -val if neg else val
+
+        # --- normalize ACTUALS into {cost_center: actual_amount} -------------------------
+        def actuals_rows(blob):
+            if isinstance(blob, list):
+                return [r for r in blob if isinstance(r, dict)]
+            if isinstance(blob, dict):
+                for k in ('rows', 'data', 'items', 'results', 'records', 'lines', 'QueryResponse'):
+                    v = blob.get(k)
+                    if isinstance(v, list):
+                        return [r for r in v if isinstance(r, dict)]
+                    if isinstance(v, dict):
+                        for kk in ('rows', 'data', 'items', 'Account', 'lines'):
+                            vv = v.get(kk)
+                            if isinstance(vv, list):
+                                return [r for r in vv if isinstance(r, dict)]
+            return []
+
+        actual_by_cc = {}
+        owner_by_cc = {}
+        name_by_cc = {}
+        for r in actuals_rows(actuals_raw):
+            cc = str(r.get('cost_center') or r.get('costCenter') or r.get('class')
+                     or r.get('department') or r.get('dept') or '').strip()
+            if not cc:
+                continue
+            amt = _num(r.get('actual_amount', r.get('actual', r.get('amount', r.get('value', 0)))))
+            actual_by_cc[cc] = actual_by_cc.get(cc, 0.0) + amt
+            if r.get('owner') or r.get('owner_email'):
+                owner_by_cc.setdefault(cc, {'owner': r.get('owner') or 'unassigned',
+                                            'owner_email': r.get('owner_email') or ''})
+            if r.get('cost_center_name') or r.get('name'):
+                name_by_cc.setdefault(cc, r.get('cost_center_name') or r.get('name'))
+
+        # --- normalize PLAN (Google Sheets values rows or list of dicts) -----------------
+        # Sheets API returns {'values': [[cost_center, name, owner, owner_email, plan_amount], ...]}.
+        plan_by_cc = {}
+        if isinstance(plan_raw, dict) and isinstance(plan_raw.get('values'), list):
+            for row in plan_raw['values']:
+                if not isinstance(row, list) or not row:
+                    continue
+                cc = str(row[0]).strip() if len(row) > 0 else ''
+                if not cc:
+                    continue
+                nm = str(row[1]).strip() if len(row) > 1 else cc
+                ow = str(row[2]).strip() if len(row) > 2 else 'unassigned'
+                oe = str(row[3]).strip() if len(row) > 3 else ''
+                pa = _num(row[4]) if len(row) > 4 else _num(row[-1])
+                plan_by_cc[cc] = pa
+                name_by_cc.setdefault(cc, nm)
+                owner_by_cc.setdefault(cc, {'owner': ow or 'unassigned', 'owner_email': oe})
+        else:
+            rows = plan_raw if isinstance(plan_raw, list) else (
+                (plan_raw.get('rows') or plan_raw.get('data') or plan_raw.get('items') or [])
+                if isinstance(plan_raw, dict) else [])
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                cc = str(r.get('cost_center') or r.get('costCenter') or r.get('class') or '').strip()
+                if not cc:
+                    continue
+                plan_by_cc[cc] = _num(r.get('plan_amount', r.get('plan', r.get('budget', r.get('amount', 0)))))
+                name_by_cc.setdefault(cc, r.get('cost_center_name') or r.get('name') or cc)
+                owner_by_cc.setdefault(cc, {'owner': r.get('owner') or 'unassigned',
+                                            'owner_email': r.get('owner_email') or ''})
+
+        # --- per cost center variance math (deterministic, load-bearing) -----------------
+        all_ccs = sorted(set(actual_by_cc) | set(plan_by_cc))
+        rows = []
+        for cc in all_ccs:
+            actual = round(actual_by_cc.get(cc, 0.0), 2)
+            plan = round(plan_by_cc.get(cc, 0.0), 2)
+            dollar_delta = round(actual - plan, 2)          # +overspend, -underspend
+            abs_dollar = abs(dollar_delta)
+            pct_delta = round((dollar_delta / plan) * 100.0, 2) if plan else (100.0 if actual else 0.0)
+            abs_pct = abs(pct_delta)
+            # run-rate burn = actual projected to a full period by the elapsed fraction.
+            run_rate = round(actual / elapsed, 2)
+            run_rate_vs_plan = round(run_rate - plan, 2)
+            # YTD pacing: where actual sits versus a straight-line plan to-date (1.0 = on pace).
+            expected_to_date = round(plan * elapsed, 2)
+            ytd_pacing = round((actual / expected_to_date), 4) if expected_to_date else None
+
+            # Deterministic favorable / unfavorable / on_plan flags (expense convention:
+            # actual over plan = unfavorable overspend; under plan = favorable). on_plan when
+            # the variance clears NEITHER floor (immaterial both ways).
+            candidate_material = abs_dollar >= dollar_floor or abs_pct >= pct_floor
+            if not candidate_material:
+                flag = 'on_plan'
+            elif dollar_delta > 0:
+                flag = 'unfavorable'
+            else:
+                flag = 'favorable'
+
+            owner = owner_by_cc.get(cc, {'owner': 'unassigned', 'owner_email': ''})
+            rows.append({
+                'cost_center': cc,
+                'name': name_by_cc.get(cc, cc),
+                'owner': owner.get('owner', 'unassigned'),
+                'owner_email': owner.get('owner_email', ''),
+                'actual': actual,
+                'plan': plan,
+                'dollar_delta': dollar_delta,
+                'abs_dollar': abs_dollar,
+                'pct_delta': pct_delta,
+                'abs_pct': abs_pct,
+                'run_rate': run_rate,
+                'run_rate_vs_plan': run_rate_vs_plan,
+                'ytd_pacing': ytd_pacing,
+                'flag': flag,
+                'candidate_material': candidate_material,
+            })
+
+        total_actual = round(sum(r['actual'] for r in rows), 2)
+        total_plan = round(sum(r['plan'] for r in rows), 2)
+        result = {
+            'entity_id': _input.get('entity_id'),
+            'period': _input.get('period'),
+            'dollar_floor': dollar_floor,
+            'pct_floor': pct_floor,
+            'period_elapsed_fraction': elapsed,
+            'cost_center_count': len(rows),
+            'candidate_material_count': sum(1 for r in rows if r['candidate_material']),
+            'total_actual': total_actual,
+            'total_plan': total_plan,
+            'total_dollar_delta': round(total_actual - total_plan, 2),
+            'rows': rows,
+        }
+
+  # 5) LOOP every cost center. Per-cost-center child chain: classify the variance label from
+  #    the precomputed flags, then a condition routes only candidate-material variances into the
+  #    swappable materiality gate. Steady / on_plan rows record directly with no model.
+  - id: per_cost_center_loop
+    type: loop
+    depends_on: [compute_variance]
+    loop_config:
+      over: "steps.compute_variance.output.rows"
+      step_ids:
+        - classify_variance
+        - variance_branch
+        - record_variance
+      max_iterations: 1000
+
+  # 5a) CLASSIFY the variance label using ONLY the precomputed deterministic flags - the
+  #     favorable/unfavorable/on_plan decision and the dollar/percent math were ALREADY made in
+  #     code. The cheap model only LABELS; it never re-computes the variance. Mirrors flag exactly.
+  - id: classify_variance
+    type: classify
+    classify_config:
+      model: haiku
+      input: "Classify this cost-center variance using ONLY the precomputed flags. on_plan = candidate_material is False; unfavorable = candidate_material is True and the dollar_delta is positive (actual over plan = overspend); favorable = candidate_material is True and the dollar_delta is negative (actual under plan). flag={steps.compute_variance.output._item.flag}, candidate_material={steps.compute_variance.output._item.candidate_material}, dollar_delta={steps.compute_variance.output._item.dollar_delta}, pct_delta={steps.compute_variance.output._item.pct_delta}."
+      categories:
+        - on_plan
+        - favorable
+        - unfavorable
+      branches:
+        on_plan: [record_variance]
+        favorable: [variance_branch]
+        unfavorable: [variance_branch]
+
+  # 5b) CONDITION - route only candidate-material variances into the materiality gate; on_plan
+  #     rows record directly. Deterministic branch keyed off the in-code candidate_material flag
+  #     (not the model label) so routing survives a missing model provider. No model.
+  - id: variance_branch
+    type: condition
+    condition_config:
+      expression: "{steps.compute_variance.output._item.candidate_material} == True"
+      then: [materiality_gate, record_variance]
+      else: [record_variance]
+
+  # 5c) MATERIALITY GATE (swappable + model-independent). TWO strategies, BOTH must pass:
+  #     (1) llm_eval materiality judge - "is this a real budget variance worth paging, or a
+  #         timing / accrual / reclass artifact?", model pinned to a SWAPPABLE provider;
+  #     (2) llm_eval acting as a DETERMINISTIC threshold - fed ONLY the precomputed abs($) and
+  #         abs(%) and the floors, told to answer purely from the arithmetic, so a variance still
+  #         passes/fails the gate on the non-LLM dollar + percent floor alone.
+  - id: materiality_gate
+    type: gate
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are an FP&A materiality reviewer. A per-cost-center budget-vs-actual variance was
+              computed deterministically in code and cleared a dollar or percent floor. Decide whether
+              this is a REAL, decision-relevant budget variance worth paging the budget owner, or a
+              non-actionable artifact (a timing difference, an unposted accrual, a one-time reclass, a
+              period-shift that will reverse next month). Answer exactly 'approved' if it is a material
+              variance the owner should act on, otherwise answer 'rejected' and name the reason. Judge
+              materiality / actionability only; the numeric magnitude is checked separately.
+            input: "Cost center {steps.compute_variance.output._item.cost_center} ({steps.compute_variance.output._item.name}): actual={steps.compute_variance.output._item.actual} plan={steps.compute_variance.output._item.plan} dollar_delta={steps.compute_variance.output._item.dollar_delta} pct_delta={steps.compute_variance.output._item.pct_delta}% run_rate_vs_plan={steps.compute_variance.output._item.run_rate_vs_plan} ytd_pacing={steps.compute_variance.output._item.ytd_pacing} flag={steps.compute_variance.output._item.flag}"
+            model: "{input.gate_model}"
+        - type: llm_eval
+          config:
+            prompt: >-
+              Deterministic threshold check. Answer exactly 'approved' if abs_dollar >= dollar_floor OR
+              abs_pct >= pct_floor; otherwise answer 'rejected'. Use ONLY the supplied numbers - do not
+              infer or reason beyond the two arithmetic comparisons.
+            input: "abs_dollar={steps.compute_variance.output._item.abs_dollar} dollar_floor={input.materiality_dollar_floor} abs_pct={steps.compute_variance.output._item.abs_pct} pct_floor={input.materiality_pct_floor}"
+            model: haiku
+
+  # 5d) DETERMINISTIC per-cost-center record. Folds the variance math, the classify label and
+  #     (when the gate ran) the materiality outcome into one canonical row. A variance is a
+  #     CONFIRMED material variance only when it was candidate-material AND the gate passed. No model.
+  - id: record_variance
+    type: code
+    code_config:
+      language: python
+      code: |
+        row = _input.get('_item') or {}
+        label = str(_steps.get('classify_variance') or '').strip().lower()
+        gate = _steps.get('materiality_gate')
+
+        gate_ran = gate is not None
+        if isinstance(gate, dict):
+            gate_passed = bool(gate.get('passed', gate.get('approved', gate.get('result', False))))
+        else:
+            gate_passed = bool(gate) if gate is not None else False
+
+        candidate_material = bool(row.get('candidate_material'))
+        dollar_delta = float(row.get('dollar_delta') or 0.0)
+        flag = str(row.get('flag') or 'on_plan')
+
+        # Canonical status. A confirmed, pageable variance requires the gate to have passed.
+        if candidate_material and gate_ran and gate_passed:
+            status = 'unfavorable' if dollar_delta > 0 else 'favorable'
+        elif candidate_material and gate_ran and not gate_passed:
+            status = 'immaterial'      # cleared a floor but the gate ruled it a timing/accrual artifact
+        else:
+            status = 'on_plan'
+
+        confirmed_material = status in ('favorable', 'unfavorable')
+
+        result = {
+            'cost_center': row.get('cost_center'),
+            'name': row.get('name'),
+            'owner': row.get('owner'),
+            'owner_email': row.get('owner_email'),
+            'actual': row.get('actual'),
+            'plan': row.get('plan'),
+            'dollar_delta': dollar_delta,
+            'abs_dollar': row.get('abs_dollar'),
+            'pct_delta': row.get('pct_delta'),
+            'abs_pct': row.get('abs_pct'),
+            'run_rate': row.get('run_rate'),
+            'run_rate_vs_plan': row.get('run_rate_vs_plan'),
+            'ytd_pacing': row.get('ytd_pacing'),
+            'flag': flag,
+            'classify_label': label,
+            'candidate_material': candidate_material,
+            'gate_ran': gate_ran,
+            'gate_passed': gate_passed if gate_ran else None,
+            'status': status,
+            'confirmed_material': confirmed_material,
+        }
+
+  # 6) DETERMINISTIC aggregation of every per-cost-center record from the loop. Splits on_plan /
+  #     confirmed-material / immaterial, groups confirmed material variances by owner, and builds
+  #     the per-owner page payloads + the period rollup. material_count drives the page path. No model.
+  - id: aggregate_variances
+    type: code
+    depends_on: [per_cost_center_loop]
+    code_config:
+      language: python
+      code: |
+        loop_out = _steps.get('per_cost_center_loop') or {}
+        base = _steps.get('compute_variance') or {}
+
+        items = loop_out if isinstance(loop_out, list) else (
+            loop_out.get('results') or loop_out.get('items') or loop_out.get('iterations') or []
+        )
+
+        rows = []
+        for it in items:
+            row = it
+            if isinstance(it, dict) and 'cost_center' not in it:
+                row = it.get('record_variance') or it.get('output') or it
+            if isinstance(row, dict) and row.get('cost_center'):
+                rows.append(row)
+
+        confirmed = [r for r in rows if r.get('confirmed_material')]
+        unfavorable = [r for r in confirmed if r.get('status') == 'unfavorable']
+        favorable = [r for r in confirmed if r.get('status') == 'favorable']
+        immaterial = [r for r in rows if r.get('status') == 'immaterial']
+        on_plan = [r for r in rows if r.get('status') == 'on_plan']
+
+        # Group confirmed material variances by owner for targeted paging.
+        by_owner = {}
+        for r in confirmed:
+            key = r.get('owner_email') or r.get('owner') or 'unassigned'
+            slot = by_owner.setdefault(key, {
+                'owner': r.get('owner', 'unassigned'),
+                'owner_email': r.get('owner_email', ''),
+                'variances': [],
+                'total_dollar_delta': 0.0,
+            })
+            slot['variances'].append({
+                'cost_center': r.get('cost_center'),
+                'name': r.get('name'),
+                'status': r.get('status'),
+                'dollar_delta': r.get('dollar_delta'),
+                'pct_delta': r.get('pct_delta'),
+                'run_rate_vs_plan': r.get('run_rate_vs_plan'),
+                'ytd_pacing': r.get('ytd_pacing'),
+            })
+            slot['total_dollar_delta'] = round(slot['total_dollar_delta'] + float(r.get('dollar_delta') or 0.0), 2)
+
+        owner_pages = list(by_owner.values())
+        # Largest absolute overrun first for the digest headline.
+        worst = sorted(confirmed, key=lambda r: abs(float(r.get('dollar_delta') or 0.0)), reverse=True)
+
+        result = {
+            'entity_id': base.get('entity_id'),
+            'period': base.get('period'),
+            'cost_center_count': base.get('cost_center_count', len(rows)),
+            'on_plan_count': len(on_plan),
+            'immaterial_count': len(immaterial),
+            'favorable_count': len(favorable),
+            'unfavorable_count': len(unfavorable),
+            'confirmed_material_count': len(confirmed),
+            'total_actual': base.get('total_actual'),
+            'total_plan': base.get('total_plan'),
+            'total_dollar_delta': base.get('total_dollar_delta'),
+            'net_confirmed_dollar_delta': round(sum(float(r.get('dollar_delta') or 0.0) for r in confirmed), 2),
+            'owner_pages': owner_pages,
+            'top_variances': worst[:10],
+            'material_variances': confirmed,
+            # material_count > 0 -> there are confirmed material variances to page.
+            'material_count': len(confirmed),
+        }
+
+  # 7) CONDITION - only page owners when there is at least one CONFIRMED material variance.
+  #    A clean close (material_count == 0) skips the page and sends the quiet on-plan digest. No model.
+  - id: route_variances
+    type: condition
+    depends_on: [aggregate_variances]
+    condition_config:
+      expression: "{steps.aggregate_variances.output.material_count} > 0"
+      then: [page_owner, notify_material]
+      else: [notify_clean]
+
+  # 7a) PAGE the budget owners - open a PagerDuty incident so the owner of a materially overrun
+  #     cost center is paged at close, not at the QBR. Carries the per-owner variances. Connector: pagerduty.
+  - id: page_owner
+    type: http
+    http_config:
+      url: "https://events.pagerduty.com/v2/enqueue"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      body: |
+        {
+          "routing_key": "{input.pagerduty_routing_key}",
+          "event_action": "trigger",
+          "dedup_key": "budget-variance-{input.entity_id}-{input.period}",
+          "payload": {
+            "summary": "Budget variance on {input.entity_id} {input.period}: {{ _steps['aggregate_variances']['confirmed_material_count'] }} material cost-center variance(s), net {{ _steps['aggregate_variances']['net_confirmed_dollar_delta'] }} vs plan",
+            "severity": "warning",
+            "source": "budget-variance-materiality-sentinel",
+            "custom_details": {{ _steps['aggregate_variances']['owner_pages'] }}
+          }
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 7b) NOTIFY (material) - post the confirmed material variances, owners and the period rollup to
+  #     the FP&A channel so finance sees the overruns / underruns in real time. service: slack.
+  - id: notify_material
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        :chart_with_upwards_trend: BUDGET VARIANCE - {steps.aggregate_variances.output.confirmed_material_count} material cost-center variance(s) on {steps.aggregate_variances.output.entity_id} {steps.aggregate_variances.output.period}
+        Unfavorable (overspend): {steps.aggregate_variances.output.unfavorable_count}
+        Favorable (underspend) : {steps.aggregate_variances.output.favorable_count}
+        Immaterial filtered    : {steps.aggregate_variances.output.immaterial_count}
+        Net vs plan (confirmed): {steps.aggregate_variances.output.net_confirmed_dollar_delta}
+        Period total: actual {steps.aggregate_variances.output.total_actual} vs plan {steps.aggregate_variances.output.total_plan} (delta {steps.aggregate_variances.output.total_dollar_delta})
+        Top variances: {steps.aggregate_variances.output.top_variances}
+        Owner pages: {steps.aggregate_variances.output.owner_pages}
+
+  # 7c) NOTIFY (clean) - quiet "budget on plan" digest on a clean close. No page.
+  - id: notify_clean
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        :white_check_mark: Budget on plan for {steps.aggregate_variances.output.entity_id} {steps.aggregate_variances.output.period}.
+        {steps.aggregate_variances.output.on_plan_count} cost centers on plan, {steps.aggregate_variances.output.immaterial_count} immaterial blips filtered, 0 confirmed material variances. No page.
+on_complete:
+  storage_path: "budget-variance-materiality-sentinel/{run_id}/result.json"

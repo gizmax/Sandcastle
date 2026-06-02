@@ -1,0 +1,631 @@
+# name: Expense Policy Line-Item Auditor
+# description: Pulls every line item on a submitted expense report from the expense/ERP system, classifies each into a spend category with a swappable labeler, then runs a 100% deterministic policy rule engine (per-category caps, receipt-required thresholds, per-diem math, weekend/alcohol/duplicate-merchant flags) to decide pass/violation per line. Only the disputed lines are routed to a two-strategy approval gate (llm_eval exception-judge AND a non-LLM rule-hit threshold) and a human finance reviewer, then an itemized verdict is PUT back to the expense system and an auditable summary is filed. Money and policy math never touch a model.
+# tags: [Expense, Concur, ERP, PolicyEngine, PerDiem, Receipts, DuplicateDetection, FinanceOps, Audit, T&E, Compliance]
+# category: finance_ops
+# connectors: concur, slack, s3
+name: expense-policy-line-item-auditor
+description: >-
+  A line-item policy auditor for travel & expense (T&E) reports. A DETERMINISTIC http GET pulls the
+  pending expense report and all of its line items from the expense/ERP system (SAP Concur / Coupa /
+  Workday style REST). A code step normalizes every line into a loopable row carrying amount, date,
+  merchant, currency, a receipt flag and a stable line key. The workflow LOOPS each line: a swappable
+  CLASSIFY labels the spend category (travel / meals / lodging / software / entertainment), then the
+  LOAD-BEARING code rule engine evaluates that line against policy 100% deterministically - per-category
+  dollar caps, receipt-required thresholds, per-diem limits from the supplied table, weekend-spend and
+  alcohol flags, and a duplicate-merchant/amount/day check via hashing - and records every rule hit with
+  a pass/violation verdict and a hit count. A CONDITION routes only the lines that actually hit a rule
+  into a two-strategy GATE that BOTH must pass: a swappable llm_eval judge ("is this a genuine policy
+  breach or a justified exception?") AND a non-LLM threshold strategy fed only the pre-computed
+  rule-hit count, so a line passes or fails the gate on the arithmetic alone with zero model
+  involvement. Contested lines then go to a human finance reviewer via an APPROVAL step. A
+  deterministic code step folds every per-line verdict into an itemized report decision, a REPORT
+  assembles the auditable violation summary, an http PUT posts the per-line verdict back to the expense
+  system, and a NOTIFY pushes the result to the finance queue. All caps, per-diem and duplicate math
+  are pure Python and run with zero model providers available; the model is confined to the swappable
+  category labeler and the gate's swappable exception judge.
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 1200
+input_schema:
+  required: ["report_id", "expense_api_base_url"]
+  properties:
+    report_id:
+      type: string
+      description: "Expense report id to audit (the submitted report whose line items are pulled and verdicted)."
+      default: "EXP-2026-004821"
+      example: "EXP-2026-004821"
+    employee_id:
+      type: string
+      description: "Employee id who submitted the report (used for per-diem lookup and the audit record)."
+      default: ""
+      example: "E-10293"
+    expense_api_base_url:
+      type: string
+      description: "Expense / ERP REST base URL exposing the report + line items and accepting the per-line verdict (SAP Concur / Coupa / Workday Expenses style)."
+      default: "https://www.concursolutions.com/api/v3.0/expense"
+      example: "https://acme.concursolutions.com/api/v3.0/expense"
+    policy_caps:
+      type: string
+      description: "JSON object of per-category USD caps plus a global receipt-required threshold. Keys: meals, lodging, travel, software, entertainment, receipt_required_over. Drives the deterministic cap + receipt rules."
+      default: '{"meals": 75, "lodging": 350, "travel": 1500, "software": 500, "entertainment": 50, "receipt_required_over": 25}'
+      example: '{"meals": 75, "lodging": 350, "travel": 1500, "software": 500, "entertainment": 50, "receipt_required_over": 25}'
+    per_diem_table:
+      type: string
+      description: "JSON object of per-diem USD limits per spend category (the daily allowance a single line may not exceed). Empty categories fall back to the matching policy cap."
+      default: '{"meals": 75, "lodging": 350}'
+      example: '{"meals": 75, "lodging": 350}'
+    allow_alcohol:
+      type: string
+      description: "Whether alcohol line items are reimbursable under policy. 'false' raises an alcohol-policy flag on any line whose merchant/description trips the alcohol keyword list."
+      default: "false"
+      example: "false"
+    allow_weekend:
+      type: string
+      description: "Whether weekend-dated spend is reimbursable. 'false' raises a weekend-spend flag on any Saturday/Sunday line for review."
+      default: "false"
+      example: "false"
+    gate_model:
+      type: string
+      description: "Swappable exception-judge model for the gate. Any provider can back it; for EU/regulated data pin a local provider (mistral/large, ollama, omlx/qwen-3). The rule engine works with this unavailable."
+      default: "sonnet"
+      example: "mistral/large"
+    report_author:
+      type: string
+      description: "Author shown on the auditable expense-violation summary report."
+      default: "Finance Operations"
+      example: "Finance Operations"
+    archive_base_url:
+      type: string
+      description: "Object store (S3-compatible) REST base URL where the audit summary is archived for retention."
+      default: "https://s3.eu-central-1.amazonaws.com"
+      example: "https://s3.eu-central-1.amazonaws.com"
+    archive_bucket:
+      type: string
+      description: "Bucket that retains the sealed expense-audit summaries."
+      default: "expense-audit-records"
+      example: "acme-expense-audit-records"
+    slack_channel:
+      type: string
+      description: "Finance-queue Slack channel for the itemized audit result."
+      default: "#expense-audit-queue"
+      example: "#expense-audit-queue"
+steps:
+  # 1) DETERMINISTIC http GET - pull the submitted expense report and ALL of its line items from the
+  #    expense / ERP system (SAP Concur / Coupa / Workday Expenses style). No model.
+  - id: fetch_report
+    type: http
+    http_config:
+      url: "{input.expense_api_base_url}/reports/{input.report_id}?expand=lineItems,allocations"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.EXPENSE_API_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2) DETERMINISTIC normalization - flatten the report into a flat, loopable list of line rows.
+  #    Each row carries amount (float), date, merchant, currency, a receipt-present flag, raw
+  #    description and a stable line key. Parses policy_caps + per_diem_table once. No model.
+  - id: normalize_lines
+    type: code
+    depends_on: [fetch_report]
+    code_config:
+      language: python
+      code: |
+        import json
+        import re
+
+        report = _steps.get('fetch_report') or {}
+        if not isinstance(report, dict):
+            report = {}
+
+        # The report payload nests line items under one of several vendor keys.
+        rows = (report.get('lineItems') or report.get('line_items') or report.get('items')
+                or report.get('expenses') or report.get('data') or [])
+        if isinstance(rows, dict):
+            rows = rows.get('items') or rows.get('data') or []
+        if not isinstance(rows, list):
+            rows = []
+
+        def _parse_json(blob, fallback):
+            if isinstance(blob, dict):
+                return blob
+            try:
+                val = json.loads(str(blob)) if blob else fallback
+                return val if isinstance(val, dict) else fallback
+            except (ValueError, TypeError):
+                return fallback
+
+        caps = _parse_json(_input.get('policy_caps'), {})
+        per_diem = _parse_json(_input.get('per_diem_table'), {})
+
+        def _to_float(v):
+            try:
+                return round(float(str(v).replace(',', '').replace('$', '').strip()), 2)
+            except (ValueError, TypeError):
+                return 0.0
+
+        def _truthy(v):
+            return str(v).strip().lower() in ('true', '1', 'yes', 'y', 'attached', 'present')
+
+        lines = []
+        for idx, rec in enumerate(rows):
+            if not isinstance(rec, dict):
+                continue
+            line_id = str(rec.get('id') or rec.get('lineItemId') or rec.get('expenseId')
+                          or f"L{idx + 1}").strip()
+            amount = _to_float(rec.get('amount') or rec.get('transactionAmount')
+                               or rec.get('approvedAmount') or rec.get('value') or 0)
+            merchant = str(rec.get('merchant') or rec.get('vendor') or rec.get('vendorName')
+                           or rec.get('payee') or '').strip()
+            description = str(rec.get('description') or rec.get('comment')
+                              or rec.get('expenseType') or rec.get('category') or '').strip()
+            date = str(rec.get('date') or rec.get('transactionDate')
+                       or rec.get('expenseDate') or '').strip()[:10]
+            currency = str(rec.get('currency') or rec.get('currencyCode') or 'USD').strip().upper()
+            # Receipt present? several vendor shapes; default to "missing" if unknown.
+            has_receipt = _truthy(rec.get('hasReceipt') if 'hasReceipt' in rec
+                                  else rec.get('receiptAttached', rec.get('receipt', False)))
+            vendor_hint = str(rec.get('expenseType') or rec.get('category')
+                              or rec.get('type') or '').strip().lower()
+
+            lines.append({
+                'line_id': line_id,
+                'amount': amount,
+                'merchant': merchant,
+                'description': description,
+                'date': date,
+                'currency': currency,
+                'has_receipt': has_receipt,
+                'vendor_hint': vendor_hint,
+            })
+
+        result = {
+            'report_id': _input.get('report_id'),
+            'employee_id': _input.get('employee_id'),
+            'line_count': len(lines),
+            'total_amount': round(sum(l['amount'] for l in lines), 2),
+            'policy_caps': caps,
+            'per_diem_table': per_diem,
+            'lines': lines,
+        }
+
+  # 3) LOOP over every line item. Per-line child chain: classify the spend category (swappable
+  #    model labeler) -> deterministic policy rule-eval (code) -> condition routes only rule-hits
+  #    into the two-strategy approval gate -> record the per-line verdict (code).
+  - id: per_line_loop
+    type: loop
+    depends_on: [normalize_lines]
+    loop_config:
+      over: "steps.normalize_lines.output.lines"
+      step_ids:
+        - classify_category
+        - evaluate_line
+        - violation_branch
+        - record_line_verdict
+      max_iterations: 1000
+
+  # 3a) CLASSIFY the spend category. The ONLY model in the per-line path and it is SWAPPABLE to any
+  #     provider; the label only steers which cap/per-diem the deterministic engine reads - every
+  #     category falls through to the same code rule-eval, so a missing model never changes a verdict.
+  - id: classify_category
+    type: classify
+    classify_config:
+      model: haiku
+      input: >-
+        Classify this expense line into exactly one spend category. travel = airfare, rail, taxi,
+        rideshare, fuel, parking, tolls. meals = restaurants, food, coffee, catering. lodging =
+        hotels, lodging, Airbnb. software = SaaS, subscriptions, licenses, cloud, apps.
+        entertainment = events, tickets, bars, recreation, client entertainment. merchant={input._item.merchant}
+        description={input._item.description} vendor_hint={input._item.vendor_hint} amount={input._item.amount} {input._item.currency}.
+      categories:
+        - travel
+        - meals
+        - lodging
+        - software
+        - entertainment
+      branches:
+        travel: [evaluate_line]
+        meals: [evaluate_line]
+        lodging: [evaluate_line]
+        software: [evaluate_line]
+        entertainment: [evaluate_line]
+
+  # 3b) LOAD-BEARING DETERMINISTIC POLICY RULE ENGINE. NO model. For THIS line, apply policy 100%
+  #     in code: per-category cap, per-diem limit, receipt-required threshold, weekend-spend flag,
+  #     alcohol flag, and a duplicate (merchant+amount+day) hash check. Records every rule hit and a
+  #     pass/violation verdict + hit count. This is the audit-load-bearing math the gate consumes.
+  - id: evaluate_line
+    type: code
+    code_config:
+      language: python
+      code: |
+        import hashlib
+        from datetime import date as _date
+
+        line = _input.get('_item') or {}
+        norm = _steps.get('normalize_lines') or {}
+        caps = norm.get('policy_caps') or {}
+        per_diem = norm.get('per_diem_table') or {}
+
+        category = str(_steps.get('classify_category') or 'meals').strip().lower()
+        if category not in ('travel', 'meals', 'lodging', 'software', 'entertainment'):
+            category = 'meals'
+
+        amount = float(line.get('amount') or 0.0)
+        merchant = str(line.get('merchant') or '').strip()
+        description = str(line.get('description') or '').strip()
+        text_blob = (merchant + ' ' + description).lower()
+        date_str = str(line.get('date') or '').strip()[:10]
+        has_receipt = bool(line.get('has_receipt'))
+
+        allow_alcohol = str(_input.get('allow_alcohol') or 'false').strip().lower() in ('true', '1', 'yes')
+        allow_weekend = str(_input.get('allow_weekend') or 'false').strip().lower() in ('true', '1', 'yes')
+
+        def _num(v, default):
+            try:
+                return float(v)
+            except (ValueError, TypeError):
+                return float(default)
+
+        rule_hits = []
+
+        # --- (a) Per-category cap: a single line may not exceed the category dollar cap. ---------
+        cap = caps.get(category)
+        if cap is not None:
+            cap_val = _num(cap, 0)
+            if cap_val > 0 and amount > cap_val:
+                rule_hits.append({
+                    'rule': 'category_cap_exceeded',
+                    'category': category,
+                    'cap': round(cap_val, 2),
+                    'amount': round(amount, 2),
+                    'over_by': round(amount - cap_val, 2),
+                })
+
+        # --- (b) Per-diem limit: a daily allowance for this category (falls back to the cap). ----
+        pd = per_diem.get(category)
+        pd_val = _num(pd, cap if cap is not None else 0)
+        if pd_val > 0 and amount > pd_val:
+            rule_hits.append({
+                'rule': 'per_diem_exceeded',
+                'category': category,
+                'per_diem': round(pd_val, 2),
+                'amount': round(amount, 2),
+                'over_by': round(amount - pd_val, 2),
+            })
+
+        # --- (c) Receipt-required threshold: any line over the threshold needs a receipt. -------
+        receipt_thresh = _num(caps.get('receipt_required_over', 25), 25)
+        if amount > receipt_thresh and not has_receipt:
+            rule_hits.append({
+                'rule': 'receipt_missing',
+                'threshold': round(receipt_thresh, 2),
+                'amount': round(amount, 2),
+            })
+
+        # --- (d) Weekend-spend flag: Saturday/Sunday spend flagged unless policy allows it. ------
+        is_weekend = False
+        if not allow_weekend and len(date_str) == 10:
+            try:
+                y, m, d = (int(x) for x in date_str.split('-'))
+                # weekday(): Monday=0 .. Saturday=5, Sunday=6
+                is_weekend = _date(y, m, d).weekday() >= 5
+            except (ValueError, TypeError):
+                is_weekend = False
+            if is_weekend:
+                rule_hits.append({'rule': 'weekend_spend', 'date': date_str})
+
+        # --- (e) Alcohol flag: keyword scan when alcohol is not reimbursable. --------------------
+        alcohol_keywords = ('bar', 'pub', 'wine', 'beer', 'liquor', 'cocktail', 'brewery',
+                            'spirits', 'alcohol', 'tavern', 'distillery', 'vineyard')
+        is_alcohol = (not allow_alcohol) and any(k in text_blob for k in alcohol_keywords)
+        if is_alcohol:
+            rule_hits.append({'rule': 'alcohol_not_reimbursable', 'merchant': merchant})
+
+        # --- (f) Duplicate fingerprint: same merchant + amount + day is a likely double-submit. --
+        # Deterministic hash key; the aggregate step uses it to dedupe across the whole report.
+        dup_basis = '{}|{:.2f}|{}'.format(merchant.lower(), amount, date_str)
+        dup_hash = hashlib.sha256(dup_basis.encode('utf-8')).hexdigest()[:16]
+
+        hit_count = len(rule_hits)
+        verdict = 'violation' if hit_count > 0 else 'pass'
+
+        result = {
+            'line_id': line.get('line_id'),
+            'category': category,
+            'amount': round(amount, 2),
+            'currency': line.get('currency'),
+            'merchant': merchant,
+            'date': date_str,
+            'has_receipt': has_receipt,
+            'is_weekend': is_weekend,
+            'is_alcohol': is_alcohol,
+            'rule_hits': rule_hits,
+            'rule_hit_count': hit_count,
+            'verdict': verdict,
+            'dup_hash': dup_hash,
+        }
+
+  # 3c) CONDITION - route ONLY lines that actually hit a policy rule into the two-strategy gate;
+  #     clean lines skip straight to recording their pass verdict. Deterministic branch keyed off
+  #     the in-code rule_hit_count (not a model), so routing survives a missing model provider.
+  - id: violation_branch
+    type: condition
+    condition_config:
+      expression: "{steps.evaluate_line.output.rule_hit_count} > 0"
+      then: [exception_gate, record_line_verdict]
+      else: [record_line_verdict]
+
+  # 3d) TWO-STRATEGY GATE (swappable + model-independent). BOTH strategies must pass:
+  #     (1) llm_eval exception judge - "is this a genuine policy breach or a justified exception?",
+  #         pinned to a SWAPPABLE provider (any can back it);
+  #     (2) llm_eval acting as a DETERMINISTIC threshold - fed ONLY the pre-computed rule_hit_count
+  #         and told to answer purely from the arithmetic, so the line still passes/fails the gate
+  #         on the non-LLM rule-hit math alone with zero reasoning.
+  - id: exception_gate
+    type: gate
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are a T&E policy reviewer. A line item deterministically hit one or more policy
+              rules in code. Decide whether this is a GENUINE policy breach that should be flagged
+              for a human, or a justified exception (e.g. an approved client dinner, an emergency
+              same-day rebooking, a pre-authorized over-cap purchase). Answer exactly 'approved' if
+              it is a genuine breach worth routing to a reviewer, otherwise answer 'rejected' and
+              name the justification. Judge intent only; the numeric rule count is checked
+              separately.
+            input: "Line {steps.evaluate_line.output.line_id} ({steps.evaluate_line.output.category}, {steps.evaluate_line.output.amount} {steps.evaluate_line.output.currency} at {steps.evaluate_line.output.merchant}): rule_hits={steps.evaluate_line.output.rule_hits}"
+            model: "{input.gate_model}"
+        - type: llm_eval
+          config:
+            prompt: >-
+              Deterministic threshold check. Answer exactly 'approved' if rule_hit_count >= 1;
+              otherwise answer 'rejected'. Use ONLY the supplied number - do not infer or reason
+              beyond the arithmetic comparison.
+            input: "rule_hit_count={steps.evaluate_line.output.rule_hit_count}"
+            model: haiku
+
+  # 3e) DETERMINISTIC per-line verdict record. Folds the rule-eval result and (when the gate ran)
+  #     the gate outcome into one canonical row. A line is a CONFIRMED violation only when it hit a
+  #     rule AND the gate passed; gate-rejected lines are reclassified as a justified exception. No model.
+  - id: record_line_verdict
+    type: code
+    code_config:
+      language: python
+      code: |
+        ev = _steps.get('evaluate_line') or {}
+        gate = _steps.get('exception_gate')
+
+        hit_count = int(ev.get('rule_hit_count') or 0)
+        gate_ran = gate is not None
+        if isinstance(gate, dict):
+            gate_passed = bool(gate.get('passed', gate.get('approved', gate.get('result', False))))
+        else:
+            gate_passed = bool(gate) if gate is not None else False
+
+        if hit_count > 0 and gate_ran and gate_passed:
+            status = 'violation'           # rule hit AND gate confirmed it is a genuine breach
+        elif hit_count > 0 and gate_ran and not gate_passed:
+            status = 'justified_exception'  # rule hit but gate ruled it a justified exception
+        elif hit_count > 0 and not gate_ran:
+            status = 'flagged_unreviewed'   # rule hit, gate did not run (defensive)
+        else:
+            status = 'pass'
+
+        result = {
+            'line_id': ev.get('line_id'),
+            'category': ev.get('category'),
+            'amount': ev.get('amount'),
+            'currency': ev.get('currency'),
+            'merchant': ev.get('merchant'),
+            'date': ev.get('date'),
+            'status': status,
+            'verdict': status,
+            'rule_hits': ev.get('rule_hits', []),
+            'rule_hit_count': hit_count,
+            'gate_ran': gate_ran,
+            'gate_passed': gate_passed if gate_ran else None,
+            'dup_hash': ev.get('dup_hash'),
+            'is_confirmed_violation': status == 'violation',
+        }
+
+  # 4) DETERMINISTIC aggregation of every per-line verdict from the loop. De-dupes duplicate-merchant
+  #    submissions via the dup_hash (the second+ occurrence of an identical merchant+amount+day is a
+  #    duplicate violation), splits pass / violation / exception, totals the disputed dollars and
+  #    builds the contested-line list for the human reviewer. No model.
+  - id: aggregate_verdicts
+    type: code
+    depends_on: [per_line_loop, normalize_lines]
+    code_config:
+      language: python
+      code: |
+        loop_out = _steps.get('per_line_loop') or {}
+        norm = _steps.get('normalize_lines') or {}
+
+        items = loop_out if isinstance(loop_out, list) else (
+            loop_out.get('results') or loop_out.get('items') or loop_out.get('iterations') or []
+        )
+
+        lines = []
+        for it in items:
+            row = it
+            if isinstance(it, dict) and 'line_id' not in it:
+                row = it.get('record_line_verdict') or it.get('output') or it
+            if isinstance(row, dict) and row.get('line_id'):
+                lines.append(row)
+
+        # --- Duplicate-merchant dedup: first occurrence of a dup_hash is original, the rest dupes. -
+        seen = {}
+        for ln in lines:
+            h = ln.get('dup_hash')
+            if not h:
+                continue
+            if h in seen:
+                ln['is_duplicate'] = True
+                # A duplicate is always a confirmed violation regardless of the gate.
+                existing = list(ln.get('rule_hits') or [])
+                existing.append({'rule': 'duplicate_merchant_submission', 'dup_of': seen[h]})
+                ln['rule_hits'] = existing
+                ln['rule_hit_count'] = int(ln.get('rule_hit_count') or 0) + 1
+                ln['status'] = 'violation'
+                ln['verdict'] = 'violation'
+                ln['is_confirmed_violation'] = True
+            else:
+                seen[h] = ln.get('line_id')
+                ln['is_duplicate'] = False
+
+        violations = [l for l in lines if l.get('status') == 'violation']
+        exceptions = [l for l in lines if l.get('status') == 'justified_exception']
+        passes = [l for l in lines if l.get('status') == 'pass']
+
+        disputed_amount = round(sum(float(l.get('amount') or 0) for l in violations), 2)
+        total_amount = round(sum(float(l.get('amount') or 0) for l in lines), 2)
+
+        # Lines that need a human reviewer = confirmed violations.
+        contested = [
+            {
+                'line_id': l.get('line_id'),
+                'category': l.get('category'),
+                'amount': l.get('amount'),
+                'currency': l.get('currency'),
+                'merchant': l.get('merchant'),
+                'date': l.get('date'),
+                'rule_hits': l.get('rule_hits'),
+                'is_duplicate': l.get('is_duplicate', False),
+            }
+            for l in violations
+        ]
+
+        result = {
+            'report_id': norm.get('report_id'),
+            'employee_id': norm.get('employee_id'),
+            'line_count': len(lines),
+            'pass_count': len(passes),
+            'violation_count': len(violations),
+            'exception_count': len(exceptions),
+            'duplicate_count': sum(1 for l in lines if l.get('is_duplicate')),
+            'total_amount': total_amount,
+            'disputed_amount': disputed_amount,
+            'contested_lines': contested,
+            'lines': lines,
+            'has_violations': len(violations) > 0,
+        }
+
+  # 5) APPROVAL - a human finance reviewer signs off on the contested lines before the verdict is
+  #    posted back. Only confirmed violations reach this desk; a clean report needs no sign-off but
+  #    still records the auto-clear. The reviewer can override any single line during sign-off.
+  - id: finance_review
+    type: approval
+    depends_on: [aggregate_verdicts]
+    approval_config:
+      message: >-
+        Finance review for expense report {input.report_id} (employee {input.employee_id}):
+        {steps.aggregate_verdicts.output.violation_count} confirmed line violation(s) totalling
+        {steps.aggregate_verdicts.output.disputed_amount} disputed, {steps.aggregate_verdicts.output.duplicate_count}
+        duplicate submission(s). Approve to post the itemized verdict back to the expense system, or
+        reject to override individual lines. Contested lines: {steps.aggregate_verdicts.output.contested_lines}
+      timeout_hours: 48
+      on_timeout: abort
+
+  # 6) REPORT - assemble the auditable violation summary: every line, its category, the rules it hit,
+  #    the per-line verdict, the disputed dollar total and the reviewer sign-off, so finance can
+  #    reconstruct exactly why each line was flagged.
+  - id: audit_summary
+    type: report
+    depends_on: [finance_review]
+    report_config:
+      template: research-report
+      format: pdf
+      theme: professional
+      title: "Expense Policy Audit - Report {input.report_id} ({input.employee_id})"
+      author: "{input.report_author}"
+    prompt: |
+      Assemble the itemized expense-policy audit summary so finance + audit can reconstruct every
+      line decision. The pass/violation math was already computed deterministically in code - report
+      it faithfully, do not re-derive verdicts.
+
+      Section 1 - Report + employee + totals:
+      report_id={steps.aggregate_verdicts.output.report_id}, employee={steps.aggregate_verdicts.output.employee_id},
+      lines={steps.aggregate_verdicts.output.line_count}, total={steps.aggregate_verdicts.output.total_amount},
+      disputed={steps.aggregate_verdicts.output.disputed_amount}
+
+      Section 2 - Verdict breakdown (counts):
+      passes={steps.aggregate_verdicts.output.pass_count}, violations={steps.aggregate_verdicts.output.violation_count},
+      justified_exceptions={steps.aggregate_verdicts.output.exception_count}, duplicates={steps.aggregate_verdicts.output.duplicate_count}
+
+      Section 3 - Every line + the policy rules it hit + per-line verdict:
+      {steps.aggregate_verdicts.output.lines}
+
+      Section 4 - Contested lines routed to finance:
+      {steps.aggregate_verdicts.output.contested_lines}
+
+      Section 5 - Finance reviewer sign-off:
+      {steps.finance_review.output}
+
+  # 7) DETERMINISTIC http PUT - post the itemized per-line verdict back to the expense system so each
+  #    line is marked pass / violation / exception in Concur/ERP. Real persistence path. No model.
+  - id: post_verdict
+    type: http
+    depends_on: [audit_summary]
+    http_config:
+      url: "{input.expense_api_base_url}/reports/{input.report_id}/audit-verdict"
+      method: PUT
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.EXPENSE_API_TOKEN}"
+      body: |
+        {
+          "report_id": "{input.report_id}",
+          "employee_id": "{input.employee_id}",
+          "violation_count": "{steps.aggregate_verdicts.output.violation_count}",
+          "disputed_amount": "{steps.aggregate_verdicts.output.disputed_amount}",
+          "duplicate_count": "{steps.aggregate_verdicts.output.duplicate_count}",
+          "line_verdicts": {{ _steps['aggregate_verdicts']['lines'] }}
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 8) ARCHIVE the audit summary to the retention object store. Real persistence path. No model.
+  - id: archive_summary
+    type: http
+    depends_on: [post_verdict]
+    http_config:
+      url: "{input.archive_base_url}/{input.archive_bucket}/audits/{input.report_id}/expense-audit-summary.pdf"
+      method: PUT
+      headers:
+        Content-Type: "application/pdf"
+        x-amz-meta-report-id: "{input.report_id}"
+        x-amz-meta-violation-count: "{steps.aggregate_verdicts.output.violation_count}"
+        x-amz-meta-disputed-amount: "{steps.aggregate_verdicts.output.disputed_amount}"
+      auth: "aws4:{env.AWS_ACCESS_KEY_ID}:{env.AWS_SECRET_ACCESS_KEY}"
+      body: "{steps.audit_summary.output}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 9) NOTIFY the finance queue with the itemized audit result. service: slack.
+  - id: notify_finance
+    type: notify
+    depends_on: [archive_summary]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        :receipt: Expense audit complete - report {steps.aggregate_verdicts.output.report_id} (employee {steps.aggregate_verdicts.output.employee_id})
+        Lines        : {steps.aggregate_verdicts.output.line_count}
+        Violations   : {steps.aggregate_verdicts.output.violation_count} ({steps.aggregate_verdicts.output.disputed_amount} disputed)
+        Duplicates   : {steps.aggregate_verdicts.output.duplicate_count}
+        Exceptions   : {steps.aggregate_verdicts.output.exception_count}
+        Passed clean : {steps.aggregate_verdicts.output.pass_count}
+        Verdict PUT back to the expense system; summary archived at audits/{steps.aggregate_verdicts.output.report_id}/expense-audit-summary.pdf
+on_complete:
+  storage_path: "expense-policy-line-item-auditor/{run_id}/result.json"

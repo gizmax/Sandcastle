@@ -1,0 +1,594 @@
+# name: Trip Itinerary Race Planner
+# description: Races two travel itinerary providers (failover across model providers - first that returns a usable day-by-day plan wins), then HTTP-verifies the draft against the live flight-status feed and the destination weather forecast for the exact trip dates. A DETERMINISTIC code step runs the feasibility math - minimum-connection-time gaps between legs, outdoor-activity vs precipitation conflicts, and a budget sum vs your cap - and the plan only lands in your inbox after a GATE where a swappable llm_eval quality judge AND a non-LLM feasibility-threshold strategy BOTH pass. All the go/no-go math is model-independent.
+# tags: [Travel, Itinerary, Trip, Flights, Weather, Race, Failover, Feasibility, Personal, Planner, Layover, Budget]
+# category: personal
+# connectors: flightaware, openweather, sendgrid, slack
+name: trip-itinerary-race-planner
+description: >-
+  A personal trip planner that proves Sandcastle as an ENGINE rather than a single
+  model call. A deterministic code step first normalizes your destination + date range
+  into a clean trip spec (trip length, ISO dates, IATA/city, budget cap). A cross-provider
+  RACE then fans the same brief out to TWO itinerary drafters backed by DIFFERENT model
+  providers and takes the FIRST that returns a usable day-by-day plan (provider failover,
+  not a vote), so the plan still drafts when one provider is down. The draft is then
+  VERIFIED against reality: an http GET pulls live flight status for the booked legs and a
+  second http GET pulls the destination weather forecast for the exact trip dates. A
+  load-bearing DETERMINISTIC code step does the feasibility math with NO model - minimum
+  connection time between consecutive legs, outdoor-activity days that collide with a
+  rained-out forecast, and the summed activity budget against your cap - and emits hard
+  pass/fail booleans plus a 0-1 feasibility score. A GATE then requires TWO strategies to
+  BOTH pass: a swappable llm_eval plan-quality judge (any provider can back it) AND a
+  second llm_eval fed ONLY the pre-computed feasibility booleans so the plan can pass or
+  fail purely on the arithmetic. A CONDITION routes a feasible plan to a polished itinerary
+  REPORT that is emailed to you, while an infeasible plan is bounced back with the exact
+  blocking reasons. Every go/no-go decision is deterministic and runs with zero model
+  providers available; the model only drafts and acts as the swappable quality judge.
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 900
+input_schema:
+  required: ["destination", "date_range", "flight_status_url", "weather_api_url"]
+  properties:
+    destination:
+      type: string
+      description: "Destination city name or IATA airport code the trip is built around."
+      default: "Lisbon (LIS)"
+      example: "Lisbon (LIS)"
+    date_range:
+      type: string
+      description: "Trip start and end dates as 'YYYY-MM-DD..YYYY-MM-DD' (or 'start to end'). Drives the per-day plan, the weather window and the flight-status dates."
+      default: "2026-07-10..2026-07-14"
+      example: "2026-07-10..2026-07-14"
+    flight_status_url:
+      type: string
+      description: "Live flight-status REST endpoint (FlightAware AeroAPI / Aviationstack style) returning the booked legs with scheduled/estimated times and status for the trip dates."
+      default: "https://aeroapi.flightaware.com/aeroapi/flights"
+      example: "https://aeroapi.flightaware.com/aeroapi/flights/search?query=dest LIS"
+    weather_api_url:
+      type: string
+      description: "Destination weather-forecast REST endpoint (OpenWeather / Open-Meteo style) returning a daily forecast (precipitation probability, condition) covering the trip dates."
+      default: "https://api.openweathermap.org/data/2.5/forecast/daily"
+      example: "https://api.open-meteo.com/v1/forecast?daily=precipitation_probability_max"
+    budget_cap:
+      type: number
+      description: "Total activity/excursion budget cap in your currency. The deterministic feasibility step sums the drafted activity costs and fails the plan if it exceeds this."
+      default: 800
+      example: "800"
+    min_connection_minutes:
+      type: integer
+      description: "Minimum legal/comfortable connection time in minutes between two consecutive flight legs. A drafted layover shorter than this is a hard feasibility failure."
+      default: 45
+      example: "45"
+    rain_threshold:
+      type: number
+      description: "Precipitation-probability threshold (0-100). A forecast day at or above this is treated as a wash-out; an outdoor activity scheduled that day is a feasibility conflict."
+      default: 70
+      example: "70"
+    min_feasibility_score:
+      type: number
+      description: "Deterministic feasibility score (0-1) the plan must reach for the gate's non-LLM strategy to approve it. Computed purely from the layover/weather/budget checks."
+      default: 1.0
+      example: "1.0"
+    judge_model:
+      type: string
+      description: "Swappable plan-quality judge model for the gate. Any of the providers can back it; the feasibility math passes/fails without it. The two race drafters run on DIFFERENT providers (sonnet and google/gemini-2.5-pro) for genuine cross-provider failover."
+      default: "sonnet"
+      example: "ollama/qwen-3"
+    recipient_email:
+      type: string
+      description: "Inbox that receives the final itinerary (or the bounce-back with blocking reasons)."
+      default: "me@example.com"
+      example: "traveler@example.com"
+    slack_channel:
+      type: string
+      description: "Optional Slack channel for a short trip-planned ping alongside the email."
+      default: "#my-trips"
+      example: "#my-trips"
+steps:
+  # 1) DETERMINISTIC trip-spec normalization. NO model. Parse the date_range into ISO start/end,
+  #    compute trip length + the explicit list of trip dates, pull the IATA code out of the
+  #    destination string, and surface the budget cap / thresholds as a clean brief the drafters
+  #    and every downstream verifier read from one shape.
+  - id: normalize_trip
+    type: code
+    code_config:
+      language: python
+      code: |
+        import re
+        from datetime import date, timedelta
+
+        dest_raw = str(_input.get('destination') or '').strip()
+        dr_raw = str(_input.get('date_range') or '').strip()
+
+        # --- Pull an IATA-ish 3-letter code from "Lisbon (LIS)" / "LIS" if present.
+        iata = ''
+        m = re.search(r'\(([A-Za-z]{3})\)', dest_raw)
+        if m:
+            iata = m.group(1).upper()
+        elif re.fullmatch(r'[A-Za-z]{3}', dest_raw):
+            iata = dest_raw.upper()
+        city = re.sub(r'\s*\([A-Za-z]{3}\)\s*', '', dest_raw).strip() or dest_raw
+
+        # --- Parse "start..end" or "start to end" into two ISO dates.
+        parts = re.split(r'\.\.|\bto\b|–|/', dr_raw)
+        iso = [p for p in (x.strip() for x in parts) if re.fullmatch(r'\d{4}-\d{2}-\d{2}', p)]
+
+        def _d(s):
+            y, mo, dd = (int(x) for x in s.split('-'))
+            return date(y, mo, dd)
+
+        start_d = _d(iso[0]) if len(iso) >= 1 else date.today()
+        end_d = _d(iso[1]) if len(iso) >= 2 else start_d
+        if end_d < start_d:
+            start_d, end_d = end_d, start_d
+
+        nights = (end_d - start_d).days
+        days = nights + 1
+        trip_dates = [(start_d + timedelta(days=i)).isoformat() for i in range(days)]
+
+        try:
+            budget_cap = float(_input.get('budget_cap', 800) or 800)
+        except (ValueError, TypeError):
+            budget_cap = 800.0
+
+        result = {
+            'destination_raw': dest_raw,
+            'city': city,
+            'iata': iata,
+            'start_date': start_d.isoformat(),
+            'end_date': end_d.isoformat(),
+            'nights': nights,
+            'days': days,
+            'trip_dates': trip_dates,
+            'budget_cap': budget_cap,
+            'min_connection_minutes': int(_input.get('min_connection_minutes', 45) or 45),
+            'rain_threshold': float(_input.get('rain_threshold', 70) or 70),
+            'valid': len(iso) >= 2 and days >= 1,
+        }
+
+  # 2) CROSS-PROVIDER RACE. Fan the SAME brief out to TWO itinerary drafters backed by DIFFERENT
+  #    model providers; the FIRST that returns a usable day-by-day plan wins (provider failover,
+  #    not a vote). Each drafter must emit machine-parseable JSON so the deterministic verifier can
+  #    read legs + activities. Branch steps are DEFINED SEPARATELY below with NO depends_on.
+  - id: draft_itinerary_a
+    type: llm
+    model: sonnet
+    prompt: >-
+      You are a meticulous trip planner. Build a day-by-day itinerary for {steps.normalize_trip.output.days}
+      day(s) in {steps.normalize_trip.output.city} ({steps.normalize_trip.output.iata}) covering exactly the
+      dates {steps.normalize_trip.output.trip_dates}, keeping total activity cost under
+      {steps.normalize_trip.output.budget_cap}. Return ONLY a JSON object with this shape and no prose:
+      {"summary": "...", "flights": [{"flight": "TP123", "from": "LHR", "to": "LIS", "depart": "2026-07-10T08:00",
+      "arrive": "2026-07-10T11:10"}], "days": [{"date": "2026-07-10", "title": "...",
+      "activities": [{"name": "...", "outdoor": true, "cost": 35}]}]}. Use realistic flight times so that any
+      connection between consecutive legs is at least {input.min_connection_minutes} minutes.
+      Mark each activity outdoor true/false honestly. Keep the summed activity cost under the cap.
+    retry:
+      max_attempts: 1
+      on_failure: skip
+
+  - id: draft_itinerary_b
+    type: llm
+    model: google/gemini-2.5-pro
+    prompt: >-
+      Act as a travel concierge. Produce a JSON-only day-by-day itinerary for
+      {steps.normalize_trip.output.days} day(s) in {steps.normalize_trip.output.city}
+      ({steps.normalize_trip.output.iata}) for the dates {steps.normalize_trip.output.trip_dates},
+      with total activity spend below {steps.normalize_trip.output.budget_cap}. Output ONLY this JSON
+      object: {"summary": "...", "flights": [{"flight": "...", "from": "...", "to": "...",
+      "depart": "ISO8601", "arrive": "ISO8601"}], "days": [{"date": "YYYY-MM-DD", "title": "...",
+      "activities": [{"name": "...", "outdoor": true, "cost": 0}]}]}. Ensure consecutive legs leave at
+      least {input.min_connection_minutes} minutes to connect and flag outdoor activities truthfully.
+    retry:
+      max_attempts: 1
+      on_failure: skip
+
+  - id: itinerary_race
+    type: race
+    depends_on: [normalize_trip]
+    race_config:
+      branches:
+        - [draft_itinerary_a]
+        - [draft_itinerary_b]
+      validator: "'days' in str(output) and len(str(output).strip()) > 40"
+
+  # 3) DETERMINISTIC parse of whichever drafter won the race into a uniform plan (flights[],
+  #    day-by-day activities[]) regardless of which provider produced it. NO model - just JSON
+  #    extraction + coercion so the verifier and feasibility math read one shape.
+  - id: parse_draft
+    type: code
+    depends_on: [itinerary_race, normalize_trip]
+    code_config:
+      language: python
+      code: |
+        import json
+        import re
+
+        raw = _steps.get('itinerary_race')
+        trip = _steps.get('normalize_trip') or {}
+
+        # The winning branch output may be a dict already or a string with JSON embedded.
+        plan = {}
+        if isinstance(raw, dict) and ('days' in raw or 'flights' in raw):
+            plan = raw
+        else:
+            text = raw if isinstance(raw, str) else json.dumps(raw) if raw is not None else ''
+            # Grab the first {...} block and parse it.
+            mt = re.search(r'\{.*\}', text, re.DOTALL)
+            if mt:
+                try:
+                    plan = json.loads(mt.group(0))
+                except (ValueError, TypeError):
+                    plan = {}
+        if not isinstance(plan, dict):
+            plan = {}
+
+        # --- Normalize flights into ordered legs with depart/arrive strings.
+        flights_in = plan.get('flights') or plan.get('legs') or []
+        flights = []
+        if isinstance(flights_in, list):
+            for f in flights_in:
+                if not isinstance(f, dict):
+                    continue
+                flights.append({
+                    'flight': str(f.get('flight') or f.get('number') or f.get('code') or '').strip(),
+                    'from': str(f.get('from') or f.get('origin') or '').strip().upper(),
+                    'to': str(f.get('to') or f.get('destination') or '').strip().upper(),
+                    'depart': str(f.get('depart') or f.get('departure') or f.get('std') or '').strip(),
+                    'arrive': str(f.get('arrive') or f.get('arrival') or f.get('sta') or '').strip(),
+                })
+
+        # --- Normalize the day plan + flatten activities with outdoor flag + numeric cost.
+        days_in = plan.get('days') or plan.get('itinerary') or []
+        days = []
+        activities = []
+        if isinstance(days_in, list):
+            for d in days_in:
+                if not isinstance(d, dict):
+                    continue
+                dd = str(d.get('date') or '').strip()
+                acts_in = d.get('activities') or d.get('items') or []
+                day_acts = []
+                if isinstance(acts_in, list):
+                    for a in acts_in:
+                        if not isinstance(a, dict):
+                            a = {'name': str(a)}
+                        try:
+                            cost = float(a.get('cost') or a.get('price') or 0)
+                        except (ValueError, TypeError):
+                            cost = 0.0
+                        outdoor = str(a.get('outdoor', a.get('is_outdoor', False))).strip().lower() in (
+                            'true', '1', 'yes', 'outdoor'
+                        )
+                        rec = {
+                            'name': str(a.get('name') or a.get('title') or '').strip(),
+                            'outdoor': outdoor,
+                            'cost': round(cost, 2),
+                            'date': dd,
+                        }
+                        day_acts.append(rec)
+                        activities.append(rec)
+                days.append({'date': dd, 'title': str(d.get('title') or '').strip(), 'activities': day_acts})
+
+        result = {
+            'summary': str(plan.get('summary') or '').strip(),
+            'flights': flights,
+            'days': days,
+            'activities': activities,
+            'flight_count': len(flights),
+            'day_count': len(days),
+            'activity_count': len(activities),
+            'total_activity_cost': round(sum(a['cost'] for a in activities), 2),
+            'has_plan': len(days) > 0 or len(flights) > 0,
+            'trip_dates': trip.get('trip_dates', []),
+        }
+
+  # 4) VERIFY vs reality (1/2): http GET LIVE flight status for the booked legs on the trip dates
+  #    from the real flight-status feed (FlightAware AeroAPI / Aviationstack style). Connector:
+  #    flightaware. on_failure: skip so a feed outage degrades to plan-only, it does not abort.
+  - id: fetch_flight_status
+    type: http
+    depends_on: [parse_draft]
+    http_config:
+      url: "{input.flight_status_url}?dest={steps.normalize_trip.output.iata}&start={steps.normalize_trip.output.start_date}&end={steps.normalize_trip.output.end_date}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.FLIGHT_STATUS_API_KEY}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 5) VERIFY vs reality (2/2): http GET the destination weather FORECAST for the exact trip
+  #    window (OpenWeather / Open-Meteo style) - daily precipitation probability + condition.
+  #    Connector: openweather. on_failure: skip so a missing forecast degrades gracefully.
+  - id: fetch_weather_forecast
+    type: http
+    depends_on: [parse_draft]
+    http_config:
+      url: "{input.weather_api_url}?q={steps.normalize_trip.output.city}&start={steps.normalize_trip.output.start_date}&end={steps.normalize_trip.output.end_date}&units=metric"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.WEATHER_API_KEY}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 6) LOAD-BEARING DETERMINISTIC FEASIBILITY MATH. NO model. Three hard checks against the parsed
+  #    plan + the live feeds: (a) minimum connection time between consecutive legs (using live
+  #    flight status when available, else the drafted times), (b) outdoor activities scheduled on a
+  #    forecast wash-out day (precip prob >= rain_threshold), (c) summed activity budget vs the cap.
+  #    Emits hard pass/fail booleans + a 0-1 feasibility score the gate's non-LLM strategy consumes.
+  - id: check_feasibility
+    type: code
+    depends_on: [parse_draft, fetch_flight_status, fetch_weather_forecast]
+    code_config:
+      language: python
+      code: |
+        from datetime import datetime
+
+        plan = _steps.get('parse_draft') or {}
+        trip = _steps.get('normalize_trip') or {}
+        flight_live = _steps.get('fetch_flight_status') or {}
+        weather = _steps.get('fetch_weather_forecast') or {}
+
+        min_conn = int(trip.get('min_connection_minutes', 45) or 45)
+        rain_threshold = float(trip.get('rain_threshold', 70) or 70)
+        try:
+            budget_cap = float(_input.get('budget_cap', 800) or 800)
+        except (ValueError, TypeError):
+            budget_cap = 800.0
+        try:
+            min_score = float(_input.get('min_feasibility_score', 1.0) or 1.0)
+        except (ValueError, TypeError):
+            min_score = 1.0
+
+        def _parse_dt(s):
+            s = str(s or '').strip().replace('Z', '+00:00')
+            for fmt in ('%Y-%m-%dT%H:%M:%S', '%Y-%m-%dT%H:%M', '%Y-%m-%d %H:%M'):
+                try:
+                    return datetime.strptime(s[:len(fmt) + 2] if '+' not in s else s.split('+')[0], fmt)
+                except (ValueError, TypeError):
+                    continue
+            try:
+                return datetime.fromisoformat(s)
+            except (ValueError, TypeError):
+                return None
+
+        # --- Build a map of live actual times keyed by flight number, when the feed gave us rows.
+        def _rows(blob):
+            if isinstance(blob, list):
+                return [r for r in blob if isinstance(r, dict)]
+            if isinstance(blob, dict):
+                for k in ('flights', 'data', 'results', 'items', 'records'):
+                    v = blob.get(k)
+                    if isinstance(v, list):
+                        return [r for r in v if isinstance(r, dict)]
+            return []
+
+        live_rows = _rows(flight_live)
+        live_by_flight = {}
+        for r in live_rows:
+            key = str(r.get('flight') or r.get('ident') or r.get('flight_number') or '').strip().upper()
+            if key:
+                live_by_flight[key] = r
+
+        # --- (a) Minimum-connection-time check between consecutive legs.
+        flights = plan.get('flights', [])
+        layover_conflicts = []
+        min_observed_gap = None
+        for i in range(len(flights) - 1):
+            cur = flights[i]
+            nxt = flights[i + 1]
+            # Prefer the live-actual arrival/departure when the feed has the flight.
+            cur_live = live_by_flight.get(str(cur.get('flight', '')).upper(), {})
+            nxt_live = live_by_flight.get(str(nxt.get('flight', '')).upper(), {})
+            arr = _parse_dt(cur_live.get('arrival_estimated') or cur_live.get('arrival') or cur.get('arrive'))
+            dep = _parse_dt(nxt_live.get('departure_estimated') or nxt_live.get('departure') or nxt.get('depart'))
+            if arr and dep:
+                gap_min = (dep - arr).total_seconds() / 60.0
+                if min_observed_gap is None or gap_min < min_observed_gap:
+                    min_observed_gap = round(gap_min, 1)
+                if gap_min < min_conn:
+                    layover_conflicts.append({
+                        'after_flight': cur.get('flight'),
+                        'before_flight': nxt.get('flight'),
+                        'connection_minutes': round(gap_min, 1),
+                        'required_minutes': min_conn,
+                    })
+        layover_ok = len(layover_conflicts) == 0
+
+        # --- Build a forecast wash-out set: dates with precip prob >= threshold.
+        wx_rows = _rows(weather)
+        if not wx_rows and isinstance(weather, dict):
+            # Open-Meteo style: parallel arrays under 'daily'.
+            daily = weather.get('daily')
+            if isinstance(daily, dict):
+                dates = daily.get('time') or daily.get('date') or []
+                pops = (daily.get('precipitation_probability_max')
+                        or daily.get('precipitation_probability') or daily.get('pop') or [])
+                if isinstance(dates, list) and isinstance(pops, list):
+                    wx_rows = [
+                        {'date': dates[i], 'pop': pops[i]}
+                        for i in range(min(len(dates), len(pops)))
+                    ]
+        washout_dates = set()
+        for r in wx_rows:
+            dt = str(r.get('date') or r.get('dt') or r.get('day') or '').strip()[:10]
+            pop = r.get('pop')
+            if pop is None:
+                pop = r.get('precipitation_probability_max', r.get('precipitation_probability', 0))
+            try:
+                popf = float(pop)
+            except (ValueError, TypeError):
+                popf = 0.0
+            # Some feeds give 0-1 probability; lift to 0-100.
+            if popf <= 1.0:
+                popf = popf * 100.0
+            if dt and popf >= rain_threshold:
+                washout_dates.add(dt)
+
+        # --- (b) Outdoor activity vs precipitation conflict.
+        weather_conflicts = []
+        for a in plan.get('activities', []):
+            if a.get('outdoor') and str(a.get('date', ''))[:10] in washout_dates:
+                weather_conflicts.append({
+                    'activity': a.get('name'),
+                    'date': a.get('date'),
+                    'reason': 'outdoor_on_washout_day',
+                })
+        weather_ok = len(weather_conflicts) == 0
+
+        # --- (c) Budget sum vs cap.
+        total_cost = round(sum(float(a.get('cost', 0) or 0) for a in plan.get('activities', [])), 2)
+        budget_ok = total_cost <= budget_cap
+
+        # --- Deterministic 0-1 feasibility score: fraction of the three hard checks that passed.
+        checks = [layover_ok, weather_ok, budget_ok]
+        feasibility_score = round(sum(1 for c in checks if c) / len(checks), 4)
+        feasible = all(checks) and feasibility_score >= min_score
+
+        blocking_reasons = []
+        if not layover_ok:
+            blocking_reasons.append(f"{len(layover_conflicts)} tight layover(s) below {min_conn} min")
+        if not weather_ok:
+            blocking_reasons.append(f"{len(weather_conflicts)} outdoor activity(ies) on a forecast wash-out day")
+        if not budget_ok:
+            blocking_reasons.append(f"activity budget {total_cost} exceeds cap {budget_cap}")
+
+        result = {
+            'feasible': feasible,
+            'feasibility_score': feasibility_score,
+            'min_feasibility_score': min_score,
+            'layover_ok': layover_ok,
+            'weather_ok': weather_ok,
+            'budget_ok': budget_ok,
+            'min_connection_minutes': min_conn,
+            'min_observed_gap_minutes': min_observed_gap,
+            'layover_conflicts': layover_conflicts,
+            'weather_conflicts': weather_conflicts,
+            'washout_dates': sorted(washout_dates),
+            'total_activity_cost': total_cost,
+            'budget_cap': budget_cap,
+            'flight_status_checked': bool(live_rows),
+            'weather_checked': bool(wx_rows),
+            'blocking_reasons': blocking_reasons,
+        }
+
+  # 7) GATE (swappable + model-independent). TWO strategies, BOTH must pass:
+  #    (1) llm_eval plan-quality judge - "is this a coherent, enjoyable, well-paced itinerary?",
+  #        model pinned to a SWAPPABLE provider (any provider can back it);
+  #    (2) llm_eval acting as a DETERMINISTIC threshold - fed ONLY the pre-computed feasibility
+  #        booleans + score, told to answer purely from the arithmetic, so the plan still passes
+  #        or fails the gate on the non-LLM feasibility math alone.
+  - id: plan_gate
+    type: gate
+    depends_on: [check_feasibility]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are a travel-quality reviewer. The numeric feasibility (layovers, weather,
+              budget) was already checked deterministically in code; judge ONLY plan QUALITY:
+              is this a coherent, sensibly paced, enjoyable day-by-day itinerary for the
+              destination and trip length, with a reasonable mix of activities? Answer exactly
+              'approved' if the plan reads as a good trip worth sending, otherwise 'rejected'
+              and name the weakness. Do not re-judge the numbers.
+            input: "Summary: {steps.parse_draft.output.summary} | Days: {steps.parse_draft.output.days} | Flights: {steps.parse_draft.output.flights}"
+            model: "{input.judge_model}"
+        - type: llm_eval
+          config:
+            prompt: >-
+              Deterministic feasibility threshold check. Answer exactly 'approved' if feasible is
+              True AND feasibility_score >= min_feasibility_score AND layover_ok AND weather_ok
+              AND budget_ok are all True; otherwise answer 'rejected'. Use ONLY the supplied
+              booleans and numbers - do not infer or reason beyond the comparison.
+            input: "feasible={steps.check_feasibility.output.feasible} feasibility_score={steps.check_feasibility.output.feasibility_score} min={steps.check_feasibility.output.min_feasibility_score} layover_ok={steps.check_feasibility.output.layover_ok} weather_ok={steps.check_feasibility.output.weather_ok} budget_ok={steps.check_feasibility.output.budget_ok}"
+            model: haiku
+
+  # 8) CONDITION - route on the DETERMINISTIC feasibility verdict (not the model label), so a plan
+  #    only proceeds to the final report when the feasibility math passed. A failed plan is bounced
+  #    back with the exact blocking reasons. No model.
+  - id: route_plan
+    type: condition
+    depends_on: [plan_gate, check_feasibility]
+    condition_config:
+      expression: "{steps.check_feasibility.output.feasible} == True"
+      then: [build_itinerary_report, email_itinerary, ping_slack]
+      else: [bounce_back]
+
+  # 8a) REPORT - the final, polished day-by-day itinerary assembled from the winning draft plus the
+  #     live-verification evidence (flight status checked, weather window, feasibility breakdown).
+  - id: build_itinerary_report
+    type: report
+    report_config:
+      template: research-report
+      format: pdf
+      theme: professional
+      title: "Trip Itinerary - {input.destination} ({input.date_range})"
+      author: "Trip Itinerary Race Planner"
+    prompt: |
+      Assemble a clean, traveler-friendly day-by-day itinerary that has already passed
+      deterministic feasibility verification (layovers, weather, budget) and a quality gate.
+
+      Trip overview:
+      {steps.normalize_trip.output}
+
+      Day-by-day plan (winning drafter, parsed):
+      {steps.parse_draft.output}
+
+      Live verification + feasibility breakdown (layover gaps, weather wash-outs, budget vs cap):
+      {steps.check_feasibility.output}
+
+      Present the days clearly with flights, activities and costs, note the verified weather
+      window and connection times, and finish with the total activity spend vs the budget cap.
+
+  # 8b) EMAIL the finished itinerary to the traveler's inbox. Connector: sendgrid.
+  - id: email_itinerary
+    type: http
+    http_config:
+      url: "https://api.sendgrid.com/v3/mail/send"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.SENDGRID_API_KEY}"
+      body: |
+        {
+          "personalizations": [{"to": [{"email": "{input.recipient_email}"}]}],
+          "from": {"email": "trips@example.com", "name": "Trip Itinerary Race Planner"},
+          "subject": "Your verified itinerary: {input.destination} ({input.date_range})",
+          "content": [{"type": "text/plain", "value": "Your itinerary for {input.destination} passed all feasibility checks (layovers, weather, budget). Total activity spend {steps.check_feasibility.output.total_activity_cost} vs cap {steps.check_feasibility.output.budget_cap}. Full day-by-day plan attached."}]
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 8c) NOTIFY - a short trip-planned ping in Slack alongside the email. service: slack.
+  - id: ping_slack
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        :airplane: Itinerary ready for {input.destination} ({input.date_range}) - feasibility {steps.check_feasibility.output.feasibility_score}, layovers OK, weather window clear, spend {steps.check_feasibility.output.total_activity_cost}/{steps.check_feasibility.output.budget_cap}. Emailed to {input.recipient_email}.
+
+  # 8d) BOUNCE-BACK - an infeasible plan is NOT sent as a trip; the traveler gets the exact
+  #     blocking reasons (tight layovers, rained-out outdoor days, over-budget) instead. service: slack.
+  - id: bounce_back
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: |
+        :warning: Itinerary for {input.destination} ({input.date_range}) did NOT pass feasibility and was held back.
+        Feasibility score: {steps.check_feasibility.output.feasibility_score} (need {steps.check_feasibility.output.min_feasibility_score})
+        Layover OK: {steps.check_feasibility.output.layover_ok} | Weather OK: {steps.check_feasibility.output.weather_ok} | Budget OK: {steps.check_feasibility.output.budget_ok}
+        Blocking reasons: {steps.check_feasibility.output.blocking_reasons}
+on_complete:
+  storage_path: "trip-itinerary-race-planner/{run_id}/result.json"
