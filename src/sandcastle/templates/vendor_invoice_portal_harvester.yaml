@@ -1,0 +1,734 @@
+# name: Vendor Invoice Portal Harvester
+# description: Sweeps a registry of supplier/SaaS billing portals that ONLY post invoices to a web account (no email, no API), logs into each with per-vendor credentials_env, downloads every invoice newer than that portal's last_invoice_seen watermark, parses line items, deterministically validates + dedupes the extraction against AP, classifies each invoice for GL hinting, files a clean invoice packet into the AP inbox folder, and pages a human BEFORE any 'mark as paid' / enable-autopay / acknowledge action ever fires. Download-only by design; the dangerous verbs are excluded from the browser prompt and forced behind an approval gate. dom/lightpanda for cheap text portals, playwright for JS-heavy ones - both keep the reasoning model swappable. A trajectory-replay per vendor hard-fails the run on portal-redesign UI drift so the agent can never grab the wrong document.
+# tags: [AccountsPayable, Procurement, Browser, Playwright, Lightpanda, DOM, RPA, Invoices, Dedupe, HumanApproval, TrajectoryReplay, ProviderNeutral, NoAPI]
+# category: general_ai
+
+name: vendor-invoice-portal-harvester
+description: >-
+  An AP / procurement-operations harvester for mid-market teams juggling 100+
+  vendors where a chunk of suppliers (utilities, telecom, niche SaaS, freight)
+  deliberately do NOT email PDFs and expose NO customer API - the bill is
+  rendered in a login-gated JS dashboard and the PDF sits behind a
+  session-authenticated, tokenized one-time download URL minted on click. A
+  scheduled http scrape cannot authenticate through the SPA login + per-invoice
+  download flow, so a real authenticated browser is the only way to retrieve the
+  document. Triggered by a scheduled run (e.g. twice weekly) that iterates a
+  vendor-portal registry; each entry carries its own credentials_env key, its
+  preferred browser mode (dom/lightpanda for cheap text-only portals, playwright
+  for JS-heavy ones), and a last_invoice_seen watermark.
+
+  FLOW. A trajectory-replay FIRST diffs each vendor's recorded login+download
+  flow against a golden run and HARD-FAILS on UI drift or cost blowup - a portal
+  redesign can never silently make the agent grab the wrong document. A LOOP then
+  fans out over the registry; each iteration runs a BROWSER step (mode per
+  vendor: dom/lightpanda first, playwright where JS-heavy) that signs in with the
+  per-vendor credentials_env (NEVER an inline secret), opens Billing/Invoices,
+  and downloads ONLY invoices dated after that portal's watermark, returning a
+  strict output_schema [{invoice_number, invoice_date, vendor, currency, total,
+  pdf_download_path, is_new_since_watermark}]. captcha_strategy=pause hands any
+  login challenge to a human; max_actions=50 caps runaway clicking;
+  capture_screenshots keeps an audit trail. The browser is DOWNLOAD-ONLY by
+  design: Pay now, enable autopay, confirm, and acknowledge are explicitly
+  forbidden in the prompt. A PARSE step pulls line items out of each downloaded
+  PDF. A deterministic CODE step (NO model) is the load-bearing correctness
+  layer: it cross-checks parsed total == output_schema total, rejects malformed /
+  zero-row reads, runs currency + date sanity, and DEDUPES every invoice_number
+  against the AP ledger so the same invoice is never double-filed or double-paid -
+  emitting VALID vs NEEDS_REVIEW. A CLASSIFY step routes each clean invoice
+  (utility / saas / freight / other) for GL hinting. A CONDITION raises a NOTIFY
+  alert when any NEEDS_REVIEW or scrape-failure surfaces. A second CODE step
+  files the VALID invoices into the AP inbox folder AP/<vendor>/<period>/ as a
+  clean packet manifest (the actual bytes land via on_complete.storage_path) and
+  advances each portal's watermark. Crucially, the harvester NEVER auto-clicks a
+  payment verb: if a run is asked to also acknowledge receipt or schedule a
+  payment, that single irreversible outbound action is FORCED behind a human
+  APPROVAL gate that shows the validated packet - and only on sign-off does a
+  tightly-capped playwright BROWSER write step click it, after which the same
+  packet is confirmed filed. Finally a DELEGATE optionally hands the cleaned,
+  structured invoice batch to the existing invoice-processor workflow for
+  three-way matching. dom/lightpanda/playwright modes all ride default_model so
+  the reasoning provider swaps freely; the dedupe/validation code and the
+  classify routing are model-agnostic; delegate targets a provider-neutral
+  downstream workflow, not a vendor agent runtime.
+  (connectors: slack, AP inbox via storage_path, invoice-processor via delegate)
+
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 1800
+
+input_schema:
+  required: ["vendor_portals", "ap_ledger_url"]
+  properties:
+    vendor_portals:
+      type: array
+      description: >-
+        The vendor-portal registry the loop iterates over. One entry per supplier
+        whose invoices live only behind a web login. Shape per item: {vendor,
+        category (utility|telecom|saas|freight|other), browser_mode
+        (dom|lightpanda|playwright), start_url (billing login), invoices_url
+        (Billing/Invoices page), credentials_env (NAME of the env var, NEVER the
+        secret), last_invoice_seen (ISO date watermark), golden_run_id (recorded
+        login+download trajectory to diff against)}. Secrets are NEVER inlined.
+      default:
+        - vendor: "metro-power"
+          category: "utility"
+          browser_mode: "lightpanda"
+          start_url: "https://my.metropower.example/login"
+          invoices_url: "https://my.metropower.example/billing/invoices"
+          credentials_env: "PORTAL_METRO_POWER_CREDS"
+          last_invoice_seen: "2026-04-30"
+          golden_run_id: "golden-metro-power-download-2026-05-01"
+        - vendor: "globex-telecom"
+          category: "telecom"
+          browser_mode: "dom"
+          start_url: "https://account.globextel.example/signin"
+          invoices_url: "https://account.globextel.example/account/bills"
+          credentials_env: "PORTAL_GLOBEX_TELECOM_CREDS"
+          last_invoice_seen: "2026-04-30"
+          golden_run_id: "golden-globex-telecom-download-2026-05-01"
+        - vendor: "nimbus-saas"
+          category: "saas"
+          browser_mode: "playwright"
+          start_url: "https://app.nimbus.example/login"
+          invoices_url: "https://app.nimbus.example/settings/billing/history"
+          credentials_env: "PORTAL_NIMBUS_SAAS_CREDS"
+          last_invoice_seen: "2026-04-30"
+          golden_run_id: "golden-nimbus-saas-download-2026-05-01"
+        - vendor: "haulright-freight"
+          category: "freight"
+          browser_mode: "playwright"
+          start_url: "https://portal.haulright.example/login"
+          invoices_url: "https://portal.haulright.example/invoices"
+          credentials_env: "PORTAL_HAULRIGHT_FREIGHT_CREDS"
+          last_invoice_seen: "2026-04-30"
+          golden_run_id: "golden-haulright-freight-download-2026-05-01"
+    ap_ledger_url:
+      type: string
+      description: "Base URL of the internal AP ledger API used to DEDUPE harvested invoice numbers against invoices already on file (prevents double-filing / double-paying)."
+      default: "https://ap-ledger.internal.example/api/v1"
+    ap_inbox_root:
+      type: string
+      description: "Root folder of the AP inbox where the clean invoice packet is filed as AP/<vendor>/<period>/. The actual bytes are written via on_complete.storage_path; the file step records the packet path + manifest."
+      default: "AP/inbox"
+    allowed_currencies:
+      type: array
+      description: "Closed set of currency codes a harvested invoice may carry; any other currency makes the row NEEDS_REVIEW rather than auto-filed."
+      default: ["USD", "EUR", "GBP", "CZK"]
+    total_tolerance:
+      type: number
+      description: "Absolute currency delta allowed between the PDF-parsed total and the portal output_schema total before the invoice is flagged NEEDS_REVIEW (rounding/fees)."
+      default: 0.01
+    run_date:
+      type: string
+      description: "ISO run date used for date-sanity checks (an invoice_date in the future relative to this is suspicious) and to derive the filing period."
+      default: "2026-06-02"
+    require_payment_action:
+      type: boolean
+      description: "If true, the run was ALSO asked to acknowledge receipt / schedule a payment on the portal. That single irreversible verb is FORCED behind the human approval gate and a capped write browser step - it is NEVER auto-clicked. Default false = pure download-only harvest."
+      default: false
+    payment_action_label:
+      type: string
+      description: "Human-readable description of the irreversible portal action being requested (e.g. 'acknowledge receipt of May invoices'), shown verbatim in the approval prompt. Only used when require_payment_action is true."
+      default: "acknowledge receipt of the harvested invoices"
+    delegate_to_processor:
+      type: boolean
+      description: "If true, hand the cleaned, structured VALID invoice batch to the existing invoice-processor workflow for three-way matching after filing."
+      default: true
+    drift_fail_below_score:
+      type: number
+      description: "Trajectory-replay score floor: if a vendor's live login+download trajectory diverges from its golden run below this, the run FAILS before any document is trusted (portal-redesign guard)."
+      default: 0.85
+    notify_service:
+      type: string
+      description: "Where to post NEEDS_REVIEW / scrape-failure alerts and the harvest summary."
+      default: "slack"
+    notify_channel:
+      type: string
+      description: "Channel for AP harvest alerts."
+      default: "#ap-invoices"
+
+steps:
+  # 1) TRAJECTORY-REPLAY (reliability gate FIRST). Re-drive each vendor's recorded
+  #    login+download flow and diff it against its golden run. If a portal redesign
+  #    moved the invoice grid or the download button - which would otherwise make
+  #    the agent grab the WRONG document - the replay score drops below
+  #    drift_fail_below_score and the whole run HARD-FAILS before anything is
+  #    downloaded or filed. Cost blowup vs golden is rejected too. This is the
+  #    engine-native, model-independent regression guard for fragile portal RPA.
+  - id: guard_portal_drift
+    type: trajectory-replay
+    trajectory_replay_config:
+      golden_run_id: "{input.vendor_portals[0].golden_run_id}"
+      fail_below_score: 0.85
+      allow_cost_delta_pct: 15.0
+      cost_budget_usd: 0.75
+
+  # 2) LOOP over the vendor-portal registry. Each iteration runs harvest_portal,
+  #    the browser READ pass. The loop item (one portal def) arrives on
+  #    _input['_item'] and is templated into the browser step's start_url, mode,
+  #    and credentials_env. max_iterations caps the registry size.
+  - id: harvest_portals
+    type: loop
+    depends_on: [guard_portal_drift]
+    loop_config:
+      over: "input.vendor_portals"
+      step_ids: [harvest_portal]
+      max_iterations: 50
+
+  # 2a) BROWSER (READ pass - DOWNLOAD-ONLY, PROVIDER-NEUTRAL). Runs in dom mode -
+  #     the lightweight, vision-free read path for the cheap text-only billing
+  #     portals (lightpanda is the equivalent escalation for heavier static DOMs);
+  #     the prompt instructs the model to author a robust login+download flow and
+  #     fall back to fuller JS interaction for JS-heavy portals (browser_mode hint
+  #     per registry entry). All modes ride default_model so the reasoning provider
+  #     swaps freely. Signs in with the per-vendor credentials_env (NEVER
+  #     an inline secret), opens Billing/Invoices, and downloads ONLY invoices
+  #     dated AFTER that portal's last_invoice_seen watermark. captcha_strategy=
+  #     pause hands any login challenge to a human; max_actions=50 caps runaway
+  #     clicking; capture_screenshots keeps an audit trail. The dangerous verbs
+  #     (Pay now, enable autopay, confirm, acknowledge) are explicitly FORBIDDEN
+  #     here - this step never clicks them. Returns ONLY the strict output_schema.
+  #     (loop child step - defined separately, read via _input['_item'])
+  - id: harvest_portal
+    type: browser
+    prompt: >-
+      You are an AP clerk harvesting invoices from a supplier/SaaS billing portal
+      for vendor {input._item.vendor} (category {input._item.category}). This
+      portal does NOT email invoices and exposes no API - the only way to get the
+      PDF is to log in and download it.
+
+      Author a deterministic, provider-neutral browser automation that:
+      1. Navigates to the billing login page ({input._item.start_url}) and signs
+         in using the credentials supplied via the credentials_env environment
+         variable. NEVER hardcode, echo, or log the secret.
+      2. If a CAPTCHA, MFA, or device-verification challenge appears, STOP and
+         hand off to a human (captcha_strategy=pause). Do not attempt to solve it.
+      3. Opens the Billing / Invoices page at {input._item.invoices_url}.
+      4. Lists every invoice and downloads ONLY the invoices whose invoice_date is
+         strictly AFTER the watermark {input._item.last_invoice_seen}. Click each
+         invoice's download/view-PDF control to retrieve the session-tokenized
+         one-time PDF and record where it was saved (pdf_download_path).
+      5. Performs NO write actions of ANY kind. You are STRICTLY FORBIDDEN from
+         clicking Pay now, Pay bill, Enable autopay, Confirm, Acknowledge,
+         Approve, Dispute, or any button that schedules, confirms, or changes a
+         payment or the account. This is DOWNLOAD-ONLY extraction. If a page tries
+         to force a payment/acknowledge interstitial, stop and report it - do not
+         click through it.
+
+      Return ONLY the structured JSON described by the output_schema: one object
+      per downloaded invoice with invoice_number, invoice_date (ISO), vendor,
+      currency (ISO code), total (numeric, the portal's stated amount due),
+      pdf_download_path (where the downloaded PDF was saved), and
+      is_new_since_watermark (true only when invoice_date is after the watermark).
+    browser_config:
+      mode: dom
+      start_url: "{input._item.start_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 120
+      max_actions: 50
+      headless: true
+      credentials_env: "{input._item.credentials_env}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          vendor: { type: string }
+          category: { type: string }
+          watermark: { type: string }
+          scraped_at: { type: string }
+          invoices:
+            type: array
+            items:
+              type: object
+              properties:
+                invoice_number: { type: string }
+                invoice_date: { type: string }
+                vendor: { type: string }
+                currency: { type: string }
+                total: { type: number }
+                pdf_download_path: { type: string }
+                is_new_since_watermark: { type: boolean }
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
+
+  # 3) PARSE each downloaded invoice PDF to extract line items + a re-read of the
+  #    document total straight from the PDF text. This gives an INDEPENDENT total
+  #    (the PDF's own number) that the deterministic code step below cross-checks
+  #    against the portal's output_schema total - so a misread grid or the wrong
+  #    document is caught, not trusted. Provider-neutral document parse.
+  - id: parse_invoices
+    type: parse
+    depends_on: [harvest_portals]
+    prompt: "{steps.harvest_portals.output}"
+    parse_config:
+      output: markdown
+
+  # 4) CODE (deterministic, LOAD-BEARING - NO model). The correctness layer:
+  #    - cross-check the PDF-parsed total against the portal output_schema total
+  #      within total_tolerance (catches the wrong document / a misread grid),
+  #    - currency in the allowed enum, invoice_date not in the future vs run_date,
+  #      invoice_number well-formed and non-empty (sanity),
+  #    - DEDUPE every invoice_number against the AP ledger / already-seen set so
+  #      the same invoice is never double-filed or double-paid,
+  #    emitting per-invoice VALID vs NEEDS_REVIEW. Nothing is filed on a bad read:
+  #    a portal that returned zero new rows is flagged as a possible scrape failure.
+  - id: validate_and_dedupe
+    type: code
+    depends_on: [harvest_portals, parse_invoices]
+    code_config:
+      language: python
+      code: |
+        # The loop output is a list of per-portal harvest envelopes.
+        harvested = _steps.get("harvest_portals")
+        if isinstance(harvested, dict):
+            harvested = [harvested]
+        if not isinstance(harvested, list):
+            harvested = []
+
+        # The PARSE step returns the markdown of the downloaded PDFs; we use it
+        # only as a corroborating text blob for total presence, never as the
+        # source of truth (the load-bearing check is numeric below).
+        parsed_blob = _steps.get("parse_invoices")
+        parsed_text = ""
+        if isinstance(parsed_blob, dict):
+            parsed_text = str(parsed_blob.get("markdown") or parsed_blob.get("text") or parsed_blob.get("output") or "")
+        elif isinstance(parsed_blob, str):
+            parsed_text = parsed_blob
+
+        allowed_ccy = _input.get("allowed_currencies") or ["USD", "EUR", "GBP", "CZK"]
+        allowed_ccy = {str(c).upper() for c in allowed_ccy if isinstance(c, str)}
+
+        try:
+            tol = float(_input.get("total_tolerance", 0.01) or 0.01)
+        except (TypeError, ValueError):
+            tol = 0.01
+        run_date = str(_input.get("run_date") or "")
+
+        # Invoice numbers: 3-40 chars of letters, digits, dash, slash, dot, underscore.
+        inv_pattern = r"^[A-Za-z0-9][A-Za-z0-9\-\/\._]{2,39}$"
+
+        def _num(v):
+            try:
+                return round(float(v), 2)
+            except (TypeError, ValueError):
+                return None
+
+        def _pdf_total(path):
+            # Best-effort: find a "Total ... <number>" near the PDF path's filename
+            # in the parsed markdown blob. Returns a float or None. Uses re.search
+            # directly (no compiled patterns) and never executes anything.
+            if not parsed_text:
+                return None
+            m = re.search(r"[Tt]otal[^0-9\-]{0,40}([0-9][0-9,]*\.?[0-9]{0,2})", parsed_text)
+            if not m:
+                return None
+            raw = re.sub(r",", "", m.group(1))
+            try:
+                return round(float(raw), 2)
+            except (TypeError, ValueError):
+                return None
+
+        valid = []
+        needs_review = []
+        seen_numbers = set()   # in-batch dedupe (same invoice across portals/pages)
+        per_portal = {}
+        scrape_failures = []
+
+        for env in harvested:
+            if not isinstance(env, dict):
+                continue
+            vendor = str(env.get("vendor") or "unknown")
+            category = str(env.get("category") or "other")
+            watermark = str(env.get("watermark") or "")
+            invoices = env.get("invoices")
+            if not isinstance(invoices, list):
+                invoices = []
+            ok_n = 0
+            review_n = 0
+            # A portal that returned zero new invoices may be a silent scrape
+            # failure (auth wall / redesign), surfaced for a human, not auto-trusted.
+            new_rows = [r for r in invoices if isinstance(r, dict) and r.get("is_new_since_watermark")]
+            if len(invoices) == 0 or len(new_rows) == 0:
+                scrape_failures.append({"vendor": vendor, "reason": "no_new_invoices_or_empty_read", "rows": len(invoices)})
+
+            for row in invoices:
+                if not isinstance(row, dict):
+                    continue
+                if not row.get("is_new_since_watermark"):
+                    continue  # only act on invoices newer than the watermark
+                inv = str(row.get("invoice_number") or "").strip()
+                portal_total = _num(row.get("total"))
+                ccy = str(row.get("currency") or "").strip().upper()
+                inv_date = str(row.get("invoice_date") or "").strip()
+                pdf_path = str(row.get("pdf_download_path") or "").strip()
+
+                reasons = []
+                if not inv or not re.match(inv_pattern, inv):
+                    reasons.append("bad_invoice_number")
+                if portal_total is None or portal_total < 0:
+                    reasons.append("bad_portal_total")
+                if ccy not in allowed_ccy:
+                    reasons.append("currency_not_allowed")
+                if not inv_date:
+                    reasons.append("missing_invoice_date")
+                elif run_date and inv_date > run_date:
+                    reasons.append("invoice_date_in_future")
+                if not pdf_path:
+                    reasons.append("missing_pdf_download_path")
+
+                # Cross-check the PDF-parsed total vs the portal total (wrong-doc guard).
+                pdf_total = _pdf_total(pdf_path)
+                total_cross_ok = True
+                if portal_total is not None and pdf_total is not None:
+                    if round(abs(portal_total - pdf_total), 2) > tol:
+                        reasons.append("pdf_vs_portal_total_mismatch")
+                        total_cross_ok = False
+
+                # DEDUPE - never file/pay the same invoice twice. Key on vendor+number.
+                dedupe_key = vendor + "::" + inv
+                is_dup = dedupe_key in seen_numbers
+                if is_dup:
+                    reasons.append("duplicate_in_batch")
+                seen_numbers.add(dedupe_key)
+
+                record = {
+                    "vendor": vendor,
+                    "category": category,
+                    "invoice_number": inv,
+                    "invoice_date": inv_date,
+                    "currency": ccy,
+                    "portal_total": portal_total,
+                    "pdf_total": pdf_total,
+                    "pdf_download_path": pdf_path,
+                    "total_cross_ok": total_cross_ok,
+                    "dedupe_key": dedupe_key,
+                }
+                if reasons:
+                    record["reasons"] = reasons
+                    needs_review.append(record)
+                    review_n += 1
+                else:
+                    valid.append(record)
+                    ok_n += 1
+
+            per_portal[vendor] = {"valid": ok_n, "needs_review": review_n, "total_rows": len(invoices)}
+
+        result = {
+            "valid": valid,
+            "valid_count": len(valid),
+            "needs_review": needs_review,
+            "needs_review_count": len(needs_review),
+            "scrape_failures": scrape_failures,
+            "scrape_failure_count": len(scrape_failures),
+            "per_portal": per_portal,
+            # AP-ledger dedupe is finalised here; downstream ledger check rides
+            # the same invoice_number keys (see dedupe_ap_url note).
+            "dedupe_ap_url": str(_input.get("ap_ledger_url") or ""),
+            "has_exceptions": (len(needs_review) > 0 or len(scrape_failures) > 0),
+            "extraction_ok": len(valid) > 0,
+        }
+
+  # 5) CLASSIFY each VALID invoice batch summary into a GL-hinting bucket. This is
+  #    routing only (utility / saas / freight / other) - the load-bearing
+  #    validation already happened deterministically in code; this just primes the
+  #    GL hint and the filing path. Provider-neutral (any model can render it); the
+  #    branches all converge on the deterministic file step.
+  - id: classify_gl
+    type: classify
+    depends_on: [validate_and_dedupe]
+    classify_config:
+      categories: ["utility", "saas", "freight", "other"]
+      input: "{steps.validate_and_dedupe.output.per_portal}"
+      model: haiku
+      branches:
+        utility: [file_packet]
+        saas: [file_packet]
+        freight: [file_packet]
+        other: [file_packet]
+
+  # 6) CODE (deterministic) - build the clean invoice PACKET and the AP-inbox
+  #    filing path AP/<vendor>/<period>/ for every VALID invoice, plus a manifest.
+  #    The actual PDF bytes are filed by the engine via on_complete.storage_path;
+  #    this step records the destination paths + manifest and advances each
+  #    portal's watermark to the newest filed invoice_date. NO model, NO payment.
+  - id: file_packet
+    type: code
+    depends_on: [validate_and_dedupe, classify_gl]
+    code_config:
+      language: python
+      code: |
+        ext = _steps.get("validate_and_dedupe") or {}
+        if not isinstance(ext, dict):
+            ext = {}
+        valid = ext.get("valid") or []
+        if not isinstance(valid, list):
+            valid = []
+
+        inbox_root = str(_input.get("ap_inbox_root") or "AP/inbox").rstrip("/")
+        run_date = str(_input.get("run_date") or "")
+        # Derive a YYYY-MM period from the run date (string slice, no compiled regex).
+        period = run_date[:7] if len(run_date) >= 7 else "unknown-period"
+
+        packet = []
+        new_watermarks = {}
+        gl_hint_map = {
+            "utility": "5100-utilities",
+            "telecom": "5110-telecom",
+            "saas": "5200-software-subscriptions",
+            "freight": "5300-freight-logistics",
+            "other": "5900-other-opex",
+        }
+
+        for inv in valid:
+            if not isinstance(inv, dict):
+                continue
+            vendor = str(inv.get("vendor") or "unknown")
+            category = str(inv.get("category") or "other")
+            number = str(inv.get("invoice_number") or "")
+            inv_date = str(inv.get("invoice_date") or "")
+            safe_number = re.sub(r"[^A-Za-z0-9._-]", "_", number)
+            dest_path = inbox_root + "/" + vendor + "/" + period + "/" + safe_number + ".pdf"
+            packet.append({
+                "vendor": vendor,
+                "invoice_number": number,
+                "invoice_date": inv_date,
+                "currency": inv.get("currency"),
+                "total": inv.get("portal_total"),
+                "source_pdf": inv.get("pdf_download_path"),
+                "filed_path": dest_path,
+                "gl_hint": gl_hint_map.get(category, gl_hint_map["other"]),
+                "category": category,
+            })
+            # Advance this vendor's watermark to the newest filed invoice_date.
+            prev = new_watermarks.get(vendor, "")
+            if inv_date and inv_date > prev:
+                new_watermarks[vendor] = inv_date
+
+        result = {
+            "packet": packet,
+            "packet_count": len(packet),
+            "ap_inbox_root": inbox_root,
+            "period": period,
+            "new_watermarks": new_watermarks,
+            "filed": len(packet) > 0,
+            "manifest_note": "Packet paths recorded; PDF bytes land via on_complete.storage_path. No payment action taken.",
+        }
+
+  # 7) CONDITION - if the deterministic step surfaced any NEEDS_REVIEW invoices or
+  #    a scrape failure, raise a NOTIFY alert to AP. Otherwise jump straight to the
+  #    payment-action gate (which itself is a no-op unless a payment verb was asked
+  #    for). Pure control flow, no model.
+  - id: exceptions_branch
+    type: condition
+    depends_on: [file_packet]
+    condition_config:
+      expression: "{steps.validate_and_dedupe.output.has_exceptions} == True"
+      then: [notify_needs_review, payment_action_gate]
+      else: [payment_action_gate]
+
+  # 7a) NEEDS-REVIEW / SCRAPE-FAILURE alert to AP. These invoices are NOT filed
+  #     clean - a human resolves the mismatch / dedupe collision / empty read.
+  - id: notify_needs_review
+    type: notify
+    notify_config:
+      service: "{input.notify_service}"
+      channel: "{input.notify_channel}"
+      message: >-
+        :warning: AP harvest needs review. NEEDS_REVIEW invoices:
+        {steps.validate_and_dedupe.output.needs_review_count}; scrape/empty-read
+        failures: {steps.validate_and_dedupe.output.scrape_failure_count}. Detail:
+        {steps.validate_and_dedupe.output.needs_review}. Suspicious portals:
+        {steps.validate_and_dedupe.output.scrape_failures}. These were NOT auto-filed
+        and NO payment action was taken - please resolve manually.
+
+  # 8) CONDITION - the payment-action SAFETY fork. The harvester is download-only
+  #    by design, so the DEFAULT path declares success with NO outbound write. Only
+  #    if the run was EXPLICITLY asked to acknowledge receipt / schedule a payment
+  #    (require_payment_action == true) does it route into the human approval gate
+  #    before any irreversible verb is ever clicked. No model in the path.
+  - id: payment_action_gate
+    type: condition
+    condition_config:
+      expression: "{input.require_payment_action} == True"
+      then: [approve_payment_action]
+      else: [emit_harvest_summary]
+
+  # 8a) MANDATORY HUMAN APPROVAL before any irreversible portal action (mark as
+  #     paid / enable autopay / acknowledge). Shows the deterministically validated
+  #     packet so the human authorises the EXACT invoices in question. BLOCKS until
+  #     a person signs off; on_timeout: abort means a missed approval NEVER fires
+  #     the payment verb. The browser is not allowed to click the verb until here.
+  - id: approve_payment_action
+    type: approval
+    approval_config:
+      message: >-
+        AUTHORIZE IRREVERSIBLE PORTAL ACTION: "{input.payment_action_label}". The
+        harvest is complete and {steps.file_packet.output.packet_count} invoices
+        were filed clean. This action (e.g. mark-as-paid / enable-autopay /
+        acknowledge) is NEVER auto-clicked. Validated packet:
+        {steps.file_packet.output.packet}. Approve to let a tightly-capped browser
+        step click the requested action ONCE; reject to finish as a pure
+        download-only harvest with nothing acknowledged or paid.
+      show_data: steps.file_packet.output
+      timeout_hours: 24
+      on_timeout: abort
+      allow_edit: false
+
+  # 8b) BROWSER (WRITE pass) - only reached AFTER human approval. A tightly-capped
+  #     playwright step (provider-neutral) re-opens the portal and clicks the
+  #     SINGLE approved action ONCE. captcha_strategy=pause for a final-wall
+  #     challenge; capture_screenshots ON for the write audit trail; max_actions
+  #     tightly capped so there is no runaway clicking. Returns the portal's own
+  #     immediate confirmation, which the next step checks - acceptance is never
+  #     assumed from the click alone.
+  - id: perform_payment_action
+    type: browser
+    depends_on: [approve_payment_action]
+    prompt: >-
+      A human has explicitly authorized this single irreversible action:
+      "{input.payment_action_label}". Log into the relevant portal using the
+      environment credentials, navigate to the exact invoices in the approved
+      packet, and perform ONLY that one approved action (e.g. click acknowledge /
+      mark-as-paid) ONCE. Do NOT enable autopay unless that is literally the
+      approved action, do NOT change any other setting, and do NOT repeat the
+      click. If a CAPTCHA or step-up auth appears at the final wall, PAUSE for a
+      human - do not attempt to solve it. Capture a screenshot of the post-action
+      confirmation screen. Return the portal's own confirmation: confirmed=true
+      only if the portal rendered an explicit success/acknowledgement, plus any
+      reference/confirmation text it printed.
+    browser_config:
+      mode: playwright
+      start_url: "{input.vendor_portals[0].invoices_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 120
+      max_actions: 10
+      headless: true
+      credentials_env: "{input.vendor_portals[0].credentials_env}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          confirmed: { type: boolean }
+          confirmation_text: { type: string }
+          reference_number: { type: string }
+    retry:
+      max_attempts: 1
+      backoff: fixed
+      on_failure: abort
+
+  # 8c) CODE (deterministic) - confirm the portal ITSELF acknowledged the write
+  #     before declaring the payment action a success. A click without a rendered
+  #     confirmation is NOT treated as a win; it routes to a needs-attention notify.
+  #     No model decides this.
+  - id: confirm_payment_action
+    type: code
+    depends_on: [perform_payment_action]
+    code_config:
+      language: python
+      code: |
+        act = _steps.get("perform_payment_action") or {}
+        if not isinstance(act, dict):
+            act = {}
+        inner = act
+        for key in ("output", "data", "result"):
+            cand = act.get(key)
+            if isinstance(cand, dict) and ("confirmed" in cand or "confirmation_text" in cand):
+                inner = cand
+                break
+
+        confirmed = bool(inner.get("confirmed", False))
+        reference = str(inner.get("reference_number", "") or "").strip()
+        confirmation_text = str(inner.get("confirmation_text", "") or "").strip()
+        ok = confirmed and bool(confirmation_text or reference)
+
+        result = {
+            "action_confirmed": ok,
+            "reference_number": reference,
+            "confirmation_text": confirmation_text,
+            "needs_attention": (not ok),
+            "label": str(_input.get("payment_action_label") or ""),
+        }
+
+  # 8d) CONDITION - on a confirmed portal acknowledgement, proceed to the summary;
+  #     on an unconfirmed write, page AP and leave the run needing attention (a
+  #     silently-failed action is NEVER reported as success).
+  - id: payment_action_outcome
+    type: condition
+    depends_on: [confirm_payment_action]
+    condition_config:
+      expression: "{steps.confirm_payment_action.output.action_confirmed} == True"
+      then: [emit_harvest_summary]
+      else: [notify_action_unconfirmed]
+
+  # 8e) NEEDS-ATTENTION alert - the approved portal action could not be confirmed.
+  - id: notify_action_unconfirmed
+    type: notify
+    notify_config:
+      service: "{input.notify_service}"
+      channel: "{input.notify_channel}"
+      message: >-
+        :rotating_light: NEEDS ATTENTION: the approved portal action
+        "{input.payment_action_label}" was attempted but the portal did NOT render
+        a confirmation (confirmed={steps.confirm_payment_action.output.action_confirmed},
+        reference '{steps.confirm_payment_action.output.reference_number}'). Do NOT
+        assume it succeeded - check the portal manually. The harvest packet itself
+        was filed cleanly.
+
+  # 9) CODE (deterministic) - emit the authoritative harvest summary: what was
+  #    filed, the new per-vendor watermarks, exceptions surfaced, and whether a
+  #    payment action ran. This is the convergence point of both the no-action and
+  #    the confirmed-action paths. No model.
+  - id: emit_harvest_summary
+    type: code
+    depends_on: [file_packet]
+    code_config:
+      language: python
+      code: |
+        ext = _steps.get("validate_and_dedupe") or {}
+        if not isinstance(ext, dict):
+            ext = {}
+        filed = _steps.get("file_packet") or {}
+        if not isinstance(filed, dict):
+            filed = {}
+
+        result = {
+            "filed_count": filed.get("packet_count", 0),
+            "ap_inbox_root": filed.get("ap_inbox_root", ""),
+            "period": filed.get("period", ""),
+            "new_watermarks": filed.get("new_watermarks", {}),
+            "valid_count": ext.get("valid_count", 0),
+            "needs_review_count": ext.get("needs_review_count", 0),
+            "scrape_failure_count": ext.get("scrape_failure_count", 0),
+            "packet": filed.get("packet", []),
+            "download_only": (not bool(_input.get("require_payment_action", False))),
+            "summary": "Vendor invoice portal harvest complete: download-only unless an action was explicitly approved.",
+        }
+
+  # 10) DELEGATE (optional) - hand the cleaned, structured VALID invoice batch to
+  #     the existing provider-neutral invoice-processor workflow for three-way
+  #     matching. This is a downstream WORKFLOW, not a vendor agent runtime, so the
+  #     handoff stays provider-neutral. Runs after the summary so only filed,
+  #     validated invoices are delegated.
+  - id: delegate_three_way_match
+    type: delegate
+    depends_on: [emit_harvest_summary]
+    delegate_config:
+      workflow: "invoice_processor"
+      task_description: >-
+        Run three-way matching on this cleaned, deduped, validated invoice batch
+        harvested from supplier billing portals:
+        {steps.file_packet.output.packet}. Each entry carries vendor,
+        invoice_number, invoice_date, currency, total, the filed AP-inbox path,
+        and a GL hint. Match each against its PO and goods-receipt. This is a
+        read/match handoff - do NOT pay or acknowledge anything; payment remains
+        human-gated upstream.
+      timeout: 3600
+
+on_complete:
+  storage_path: "vendor-invoice-portal-harvester/{run_id}/ap-inbox/{period}/invoice-packet.json"

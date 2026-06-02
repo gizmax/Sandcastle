@@ -1,0 +1,748 @@
+# name: WCAG Accessibility Audit Evidence Pack
+# description: Runs a deterministic axe-core accessibility scan inside a real rendered browser across a sampled set of journey pages - including states only reachable after interaction (opened modals, expanded menus, SPA route changes) - classifies every violation by WCAG 2.2 success criterion and EAA/ADA/Section-508 clause with pure-Python mapping, scores each page against a configurable max-critical threshold, and ships a timestamped, screenshot-backed remediation dossier to an object-lock (WORM) S3 bucket as the defensible audit evidence pack, with a VPAT-style PDF behind a human filing-approval gate.
+# tags: [wcag, accessibility, axe-core, a11y, eaa, ada, section-508, vpat, browser, playwright, evidence, compliance, trajectory-replay]
+# category: engineering
+
+name: wcag-accessibility-audit-evidence-pack
+description: >-
+  A provider-neutral accessibility conformance harness for the accessibility lead or compliance
+  officer facing the EU Accessibility Act (June 2025+), ADA Title III, or Section 508 - or an a11y
+  audit agency that must produce defensible, reproducible evidence packs. WCAG conformance is
+  defined on the RENDERED DOM and on interaction states: color contrast, ARIA roles, focus order,
+  name/role/value, and violations inside dynamically-injected components (modals, accordions, SPA
+  route changes) only exist after JS executes and after the user interacts, so an http fetch of
+  source HTML cannot see them. This workflow defines or pulls a page+state sample (each entry a URL
+  plus an optional interaction recipe like "open the cart modal"), then LOOPS the sample. For each
+  page a PLAYWRIGHT browser step (provider-neutral: the model only authors the load+interact+axe.run
+  +screenshot script, swappable across providers) loads the page, performs the interaction recipe to
+  reach the target STATE, INJECTS axe-core and runs axe.run against the live accessibility tree, and
+  screenshots each failing node - returning structured axe JSON via output_schema. axe-core does the
+  actual accessibility evaluation deterministically inside the browser; the model never decides
+  conformance. A deterministic Python step then VALIDATES the axe extraction (rejecting empty or
+  malformed scans so a blank read can never pass), normalizes it, maps each axe rule id to its WCAG
+  2.2 success criterion + EAA/508 clause via an inline mapping table, and computes per-page
+  conformance scores and a hard pass/fail against a configurable max-critical threshold - this
+  scoring is the audit-load-bearing math, pure Python, no model. A gate confirms the deterministic
+  threshold verdict via an engine-native human strategy while a swappable llm_eval merely DRAFTS
+  plain-language remediation prose that cannot alter the pass/fail. The canonical axe JSON, scores
+  and screenshots are PUT to an object-lock S3 bucket (the only write - append-only WORM) as the
+  dated evidence pack, a sensor confirms the object is durably sealed, and a VPAT-style PDF report
+  with embedded screenshots and WCAG criterion mapping is generated. If critical violations exceed
+  the threshold, an approval routes to the a11y lead before the report is marked the official filing.
+  Finally a trajectory-replay vs a golden run detects when a UI change silently regresses the scan
+  coverage. Triggered on a schedule (per release / monthly) over a sitemap or defined journey URLs,
+  or fired from a staging-deploy webhook for shift-left a11y gating.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 1800
+
+# Per-release / monthly trigger (cron). Can also be fired from a sensor on a staging-deploy webhook.
+schedule: "0 3 1 * *"
+
+input_schema:
+  required: ["audit_id", "journey_sample"]
+  properties:
+    audit_id:
+      type: string
+      description: "Unique id for this accessibility audit cycle (used in object keys, report title, evidence path)."
+      example: "A11Y-2026-06-RELEASE-4.2"
+    journey_sample:
+      type: string
+      description: >-
+        JSON array of pages+states to scan. Each entry: {url, state_label, interaction_recipe?}.
+        interaction_recipe is an optional plain-language recipe to reach a state only visible after
+        interaction (e.g. "click the cart icon to open the cart modal"). Pulled from a sitemap or a
+        defined set of user-journey URLs upstream. Used to drive the loop.
+      example: '[{"url":"https://app.example.com/checkout","state_label":"cart-modal-open","interaction_recipe":"click the cart icon in the header to open the cart modal"},{"url":"https://app.example.com/pricing","state_label":"default"}]'
+    sitemap_url:
+      type: string
+      description: >-
+        Optional sitemap or journey-config URL to PULL the page sample from when journey_sample is
+        not pre-defined. Fetched read-only via http; the code step prefers journey_sample if present.
+      default: ""
+      example: "https://app.example.com/a11y-journey-config.json"
+    max_critical_per_page:
+      type: integer
+      description: >-
+        The configurable threshold: maximum allowed critical (serious/critical impact) WCAG
+        violations per page before the page FAILS conformance. The deterministic load-bearing
+        pass/fail compares against this. 0 = zero-tolerance for critical violations.
+      default: 0
+      example: "0"
+    wcag_target_level:
+      type: string
+      description: "Target WCAG conformance level for the audit (A, AA, AAA). EAA/Section-508 typically require AA."
+      default: "AA"
+      example: "AA"
+    portal_credentials_env:
+      type: string
+      description: >-
+        Name of the environment variable holding login credentials for GATED journeys (NEVER inline
+        secrets). Passed to the browser step's credentials_env; public pages need no secret.
+      default: "A11Y_PORTAL_CREDS"
+      example: "A11Y_PORTAL_CREDS"
+    s3_base_url:
+      type: string
+      description: "S3 (or S3-compatible) REST base URL for the object-lock (WORM) evidence bucket."
+      default: "https://s3.eu-central-1.amazonaws.com"
+      example: "https://s3.eu-central-1.amazonaws.com"
+    s3_bucket:
+      type: string
+      description: "Object-lock (WORM) bucket that stores the append-only, tamper-evident accessibility evidence pack."
+      default: "a11y-audit-evidence"
+      example: "acme-a11y-audit-evidence"
+    golden_run_id:
+      type: string
+      description: >-
+        ID of the known-good recorded scan run. trajectory-replay diffs the candidate scan coverage
+        against this golden run to detect when a UI change silently regressed which states got scanned.
+      default: "golden-a11y-journey-scan-2026-05-01"
+    a11y_lead_timeout_hours:
+      type: integer
+      description: "Hours the a11y-lead filing approval waits before its timeout fires (on_timeout: abort - never auto-files a failing audit)."
+      default: 48
+      example: "48"
+    report_author:
+      type: string
+      description: "Author/organization printed on the VPAT-style conformance PDF."
+      default: "Accessibility Compliance Office"
+      example: "Accessibility Compliance Office"
+
+steps:
+  # ---------------------------------------------------------------------------
+  # 0) PULL the optional sitemap / journey config (read-only). When the caller did
+  #    not pre-define journey_sample, this lets the next code step harvest URLs from
+  #    a sitemap. Skips cleanly (on_failure: skip) when no sitemap_url is given.
+  # ---------------------------------------------------------------------------
+  - id: pull_sitemap
+    type: http
+    http_config:
+      url: "{input.sitemap_url}"
+      method: GET
+      headers:
+        Accept: "application/json, application/xml, text/plain"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # ---------------------------------------------------------------------------
+  # 1) DEFINE the page+state sample DETERMINISTICALLY. Prefer the explicit
+  #    journey_sample input; otherwise harvest URLs from the pulled sitemap. Each
+  #    entry carries url + state_label + optional interaction_recipe so the browser
+  #    loop can reach states only visible after interaction. No model.
+  # ---------------------------------------------------------------------------
+  - id: build_sample
+    type: code
+    depends_on: [pull_sitemap]
+    code_config:
+      language: python
+      code: |
+        import json
+        import re
+
+        # Prefer an explicit, reviewed journey sample over harvested sitemap URLs.
+        raw = _input.get('journey_sample') or ''
+        sample = []
+        if isinstance(raw, list):
+            sample = raw
+        elif isinstance(raw, str) and raw.strip():
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, list):
+                    sample = parsed
+            except (ValueError, TypeError):
+                sample = []
+
+        # Fallback: harvest <loc> URLs from a pulled sitemap (XML or JSON list).
+        if not sample:
+            sm = _steps.get('pull_sitemap') or {}
+            body = sm.get('body') if isinstance(sm, dict) else sm
+            urls = []
+            if isinstance(body, list):
+                for u in body:
+                    if isinstance(u, str):
+                        urls.append(u)
+                    elif isinstance(u, dict) and u.get('url'):
+                        urls.append(str(u.get('url')))
+            elif isinstance(body, str) and body.strip():
+                # Pull URLs out of <loc>...</loc> sitemap entries deterministically.
+                urls = re.findall(r'<loc>\s*([^<\s]+)\s*</loc>', body)
+                if not urls:
+                    urls = re.findall(r'https?://[^\s"\'<>]+', body)
+            sample = [{'url': u, 'state_label': 'default', 'interaction_recipe': ''} for u in urls]
+
+        # Normalize: every entry must have url + state_label; interaction_recipe optional.
+        normalized = []
+        for entry in sample:
+            if not isinstance(entry, dict):
+                continue
+            url = str(entry.get('url') or '').strip()
+            if not url.startswith('http'):
+                continue
+            normalized.append({
+                'url': url,
+                'state_label': str(entry.get('state_label') or 'default').strip(),
+                'interaction_recipe': str(entry.get('interaction_recipe') or '').strip(),
+            })
+
+        result = {
+            'audit_id': _input.get('audit_id'),
+            'page_count': len(normalized),
+            'pages': normalized,
+            'has_pages': len(normalized) > 0,
+        }
+
+  # ---------------------------------------------------------------------------
+  # 2) LOOP over each sampled page+state. The child is the playwright axe-core scan.
+  #    Downstream steps depend_on the loop, not the child, per loop semantics.
+  # ---------------------------------------------------------------------------
+  - id: scan_loop
+    type: loop
+    depends_on: [build_sample]
+    loop_config:
+      over: "steps.build_sample.output.pages"
+      step_ids: [axe_scan_page]
+      max_iterations: 200
+
+  # ---------------------------------------------------------------------------
+  # 2a) BROWSER (PLAYWRIGHT, provider-neutral READ pass). The model AUTHORS a
+  #     Playwright script that: loads _item.url, performs _item.interaction_recipe
+  #     to reach the target STATE (open the modal / expand the menu / route change),
+  #     INJECTS axe-core and runs axe.run() against the LIVE accessibility tree, and
+  #     SCREENSHOTS each failing node. axe-core does the deterministic a11y
+  #     evaluation - the model never judges conformance. capture_screenshots=true so
+  #     the auditor sees the actual rendered failure; captcha_strategy=pause halts for
+  #     a human; credentials_env (never inline) covers gated journeys; max_actions caps
+  #     the interaction recipe; the step only reads/injects/screenshots - no writes.
+  #     output_schema returns structured axe JSON for deterministic downstream scoring.
+  # ---------------------------------------------------------------------------
+  - id: axe_scan_page
+    type: browser
+    prompt: >-
+      You are running an automated WCAG 2.2 {input.wcag_target_level} accessibility scan on a single
+      page STATE. The page to audit is provided as the loop item: {{ _item }} - use its `url`,
+      `state_label`, and optional `interaction_recipe`. Author and run a Playwright script that does
+      exactly this and nothing else: (1) navigate to _item.url; if the page sits behind a login wall,
+      authenticate using the credentials supplied via the environment - never read or print secrets.
+      (2) If `interaction_recipe` is non-empty, perform that interaction to reach the target rendered
+      STATE (for example open the named modal, expand the menu/accordion, or trigger the SPA route
+      change) and wait for the dynamically-injected DOM to settle - this is the whole point, because
+      these violations only exist after JS executes and after the user interacts. (3) INJECT axe-core
+      into the page and run axe.run() against the LIVE accessibility tree of the current state, scoped
+      to WCAG 2.2 {input.wcag_target_level} rules. (4) For every violating node, capture a screenshot
+      of the actual rendered failure and keep a reference to it. Do NOT submit forms, pay, send,
+      delete, or mutate anything - this is a read-only scan that only loads, interacts to reveal a
+      state, injects axe, and screenshots. If a CAPTCHA or unexpected step-up wall appears, PAUSE for
+      a human rather than guessing. Return ONLY the structured object described by output_schema: the
+      raw axe violations (each with its axe rule id, the wcag_criterion tags axe reports, the impact,
+      and the failing nodes with target selector, outerHTML snippet, and screenshot_ref), plus
+      passes_count and incomplete_count, the scanned url and state_label, and axe_ran=true.
+    browser_config:
+      mode: playwright
+      start_url: "{{ _item.url }}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 120
+      max_actions: 50
+      headless: true
+      credentials_env: "{input.portal_credentials_env}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          url:
+            type: string
+            description: "The URL that was scanned (echoes _item.url)."
+          state_label:
+            type: string
+            description: "The state label reached before scanning (e.g. cart-modal-open)."
+          axe_ran:
+            type: boolean
+            description: "True only if axe-core was successfully injected and axe.run() completed against the live tree."
+          violations:
+            type: array
+            description: "axe-core violations array. Each item is one failing rule."
+            items:
+              type: object
+              properties:
+                id:
+                  type: string
+                  description: "axe rule id (e.g. color-contrast, aria-required-attr, image-alt)."
+                impact:
+                  type: string
+                  description: "axe impact: minor | moderate | serious | critical."
+                wcag_criterion:
+                  type: array
+                  description: "WCAG tag(s) axe attached to this rule (e.g. wcag2aa, wcag143, wcag412)."
+                  items:
+                    type: string
+                description:
+                  type: string
+                  description: "axe human-readable description of the rule that failed."
+                nodes:
+                  type: array
+                  description: "The failing DOM nodes for this rule."
+                  items:
+                    type: object
+                    properties:
+                      target:
+                        type: string
+                        description: "CSS selector / target path of the failing node."
+                      html:
+                        type: string
+                        description: "outerHTML snippet of the failing node."
+                      screenshot_ref:
+                        type: string
+                        description: "Reference to the captured screenshot of this failing node's rendered state."
+          passes_count:
+            type: integer
+            description: "Number of axe checks that passed on this state."
+          incomplete_count:
+            type: integer
+            description: "Number of axe checks that need manual review (incomplete)."
+        required: ["url", "axe_ran", "violations"]
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
+
+  # ---------------------------------------------------------------------------
+  # 3) VALIDATE + NORMALIZE + MAP + SCORE - the audit-LOAD-BEARING deterministic
+  #    math. NO model. First VALIDATES the axe extraction (rejecting empty/malformed
+  #    scans so a blank read can never pass as conformant). Then maps each axe rule id
+  #    -> WCAG 2.2 success criterion + EAA/Section-508 clause via an INLINE mapping
+  #    table, computes a per-page conformance score, counts critical (serious/critical
+  #    impact) violations, and applies the HARD pass/fail vs max_critical_per_page.
+  #    This pass/fail is pure Python and is the official conformance verdict.
+  # ---------------------------------------------------------------------------
+  - id: score_conformance
+    type: code
+    depends_on: [scan_loop]
+    code_config:
+      language: python
+      code: |
+        loop_out = _steps.get('scan_loop') or {}
+        # Loop output may be a list of per-item results or a wrapper dict.
+        if isinstance(loop_out, list):
+            items = loop_out
+        elif isinstance(loop_out, dict):
+            items = loop_out.get('results') or loop_out.get('items') or loop_out.get('output') or []
+        else:
+            items = []
+        if not isinstance(items, list):
+            items = [items]
+
+        max_critical = int(_input.get('max_critical_per_page', 0) or 0)
+        target_level = str(_input.get('wcag_target_level', 'AA') or 'AA').upper()
+
+        # INLINE axe-rule -> (WCAG 2.2 success criterion, EAA/Section-508 clause) mapping table.
+        # Deterministic, model-free. Covers the common axe rule ids; unknown rules fall back to
+        # the rule id itself and a generic clause so nothing is silently dropped.
+        WCAG_MAP = {
+            'color-contrast': {'sc': '1.4.3 Contrast (Minimum)', 'clause': 'EN 301 549 9.1.4.3 / 508 1194.21(c)'},
+            'color-contrast-enhanced': {'sc': '1.4.6 Contrast (Enhanced)', 'clause': 'EN 301 549 9.1.4.6'},
+            'image-alt': {'sc': '1.1.1 Non-text Content', 'clause': 'EN 301 549 9.1.1.1 / 508 1194.22(a)'},
+            'input-image-alt': {'sc': '1.1.1 Non-text Content', 'clause': 'EN 301 549 9.1.1.1'},
+            'area-alt': {'sc': '1.1.1 Non-text Content', 'clause': 'EN 301 549 9.1.1.1'},
+            'label': {'sc': '4.1.2 Name, Role, Value', 'clause': 'EN 301 549 9.4.1.2 / 508 1194.22(n)'},
+            'label-title-only': {'sc': '4.1.2 Name, Role, Value', 'clause': 'EN 301 549 9.4.1.2'},
+            'form-field-multiple-labels': {'sc': '4.1.2 Name, Role, Value', 'clause': 'EN 301 549 9.4.1.2'},
+            'aria-required-attr': {'sc': '4.1.2 Name, Role, Value', 'clause': 'EN 301 549 9.4.1.2'},
+            'aria-required-children': {'sc': '1.3.1 Info and Relationships', 'clause': 'EN 301 549 9.1.3.1'},
+            'aria-required-parent': {'sc': '1.3.1 Info and Relationships', 'clause': 'EN 301 549 9.1.3.1'},
+            'aria-roles': {'sc': '4.1.2 Name, Role, Value', 'clause': 'EN 301 549 9.4.1.2'},
+            'aria-valid-attr': {'sc': '4.1.2 Name, Role, Value', 'clause': 'EN 301 549 9.4.1.2'},
+            'aria-valid-attr-value': {'sc': '4.1.2 Name, Role, Value', 'clause': 'EN 301 549 9.4.1.2'},
+            'aria-hidden-focus': {'sc': '4.1.2 Name, Role, Value', 'clause': 'EN 301 549 9.4.1.2'},
+            'button-name': {'sc': '4.1.2 Name, Role, Value', 'clause': 'EN 301 549 9.4.1.2 / 508 1194.22(n)'},
+            'link-name': {'sc': '4.1.2 Name, Role, Value', 'clause': 'EN 301 549 9.4.1.2'},
+            'document-title': {'sc': '2.4.2 Page Titled', 'clause': 'EN 301 549 9.2.4.2'},
+            'html-has-lang': {'sc': '3.1.1 Language of Page', 'clause': 'EN 301 549 9.3.1.1 / 508 1194.22(i)'},
+            'html-lang-valid': {'sc': '3.1.1 Language of Page', 'clause': 'EN 301 549 9.3.1.1'},
+            'heading-order': {'sc': '1.3.1 Info and Relationships', 'clause': 'EN 301 549 9.1.3.1'},
+            'list': {'sc': '1.3.1 Info and Relationships', 'clause': 'EN 301 549 9.1.3.1'},
+            'listitem': {'sc': '1.3.1 Info and Relationships', 'clause': 'EN 301 549 9.1.3.1'},
+            'definition-list': {'sc': '1.3.1 Info and Relationships', 'clause': 'EN 301 549 9.1.3.1'},
+            'td-headers-attr': {'sc': '1.3.1 Info and Relationships', 'clause': 'EN 301 549 9.1.3.1'},
+            'th-has-data-cells': {'sc': '1.3.1 Info and Relationships', 'clause': 'EN 301 549 9.1.3.1'},
+            'duplicate-id-aria': {'sc': '4.1.1 Parsing', 'clause': 'EN 301 549 9.4.1.1'},
+            'frame-title': {'sc': '4.1.2 Name, Role, Value', 'clause': 'EN 301 549 9.4.1.2'},
+            'tabindex': {'sc': '2.4.3 Focus Order', 'clause': 'EN 301 549 9.2.4.3'},
+            'focus-order-semantics': {'sc': '2.4.3 Focus Order', 'clause': 'EN 301 549 9.2.4.3'},
+            'bypass': {'sc': '2.4.1 Bypass Blocks', 'clause': 'EN 301 549 9.2.4.1 / 508 1194.22(o)'},
+            'meta-viewport': {'sc': '1.4.4 Resize Text', 'clause': 'EN 301 549 9.1.4.4'},
+            'scrollable-region-focusable': {'sc': '2.1.1 Keyboard', 'clause': 'EN 301 549 9.2.1.1'},
+        }
+        GENERIC_CLAUSE = 'EN 301 549 (WCAG 2.2 ' + target_level + ') / Section 508'
+
+        def map_rule(rule_id, axe_tags):
+            entry = WCAG_MAP.get(rule_id)
+            if entry:
+                return entry['sc'], entry['clause']
+            # Fall back to any wcag### tag axe reported, else the rule id itself.
+            tag_hint = ''
+            for t in (axe_tags or []):
+                ts = str(t)
+                if ts.lower().startswith('wcag') and any(ch.isdigit() for ch in ts):
+                    tag_hint = ts
+                    break
+            sc = tag_hint or ('axe:' + str(rule_id))
+            return sc, GENERIC_CLAUSE
+
+        CRITICAL_IMPACTS = ('serious', 'critical')
+
+        def unwrap(it):
+            # A per-page browser result may be nested under output/data/result.
+            if isinstance(it, dict):
+                for k in ('output', 'data', 'result'):
+                    inner = it.get(k)
+                    if isinstance(inner, dict) and ('violations' in inner or 'axe_ran' in inner):
+                        return inner
+            return it if isinstance(it, dict) else {}
+
+        page_reports = []
+        validation_errors = []
+        total_violations = 0
+        total_critical = 0
+        pages_failed = 0
+        pages_scanned = 0
+
+        for raw_item in items:
+            page = unwrap(raw_item)
+            url = str(page.get('url') or '').strip()
+            state_label = str(page.get('state_label') or 'default').strip()
+            axe_ran = bool(page.get('axe_ran', False))
+            violations = page.get('violations')
+            if not isinstance(violations, list):
+                violations = []
+
+            # VALIDATE the extraction: a page that did not actually run axe, or has no url,
+            # is a BAD READ - it must not be scored as conformant (absence of violations from a
+            # failed scan is NOT a pass). Flag it and treat as failing for safety.
+            page_valid = True
+            page_reasons = []
+            if not url.startswith('http'):
+                page_valid = False
+                page_reasons.append('missing/invalid scanned url')
+            if not axe_ran:
+                page_valid = False
+                page_reasons.append('axe-core did not run on this state (blank/failed scan)')
+
+            mapped_violations = []
+            page_critical = 0
+            for v in violations:
+                if not isinstance(v, dict):
+                    continue
+                rule_id = str(v.get('id') or 'unknown-rule')
+                impact = str(v.get('impact') or 'moderate').lower()
+                axe_tags = v.get('wcag_criterion') if isinstance(v.get('wcag_criterion'), list) else []
+                sc, clause = map_rule(rule_id, axe_tags)
+                nodes = v.get('nodes') if isinstance(v.get('nodes'), list) else []
+                node_count = len(nodes)
+                is_critical = impact in CRITICAL_IMPACTS
+                if is_critical:
+                    page_critical += 1
+                mapped_violations.append({
+                    'rule_id': rule_id,
+                    'impact': impact,
+                    'is_critical': is_critical,
+                    'wcag_success_criterion': sc,
+                    'eaa_508_clause': clause,
+                    'node_count': node_count,
+                    'description': str(v.get('description') or ''),
+                    'nodes': nodes,
+                })
+
+            # Per-page conformance score: 1.0 = clean. Each violation costs, criticals cost more.
+            violation_count = len(mapped_violations)
+            penalty = sum((3 if mv['is_critical'] else 1) for mv in mapped_violations)
+            score = round(max(0.0, 1.0 - (penalty / 25.0)), 4)
+
+            # HARD deterministic pass/fail: a page passes only if it was a valid scan AND its
+            # critical count is within the configured threshold.
+            page_pass = bool(page_valid and (page_critical <= max_critical))
+
+            pages_scanned += 1
+            total_violations += violation_count
+            total_critical += page_critical
+            if not page_pass:
+                pages_failed += 1
+            if not page_valid:
+                validation_errors.append({'url': url or '(unknown)', 'state_label': state_label, 'reasons': page_reasons})
+
+            page_reports.append({
+                'url': url,
+                'state_label': state_label,
+                'axe_ran': axe_ran,
+                'valid_scan': page_valid,
+                'validation_reasons': page_reasons,
+                'violation_count': violation_count,
+                'critical_count': page_critical,
+                'conformance_score': score,
+                'page_pass': page_pass,
+                'passes_count': int(page.get('passes_count') or 0),
+                'incomplete_count': int(page.get('incomplete_count') or 0),
+                'violations': mapped_violations,
+            })
+
+        overall_score = round(sum(p['conformance_score'] for p in page_reports) / len(page_reports), 4) if page_reports else 0.0
+        # The audit FAILS (criticals exceed threshold) if any page failed or any scan was invalid.
+        criticals_exceed_threshold = bool(pages_failed > 0 or len(validation_errors) > 0 or pages_scanned == 0)
+
+        result = {
+            'audit_id': _input.get('audit_id'),
+            'wcag_target_level': target_level,
+            'max_critical_per_page': max_critical,
+            'pages_scanned': pages_scanned,
+            'pages_failed': pages_failed,
+            'total_violations': total_violations,
+            'total_critical': total_critical,
+            'overall_conformance_score': overall_score,
+            'criticals_exceed_threshold': criticals_exceed_threshold,
+            'has_invalid_scans': len(validation_errors) > 0,
+            'validation_errors': validation_errors,
+            'page_reports': page_reports,
+        }
+
+  # ---------------------------------------------------------------------------
+  # 4) GATE. The BINDING pass/fail is engine-native and NON-LLM: a human strategy
+  #    confirms the DETERMINISTIC threshold verdict computed above (the human signs
+  #    off on the mechanical score, they do not recompute it). A swappable llm_eval
+  #    ONLY drafts plain-language remediation guidance per violation and is advisory -
+  #    it cannot change the conformance score. ALL strategies must pass.
+  # ---------------------------------------------------------------------------
+  - id: conformance_gate
+    type: gate
+    depends_on: [score_conformance]
+    gate_config:
+      strategies:
+        # Advisory only: drafts remediation prose. Pin to ANY provider (swappable).
+        # Its verdict is non-binding on the conformance score, which is set in Python.
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are an accessibility remediation advisor. Read this deterministically-scored axe
+              report. For each WCAG violation, draft one short plain-language remediation tip (what
+              to change in the markup/CSS). Then reply with exactly the single word 'approved' to
+              acknowledge you have drafted guidance. Your reply does NOT determine conformance - the
+              pass/fail is already fixed by the Python score - so always reply 'approved' once you
+              have drafted guidance. Report: {steps.score_conformance.output}
+            input: "{steps.score_conformance.output}"
+            model: sonnet
+        # Binding, engine-native, non-LLM: a human attests to the mechanical verdict.
+        - type: human
+          config:
+            message: >-
+              Accessibility reviewer: confirm the deterministic scan results are complete before the
+              evidence pack is sealed. Pages scanned: {steps.score_conformance.output.pages_scanned},
+              pages failed: {steps.score_conformance.output.pages_failed}, total critical violations:
+              {steps.score_conformance.output.total_critical}, overall score:
+              {steps.score_conformance.output.overall_conformance_score}. Invalid/blank scans:
+              {steps.score_conformance.output.has_invalid_scans}. Confirm to proceed with sealing.
+            timeout_hours: 48
+            on_timeout: abort
+
+  # ---------------------------------------------------------------------------
+  # 5) ASSEMBLE the canonical, dated evidence pack DETERMINISTICALLY (no model):
+  #    the normalized axe JSON, per-page scores, WCAG/EAA mapping, screenshot refs,
+  #    a generation timestamp, and a SHA-256 over the canonical bytes so the pack is
+  #    tamper-evident at rest. Produces the S3 object key for the WORM write.
+  # ---------------------------------------------------------------------------
+  - id: assemble_evidence
+    type: code
+    depends_on: [conformance_gate]
+    code_config:
+      language: python
+      code: |
+        import json
+        import hashlib
+        from datetime import datetime, timezone
+
+        scored = _steps.get('score_conformance') or {}
+        if not isinstance(scored, dict):
+            scored = {}
+
+        generated_at = datetime.now(timezone.utc).isoformat()
+        audit_id = str(_input.get('audit_id') or 'audit')
+        date_stamp = generated_at[:10]
+
+        evidence = {
+            'audit_id': audit_id,
+            'generated_at': generated_at,
+            'wcag_target_level': scored.get('wcag_target_level'),
+            'max_critical_per_page': scored.get('max_critical_per_page'),
+            'totals': {
+                'pages_scanned': scored.get('pages_scanned', 0),
+                'pages_failed': scored.get('pages_failed', 0),
+                'total_violations': scored.get('total_violations', 0),
+                'total_critical': scored.get('total_critical', 0),
+                'overall_conformance_score': scored.get('overall_conformance_score', 0.0),
+            },
+            'criticals_exceed_threshold': bool(scored.get('criticals_exceed_threshold', True)),
+            'page_reports': scored.get('page_reports', []),
+            'validation_errors': scored.get('validation_errors', []),
+        }
+
+        # Canonical (sorted-key) serialization so the integrity hash is reproducible.
+        canonical = json.dumps(evidence, sort_keys=True, separators=(',', ':'))
+        digest = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+        object_key = 'evidence/' + audit_id + '/' + date_stamp + '/axe-evidence-pack.json'
+
+        result = {
+            'audit_id': audit_id,
+            'object_key': object_key,
+            'sha256': digest,
+            'byte_length': len(canonical),
+            'generated_at': generated_at,
+            'canonical_json': canonical,
+            'evidence_pack': evidence,
+        }
+
+  # ---------------------------------------------------------------------------
+  # 6) WRITE (the ONLY irreversible action - append-only WORM): PUT the canonical
+  #    axe JSON + scores + screenshot refs to the object-lock S3 bucket as the dated
+  #    evidence pack. Object-lock COMPLIANCE mode + retain-until makes it WORM; the
+  #    SHA-256 rides as object metadata so the pack is tamper-evident. Secrets come
+  #    from env (aws4), never inline. This append-only write needs no human approval
+  #    (it cannot overwrite or destroy); the OFFICIAL FILING of the report is what is
+  #    gated by a human below.
+  # ---------------------------------------------------------------------------
+  - id: seal_evidence_pack
+    type: http
+    depends_on: [assemble_evidence]
+    http_config:
+      url: "{input.s3_base_url}/{input.s3_bucket}/{steps.assemble_evidence.output.object_key}"
+      method: PUT
+      headers:
+        Content-Type: "application/json"
+        x-amz-object-lock-mode: "COMPLIANCE"
+        x-amz-object-lock-retain-until-date: "2034-01-01T00:00:00Z"
+        x-amz-meta-sha256: "{steps.assemble_evidence.output.sha256}"
+        x-amz-meta-audit-id: "{input.audit_id}"
+      auth: "aws4:{env.AWS_ACCESS_KEY_ID}:{env.AWS_SECRET_ACCESS_KEY}"
+      body: "{steps.assemble_evidence.output.canonical_json}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # ---------------------------------------------------------------------------
+  # 7) CONFIRM the write took effect (engine-native SENSOR, no model). Poll the
+  #    object's HEAD on S3 until it is durably present - the evidence pack is not
+  #    declared sealed on the PUT's word alone; the bucket itself must confirm.
+  # ---------------------------------------------------------------------------
+  - id: confirm_sealed
+    type: sensor
+    depends_on: [seal_evidence_pack]
+    sensor_config:
+      url: "{input.s3_base_url}/{input.s3_bucket}/{steps.assemble_evidence.output.object_key}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200"
+      check_interval: 30
+      timeout: 1800
+
+  # ---------------------------------------------------------------------------
+  # 8) REPORT - VPAT-style conformance PDF with embedded screenshots of the actual
+  #    rendered failures and the WCAG 2.2 success-criterion / EAA-508 clause mapping.
+  #    Generated from the sealed, deterministically-scored evidence. The prose reflects
+  #    the Python verdict; it does not recompute conformance.
+  # ---------------------------------------------------------------------------
+  - id: conformance_report
+    type: report
+    depends_on: [confirm_sealed]
+    report_config:
+      template: "research-report"
+      format: pdf
+      theme: professional
+      title: "VPAT / WCAG 2.2 Accessibility Conformance Report - {input.audit_id}"
+      author: "{input.report_author}"
+    prompt: |
+      Produce a formal VPAT-style WCAG 2.2 accessibility conformance report (PDF) for the audit file
+      from the payload below. Open with the audit id, generation timestamp, target conformance level,
+      and the headline totals: pages scanned, pages failed, total violations, total critical
+      violations, and the overall conformance score. Then, for EACH scanned page+state, list its URL
+      and state label, its per-page conformance score and pass/fail, and a table of every violation
+      showing: axe rule id, impact, the mapped WCAG 2.2 success criterion, the EAA / EN 301 549 /
+      Section 508 clause, the failing node selectors, and the embedded screenshot reference of the
+      actual rendered failure. Clearly mark any page whose scan was invalid/blank as NON-CONFORMANT
+      (a failed scan is never reported as a pass). State plainly whether critical violations exceeded
+      the configured per-page threshold. Use only the structured facts below; do not invent results.
+      Evidence pack: {steps.assemble_evidence.output.evidence_pack}. Integrity SHA-256:
+      {steps.assemble_evidence.output.sha256}. Sealed object: {steps.assemble_evidence.output.object_key}.
+
+  # ---------------------------------------------------------------------------
+  # 9) CONDITION (deterministic, on the Python verdict). If critical violations
+  #    exceeded the threshold, route to a human a11y-lead approval BEFORE the report
+  #    is marked the official filing. Otherwise mark it filed automatically. The
+  #    trajectory-replay coverage check runs in both branches.
+  # ---------------------------------------------------------------------------
+  - id: filing_route
+    type: condition
+    depends_on: [conformance_report]
+    condition_config:
+      expression: "{steps.score_conformance.output.criticals_exceed_threshold} == True"
+      then: [a11y_lead_filing_approval, replay_coverage_check]
+      else: [mark_official_filing, replay_coverage_check]
+
+  # 9a) FAILING-AUDIT PATH - critical violations exceeded the threshold. A human
+  #     a11y lead must explicitly approve before this conformance report becomes the
+  #     official filing. on_timeout: abort - a failing audit is NEVER auto-filed.
+  - id: a11y_lead_filing_approval
+    type: approval
+    depends_on: [filing_route]
+    approval_config:
+      message: >-
+        ACCESSIBILITY FILING APPROVAL REQUIRED - audit {input.audit_id} has critical WCAG violations
+        that EXCEED the configured threshold ({steps.score_conformance.output.total_critical} critical
+        across {steps.score_conformance.output.pages_failed} failing page(s), overall score
+        {steps.score_conformance.output.overall_conformance_score}). The evidence pack is already
+        sealed to the object-lock bucket (sha256 {steps.assemble_evidence.output.sha256}). Review the
+        VPAT-style report and the screenshot-backed failures, then approve to mark this as the OFFICIAL
+        conformance filing, or reject to hold it pending remediation.
+      show_data: steps.score_conformance.output
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: false
+
+  # 9b) PASSING-AUDIT PATH - within threshold; mark filed deterministically.
+  - id: mark_official_filing
+    type: code
+    depends_on: [filing_route]
+    code_config:
+      language: python
+      code: |
+        assembled = _steps.get('assemble_evidence') or {}
+        scored = _steps.get('score_conformance') or {}
+        result = {
+            'audit_id': _input.get('audit_id'),
+            'official_filing': True,
+            'auto_filed': True,
+            'reason': 'within max_critical_per_page threshold',
+            'overall_conformance_score': scored.get('overall_conformance_score', 0.0),
+            'evidence_object': assembled.get('object_key', ''),
+            'evidence_sha256': assembled.get('sha256', ''),
+        }
+
+  # ---------------------------------------------------------------------------
+  # 10) TRAJECTORY-REPLAY (reliability layer, read-only). Diff THIS scan run against
+  #     the golden run to detect when a UI change silently regressed scan coverage -
+  #     e.g. an interaction recipe no longer reaches the modal, so a whole state stops
+  #     being scanned and the audit goes quietly blind. Fails on coverage drift or
+  #     cost blowup. Deterministic scorer, not a model's opinion.
+  # ---------------------------------------------------------------------------
+  - id: replay_coverage_check
+    type: trajectory-replay
+    depends_on: [filing_route]
+    trajectory_replay_config:
+      golden_run_id: "{input.golden_run_id}"
+      fail_below_score: 0.85
+      allow_cost_delta_pct: 15.0
+      cost_budget_usd: 0.50
+
+on_complete:
+  storage_path: "wcag-accessibility-audit-evidence-pack/{run_id}/result.json"

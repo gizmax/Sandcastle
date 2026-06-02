@@ -1,0 +1,845 @@
+# name: ATS Job Application Autosubmit
+# description: Files a placed candidate's tailored application into a Workday / Greenhouse / Lever / iCIMS / Taleo-style ATS apply flow on behalf of an outplacement or high-volume recruiting agency's back-office application ops. Public ATS apply flows expose no candidate-facing write API: the apply form is a login-gated, multi-page JS SPA with dynamic per-job EEO / screening questions, resume-parse autofill that must be corrected, and file uploads - none reachable by http - and each posting renders a different field map that must be discovered at runtime in the live DOM. It deterministically validates the candidate payload and normalizes a flat field-intent map, reads the live apply-wizard structure READ-ONLY in dom mode (login via ATS_CREDS, CAPTCHA pauses to a human), classifies each discovered field to a candidate-data key, gates the whole mapping behind an llm_eval anti-fabrication check plus a human reviewer, fills every field and uploads the resume in a provider-neutral playwright pass that STOPS on the review page (never clicks Submit), holds for a human approval of the irreversible submit, clicks Submit and captures the confirmation number, asserts the confirmation deterministically, then sensor-polls the application's own status page until the ATS confirms receipt before writing the confirmation back. Read is split from write, the flow fails closed, and the irreversible submit can never fire on a single model's opinion alone.
+# tags: [ATS, JobApplication, Workday, Greenhouse, Lever, iCIMS, Taleo, RPA, Playwright, DOM, HumanInTheLoop, Sensor, ProviderNeutral, NoAPI, Outplacement, Recruiting]
+# category: sales_crm
+
+name: ats-job-application-autosubmit
+description: >-
+  Takes a single candidate-queue row - {job_url, candidate_profile, tailored_answers, resume_file} -
+  that an outplacement / career-services firm or a high-volume recruiting agency has queued for a placed
+  candidate, and FILES the application into a Workday / Greenhouse / Lever / iCIMS / Taleo-style ATS apply
+  flow on the candidate's behalf (back-office application ops). Public ATS apply flows expose NO
+  candidate-facing write API: the apply form is a login-gated, multi-page JS single-page app with
+  dynamic per-job EEO / voluntary-disclosure / screening questions, resume-parse autofill that must be
+  corrected, and file uploads - none of which http can reach. Because each posting renders a different
+  field map, the form structure must be discovered at RUNTIME in the live DOM. The flow is split
+  read-from-write and fails closed. A DETERMINISTIC code step validates the candidate payload (required
+  profile fields present, resume path resolvable, tailored answers non-empty) and normalizes a flat
+  field-intent map keyed by normalized label. A provider-neutral dom-mode browser step logs in via
+  ATS_CREDS (CAPTCHA / step-up hands off to a human through captcha_strategy=pause), walks the apply
+  wizard, and EXTRACTS its structure READ-ONLY via output_schema - every page, every field with its
+  label / type / required flag / options, plus a detected_captcha flag - writing nothing. A
+  provider-agnostic classify routes on how rich the per-job custom screening surface is, then a
+  deterministic code step matches each discovered field to a candidate-data key and produces a
+  {field_label -> value, unmapped_fields[]} fill plan, rejecting on any required field with no source
+  value. A gate (llm_eval anti-fabrication completeness check + a human reviewer of unmapped / sensitive
+  answers) must pass before anything is typed. Only then does a playwright-mode browser step re-open the
+  wizard, fill all fields per the approved plan, upload the resume, and STOP on the REVIEW page - it does
+  NOT click Submit - returning whether the fill landed, a review-page screenshot, and the entered values.
+  A deterministic code step validates that filled state, then a mandatory human approval gates the
+  IRREVERSIBLE submit: the reviewer sees the screenshot and entered values and authorizes it. A second
+  playwright step clicks Submit ONCE and captures {confirmation_id, confirmation_text, timestamp}; a
+  deterministic code step asserts a confirmation_id is present and well-formed - the load-bearing success
+  gate, so a silently-failed submit can never be recorded as a filed application. An engine-native sensor
+  then polls the application's own status page until the ATS confirms receipt (a second, portal-sourced
+  proof), and finally a notify + transform write the confirmation back to the candidate row. Every
+  browser step rides default_model and stays swappable; the anti-fabrication llm_eval and the classify
+  run provider-agnostically with failover; the code validators and the sensor are pure engine logic - so
+  swapping the reasoning provider never changes filing behavior or weakens safety.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 1800
+
+input_schema:
+  required: ["job_url", "candidate_profile", "tailored_answers", "resume_file", "status_url"]
+  properties:
+    job_url:
+      type: string
+      description: "Start URL of the ATS apply flow for this posting (a login-gated multi-page SPA with no candidate-facing write API). Templated into both browser steps' start_url."
+      example: "https://boards.greenhouse.io/acme/jobs/5512334/apply"
+    candidate_profile:
+      type: string
+      description: "Structured profile for the placed candidate, as a JSON string. Drives field mapping. Each key is a normalized candidate-data key (first_name, last_name, email, phone, work_authorization, etc.). PII values are NOT logged raw - only presence flags are emitted."
+      example: '{"first_name":"Dana","last_name":"Okoye","email":"dana.okoye@example.com","phone":"+1-415-555-0199","city":"San Francisco","work_authorization":"US Citizen","requires_sponsorship":false,"linkedin":"https://linkedin.com/in/danaokoye","veteran_status":"I am not a protected veteran","disability_status":"I do not wish to answer","gender":"Decline to self-identify","ethnicity":"Decline to self-identify"}'
+    tailored_answers:
+      type: string
+      description: "Per-job tailored free-text answers to custom screening / EEO / cover-letter style questions, as a JSON string keyed by normalized question label. Used to map the dynamic per-posting questions discovered at runtime. Must be non-empty for required custom questions."
+      example: '{"why_do_you_want_to_work_here":"I admire the work on developer tooling","years_of_python_experience":"6","are_you_willing_to_relocate":"Yes","cover_letter":"Dear Hiring Team, ..."}'
+    resume_file:
+      type: string
+      description: "Reference to the candidate's resume file to upload (e.g. an s3:// or file path). Existence/resolvability is validated before any filing; the upload happens in the playwright fill pass."
+      example: "s3://candidates/dana-okoye/resume.pdf"
+    status_url:
+      type: string
+      description: "URL of the application's own status / confirmation page for THIS submission; the post-submit sensor re-reads it to confirm the ATS recorded receipt (a second, portal-sourced proof beyond the on-screen confirmation)."
+      example: "https://boards.greenhouse.io/acme/applications/INV-OKOYE-5512334/status"
+    required_profile_fields:
+      type: array
+      description: "Profile keys that MUST be present and non-empty for the application to proceed. The validate step fails closed if any is missing."
+      default: ["first_name", "last_name", "email", "phone", "work_authorization"]
+    confirmation_id_pattern:
+      type: string
+      description: "Regex the ATS-issued confirmation_id must match (deterministic success gate). Defaults to a generic confirmation-id shape; override per ATS."
+      default: "^[A-Za-z0-9][A-Za-z0-9_-]{4,}$"
+      example: "^GH-[0-9]{6,}$"
+    candidate_row_id:
+      type: string
+      description: "Identifier of the candidate-queue row this run was triggered from (Postgres id / Sheet row key). Used to write the confirmation back to the right row and to label notifications."
+      default: ""
+      example: "queue-row-8841"
+    crm_writeback_url:
+      type: string
+      description: "Optional HTTP endpoint of the candidate queue / CRM to which the transform writes the confirmation back (the transform emits the payload; the engine's writeback target consumes it)."
+      default: ""
+      example: "https://ops.agency.example/api/candidate-queue/8841/applied"
+    sensor_poll_interval_seconds:
+      type: integer
+      description: "Seconds between status-page polls while waiting for the ATS to confirm receipt of the application."
+      default: 60
+      example: "60"
+    sensor_timeout_seconds:
+      type: integer
+      description: "Hard ceiling in seconds the receipt sensor waits for ATS confirmation before giving up; a timeout is NOT treated as success (the run is left needing attention)."
+      default: 3600
+      example: "3600"
+    approval_timeout_hours:
+      type: integer
+      description: "Hours the human submit-approval waits before its timeout fires (on_timeout: abort - never auto-submits)."
+      default: 24
+      example: "24"
+    notify_channel:
+      type: string
+      description: "Slack channel for the application-ops team's filed / blocked / needs-attention notifications."
+      default: "#application-ops"
+      example: "#application-ops"
+
+steps:
+  # 1) DETERMINISTIC intake validation + field-intent normalization (sandboxed Python, no model).
+  #    Confirm every required profile field is present and non-empty, the resume reference resolves,
+  #    and the tailored answers are non-empty, then NORMALIZE the candidate profile + tailored answers
+  #    into a single flat field-intent map keyed by normalized label (lowercased, spaces -> underscores)
+  #    so the discovered DOM fields can be matched against it deterministically. Raw PII is REDACTED
+  #    from emitted log fields (only presence flags). Fails CLOSED - nothing touches an ATS on a bad
+  #    payload. This is the load-bearing pre-flight check, not a model's opinion.
+  - id: validate_candidate
+    type: code
+    code_config:
+      language: python
+      code: |
+        import json
+        # --- Parse the structured candidate-queue row handed in by the trigger. ---
+        def _load(raw, default):
+            if isinstance(raw, (dict, list)):
+                return raw
+            try:
+                return json.loads(raw)
+            except (TypeError, ValueError):
+                return default
+
+        profile = _load(_input.get('candidate_profile') or '', {})
+        if not isinstance(profile, dict):
+            profile = {}
+        answers = _load(_input.get('tailored_answers') or '', {})
+        if not isinstance(answers, dict):
+            answers = {}
+        resume_ref = str(_input.get('resume_file', '') or '').strip()
+
+        problems = []
+
+        # --- Required profile fields must be present and non-empty. ---
+        required_fields = _input.get('required_profile_fields') or [
+            'first_name', 'last_name', 'email', 'phone', 'work_authorization',
+        ]
+        for k in required_fields:
+            if not str(profile.get(k, '') or '').strip():
+                problems.append('missing required profile field: ' + str(k))
+
+        # --- Resume reference must resolve to something (path / s3 ref present). ---
+        if not resume_ref:
+            problems.append('resume_file reference is empty (no resume to upload)')
+
+        # --- Tailored answers must be non-empty (at least one tailored answer present). ---
+        non_empty_answers = {k: v for k, v in answers.items() if str(v or '').strip()}
+        if len(non_empty_answers) == 0:
+            problems.append('tailored_answers is empty (no per-job answers to map)')
+
+        # --- Normalize a FLAT field-intent map keyed by normalized label. ---
+        # Profile keys and tailored-answer keys both become candidate-data keys the DOM
+        # fields can map against; answers win on a key clash (they are job-specific).
+        def _norm(label):
+            return str(label or '').strip().lower().replace(' ', '_')
+
+        field_intent = {}
+        for k, v in profile.items():
+            val = v
+            if isinstance(v, bool):
+                val = 'Yes' if v else 'No'
+            field_intent[_norm(k)] = val
+        for k, v in non_empty_answers.items():
+            field_intent[_norm(k)] = v
+
+        # --- PII REDACTION for logs: keep structure + presence flags, drop raw identity values. ---
+        redacted_profile = {
+            'has_first_name': bool(str(profile.get('first_name', '') or '').strip()),
+            'has_last_name': bool(str(profile.get('last_name', '') or '').strip()),
+            'has_email': bool(str(profile.get('email', '') or '').strip()),
+            'has_phone': bool(str(profile.get('phone', '') or '').strip()),
+            'work_authorization': str(profile.get('work_authorization', '') or ''),
+            'requires_sponsorship': bool(profile.get('requires_sponsorship', False)),
+            'answer_count': len(non_empty_answers),
+            'resume_present': bool(resume_ref),
+        }
+
+        ok = len(problems) == 0
+        result = {
+            'ok': ok,
+            'problems': problems,
+            # Redacted, log-safe view (no raw PII).
+            'redacted_profile': redacted_profile,
+            # Flat intent map the field-mapping step uses; carried forward, not a logged field.
+            'field_intent': field_intent,
+            'field_intent_keys': sorted(field_intent.keys()),
+            'resume_ref': resume_ref,
+            'answer_count': len(non_empty_answers),
+        }
+
+  # 1b) Hard stop on a bad payload - never touch an ATS apply flow with an incomplete candidate row.
+  - id: payload_gate
+    type: condition
+    depends_on: [validate_candidate]
+    condition_config:
+      expression: "{steps.validate_candidate.output.ok} == True"
+      then: [read_wizard]
+      else: [notify_blocked]
+
+  # 1c) Blocked branch: tell application-ops the row was NOT filed and why. Nothing was submitted.
+  - id: notify_blocked
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        ATS application for candidate row {input.candidate_row_id} was BLOCKED before any apply-flow
+        entry. Payload validation failed: {steps.validate_candidate.output.problems}. No application
+        was filed and no PII was transmitted. Fix the candidate row and re-run.
+
+  # 2) READ PASS (dom mode, READ-ONLY, provider-neutral). The reasoning model logs in via ATS_CREDS
+  #    (never inlined) - CAPTCHA / step-up auth hands off to a human through captcha_strategy=pause -
+  #    walks the multi-page apply wizard, and EXTRACTS its structure WITHOUT entering anything: each
+  #    page, and for each page every field's label / type / required flag / options, plus a
+  #    detected_captcha flag. Because each posting renders a different field map, this discovers the
+  #    live structure at runtime. max_actions caps clicking; output_schema returns structured JSON to
+  #    map against. No write happens.
+  - id: read_wizard
+    type: browser
+    depends_on: [payload_gate]
+    prompt: >-
+      You are doing a READ-ONLY reconnaissance of a multi-page ATS job-application wizard (Workday /
+      Greenhouse / Lever / iCIMS / Taleo style). Log in using the credentials provided via the ATS_CREDS
+      environment variable. If a CAPTCHA, bot-check, or step-up / device-verification prompt appears,
+      STOP and hand off to a human (captcha_strategy=pause) - do not attempt to solve it, and set
+      detected_captcha=true. Open the apply flow for this posting. DO NOT type into, select, upload to,
+      or submit any field - this is a structure read only; resume-parse autofill may pre-populate some
+      fields but do not correct or change anything. Walk every page of the wizard and report its
+      structure: the ordered list of pages, and for each page its page_name and its fields - for each
+      field the visible label, the input type (text / email / tel / select / radio / checkbox / file /
+      textarea), whether it is required, and the allowed options if it is a dropdown / radio. Capture the
+      dynamic per-job EEO / voluntary-disclosure / custom screening questions too. Return ONLY the
+      structured object described by the output schema.
+    browser_config:
+      mode: dom
+      start_url: "{input.job_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 300
+      max_actions: 60
+      headless: true
+      credentials_env: "ATS_CREDS"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          pages:
+            type: array
+            items:
+              type: object
+              properties:
+                page_name: { type: string }
+                fields:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      label: { type: string }
+                      type: { type: string }
+                      required: { type: boolean }
+                      options:
+                        type: array
+                        items: { type: string }
+          detected_captcha: { type: boolean }
+
+  # 3) CLASSIFY (provider-agnostic with failover) - route on how rich this posting's custom screening
+  #    surface is so the human reviewer knows what to expect, given the validated intent map and the
+  #    discovered wizard. Routing only - the load-bearing field mapping is built deterministically in
+  #    the next code step; every branch converges on build_fill_plan.
+  - id: classify_screening
+    type: classify
+    depends_on: [read_wizard]
+    model: haiku
+    classify_config:
+      model: haiku
+      input: >-
+        Decide how rich this ATS posting's custom screening surface is, given the discovered wizard
+        structure and the validated candidate intent map. Choose 'heavy_screening' when the wizard has
+        several custom free-text / screening questions beyond standard contact + EEO fields;
+        'eeo_heavy' when the bulk of the extra fields are voluntary EEO / disclosure questions;
+        'standard_apply' when it is mostly the standard contact + resume + a few questions; 'minimal'
+        when it is a short one-page apply. Validated candidate intent keys:
+        {steps.validate_candidate.output.field_intent_keys} . Discovered wizard structure:
+        {steps.read_wizard.output} .
+      categories:
+        - heavy_screening
+        - eeo_heavy
+        - standard_apply
+        - minimal
+      branches:
+        heavy_screening: [build_fill_plan]
+        eeo_heavy: [build_fill_plan]
+        standard_apply: [build_fill_plan]
+        minimal: [build_fill_plan]
+
+  # 4) DETERMINISTIC field-mapping FILL PLAN (sandboxed Python, no model). Matches each discovered DOM
+  #    field to a candidate-data key from the validated flat intent map (by normalized label), producing
+  #    a {field_label -> value} plan plus an explicit unmapped_fields[] list. REJECTS when any REQUIRED
+  #    discovered field has no source value, and surfaces every unmapped field (required or not) for the
+  #    human reviewer. This is the load-bearing correctness layer before the gate - nothing is typed on
+  #    a bad plan.
+  - id: build_fill_plan
+    type: code
+    depends_on: [classify_screening]
+    code_config:
+      language: python
+      code: |
+        validated = _steps.get('validate_candidate') or {}
+        if not isinstance(validated, dict):
+            validated = {}
+        wizard = _steps.get('read_wizard') or {}
+        if not isinstance(wizard, dict):
+            wizard = {}
+        # Browser payloads may nest under output/data/result.
+        for key in ('output', 'data', 'result'):
+            inner = wizard.get(key)
+            if isinstance(inner, dict) and ('pages' in inner or 'detected_captcha' in inner):
+                wizard = inner
+                break
+
+        intent = validated.get('field_intent') if isinstance(validated.get('field_intent'), dict) else {}
+        pages = wizard.get('pages') if isinstance(wizard.get('pages'), list) else []
+
+        problems = []
+
+        def _norm(label):
+            return str(label or '').strip().lower().replace(' ', '_')
+
+        # --- Field mapping: every REQUIRED discovered field must trace to a source value. ---
+        fill_plan = []          # [{label, value, source_key, type, required}]
+        unmapped_fields = []    # discovered fields with no source value (required or optional)
+        required_unmapped = []  # required discovered fields with no source value -> rejection
+        field_total = 0
+        for page in pages:
+            if not isinstance(page, dict):
+                continue
+            page_name = str(page.get('page_name', '') or '')
+            for f in (page.get('fields') or []):
+                if not isinstance(f, dict):
+                    continue
+                label = str(f.get('label', '') or '').strip()
+                if not label:
+                    continue
+                field_total += 1
+                required = bool(f.get('required'))
+                norm = _norm(label)
+                src_val = intent.get(norm)
+                # Light fuzzy fallback: try matching on a normalized-key containment when no exact hit.
+                if src_val in (None, '', [], {}):
+                    for ik, iv in intent.items():
+                        if ik and (ik in norm or norm in ik):
+                            src_val = iv
+                            norm = ik
+                            break
+                has_src = src_val not in (None, '', [], {})
+                if has_src:
+                    fill_plan.append({
+                        'page': page_name,
+                        'label': label,
+                        'value': src_val,
+                        'source_key': norm,
+                        'type': str(f.get('type', '') or ''),
+                        'required': required,
+                    })
+                else:
+                    unmapped_fields.append({'page': page_name, 'label': label, 'required': required})
+                    if required:
+                        required_unmapped.append(page_name + '.' + label)
+
+        if required_unmapped:
+            problems.append('required wizard fields with no source value: ' + ', '.join(required_unmapped))
+        if field_total == 0:
+            problems.append('no fields discovered in the apply wizard (empty read)')
+
+        # A captcha detected during the read means the flow cannot proceed unattended.
+        if bool(wizard.get('detected_captcha')):
+            problems.append('a CAPTCHA / bot-check was detected during the read pass')
+
+        ok = (len(problems) == 0) and (len(fill_plan) > 0)
+        result = {
+            'ok': ok,
+            'problems': problems,
+            'fill_plan': fill_plan,
+            'mapped_count': len(fill_plan),
+            'field_total': field_total,
+            'unmapped_fields': unmapped_fields,
+            'unmapped_count': len(unmapped_fields),
+            'required_unmapped': required_unmapped,
+            'resume_ref': validated.get('resume_ref', ''),
+        }
+
+  # 4b) Hard stop on a bad mapping - do NOT proceed to the gate / data entry on an incomplete plan.
+  - id: plan_gate
+    type: condition
+    depends_on: [build_fill_plan]
+    condition_config:
+      expression: "{steps.build_fill_plan.output.ok} == True"
+      then: [entry_gate]
+      else: [notify_plan_failed]
+
+  - id: notify_plan_failed
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        ATS application for candidate row {input.candidate_row_id} could NOT be mapped to the apply
+        wizard before any data entry: {steps.build_fill_plan.output.problems}. Required unmapped fields:
+        {steps.build_fill_plan.output.required_unmapped}. Nothing was entered. Resolve and re-run.
+
+  # 5) PRE-ENTRY GATE - ALL strategies must pass before anything is typed/uploaded into the apply flow.
+  #    (a) llm_eval ANTI-FABRICATION + completeness: confirms every required field is mapped AND that no
+  #        planned value looks fabricated / invented relative to the candidate profile and tailored
+  #        answers (provider-swappable, runs with failover).
+  #    (b) human: a reviewer signs off on the unmapped / sensitive answers (EEO, sponsorship, custom
+  #    screening) before entry. This is the last stop before the (still reversible) data entry; the
+  #    irreversible submit is gated separately downstream.
+  - id: entry_gate
+    type: gate
+    depends_on: [plan_gate]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are an ATS application mapping reviewer guarding against fabricated answers. Verify the
+              proposed field-mapping fill plan is COMPLETE and that NO value is fabricated BEFORE anything
+              is entered into the apply flow. Reply with exactly 'approved' only if: every required
+              wizard field has a traceable source value (no required field unmapped); and every planned
+              value is grounded in the candidate's validated profile or their tailored answers - no
+              invented employment dates, credentials, work-authorization, or EEO answers that the
+              candidate did not provide. Otherwise reply 'rejected' and name each unmapped required field
+              or each value that looks fabricated. Validated candidate (redacted flags):
+              {steps.validate_candidate.output.redacted_profile} . Fill plan:
+              {steps.build_fill_plan.output.fill_plan} . Unmapped fields:
+              {steps.build_fill_plan.output.unmapped_fields} .
+            input: "{steps.build_fill_plan.output}"
+            model: google/gemini-2.5-pro
+        - type: human
+          config:
+            message: >-
+              ATS pre-entry review for candidate row {input.candidate_row_id}. Confirm the field-mapping
+              fill plan is correct and approve entry into the apply flow. Mapped fields:
+              {steps.build_fill_plan.output.mapped_count} of {steps.build_fill_plan.output.field_total}.
+              Review the UNMAPPED / sensitive answers before approving (EEO, sponsorship, custom
+              screening): {steps.build_fill_plan.output.unmapped_fields}. Reject if any required field is
+              unmapped or any answer is wrong. Full plan: {steps.build_fill_plan.output.fill_plan}
+            timeout_hours: 24
+            on_timeout: abort
+
+  # 6) FILL PASS (playwright mode, provider-neutral). The reasoning model AUTHORS a Playwright script
+  #    that re-logs-in via ATS_CREDS (CAPTCHA pauses to a human), re-opens the apply wizard, corrects
+  #    any wrong resume-parse autofill, fills EVERY field from the approved plan across all pages,
+  #    uploads the resume to the file slot, advances to the FINAL REVIEW page, and STOPS. It does NOT
+  #    click Submit. capture_screenshots gives an auditable review snapshot; output_schema returns the
+  #    entered values and whether the submit control is present for the reviewer. max_actions bounds the
+  #    wizard.
+  - id: fill_to_review
+    type: browser
+    depends_on: [entry_gate]
+    prompt: >-
+      You are completing a multi-page ATS job-application wizard on behalf of a placed candidate.
+      Authenticate using the ATS_CREDS environment variable - if a CAPTCHA, bot-check, or step-up auth
+      appears, PAUSE for a human (do not attempt to solve it). Open the apply flow and walk it end to end.
+      Using the APPROVED fill plan, set every field to its planned value across every page, correcting any
+      wrong resume-parse autofill so the visible value matches the plan, and waiting for client-side
+      validation to settle before advancing each page. Upload the candidate's resume from the resume
+      reference to the file-upload slot. CRITICAL: advance only to the FINAL REVIEW / summary page and
+      STOP there - DO NOT click the final Submit / Apply / Send Application button. Submission is a
+      separate, human-approved step. Approved fill plan: {steps.build_fill_plan.output.fill_plan} . Resume
+      reference to upload: {steps.build_fill_plan.output.resume_ref} . Return ONLY the structured object:
+      whether the fill landed (filled), a reference to the captured review-page screenshot, a summary of
+      the entered values as shown on the review page, the count of fields actually filled, whether the
+      resume upload was accepted, and whether the final Submit button is present and enabled on the review
+      page.
+    browser_config:
+      mode: playwright
+      start_url: "{input.job_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 600
+      max_actions: 150
+      headless: true
+      credentials_env: "ATS_CREDS"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          filled: { type: boolean }
+          review_page_screenshot: { type: string }
+          summary_of_entered_values:
+            type: object
+            properties:
+              first_name: { type: string }
+              last_name: { type: string }
+              email: { type: string }
+              fields_filled: { type: integer }
+          filled_field_count: { type: integer }
+          resume_uploaded: { type: boolean }
+          submit_button_present: { type: boolean }
+
+  # 6b) DETERMINISTIC validation of the FILLED review state (no model). The load-bearing pre-submit
+  #     check: the fill must report success, the filled field count must cover the planned mapped fields,
+  #     the resume must be uploaded, the submit button must be present (wizard actually reached review),
+  #     and a review screenshot must exist for the human. Fails closed.
+  - id: validate_review
+    type: code
+    depends_on: [fill_to_review]
+    code_config:
+      language: python
+      code: |
+        read_out = _steps.get('fill_to_review') or {}
+        if not isinstance(read_out, dict):
+            read_out = {}
+        for key in ('output', 'data', 'result'):
+            inner = read_out.get(key)
+            if isinstance(inner, dict) and ('filled' in inner or 'summary_of_entered_values' in inner):
+                read_out = inner
+                break
+
+        plan = _steps.get('build_fill_plan') or {}
+        if not isinstance(plan, dict):
+            plan = {}
+
+        problems = []
+
+        def _int(v):
+            try:
+                return int(v)
+            except (TypeError, ValueError):
+                return 0
+
+        # The fill step must report it actually filled the form.
+        if not read_out.get('filled'):
+            problems.append('fill step did not report filled=true (form not safely filled)')
+
+        # Filled field count must cover the planned mapped fields (no silently dropped fields).
+        planned_mapped = _int(plan.get('mapped_count'))
+        filled_count = _int(read_out.get('filled_field_count'))
+        if filled_count < planned_mapped:
+            problems.append('filled field count ' + str(filled_count) + ' < planned mapped '
+                            + str(planned_mapped))
+
+        # The resume must have uploaded.
+        if not read_out.get('resume_uploaded'):
+            problems.append('resume was not reported as uploaded')
+
+        # The wizard must have reached a review screen with a submit control.
+        if not read_out.get('submit_button_present'):
+            problems.append('submit button not present - wizard did not reach the review page')
+
+        # A review screenshot must exist for the human approver to inspect.
+        review_shot = str(read_out.get('review_page_screenshot', '') or '').strip()
+        if not review_shot:
+            problems.append('no review-page screenshot captured for the human approver')
+
+        entered = read_out.get('summary_of_entered_values')
+        if not isinstance(entered, dict):
+            entered = {}
+
+        ok = len(problems) == 0
+        result = {
+            'ok': ok,
+            'problems': problems,
+            'review_page_screenshot': review_shot,
+            'summary_of_entered_values': entered,
+            'filled_field_count': filled_count,
+            'planned_mapped_count': planned_mapped,
+            'resume_uploaded': bool(read_out.get('resume_uploaded')),
+        }
+
+  # 6c) Hard stop on a bad fill - do NOT advance to the submit approval on a bad review read.
+  - id: review_gate
+    type: condition
+    depends_on: [validate_review]
+    condition_config:
+      expression: "{steps.validate_review.output.ok} == True"
+      then: [approve_submit]
+      else: [notify_review_failed]
+
+  - id: notify_review_failed
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        ATS application for candidate row {input.candidate_row_id} reached the apply REVIEW page but the
+        deterministic review check FAILED before submission:
+        {steps.validate_review.output.problems}. Nothing was submitted. Re-check the wizard fill and
+        resume upload, then re-run.
+
+  # 7) MANDATORY HUMAN APPROVAL before the IRREVERSIBLE submit. The reviewer sees the validated entered
+  #    values and the captured review-page screenshot and authorizes the submit. No submission can occur
+  #    without this gate; on_timeout: abort never auto-submits - this is the human authority over filing
+  #    an application on the candidate's behalf.
+  - id: approve_submit
+    type: approval
+    approval_config:
+      message: >-
+        AUTHORIZE the IRREVERSIBLE application SUBMIT for candidate row {input.candidate_row_id}. The
+        application is filled and sitting on the apply REVIEW page with
+        {steps.validate_review.output.filled_field_count} fields filled (planned
+        {steps.validate_review.output.planned_mapped_count}) and the resume uploaded
+        ({steps.validate_review.output.resume_uploaded}). Review the captured review-page screenshot and
+        the entered values - this is the EXACT state you are submitting on the candidate's behalf. Approve
+        to click Submit; reject to abort with nothing submitted.
+      show_data: steps.validate_review.output
+      show_images: ["steps.validate_review.output.review_page_screenshot"]
+      timeout_hours: 24
+      on_timeout: abort
+      allow_edit: false
+
+  # 8) SUBMIT PASS (playwright mode, WRITE). Only reached AFTER the human approves. Re-opens the filled
+  #    review page, confirms the values still match, clicks the SINGLE final Submit button ONCE, then
+  #    reads the ATS confirmation and captures {confirmation_id, confirmation_text, timestamp}.
+  #    capture_screenshots gives an after-submit audit record; max_actions tightly capped (one confirm
+  #    action); CAPTCHA / step-up pause to a human.
+  - id: submit_application
+    type: browser
+    depends_on: [approve_submit]
+    prompt: >-
+      A human has authorized this IRREVERSIBLE application submission for candidate row
+      {input.candidate_row_id}. Authenticate with ATS_CREDS if the session expired (CAPTCHA / step-up
+      pause to a human), return to the filled apply REVIEW page, confirm the entered values still match
+      the approved review, then click the SINGLE final Submit / Apply / Send Application button ONCE to
+      file the application. Do NOT edit any field, do NOT re-upload the resume, and do NOT click submit
+      more than once. If a CAPTCHA or bot-check appears at this final wall, PAUSE for a human - do not
+      attempt to solve it. Then read the ATS confirmation page and capture the CONFIRMATION NUMBER / id,
+      the on-screen confirmation text, and the timestamp. Return ONLY the structured object described by
+      the output schema.
+    browser_config:
+      mode: playwright
+      start_url: "{input.job_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 300
+      max_actions: 20
+      headless: true
+      credentials_env: "ATS_CREDS"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          confirmation_id: { type: string }
+          confirmation_text: { type: string }
+          timestamp: { type: string }
+          confirmation_screenshot: { type: string }
+
+  # 9) DETERMINISTIC SUCCESS GATE (no model). Assert the ATS-issued confirmation_id is present and
+  #    matches the expected pattern. A missing/malformed confirmation_id means the submit did NOT
+  #    provably land - so a silently-failed submit can NEVER be recorded as a filed application.
+  - id: assert_confirmation
+    type: code
+    depends_on: [submit_application]
+    code_config:
+      language: python
+      code: |
+        import re
+        sub = _steps.get('submit_application') or {}
+        if not isinstance(sub, dict):
+            sub = {}
+        for key in ('output', 'data', 'result'):
+            inner = sub.get(key)
+            if isinstance(inner, dict) and ('confirmation_id' in inner):
+                sub = inner
+                break
+
+        confirmation_id = str(sub.get('confirmation_id', '') or '').strip()
+        confirmation_text = str(sub.get('confirmation_text', '') or '').strip()
+        timestamp = str(sub.get('timestamp', '') or '').strip()
+
+        pattern = str(_input.get('confirmation_id_pattern', '') or '').strip()
+        if not pattern:
+            pattern = '^[A-Za-z0-9][A-Za-z0-9_-]{4,}$'
+
+        problems = []
+        matched = False
+        if not confirmation_id:
+            problems.append('ATS returned no confirmation_id - submission not provably accepted')
+        else:
+            try:
+                matched = bool(re.search(pattern, confirmation_id))
+            except (TypeError, ValueError):
+                matched = False
+            if not matched:
+                problems.append('confirmation_id "' + confirmation_id + '" does not match pattern ' + pattern)
+        if not timestamp:
+            problems.append('no confirmation timestamp returned')
+
+        filed = bool(confirmation_id) and matched and (len(problems) == 0)
+        result = {
+            'filed': filed,
+            'problems': problems,
+            'confirmation_id': confirmation_id,
+            'confirmation_text': confirmation_text,
+            'timestamp': timestamp,
+            'pattern': pattern,
+        }
+
+  # 9b) Branch on the deterministic success gate. Only a provably-confirmed submit proceeds to the
+  #     portal-sourced receipt sensor + writeback. An unconfirmed submit is paged and left needing
+  #     attention - a false success is NEVER recorded as a filed application.
+  - id: filed_gate
+    type: condition
+    depends_on: [assert_confirmation]
+    condition_config:
+      expression: "{steps.assert_confirmation.output.filed} == True"
+      then: [verify_receipt]
+      else: [notify_submit_unconfirmed]
+
+  # 9c) UNCONFIRMED PATH - submit happened but the confirmation_id did not validate. Page the team and
+  #     leave the run needing attention.
+  - id: notify_submit_unconfirmed
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        NEEDS ATTENTION: ATS submit for candidate row {input.candidate_row_id} did NOT return a valid
+        confirmation_id ({steps.assert_confirmation.output.problems}). Do NOT assume the application was
+        filed - manually check the ATS. The run is left in a needs-attention state.
+
+  # 10) RECEIPT SENSOR (engine-native, model-independent) - the act-then-VERIFY core. Poll the
+  #     application's OWN status page until the ATS provably recorded receipt: the status reads
+  #     submitted / received / under-review OR a confirmation/reference id is present. This is a second,
+  #     PORTAL-SOURCED proof beyond the on-screen confirmation. A provider-agnostic boolean over the
+  #     polled JSON - pure control flow, no model. Hard timeout so we never wait forever; a timeout is
+  #     NOT treated as success.
+  - id: verify_receipt
+    type: sensor
+    depends_on: [filed_gate]
+    sensor_config:
+      url: "{input.status_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200 and (str(response.get('status', '')).strip().lower() in ('submitted', 'received', 'under_review', 'under review', 'in_review', 'application received') or bool(str(response.get('confirmation_id', '') or response.get('reference', '') or '').strip()))"
+      check_interval: 60
+      timeout: 3600
+
+  # 11) Deterministically decide receipt from the sensor's last polled status payload. No model. A
+  #     missing confirmation (sensor timed out) yields confirmed=False so a silent failure can NEVER be
+  #     reported as a win.
+  - id: evaluate_receipt
+    type: code
+    depends_on: [verify_receipt]
+    code_config:
+      language: python
+      code: |
+        watch = _steps.get('verify_receipt') or {}
+        if not isinstance(watch, dict):
+            watch = {'raw': watch}
+        resp = watch.get('response') if isinstance(watch.get('response'), dict) else watch
+        if not isinstance(resp, dict):
+            resp = {}
+
+        status = str(resp.get('status', '') or '').strip().lower()
+        reference = str(resp.get('confirmation_id', '') or resp.get('reference', '') or '').strip()
+
+        received_states = ('submitted', 'received', 'under_review', 'under review',
+                           'in_review', 'application received')
+        confirmed = (status in received_states) or bool(reference)
+
+        sensor_satisfied = bool(watch.get('satisfied', watch.get('met', confirmed)))
+        timed_out = bool(watch.get('timed_out', False)) or (not sensor_satisfied and not confirmed)
+
+        result = {
+            'confirmed': bool(confirmed and not timed_out),
+            'status': status,
+            'reference': reference,
+            'timed_out': timed_out,
+            # fail_count > 0 routes the run to the needs-attention path (never false success).
+            'fail_count': 0 if (confirmed and not timed_out) else 1,
+        }
+
+  # 12) CONDITION - write the confirmation back on confirmed receipt, OR page the team and leave the run
+  #     needing attention on timeout / no-confirmation. We NEVER report a false win.
+  - id: receipt_outcome
+    type: condition
+    depends_on: [evaluate_receipt]
+    condition_config:
+      expression: "{steps.evaluate_receipt.output.fail_count} > 0"
+      then: [notify_needs_attention]
+      else: [notify_filed]
+
+  # 12a) NEEDS-ATTENTION PATH - the ATS never confirmed receipt (timeout or non-received status). Page
+  #      the team; the run stays unresolved. A silently-failed submit is surfaced, never mistaken for
+  #      success.
+  - id: notify_needs_attention
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        NEEDS ATTENTION: ATS application for candidate row {input.candidate_row_id} was SUBMITTED
+        (confirmation {steps.assert_confirmation.output.confirmation_id}) but the ATS status page has NOT
+        confirmed receipt within the timeout (last status '{steps.evaluate_receipt.output.status}',
+        reference '{steps.evaluate_receipt.output.reference}',
+        timed_out={steps.evaluate_receipt.output.timed_out}). Do NOT assume success - manually check the
+        ATS. The run is left in a needs-attention state.
+
+  # 12b) SUCCESS PATH - the ATS itself confirmed receipt. Notify the team the application was filed.
+  - id: notify_filed
+    type: notify
+    depends_on: [evaluate_receipt]
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        FILED: ATS application for candidate row {input.candidate_row_id} was submitted and the ATS
+        confirmed receipt. Confirmation id {steps.assert_confirmation.output.confirmation_id} at
+        {steps.assert_confirmation.output.timestamp} (status page status
+        '{steps.evaluate_receipt.output.status}').
+
+  # 13) WRITEBACK (transform) - emit the confirmation payload to write back to the candidate-queue row so
+  #     the queue reflects this application as FILED. The transform produces the structured writeback
+  #     record; the engine's writeback target (crm_writeback_url) consumes it. Only reached on confirmed
+  #     receipt, so the row is only marked applied when the ATS itself confirmed.
+  - id: write_back_confirmation
+    type: transform
+    depends_on: [notify_filed]
+    transform_config:
+      template: |
+        {
+          "candidate_row_id": "{input.candidate_row_id}",
+          "writeback_url": "{input.crm_writeback_url}",
+          "status": "applied",
+          "job_url": "{input.job_url}",
+          "confirmation_id": "{steps.assert_confirmation.output.confirmation_id}",
+          "confirmation_text": "{steps.assert_confirmation.output.confirmation_text}",
+          "submitted_at": "{steps.assert_confirmation.output.timestamp}",
+          "ats_status": "{steps.evaluate_receipt.output.status}"
+        }
+
+on_complete:
+  storage_path: "ats-job-application-autosubmit/{input.candidate_row_id}/{run_id}/confirmation.json"

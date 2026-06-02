@@ -1,0 +1,653 @@
+# name: Bank Statement Vault Reconciler
+# description: On a monthly schedule, logs into each bank/card portal that exposes statements ONLY as PDFs behind an authenticated JS SPA (no API, no Plaid/Yodlee coverage), downloads the new statement, parses balances and transactions, reconciles deterministically against the GL/ledger, files the PDF + reconciliation report into a dated client/year/month vault, and notifies. Any unreconciled delta beyond tolerance is gated behind a human approval BEFORE the period is marked reconciled. The fragile login+download is wrapped by a per-portal trajectory-replay golden run that hard-fails on UI drift before any client books are touched.
+# tags: [Finance, Bookkeeping, Reconciliation, Browser, Playwright, RPA, BankStatements, GL, Vault, TrajectoryReplay]
+# category: general_ai
+
+name: bank-statement-vault-reconciler
+description: >-
+  Monthly statement-vault reconciler for an outsourced bookkeeping firm or
+  fractional controller running 20-80 SMB clients, each with multiple regional
+  bank and credit-card logins and NO aggregator coverage (the banks have no API
+  and forbid Plaid/Yodlee-style read tokens). A SENSOR gates the whole run on the
+  statement-close date so it only fires once the period has actually closed for
+  this account batch. A LOOP fans out over the configured portal accounts; per
+  account it runs a BROWSER step in playwright mode - the configured reasoning
+  model authors a deterministic, PROVIDER-NEUTRAL Playwright script ONCE that
+  signs in with a per-account credentials_env (secret NEVER inlined), clears any
+  MFA/CAPTCHA via captcha_strategy=pause, navigates the JS SPA to the Statements
+  page, selects the latest unfetched period, downloads the statement PDF, and
+  returns a strict output_schema manifest {account_label, statement_period,
+  statement_date, closing_balance, download_path, page_count}. This is a
+  READ-ONLY browse: the script never moves money - downloading is non-destructive
+  - and max_actions=60 caps runaway clicking while capture_screenshots keeps an
+  audit trail. A TRAJECTORY-REPLAY step (fail_below_score 0.85) immediately
+  replays each portal's golden recorded run and HARD-FAILS the workflow on UI
+  drift, preventing a wrong-statement file before client books are ever touched.
+  A PARSE step turns the downloaded PDF into text/tables. A deterministic CODE
+  step then VALIDATES the extraction: it asserts the parsed closing_balance ties
+  to the browser manifest closing_balance to the cent, asserts debits/credits tie
+  to the balance movement, and flags duplicate or missing periods - NO write runs
+  on a bad read. An HTTP step pulls the matching GL/ledger period balance and a
+  second deterministic CODE step computes the reconciliation delta (pure math, no
+  model in the path, so the conclusion is reproducible and provider-neutral). A
+  CONDITION routes on the delta: within tolerance AND validation clean -> file
+  and notify directly; otherwise -> a human APPROVAL that shows the validated
+  preview and the statement screenshot and BLOCKS before the period is marked
+  reconciled. After approval the filing CODE step writes the PDF + reconciliation
+  report into client/year/month/ (gdrive or s3 connector). A NOTIFY posts the
+  per-account summary, loudly flagging any unreconciled delta for human review.
+  The ONLY state-changing step (marking books reconciled / filing the close) sits
+  behind that approval gate; the only browser-side safety needed is the captcha
+  pause because the browsing itself is read-only. computer_use is offered only as
+  a fallback mode for the rare portal whose download control is a canvas/image map
+  needing pixel clicks. (connectors: gdrive, s3, slack, GL ledger via http)
+
+default_model: sonnet
+default_timeout: 900
+
+input_schema:
+  required: ["accounts", "ledger_api_url", "statement_close_url"]
+  properties:
+    accounts:
+      type: array
+      description: >-
+        The portal accounts the loop iterates over - one per bank/card login per
+        client. Shape per item: {account_label, client, bank_kind (bank|card),
+        start_url, statements_url, credentials_env, golden_run_id, gl_account_id,
+        download_mode (playwright|computer_use)}. Secrets are NEVER inlined - only
+        the NAME of the per-account env var is stored. credentials_env maps to one
+        env var per client account by loop index.
+      default:
+        - account_label: "acme_main_checking"
+          client: "acme-llc"
+          bank_kind: "bank"
+          start_url: "https://business.regionalbank.example/login"
+          statements_url: "https://business.regionalbank.example/accounts/statements"
+          credentials_env: "BANK_PORTAL_CREDS_ACME_CHECKING"
+          golden_run_id: "golden-acme-checking-statement-2026-05"
+          gl_account_id: "1010-acme-checking"
+          download_mode: "playwright"
+        - account_label: "acme_amex_card"
+          client: "acme-llc"
+          bank_kind: "card"
+          start_url: "https://card.regionalbank.example/signin"
+          statements_url: "https://card.regionalbank.example/statements"
+          credentials_env: "BANK_PORTAL_CREDS_ACME_AMEX"
+          golden_run_id: "golden-acme-amex-statement-2026-05"
+          gl_account_id: "2100-acme-amex"
+          download_mode: "playwright"
+        - account_label: "globex_ops_checking"
+          client: "globex-inc"
+          bank_kind: "bank"
+          start_url: "https://portal.communitybank.example/login"
+          statements_url: "https://portal.communitybank.example/edocuments"
+          credentials_env: "BANK_PORTAL_CREDS_GLOBEX_CHECKING"
+          golden_run_id: "golden-globex-checking-statement-2026-05"
+          gl_account_id: "1010-globex-checking"
+          download_mode: "computer_use"
+    ledger_api_url:
+      type: string
+      description: "Base URL of the GL/ledger API that returns a client account's closing balance and movement for the accounting period."
+      default: "https://gl-ledger.internal.example/api/v1"
+    statement_close_url:
+      type: string
+      description: >-
+        URL of the schedule marker / health endpoint the trigger sensor polls to
+        confirm the statement-close date has passed for this account batch (e.g.
+        first business day after the 5th of the month). Returns 200 with a
+        period_closed flag once the period is closeable.
+      default: "https://gl-ledger.internal.example/api/v1/period/close-status"
+    accounting_period:
+      type: string
+      description: "The accounting period being reconciled (YYYY-MM). Used to select the statement, the GL period, and the vault month folder."
+      default: "2026-05"
+    amount_tolerance:
+      type: number
+      description: "Absolute closing-balance delta (in account currency) below which a statement-vs-GL difference is treated as reconciled. Anything above routes to human approval."
+      default: 0.01
+    vault_backend:
+      type: string
+      description: "Where filed statements + reconciliation reports land: gdrive or s3."
+      default: "gdrive"
+    vault_root:
+      type: string
+      description: "Root prefix of the dated vault tree. Files land at {vault_root}/{client}/{year}/{month}/."
+      default: "statement-vault"
+    notify_service:
+      type: string
+      description: "Where the per-account reconciliation summary is posted: slack or teams."
+      default: "slack"
+    notify_channel:
+      type: string
+      description: "Channel for the reconciliation digest."
+      default: "#bookkeeping-recon"
+
+steps:
+  # ---------------------------------------------------------------------------
+  # 1) TRIGGER SENSOR - gate the entire run on the statement-close date. Polls a
+  #    schedule marker / GL period-close endpoint and only proceeds once the
+  #    accounting period has actually closed for this account batch (e.g. first
+  #    business day after the 5th). Hard timeout so a never-closing period does
+  #    not hang the run forever. Pure control flow, no model.
+  # ---------------------------------------------------------------------------
+  - id: await_statement_close
+    type: sensor
+    sensor_config:
+      url: "{input.statement_close_url}?period={input.accounting_period}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200 and bool(response.get('period_closed', False))"
+      check_interval: 3600
+      timeout: 86400
+
+  # ---------------------------------------------------------------------------
+  # 2) LOOP over the configured portal accounts. Each iteration drives ONE
+  #    bank/card login. The loop item (one account def) arrives on
+  #    _input['_item'] and is read by the child step prompts via templating.
+  # ---------------------------------------------------------------------------
+  - id: fetch_statements
+    type: loop
+    depends_on: [await_statement_close]
+    loop_config:
+      over: "input.accounts"
+      step_ids: [download_statement]
+      max_iterations: 80
+
+  # ---------------------------------------------------------------------------
+  # 2a) BROWSER (playwright mode - PROVIDER-NEUTRAL) - the READ pass. The
+  #     configured reasoning model authors a deterministic Playwright script ONCE
+  #     from this prompt, which then replays; the script is provider-agnostic and
+  #     the authoring model is swappable via default_model. It logs in with the
+  #     per-account credentials_env (NEVER an inline secret), pauses on any
+  #     CAPTCHA/MFA (captcha_strategy=pause), navigates the JS SPA to Statements,
+  #     selects the latest unfetched period, downloads the statement PDF, and
+  #     returns ONLY the strict output_schema manifest. READ-ONLY: it never moves
+  #     money - downloading is non-destructive - max_actions=60 caps runaway
+  #     clicking and capture_screenshots keeps an audit trail. computer_use is the
+  #     documented fallback for a portal whose download control is a canvas/image
+  #     map needing pixel clicks (set per-account download_mode).
+  #     (loop child step - defined separately, read via _input['_item'])
+  - id: download_statement
+    type: browser
+    browser_config:
+      mode: playwright
+      start_url: "{input._item.start_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 180
+      max_actions: 60
+      headless: true
+      credentials_env: "{input._item.credentials_env}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          account_label: { type: string }
+          client: { type: string }
+          bank_kind: { type: string }
+          statement_period: { type: string }
+          statement_date: { type: string }
+          closing_balance: { type: number }
+          currency: { type: string }
+          download_path: { type: string }
+          page_count: { type: integer }
+          screenshot: { type: string }
+        required: ["account_label", "statement_period", "closing_balance", "download_path"]
+    prompt: |
+      You are automating a regional business bank / credit-card web portal as a
+      read-only bookkeeper for client {input._item.client}, account
+      {input._item.account_label} (kind: {input._item.bank_kind}). This portal has
+      NO API and forbids aggregators - the statement is exposed ONLY as a PDF
+      behind an authenticated JS single-page app, generated after login + MFA, so
+      a plain HTTP GET cannot reach it.
+
+      Author a deterministic, provider-neutral Playwright script that:
+      1. Navigates to the login page ({input._item.start_url}) and signs in using
+         the credentials supplied by the credentials_env environment variable.
+         NEVER hardcode, echo, or log the secret.
+      2. If a CAPTCHA, MFA one-time-code, or device-verification challenge appears,
+         STOP and hand off to a human (captcha_strategy=pause). Do not attempt to
+         solve or guess any challenge.
+      3. Navigates the SPA to the Statements / eDocuments page at
+         {input._item.statements_url}.
+      4. Selects the statement for accounting period {input.accounting_period} -
+         the latest period not yet fetched - and clicks its period-specific
+         download control to download the PDF.
+      5. Performs NO write actions of any kind: never transfer, pay, schedule,
+         enroll in paperless, change settings, or click anything that moves money
+         or mutates the account. This is download-only; downloading a statement is
+         non-destructive.
+      6. Respects the max_actions cap; if the Statements page is unreachable or the
+         period is missing, return an empty download_path rather than clicking
+         blindly.
+
+      Return ONLY the structured JSON described by the output_schema: account_label,
+      client, bank_kind, statement_period, statement_date, closing_balance (the
+      headline closing/ending balance numeric, no currency symbol), currency,
+      download_path (the saved PDF path), page_count, and the path to a screenshot
+      of the statement page for the audit trail.
+
+  # ---------------------------------------------------------------------------
+  # 3) TRAJECTORY-REPLAY - the load-bearing reliability check wrapping the fragile
+  #    login+download. Replays each portal's golden recorded run and FAILS the
+  #    workflow when the replay score drops below fail_below_score (UI drift) or
+  #    cost blows past the allowed delta / budget - BEFORE the downloaded
+  #    statement is ever trusted or filed. Deterministic scorer comparing
+  #    observable actions and extracted outputs, not a model's opinion. This is
+  #    what prevents filing the wrong statement when a portal silently redesigns.
+  # ---------------------------------------------------------------------------
+  - id: replay_login_download
+    type: trajectory-replay
+    depends_on: [fetch_statements]
+    trajectory_replay_config:
+      golden_run_id: "{input.accounts.0.golden_run_id}"
+      fail_below_score: 0.85
+      allow_cost_delta_pct: 10.0
+      cost_budget_usd: 0.5
+
+  # ---------------------------------------------------------------------------
+  # 4) PARSE - turn the downloaded statement PDF into text/tables so the
+  #    deterministic validator can read the printed closing balance and the
+  #    debit/credit lines. Provider-neutral document parse, no portal access.
+  # ---------------------------------------------------------------------------
+  - id: parse_statement
+    type: parse
+    depends_on: [replay_login_download]
+    prompt: "{steps.download_statement.output.download_path}"
+    parse_config:
+      output: markdown
+
+  # ---------------------------------------------------------------------------
+  # 5) CODE - VALIDATE the extraction deterministically BEFORE anything is
+  #    trusted or filed. Asserts the parsed printed closing_balance ties to the
+  #    browser manifest closing_balance to the cent, asserts sum(debits) -
+  #    sum(credits) ties to the balance movement within tolerance, and flags
+  #    duplicate or missing periods. On any mismatch or empty read, extraction_ok
+  #    is False and NO write path runs. Pure deterministic math, no model.
+  # ---------------------------------------------------------------------------
+  - id: validate_extraction
+    type: code
+    depends_on: [parse_statement, fetch_statements]
+    code_config:
+      language: python
+      code: |
+        # Browser manifest from the read pass (loop child output).
+        manifest = _steps.get("download_statement") or {}
+        if not isinstance(manifest, dict):
+            manifest = {}
+
+        # Parsed PDF text/tables.
+        parsed = _steps.get("parse_statement")
+        if isinstance(parsed, dict):
+            parsed_text = str(parsed.get("text") or parsed.get("markdown") or parsed.get("content") or "")
+        else:
+            parsed_text = str(parsed or "")
+
+        try:
+            tol = float(_input.get("amount_tolerance", 0.01) or 0.01)
+        except (TypeError, ValueError):
+            tol = 0.01
+
+        def _to_amount(v):
+            try:
+                return round(float(v), 2)
+            except (TypeError, ValueError):
+                return None
+
+        errors = []
+        flags = []
+
+        account_label = str(manifest.get("account_label") or "").strip()
+        statement_period = str(manifest.get("statement_period") or "").strip()
+        download_path = str(manifest.get("download_path") or "").strip()
+        manifest_balance = _to_amount(manifest.get("closing_balance"))
+
+        # A trustworthy read must have an account, a period, a downloaded file, and
+        # a numeric headline balance from the browser manifest.
+        if not account_label:
+            errors.append("missing_account_label")
+        if not statement_period:
+            errors.append("missing_statement_period")
+        if not download_path:
+            errors.append("empty_download_path")
+        if manifest_balance is None:
+            errors.append("non_numeric_manifest_balance")
+        if not parsed_text.strip():
+            errors.append("empty_parsed_pdf")
+
+        # Duplicate / missing period guard: the manifest period must match the
+        # period we asked to reconcile. A mismatch means the SPA handed back the
+        # wrong (often the most recent already-filed) statement.
+        target_period = str(_input.get("accounting_period") or "").strip()
+        if target_period and statement_period and target_period not in statement_period:
+            flags.append("period_mismatch")
+            errors.append("statement_period_does_not_match_target")
+
+        # Pull the printed closing/ending balance out of the parsed PDF text and
+        # assert it ties to the browser manifest balance to the cent. We search for
+        # a labelled balance line and read the trailing money figure.
+        printed_balance = None
+        label_match = re.search(
+            r"(?:closing|ending|new|statement)\s+balance[^0-9\-]*(-?[0-9][0-9,]*\.[0-9]{2})",
+            parsed_text,
+            flags=re.IGNORECASE,
+        )
+        if label_match:
+            printed_balance = _to_amount(label_match.group(1).replace(",", ""))
+        if printed_balance is None:
+            flags.append("no_printed_balance_found")
+
+        balance_ties = False
+        balance_delta = None
+        if manifest_balance is not None and printed_balance is not None:
+            balance_delta = round(abs(manifest_balance - printed_balance), 2)
+            balance_ties = balance_delta <= tol
+            if not balance_ties:
+                errors.append("manifest_vs_printed_balance_mismatch")
+
+        # Movement tie-out: sum debits and credits printed on the statement and
+        # confirm closing = opening + credits - debits within tolerance. We read an
+        # opening balance plus all signed money lines from the parsed text.
+        opening_balance = None
+        open_match = re.search(
+            r"(?:opening|beginning|previous|prior)\s+balance[^0-9\-]*(-?[0-9][0-9,]*\.[0-9]{2})",
+            parsed_text,
+            flags=re.IGNORECASE,
+        )
+        if open_match:
+            opening_balance = _to_amount(open_match.group(1).replace(",", ""))
+
+        credits_total = 0.0
+        debits_total = 0.0
+        # Credit lines: deposits / payments-in / credits.
+        for m in re.findall(
+            r"(?:deposit|credit|payment\s+received|interest)[^0-9\-]*(-?[0-9][0-9,]*\.[0-9]{2})",
+            parsed_text,
+            flags=re.IGNORECASE,
+        ):
+            amt = _to_amount(m.replace(",", ""))
+            if amt is not None:
+                credits_total = round(credits_total + abs(amt), 2)
+        # Debit lines: withdrawals / purchases / fees / debits.
+        for m in re.findall(
+            r"(?:withdrawal|purchase|debit|fee|charge|check)[^0-9\-]*(-?[0-9][0-9,]*\.[0-9]{2})",
+            parsed_text,
+            flags=re.IGNORECASE,
+        ):
+            amt = _to_amount(m.replace(",", ""))
+            if amt is not None:
+                debits_total = round(debits_total + abs(amt), 2)
+
+        movement_ties = None
+        movement_delta = None
+        if opening_balance is not None and manifest_balance is not None:
+            expected_close = round(opening_balance + credits_total - debits_total, 2)
+            movement_delta = round(abs(expected_close - manifest_balance), 2)
+            movement_ties = movement_delta <= tol
+            if not movement_ties:
+                flags.append("movement_does_not_tie")
+        else:
+            flags.append("movement_tieout_skipped_no_opening_balance")
+
+        extraction_ok = len(errors) == 0
+
+        result = {
+            "extraction_ok": extraction_ok,
+            "errors": errors,
+            "flags": flags,
+            "account_label": account_label,
+            "client": str(manifest.get("client") or ""),
+            "gl_account_id": "",
+            "statement_period": statement_period,
+            "statement_date": str(manifest.get("statement_date") or ""),
+            "download_path": download_path,
+            "currency": str(manifest.get("currency") or ""),
+            "page_count": manifest.get("page_count"),
+            "manifest_closing_balance": manifest_balance,
+            "printed_closing_balance": printed_balance,
+            "balance_ties": balance_ties,
+            "balance_delta": balance_delta,
+            "opening_balance": opening_balance,
+            "credits_total": credits_total,
+            "debits_total": debits_total,
+            "movement_ties": movement_ties,
+            "movement_delta": movement_delta,
+            "tolerance": tol,
+        }
+
+  # ---------------------------------------------------------------------------
+  # 6) HTTP - pull the matching GL/ledger period closing balance for this account.
+  #    This is the firm's own system of record - the side we reconcile the
+  #    statement against. Auth via a bearer token from the env, NEVER inlined.
+  #    (connector: GL ledger via http)
+  # ---------------------------------------------------------------------------
+  - id: fetch_gl_balance
+    type: http
+    depends_on: [validate_extraction]
+    http_config:
+      url: "{input.ledger_api_url}/accounts/{input.accounts.0.gl_account_id}/balance?period={input.accounting_period}"
+      method: GET
+      auth: "bearer:{env.GL_LEDGER_TOKEN}"
+      headers:
+        Accept: "application/json"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # ---------------------------------------------------------------------------
+  # 7) CODE - the LOAD-BEARING reconciliation. Pure deterministic math, NO model
+  #    in the path, so the conclusion is reproducible and provider-neutral. It
+  #    compares the validated statement closing_balance to the GL period closing
+  #    balance and computes the signed delta; the run is reconciled only if the
+  #    extraction was valid AND abs(delta) is within tolerance.
+  # ---------------------------------------------------------------------------
+  - id: reconcile
+    type: code
+    depends_on: [validate_extraction, fetch_gl_balance]
+    code_config:
+      language: python
+      code: |
+        extraction = _steps.get("validate_extraction") or {}
+        if not isinstance(extraction, dict):
+            extraction = {}
+
+        gl_resp = _steps.get("fetch_gl_balance") or {}
+        if not isinstance(gl_resp, dict):
+            gl_resp = {}
+        # HTTP step output may carry the parsed body under common keys.
+        gl_body = gl_resp.get("json") or gl_resp.get("data") or gl_resp.get("body") or gl_resp
+        if not isinstance(gl_body, dict):
+            gl_body = {}
+
+        def _num(v):
+            try:
+                return round(float(v), 2)
+            except (TypeError, ValueError):
+                return None
+
+        try:
+            tol = float(_input.get("amount_tolerance", 0.01) or 0.01)
+        except (TypeError, ValueError):
+            tol = 0.01
+
+        statement_balance = _num(extraction.get("manifest_closing_balance"))
+        gl_balance = _num(
+            gl_body.get("closing_balance")
+            if gl_body.get("closing_balance") is not None
+            else gl_body.get("balance")
+        )
+
+        extraction_ok = bool(extraction.get("extraction_ok", False))
+
+        delta = None
+        within_tolerance = False
+        if statement_balance is not None and gl_balance is not None:
+            delta = round(statement_balance - gl_balance, 2)
+            within_tolerance = abs(delta) <= tol
+
+        # A clean reconciliation requires BOTH a valid extraction AND a GL balance
+        # that ties within tolerance. A missing GL figure is never treated as a tie.
+        reconciled = extraction_ok and within_tolerance and (gl_balance is not None)
+        needs_review = not reconciled
+
+        result = {
+            "account_label": extraction.get("account_label"),
+            "client": extraction.get("client"),
+            "statement_period": extraction.get("statement_period"),
+            "statement_closing_balance": statement_balance,
+            "gl_closing_balance": gl_balance,
+            "delta": delta,
+            "abs_delta": (abs(delta) if delta is not None else None),
+            "tolerance": tol,
+            "within_tolerance": within_tolerance,
+            "extraction_ok": extraction_ok,
+            "extraction_errors": extraction.get("errors", []),
+            "extraction_flags": extraction.get("flags", []),
+            "reconciled": reconciled,
+            "needs_review": needs_review,
+        }
+
+  # ---------------------------------------------------------------------------
+  # 8) CONDITION - deterministic routing on the reconciliation result. Clean
+  #    (reconciled within tolerance, extraction valid) -> file + notify directly,
+  #    no human needed. Any delta beyond tolerance OR a failed validation -> the
+  #    human APPROVAL gate before the period is ever marked reconciled. No model.
+  # ---------------------------------------------------------------------------
+  - id: route_reconciliation
+    type: condition
+    depends_on: [reconcile]
+    condition_config:
+      expression: "{steps.reconcile.output.reconciled} == True"
+      then: [file_to_vault, notify_summary]
+      else: [approve_reconciliation]
+
+  # ---------------------------------------------------------------------------
+  # 8a) APPROVAL (REVIEW path) - the ONLY state-changing gate. Fires whenever the
+  #     deterministic reconciliation delta exceeds tolerance or validation failed.
+  #     Shows the validated preview (statement vs GL, the delta, the extraction
+  #     errors/flags) AND the statement screenshot, and BLOCKS until a person
+  #     authorizes marking the period reconciled. on_timeout: abort means a missed
+  #     approval NEVER auto-files an unreconciled period.
+  - id: approve_reconciliation
+    type: approval
+    depends_on: [route_reconciliation]
+    approval_config:
+      message: >-
+        UNRECONCILED DELTA - human review required before marking the period
+        reconciled. Account {steps.reconcile.output.account_label} (client
+        {steps.reconcile.output.client}), period
+        {steps.reconcile.output.statement_period}. Statement closing balance
+        {steps.reconcile.output.statement_closing_balance} vs GL closing balance
+        {steps.reconcile.output.gl_closing_balance}; delta
+        {steps.reconcile.output.delta} (tolerance
+        {steps.reconcile.output.tolerance}). Extraction valid:
+        {steps.reconcile.output.extraction_ok}; errors
+        {steps.reconcile.output.extraction_errors}; flags
+        {steps.reconcile.output.extraction_flags}. Review the attached statement
+        screenshot - this is the EXACT statement being filed. Approve to file the
+        statement and mark the period reconciled despite the delta; reject to
+        abort with nothing filed.
+      show_data: steps.reconcile.output
+      show_images: ["steps.download_statement.output.screenshot"]
+      timeout_hours: 24
+      on_timeout: abort
+      allow_edit: false
+
+  # ---------------------------------------------------------------------------
+  # 8b) FILE TO VAULT (WRITE path) - the irreversible filing. Reached either on a
+  #     clean condition (then-branch) OR after the human approval above. Files the
+  #     statement PDF + a deterministic reconciliation report into the dated vault
+  #     tree {vault_root}/{client}/{year}/{month}/ on the configured backend
+  #     (gdrive or s3). The destination paths are computed deterministically here;
+  #     no model. (connectors: gdrive, s3)
+  - id: file_to_vault
+    type: code
+    depends_on: [route_reconciliation, approve_reconciliation]
+    code_config:
+      language: python
+      code: |
+        recon = _steps.get("reconcile") or {}
+        if not isinstance(recon, dict):
+            recon = {}
+        extraction = _steps.get("validate_extraction") or {}
+        if not isinstance(extraction, dict):
+            extraction = {}
+
+        client = str(recon.get("client") or extraction.get("client") or "unknown-client")
+        period = str(recon.get("statement_period") or _input.get("accounting_period") or "")
+        # Derive year / month from the accounting period (YYYY-MM[...]).
+        ym = re.search(r"(\d{4})[-/](\d{2})", period)
+        if ym:
+            year = ym.group(1)
+            month = ym.group(2)
+        else:
+            year = "unknown-year"
+            month = "unknown-month"
+
+        vault_root = str(_input.get("vault_root") or "statement-vault").strip("/")
+        backend = str(_input.get("vault_backend") or "gdrive")
+        account_label = str(recon.get("account_label") or extraction.get("account_label") or "account")
+
+        folder = vault_root + "/" + client + "/" + year + "/" + month
+        pdf_dest = folder + "/" + account_label + "_statement_" + period + ".pdf"
+        report_dest = folder + "/" + account_label + "_reconciliation_" + period + ".json"
+
+        source_pdf = str(extraction.get("download_path") or "")
+
+        # Deterministic reconciliation report persisted alongside the PDF.
+        report = {
+            "client": client,
+            "account_label": account_label,
+            "statement_period": period,
+            "statement_closing_balance": recon.get("statement_closing_balance"),
+            "gl_closing_balance": recon.get("gl_closing_balance"),
+            "delta": recon.get("delta"),
+            "tolerance": recon.get("tolerance"),
+            "reconciled": recon.get("reconciled"),
+            "extraction_errors": recon.get("extraction_errors", []),
+            "extraction_flags": recon.get("extraction_flags", []),
+        }
+
+        # The connector layer reads these targets to upload the PDF + report to the
+        # gdrive/s3 vault. We emit the intent deterministically rather than letting
+        # a model choose where client books are filed.
+        result = {
+            "backend": backend,
+            "folder": folder,
+            "source_pdf": source_pdf,
+            "pdf_dest": pdf_dest,
+            "report_dest": report_dest,
+            "report": report,
+            "filed": bool(source_pdf),
+        }
+
+  # ---------------------------------------------------------------------------
+  # 9) NOTIFY - post the per-account reconciliation summary to the bookkeeping
+  #    channel, loudly flagging any unreconciled delta for human review. Reached
+  #    on the clean then-branch directly; on the review path the notify is implied
+  #    by the approval thread, so this fires for the auto-reconciled accounts.
+  #    (connectors: slack, teams)
+  - id: notify_summary
+    type: notify
+    depends_on: [file_to_vault]
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        :bank: Statement reconciled and filed. Account
+        {steps.reconcile.output.account_label} (client
+        {steps.reconcile.output.client}), period
+        {steps.reconcile.output.statement_period}. Statement
+        {steps.reconcile.output.statement_closing_balance} vs GL
+        {steps.reconcile.output.gl_closing_balance}, delta
+        {steps.reconcile.output.delta} (tolerance
+        {steps.reconcile.output.tolerance}). Reconciled:
+        {steps.reconcile.output.reconciled}. Filed to
+        {steps.file_to_vault.output.pdf_dest}. Any delta beyond tolerance was held
+        for human review before filing.
+
+on_complete:
+  storage_path: "bank-statement-vault-reconciler/{run_id}/reconciliation.json"

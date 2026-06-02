@@ -1,0 +1,440 @@
+# name: Partner Portal Journey Monitor
+# description: Logs into a critical login-walled partner portal (insurer, freight/EDI carrier, bank, government filing, supplier) as a synthetic user on a daily pre-batch schedule, walks the exact multi-step task your team relies on, structurally asserts every screen, replays against a golden run, and alerts ops the moment the partner silently redesigns the portal and breaks your operational flow - all read-only, stopping short of the submit button.
+# tags: [rpa, browser, partner-portal, synthetic-monitoring, dom, lightpanda, playwright, trajectory-replay, ops, b2b-integrations, change-detection]
+# category: engineering
+
+name: partner-portal-journey-monitor
+description: >-
+  A read-only synthetic-journey monitor for a business-critical EXTERNAL partner
+  portal your team does NOT control - an insurer claims site, a freight/EDI
+  carrier booking portal, a payer-eligibility lookup, a bank, or a government tax
+  filing system. These portals are legacy, login-walled, server-rendered or
+  jQuery-era SPAs with NO public API (or none in your contract). You cannot
+  healthcheck a screen you can only reach after authenticating and clicking
+  through three wizard pages. When the partner ships a redesign or bolts on a new
+  mandatory consent step, your team's manual flow silently breaks and there is no
+  status page - you find out hours late when the daily batch stalls.
+
+  This template runs at the start of each business day, BEFORE the batch your
+  team fires against the portal. A SENSOR is the pre-batch heartbeat clock. A
+  BROWSER step (dom/lightpanda mode by default for cheap legacy portals - both
+  are lightweight headless DOM with NO vendor model in the navigation loop, so
+  they are inherently provider-neutral; swap to playwright for JS-heavy portals
+  where the model authors the script) logs in with credentials_env =
+  PARTNER_PORTAL_CREDS (never inline), navigates the EXACT task path to the form,
+  confirms the fields, dropdowns and the submit affordance render - and DELIBERATELY
+  STOPS at the submit button without clicking it, so it can never file a real
+  claim or booking. It returns STRUCTURED JSON via output_schema (logged_in,
+  screens_reachable, required_fields_present, new_unexpected_fields,
+  submit_button_enabled, session_expired, error_text).
+
+  The verdict is deterministic, never one model's opinion. A sandboxed CODE step
+  asserts logged_in, every expected screen reachable, the live field set is a
+  SUPERSET of the known schema, and the submit button is enabled - surfacing any
+  new_unexpected_fields as a soft "portal changed" warning. A TRAJECTORY-REPLAY
+  scores the live walkthrough against a recorded golden run (fail_below_score =
+  0.8) - the primary detector of a partner redesign even when fields technically
+  still resolve. A second CODE step folds both signals into one verdict, and a
+  CONDITION routes it: unchanged -> a quiet OK notify; broken or a new mandatory
+  field -> a NOTIFY that pages ops with the failure screenshot and the
+  new_unexpected_fields list, so a human can adapt the real workflow before the
+  batch fails.
+
+  Safety is structural. The journey is READ-ONLY: it stops at the submit
+  affordance and never clicks it, so no real transaction is possible - the only
+  human-in-the-loop is captcha_strategy = pause. credentials_env honours the
+  partner's auth, max_actions = 50 caps runaway clicking, capture_screenshots =
+  true gives an audit trail. If this template is ever forked to ACTUALLY submit
+  the form, that single submit action MUST be placed behind an explicit approval
+  gate showing the validated field preview - it is intentionally absent here
+  because nothing irreversible is performed.
+
+default_model: sonnet
+default_timeout: 900
+
+input_schema:
+  required: ["portal_login_url"]
+  properties:
+    portal_login_url:
+      type: string
+      description: "Login URL of the partner portal the synthetic user starts from (e.g. https://carrier.example.com/login or https://claims.insurer.example/portal)."
+      default: ""
+    browser_mode:
+      type: string
+      description: "Documented browser-mode choice. 'dom' or 'lightpanda' (default, provider-neutral, cheapest) for legacy server-rendered / jQuery-era portals; swap the browser step's mode to 'playwright' for JS-heavy SPA portals where the model authors the navigation script."
+      default: "dom"
+    expected_screens:
+      type: string
+      description: "Comma-separated screen/step names the synthetic journey MUST be able to reach, in order, on the way to the form (used by the deterministic assertion code)."
+      default: "login,dashboard,new_request_wizard_step1,new_request_wizard_step2,submit_form"
+    known_required_fields:
+      type: string
+      description: "Comma-separated names of the fields/dropdowns the team's known-good schema expects on the final form. The live field set must be a SUPERSET of these; anything extra is flagged as a portal change."
+      default: "account_number,service_date,reference_id,line_item_code,quantity,consent_checkbox"
+    golden_run_id:
+      type: string
+      description: "Run id of a recorded HEALTHY portal walkthrough to replay against for partner-redesign drift detection."
+      default: "golden-partner-portal-journey-baseline"
+    heartbeat_url:
+      type: string
+      description: "Lightweight pre-batch heartbeat/clock endpoint the sensor polls each business morning (also a webhook the daily scheduler can fire before the batch)."
+      default: "https://carrier.example.com/healthz"
+    ok_channel:
+      type: string
+      description: "Quiet Slack channel for green 'portal journey unchanged' confirmations."
+      default: "#partner-portal-ok"
+    ops_channel:
+      type: string
+      description: "Ops / B2B-integrations Slack channel that is paged when the partner portal silently changes and the operational flow is at risk."
+      default: "#ops-partner-portal-alerts"
+
+steps:
+  # ---------------------------------------------------------------------------
+  # 1. SENSOR - the pre-batch heartbeat clock. Each business morning it ticks
+  #    (and can be fired as a webhook by the daily scheduler) and gates the
+  #    journey on the portal being reachable at all before we drive a browser at
+  #    it. A cheap pre-flight, NOT the real proof of journey health.
+  # ---------------------------------------------------------------------------
+  - id: prebatch_heartbeat
+    type: sensor
+    sensor_config:
+      url: "{input.heartbeat_url}"
+      method: GET
+      condition: "status_code == 200"
+      check_interval: 60
+      timeout: 3600
+
+  # ---------------------------------------------------------------------------
+  # 2. BROWSER - the synthetic journey (READ pass). dom/lightpanda mode by
+  #    default: lightweight headless DOM with NO vendor model in the navigation
+  #    loop, so it is inherently provider-neutral (swap to playwright for JS-heavy
+  #    portals - then the model authors a swappable Playwright script). It logs in
+  #    with credentials from PARTNER_PORTAL_CREDS (never inline), walks the EXACT
+  #    task path to the form, confirms fields/dropdowns/submit-affordance render,
+  #    and DELIBERATELY STOPS at the submit button - it never clicks it, so no
+  #    real claim/booking can be filed. captcha_strategy: pause is the only HITL;
+  #    max_actions: 50 caps runaway clicking; capture_screenshots: true for audit.
+  #    output_schema makes this a STRUCTURED read pass.
+  # ---------------------------------------------------------------------------
+  - id: walk_portal_journey
+    type: browser
+    depends_on: [prebatch_heartbeat]
+    browser_config:
+      mode: dom
+      start_url: "{input.portal_login_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 120
+      max_actions: 50
+      headless: true
+      credentials_env: "PARTNER_PORTAL_CREDS"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          logged_in:
+            type: boolean
+            description: "True only if authentication succeeded and an authenticated shell rendered."
+          screens_reachable:
+            type: array
+            description: "Ordered names of the screens/wizard steps actually reached on the way to the form."
+            items: { type: string }
+          required_fields_present:
+            type: array
+            description: "Names of the fields/dropdowns that rendered on the final form (the live schema)."
+            items: { type: string }
+          new_unexpected_fields:
+            type: array
+            description: "Fields/dropdowns/consent steps present on the live form that are NOT in the known schema - a soft signal the partner changed the portal."
+            items: { type: string }
+          submit_button_enabled:
+            type: boolean
+            description: "True if the submit affordance rendered and is enabled. (We confirm it - we never click it.)"
+          session_expired:
+            type: boolean
+            description: "True if the session dropped / was bounced to login mid-journey."
+          screenshot_url:
+            type: string
+            description: "URL of the captured screenshot at the final form (or at the point of failure)."
+          error_text:
+            type: ["string", "null"]
+            description: "Short human-readable error if any screen failed to load or a step could not be reached; null when clean."
+        required:
+          - logged_in
+          - screens_reachable
+          - required_fields_present
+          - new_unexpected_fields
+          - submit_button_enabled
+          - session_expired
+          - error_text
+    prompt: |
+      You are a synthetic monitoring user for a critical EXTERNAL partner portal
+      that our operations team depends on but does NOT control. Your job is to
+      prove that the exact multi-step task our team runs by hand each day still
+      works - and to detect the moment the partner silently redesigns the portal.
+
+      HARD SAFETY RULE - THIS IS READ-ONLY: You must NEVER click the final submit
+      / file / book / send button. Walk all the way to the form, confirm the
+      submit affordance is present and enabled, and STOP. Do not submit anything.
+      Filing a real claim or booking is strictly forbidden. Do not click any
+      irreversible action.
+
+      Authenticate using ONLY the credentials supplied via the PARTNER_PORTAL_CREDS
+      environment variable. NEVER print, echo, or log the secret. If a CAPTCHA
+      appears, pause for a human per captcha_strategy.
+
+      Journey (record each screen you reach, in order, into screens_reachable):
+        1. Open {input.portal_login_url} and log in. Set logged_in = true only if
+           an authenticated shell / dashboard rendered. If you are bounced back to
+           login or the session drops at any point, set session_expired = true.
+        2. Navigate the EXACT task path our team uses to reach the operational
+           form (e.g. dashboard -> new request -> wizard step 1 -> wizard step 2
+           -> the submit form). Append each screen name to screens_reachable as
+           you reach it.
+        3. On the final form, enumerate every field, dropdown, and consent control
+           that renders. Put their names into required_fields_present (the live
+           schema).
+        4. Compare the live form against the team's known schema. Any field,
+           dropdown, or NEW mandatory consent step that is present live but is NOT
+           part of the known set goes into new_unexpected_fields - this is how we
+           catch a partner adding a mandatory step that would break our batch.
+        5. Confirm the submit affordance renders and whether it is enabled; set
+           submit_button_enabled accordingly. DO NOT CLICK IT.
+
+      Put a URL to the captured screenshot of the final form (or the point of
+      failure) into screenshot_url. If any screen failed to load or a step could
+      not be reached, put a short human-readable explanation into error_text;
+      otherwise set error_text = null.
+
+      Return ONLY the structured JSON object matching the output_schema. Do not
+      add any prose outside the JSON.
+
+  # ---------------------------------------------------------------------------
+  # 3. ASSERT JOURNEY - the load-bearing deterministic gate on the READ pass, NOT
+  #    a model opinion. Asserts logged_in, every expected screen reachable, the
+  #    live field set is a SUPERSET of the known schema, the submit button is
+  #    enabled, no session-expiry, no error text. Surfaces new_unexpected_fields
+  #    as a SOFT "portal changed" warning. Rejects empty / malformed reads so a
+  #    blank scrape is never reported as a healthy journey.
+  # ---------------------------------------------------------------------------
+  - id: assert_journey
+    type: code
+    depends_on: [walk_portal_journey]
+    code_config:
+      language: python
+      code: |
+        # Validate the browser's structured extraction field by field. Any hard
+        # miss fails the run; new_unexpected_fields is only a soft warning.
+        j = _steps.get("walk_portal_journey") or {}
+        if not isinstance(j, dict):
+            j = {}
+
+        # Parse the expected screens (ordered) and the known field schema.
+        raw_screens = str(_input.get("expected_screens", "") or "")
+        expected_screens = [s.strip() for s in raw_screens.split(",") if s.strip()]
+
+        raw_fields = str(_input.get("known_required_fields", "") or "")
+        known_fields = [s.strip() for s in raw_fields.split(",") if s.strip()]
+        known_set = {f for f in known_fields}
+
+        reached = j.get("screens_reachable") or []
+        if not isinstance(reached, list):
+            reached = []
+        reached_set = {str(s).strip() for s in reached}
+
+        live_fields = j.get("required_fields_present") or []
+        if not isinstance(live_fields, list):
+            live_fields = []
+        live_set = {str(f).strip() for f in live_fields}
+
+        unexpected = j.get("new_unexpected_fields") or []
+        if not isinstance(unexpected, list):
+            unexpected = []
+        unexpected_list = [str(u).strip() for u in unexpected if str(u).strip()]
+
+        failures = []
+
+        # Guard against an empty / malformed read - a blank journey must never be
+        # reported as a healthy portal.
+        if not reached_set and not live_set:
+            failures.append("empty_read: browser returned no screens and no fields")
+
+        # Assertion 1: authentication succeeded.
+        if not bool(j.get("logged_in", False)):
+            failures.append("not_logged_in")
+
+        # Assertion 2: the session did not expire mid-journey.
+        if bool(j.get("session_expired", False)):
+            failures.append("session_expired")
+
+        # Assertion 3: every expected screen was reachable.
+        missing_screens = [s for s in expected_screens if s not in reached_set]
+        if missing_screens:
+            failures.append("unreachable_screens: " + ", ".join(missing_screens))
+
+        # Assertion 4: the live field set is a SUPERSET of the known schema.
+        missing_fields = [f for f in known_fields if f not in live_set]
+        if missing_fields:
+            failures.append("missing_required_fields: " + ", ".join(missing_fields))
+
+        # Assertion 5: the submit affordance renders and is enabled (we never click).
+        if not bool(j.get("submit_button_enabled", False)):
+            failures.append("submit_button_not_enabled")
+
+        # Assertion 6: the browser reported no error text.
+        err = j.get("error_text")
+        if err not in (None, "", "null"):
+            failures.append("browser_error: " + str(err))
+
+        # SOFT signal: new fields/consent steps the partner added. Not a hard
+        # failure on its own, but it is the early-warning that the portal changed.
+        portal_changed = len(unexpected_list) > 0
+
+        passed = len(failures) == 0
+        result = {
+            "passed": passed,
+            "failing_assertion": ("" if passed else failures[0]),
+            "all_failures": failures,
+            "portal_changed_warning": portal_changed,
+            "new_unexpected_fields": unexpected_list,
+            "screens_reached": sorted(reached_set),
+            "missing_screens": missing_screens,
+            "missing_required_fields": missing_fields,
+            "live_fields": sorted(live_set),
+            "submit_button_enabled": bool(j.get("submit_button_enabled", False)),
+            "screenshot_url": str(j.get("screenshot_url", "") or ""),
+        }
+
+  # ---------------------------------------------------------------------------
+  # 4. TRAJECTORY-REPLAY - the primary partner-redesign detector. Scores the live
+  #    walkthrough against a recorded golden run and fails below 0.8. Catches a
+  #    silent redesign, a renamed selector, or an extra interstitial wizard step
+  #    even when the field assertions above technically still resolve. A
+  #    deterministic scorer comparing observable actions/extractions, not a model
+  #    vote - and provider-neutral.
+  # ---------------------------------------------------------------------------
+  - id: golden_replay
+    type: trajectory-replay
+    depends_on: [walk_portal_journey, assert_journey]
+    trajectory_replay_config:
+      golden_run_id: "{input.golden_run_id}"
+      fail_below_score: 0.8
+      allow_cost_delta_pct: 10.0
+      cost_budget_usd: 0.5
+
+  # ---------------------------------------------------------------------------
+  # 5. JOURNEY VERDICT - deterministically fold the assertion result AND the
+  #    golden-replay score into one health decision. A failed assertion, a
+  #    below-threshold replay score (drift), OR a new mandatory field all turn the
+  #    monitor red. Pure code - no model in this gate.
+  # ---------------------------------------------------------------------------
+  - id: journey_verdict
+    type: code
+    depends_on: [assert_journey, golden_replay]
+    code_config:
+      language: python
+      code: |
+        # Combine the deterministic assertion with the golden-run replay score and
+        # the soft portal-changed warning into a single ops verdict.
+        a = _steps.get("assert_journey") or {}
+        rep = _steps.get("golden_replay") or {}
+        if not isinstance(a, dict):
+            a = {}
+        if not isinstance(rep, dict):
+            rep = {}
+
+        assertions_passed = bool(a.get("passed", False))
+        portal_changed = bool(a.get("portal_changed_warning", False))
+        unexpected_list = a.get("new_unexpected_fields") or []
+        if not isinstance(unexpected_list, list):
+            unexpected_list = []
+
+        # The replay step surfaces a score and/or a pass flag depending on backend
+        # shape; read whichever is present and compare to the configured floor.
+        threshold = 0.8
+        score = rep.get("score", rep.get("replay_score"))
+        try:
+            score_f = float(score)
+        except (TypeError, ValueError):
+            score_f = None
+
+        if "passed" in rep:
+            replay_ok = bool(rep.get("passed"))
+        elif score_f is not None:
+            replay_ok = score_f >= threshold
+        else:
+            # No replay signal (e.g. golden run missing) - do not let a missing
+            # baseline mask a real assertion failure, and do not invent a drift
+            # failure either; treat replay as neutral and rely on the assertions.
+            replay_ok = True
+
+        # A new mandatory/unexpected field is treated as a breaking change: the
+        # team's batch could stall on a field they do not fill. Red on it too.
+        portal_broke = (not assertions_passed) or (not replay_ok) or portal_changed
+        healthy = not portal_broke
+
+        if not assertions_passed:
+            reason = "assertion_failed: " + str(a.get("failing_assertion", "unknown"))
+        elif not replay_ok:
+            sc = "n/a" if score_f is None else str(round(score_f, 3))
+            reason = "partner_redesign_drift: replay score " + sc + " below " + str(threshold)
+        elif portal_changed:
+            reason = "new_mandatory_field(s): " + ", ".join(unexpected_list)
+        else:
+            reason = "journey_unchanged"
+
+        result = {
+            "healthy": healthy,
+            "status": ("green" if healthy else "red"),
+            "reason": reason,
+            "assertions_passed": assertions_passed,
+            "replay_ok": replay_ok,
+            "replay_score": score_f,
+            "portal_changed_warning": portal_changed,
+            "new_unexpected_fields": unexpected_list,
+            "failing_assertion": str(a.get("failing_assertion", "")),
+            "all_failures": a.get("all_failures", []),
+            "screens_reached": a.get("screens_reached", []),
+            "missing_screens": a.get("missing_screens", []),
+            "missing_required_fields": a.get("missing_required_fields", []),
+            "screenshot_url": a.get("screenshot_url", ""),
+        }
+
+  # ---------------------------------------------------------------------------
+  # 6. CONDITION - route the verdict. Unchanged -> a quiet OK notify. Broken or a
+  #    new mandatory field -> page ops with the cause, the failure screenshot, and
+  #    the new_unexpected_fields list so a human can adapt the real workflow
+  #    BEFORE the daily batch fails. No write was performed, so no approval gate is
+  #    needed; a forked submit-capable version MUST gate the submit on approval.
+  # ---------------------------------------------------------------------------
+  - id: route_verdict
+    type: condition
+    depends_on: [journey_verdict]
+    condition_config:
+      expression: "{steps.journey_verdict.output.healthy} == True"
+      then: [notify_ok]
+      else: [notify_ops]
+
+  # 6a) GREEN: a quiet confirmation that the partner portal journey is unchanged.
+  - id: notify_ok
+    type: notify
+    depends_on: [route_verdict]
+    notify_config:
+      service: slack
+      channel: "{input.ok_channel}"
+      message: ":white_check_mark: Partner portal journey UNCHANGED. Reached {steps.journey_verdict.output.screens_reached}, golden replay score {steps.journey_verdict.output.replay_score}. Submit affordance present, not clicked (read-only). Portal {input.portal_login_url}."
+
+  # 6b) RED: page ops with the cause, the failure screenshot, and the list of new
+  #     unexpected/mandatory fields so they can fix the manual flow before the
+  #     batch runs and stalls.
+  - id: notify_ops
+    type: notify
+    depends_on: [route_verdict]
+    notify_config:
+      service: slack
+      channel: "{input.ops_channel}"
+      message: ":rotating_light: PARTNER PORTAL CHANGED - operational journey at risk before today's batch. Cause: {steps.journey_verdict.output.reason}. Failing assertion: {steps.journey_verdict.output.failing_assertion}. New/unexpected fields: {steps.journey_verdict.output.new_unexpected_fields}. Missing screens: {steps.journey_verdict.output.missing_screens}. Missing required fields: {steps.journey_verdict.output.missing_required_fields}. Golden replay score {steps.journey_verdict.output.replay_score} (drift floor 0.8). Screenshot: {steps.journey_verdict.output.screenshot_url}. Portal {input.portal_login_url}. Adapt the manual flow before the batch fires."
+
+on_complete:
+  storage_path: "partner-portal-journey-monitor/{run_id}/result.json"

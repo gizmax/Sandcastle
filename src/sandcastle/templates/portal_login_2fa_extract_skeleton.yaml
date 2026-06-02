@@ -1,0 +1,452 @@
+# name: Portal Login 2FA Extract Skeleton
+# description: The canonical login-with-credentials-env, pause-on-2FA/CAPTCHA, then structured-extract skeleton that every gated-portal RPA flow forks from. A playwright browser step navigates the start_url, fills the login form from credentials_env, and submits - captcha_strategy=pause hands BOTH the CAPTCHA and the interactive SMS/TOTP 2FA challenge to a human (HITL). A sensor then confirms the portal's own authenticated report endpoint is reachable before the read is trusted. A second, cheap dom-mode browser step reads the post-login report table and returns strict JSON via output_schema {rows:[{date,metric,amount}], page_count}. A deterministic code step VALIDATES the extraction (row count > 0, every amount parses as a number after stripping currency symbols, page_count consistent with the read) and raises on schema drift. A condition routes: on a bad/empty read it notifies Slack with the screenshot_on_error artifact and stops; on success a transform normalizes to the caller's shape for the parent workflow. Strictly READ-ONLY by design - no submit / pay / file / delete anywhere, so no approval gate is needed. Both browser steps run in provider-neutral playwright/dom mode where the reasoning model only AUTHORS the script, so default_model is fully swappable; the load-bearing correctness is deterministic code + an engine-native sensor, never a single model's opinion.
+# tags: [RPA, BrowserAutomation, Playwright, DOM, PortalLogin, TwoFactor, CAPTCHA, HumanInTheLoop, StructuredExtract, ReadOnly, ProviderNeutral, Skeleton, Sensor, NoAPI]
+# category: general_ai
+
+name: portal-login-2fa-extract-skeleton
+description: >-
+  The canonical login-with-credentials-env, pause-on-2FA/CAPTCHA, then
+  structured-extract skeleton that every gated-portal RPA flow forks from. Built
+  for RevOps / FinOps / IT admins who must pull data from a vendor portal (a
+  carrier dashboard, a supplier EDI portal, a state tax site, an insurance broker
+  portal) that ships NO API and hides everything behind a login plus an
+  interactive SMS / TOTP 2FA challenge. The data lives entirely inside an
+  authenticated session on a JS-heavy portal with no export endpoint, so a plain
+  http step cannot establish the session cookie, cannot satisfy the 2FA prompt,
+  and cannot read DOM rendered client-side after login - only a real browser
+  driving the login form reaches it. Triggered nightly (cron / scheduled) or
+  manually with a {portal_name} + {target_report} input, and reused as a
+  sub_workflow building block by higher-level flows. Step 1 is a PLAYWRIGHT
+  browser step (provider-neutral - the reasoning model only authors the script):
+  it opens the start_url, fills the login form from credentials_env (NEVER an
+  inline secret), and submits; captcha_strategy=pause hands BOTH a CAPTCHA and the
+  interactive 2FA code entry to a human (HITL), max_actions caps runaway clicking,
+  and capture_screenshots keeps an audit / screenshot_on_error artifact. Step 2 is
+  an engine-native SENSOR that polls the portal's OWN authenticated report
+  endpoint until it answers 200, deterministically proving the login + 2FA session
+  actually took hold before any read is trusted. Step 3 is a cheap DOM-mode browser
+  read that returns ONLY the strict output_schema {rows:[{date,metric,amount}],
+  page_count} - no write of any kind. Step 4 is deterministic sandboxed Python that
+  VALIDATES the extraction with no model: row count > 0, every amount parses as a
+  number after stripping currency symbols, and page_count is consistent with the
+  rows read; it raises on schema drift so nothing downstream trusts a bad read.
+  Step 5 is a condition that, on a failed / empty read, NOTIFIES Slack with the
+  screenshot_on_error artifact and stops, or on success runs a TRANSFORM that
+  normalizes the rows to the caller's shape and emits the JSON for the parent
+  workflow. The whole flow is strictly READ-ONLY - no submit, pay, file, withdraw,
+  or delete exists anywhere, which is why no approval gate is required and which
+  sidesteps the biggest RPA legality / ToS hazard. Both browser steps ride
+  default_model and stay swappable across all providers; the sensor and the
+  deterministic code validation are model-independent and engine-native.
+  (connectors: vendor portal via browser, slack)
+
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 1200
+
+input_schema:
+  required: ["portal_name", "login_url", "report_url", "target_report"]
+  properties:
+    portal_name:
+      type: string
+      description: >-
+        Human-readable name of the gated vendor portal being pulled (carrier
+        dashboard, supplier EDI portal, state tax site, insurance broker portal).
+        Used in prompts, the sensor reasoning, and notifications.
+      example: "Acme Carrier Dashboard"
+    login_url:
+      type: string
+      description: >-
+        URL of the portal's login page. Templated into the playwright login
+        step's start_url. The login form is filled from credentials_env, never
+        from an inline secret.
+      example: "https://portal.acme-carrier.example/login"
+    report_url:
+      type: string
+      description: >-
+        URL of the post-login report page the dom-mode read step opens to extract
+        the table, AND the authenticated endpoint the sensor polls to prove the
+        session took hold. Reachable ONLY after login + 2FA succeed.
+      example: "https://portal.acme-carrier.example/reports/monthly-spend"
+    target_report:
+      type: string
+      description: >-
+        Which report / table on the post-login page to extract (e.g. 'monthly
+        spend by line item', 'open shipments', 'tax balance due'). Steers the
+        dom-mode read's prompt.
+      example: "monthly spend by line item"
+    portal_credentials_env:
+      type: string
+      description: >-
+        NAME of the environment variable holding the portal login credentials.
+        Secrets are NEVER inlined - only the env var name is passed to the browser
+        step's credentials_env.
+      default: "PORTAL_CREDS"
+      example: "PORTAL_CREDS"
+    expected_currency:
+      type: string
+      description: >-
+        Currency symbol / code the deterministic validator strips from each amount
+        before parsing it as a number (defends against '$1,234.50', 'EUR 42'…).
+      default: "$"
+      example: "$"
+    min_rows:
+      type: integer
+      description: >-
+        The validator rejects the read as empty / drifted if fewer than this many
+        rows came back. Default 1 (a report with zero rows is treated as a
+        suspicious read, not a valid empty result).
+      default: 1
+      example: "1"
+    sensor_poll_interval_seconds:
+      type: integer
+      description: "Seconds between polls of the authenticated report endpoint while waiting for the login + 2FA session to take hold."
+      default: 30
+      example: "30"
+    sensor_timeout_seconds:
+      type: integer
+      description: >-
+        Hard ceiling in seconds the session sensor waits for the authenticated
+        endpoint to answer 200 (covers the human-paced 2FA / CAPTCHA hand-off)
+        before the run aborts rather than reading an unauthenticated page.
+      default: 1800
+      example: "1800"
+    oncall_channel:
+      type: string
+      description: "Slack channel notified when the extraction fails validation (bad / empty / drifted read), with the screenshot_on_error artifact attached."
+      default: "#portal-rpa-oncall"
+      example: "#portal-rpa-oncall"
+
+steps:
+  # ---------------------------------------------------------------------------
+  # 1) LOGIN (PLAYWRIGHT - PROVIDER-NEUTRAL). The configured reasoning model only
+  #    AUTHORS the Playwright login script from this prompt, so default_model is
+  #    fully swappable across providers. It opens the login_url, fills the form
+  #    from credentials_env (NEVER an inline secret), and submits. captcha_strategy
+  #    =pause hands BOTH a CAPTCHA and the interactive SMS / TOTP 2FA challenge to a
+  #    human (HITL) - the model never tries to solve a CAPTCHA or guess a 2FA code.
+  #    max_actions caps runaway clicking; capture_screenshots keeps an audit /
+  #    screenshot_on_error artifact. This step performs NO write beyond signing in.
+  # ---------------------------------------------------------------------------
+  - id: portal_login
+    type: browser
+    prompt: >-
+      You are signing in to the gated vendor portal "{input.portal_name}" as a
+      READ-ONLY data clerk. There is NO API - the target data lives only behind
+      this login plus an interactive 2FA challenge. Open the login page at the
+      start URL and authenticate using ONLY the credentials supplied by the
+      credentials_env environment variable. NEVER hardcode, echo, or log the
+      secret. Steps: (1) fill the username / email and password fields from the
+      environment credentials and submit the login form. (2) If a CAPTCHA appears,
+      STOP and hand off to a human - do not attempt to solve it (captcha_strategy=
+      pause). (3) If an SMS / TOTP / device-verification 2FA prompt appears, STOP
+      and PAUSE for a human to enter the one-time code - never guess or fabricate a
+      code. (4) After authentication succeeds, confirm you have reached the
+      logged-in area (an account / dashboard landing). Do NOT submit, file, pay,
+      upload, change, or delete anything - signing in is the only action. Return
+      whether login completed and whether a 2FA / CAPTCHA hand-off was required.
+    browser_config:
+      mode: playwright
+      start_url: "{input.login_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 120
+      max_actions: 30
+      headless: true
+      credentials_env: "{input.portal_credentials_env}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          logged_in:
+            type: boolean
+            description: "True once the portal shows an authenticated / logged-in landing."
+          two_factor_required:
+            type: boolean
+            description: "True if an SMS / TOTP 2FA challenge was presented and handed to a human."
+          captcha_encountered:
+            type: boolean
+            description: "True if a CAPTCHA was presented and paused for a human."
+          landing_url:
+            type: string
+            description: "The URL of the authenticated landing page reached after login."
+        required: ["logged_in"]
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
+
+  # ---------------------------------------------------------------------------
+  # 2) SESSION SENSOR (engine-native, no model) - prove the login + interactive 2FA
+  #    session ACTUALLY took hold before any read is trusted. Polls the portal's
+  #    OWN authenticated report endpoint (report_url) until it answers HTTP 200,
+  #    which is reachable only inside a valid authenticated session. The human-paced
+  #    2FA / CAPTCHA hand-off can take minutes, so this poll-with-timeout absorbs
+  #    that wait deterministically; on timeout the run aborts rather than reading an
+  #    unauthenticated / login-redirected page. Pure control flow - no model opinion.
+  # ---------------------------------------------------------------------------
+  - id: await_session
+    type: sensor
+    depends_on: [portal_login]
+    sensor_config:
+      url: "{input.report_url}"
+      method: GET
+      headers:
+        Accept: "text/html,application/json"
+      condition: "status_code == 200"
+      check_interval: 30
+      timeout: 1800
+
+  # ---------------------------------------------------------------------------
+  # 3) EXTRACT (DOM mode - PROVIDER-NEUTRAL, cheap). With the session proven live,
+  #    the reasoning model authors a lightweight DOM read of the post-login report
+  #    table and returns ONLY the strict output_schema {rows:[{date,metric,amount}],
+  #    page_count}. dom mode is a cheap server-rendered / rendered-DOM read and the
+  #    authoring model is swappable via default_model. This is PURELY the READ pass:
+  #    no form submission, no write of any kind. captcha_strategy=pause covers a
+  #    surprise step-up wall; max_actions caps clicking; capture_screenshots keeps
+  #    the screenshot_on_error audit artifact for the notify branch.
+  # ---------------------------------------------------------------------------
+  - id: extract_report
+    type: browser
+    depends_on: [await_session]
+    prompt: >-
+      The session for "{input.portal_name}" is authenticated. Open the report page
+      at the start URL and extract the "{input.target_report}" table. Read EVERY
+      data row across ALL pages (follow pagination / "next" if present). For each
+      row capture exactly three fields: the date, the metric / line-item label, and
+      the amount (keep the amount as the literal text the portal shows, including
+      any currency symbol or thousands separators - a deterministic validator
+      downstream parses it). Also report page_count = the number of report pages you
+      paged through. Do NOT submit, file, pay, export, change, or delete anything -
+      this is extraction ONLY. If a CAPTCHA or step-up auth wall appears, PAUSE for
+      a human. Return ONLY the structured JSON described by the output schema: a
+      rows array of {date, metric, amount} objects and an integer page_count.
+    browser_config:
+      mode: dom
+      start_url: "{input.report_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 120
+      max_actions: 40
+      headless: true
+      credentials_env: "{input.portal_credentials_env}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          rows:
+            type: array
+            items:
+              type: object
+              properties:
+                date: { type: string }
+                metric: { type: string }
+                amount: { type: string }
+              required: ["date", "metric", "amount"]
+          page_count:
+            type: integer
+            description: "Number of report pages paged through to read all rows."
+        required: ["rows"]
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
+
+  # ---------------------------------------------------------------------------
+  # 4) VALIDATE the extraction DETERMINISTICALLY (no model) - the load-bearing
+  #    correctness gate. Asserts row count >= min_rows, that every amount parses as
+  #    a number after stripping the currency symbol / separators (re.sub on the
+  #    string, NEVER os/subprocess/eval), and that page_count is consistent with the
+  #    rows read. ANY mismatch / empty read / schema drift => ok=False with a
+  #    human-readable reason; nothing downstream trusts a bad read. This pairs with
+  #    the session sensor above so reliability is deterministic, not a model opinion.
+  # ---------------------------------------------------------------------------
+  - id: validate_extraction
+    type: code
+    depends_on: [extract_report]
+    code_config:
+      language: python
+      code: |
+        # Deterministic gate over the dom-mode READ pass. No model decides
+        # correctness here. The browser step may nest its structured payload under
+        # output / data / result, so unwrap defensively first.
+        payload = _steps.get("extract_report") or {}
+        if not isinstance(payload, dict):
+            payload = {"raw": payload}
+        for key in ("output", "data", "result"):
+            inner = payload.get(key)
+            if isinstance(inner, dict) and ("rows" in inner or "page_count" in inner):
+                payload = inner
+                break
+
+        rows = payload.get("rows")
+        if not isinstance(rows, list):
+            rows = []
+
+        try:
+            min_rows = int(_input.get("min_rows", 1) or 1)
+        except (TypeError, ValueError):
+            min_rows = 1
+
+        currency = str(_input.get("expected_currency", "$") or "")
+
+        reasons = []
+
+        # --- Row count: an empty / sub-threshold read is treated as a bad read ---
+        if len(rows) < min_rows:
+            reasons.append(
+                "row count " + str(len(rows)) + " is below the minimum " + str(min_rows)
+                + " (empty or drifted read)"
+            )
+
+        def _parse_amount(raw):
+            # Strip the configured currency symbol, thousands separators, and any
+            # surrounding whitespace, then parse the remainder as a float. Uses
+            # re.sub on the string directly - pure sandboxed string handling.
+            s = str(raw if raw is not None else "").strip()
+            if currency:
+                s = s.replace(currency, "")
+            # Remove currency letters, spaces and thousands separators, keep digits,
+            # sign and decimal point. A leading minus / parentheses negative is kept
+            # as a sign so refunds/credits still parse.
+            neg = s.startswith("(") and s.endswith(")")
+            s = re.sub(r"[^0-9.\-]", "", s)
+            if neg and not s.startswith("-"):
+                s = "-" + s
+            if s in ("", "-", ".", "-."):
+                return None
+            try:
+                return round(float(s), 2)
+            except (TypeError, ValueError):
+                return None
+
+        clean_rows = []
+        bad_amounts = []
+        for idx, r in enumerate(rows):
+            if not isinstance(r, dict):
+                bad_amounts.append({"index": idx, "reason": "row_not_object"})
+                continue
+            date = str(r.get("date", "") or "").strip()
+            metric = str(r.get("metric", "") or "").strip()
+            amount_raw = r.get("amount", "")
+            amount = _parse_amount(amount_raw)
+            row_reasons = []
+            if not date:
+                row_reasons.append("missing_date")
+            if not metric:
+                row_reasons.append("missing_metric")
+            if amount is None:
+                row_reasons.append("amount_not_numeric")
+            if row_reasons:
+                bad_amounts.append({
+                    "index": idx,
+                    "raw_amount": str(amount_raw)[:80],
+                    "reasons": row_reasons,
+                })
+                continue
+            clean_rows.append({
+                "date": date,
+                "metric": metric,
+                "amount": amount,
+                "amount_raw": str(amount_raw)[:80],
+            })
+
+        if bad_amounts:
+            reasons.append(
+                str(len(bad_amounts)) + " row(s) failed parsing (non-numeric amount "
+                + "or missing date/metric) - likely schema drift"
+            )
+
+        # --- page_count consistency: a positive row set must have paged at least
+        #     one page; a page_count of 0 alongside rows signals a drifted read. ---
+        page_count_raw = payload.get("page_count", 1)
+        try:
+            page_count = int(page_count_raw)
+        except (TypeError, ValueError):
+            page_count = 0
+        if len(clean_rows) > 0 and page_count < 1:
+            reasons.append(
+                "page_count " + str(page_count) + " is inconsistent with "
+                + str(len(clean_rows)) + " extracted rows"
+            )
+
+        ok = bool(len(reasons) == 0 and len(clean_rows) >= min_rows)
+
+        total_amount = round(sum(r["amount"] for r in clean_rows), 2)
+
+        result = {
+            "ok": ok,
+            "row_count": len(clean_rows),
+            "bad_row_count": len(bad_amounts),
+            "bad_rows": bad_amounts,
+            "page_count": page_count,
+            "total_amount": total_amount,
+            "rows": clean_rows,
+            "reasons": reasons,
+            "reason_summary": "; ".join(reasons) if reasons else "all checks passed",
+            "portal_name": str(_input.get("portal_name", "")),
+            "target_report": str(_input.get("target_report", "")),
+        }
+
+  # ---------------------------------------------------------------------------
+  # 5) CONDITION - route on the DETERMINISTIC validation flag (not a model's
+  #    opinion). On a clean read, normalize and emit for the parent workflow. On a
+  #    bad / empty / drifted read, notify on-call with the screenshot_on_error
+  #    artifact and STOP. This is a strictly READ-ONLY flow, so there is no
+  #    irreversible action and no approval gate is required by design.
+  # ---------------------------------------------------------------------------
+  - id: route_extraction
+    type: condition
+    depends_on: [validate_extraction]
+    condition_config:
+      expression: "{steps.validate_extraction.output.ok} == True"
+      then: [normalize_output]
+      else: [notify_bad_read]
+
+  # 5a) BAD-READ PATH - the extraction failed deterministic validation (empty,
+  #     non-numeric amounts, or schema drift). Page on-call with the reasons and the
+  #     screenshot_on_error audit artifact; the run stops with nothing trusted. No
+  #     portal write ever happens - this only alerts.
+  - id: notify_bad_read
+    type: notify
+    depends_on: [route_extraction]
+    notify_config:
+      service: slack
+      channel: "{input.oncall_channel}"
+      message: >-
+        :rotating_light: Portal extract FAILED validation for
+        "{input.portal_name}" ({input.target_report}). The dom-mode read did not
+        pass the deterministic gate, so nothing downstream trusted it. Reason(s):
+        {steps.validate_extraction.output.reason_summary}. Rows read:
+        {steps.validate_extraction.output.row_count}, bad rows:
+        {steps.validate_extraction.output.bad_row_count}, page_count:
+        {steps.validate_extraction.output.page_count}. See the captured
+        screenshot_on_error artifact from the extract step for the exact page
+        state (likely a portal redesign, an expired session, or a login wall).
+        This run was strictly READ-ONLY - no submit / pay / file / delete occurred.
+
+  # 5b) SUCCESS PATH - the read passed deterministic validation. TRANSFORM
+  #     normalizes the validated rows into the caller's shape and emits the JSON the
+  #     parent workflow (which reuses this skeleton as a sub_workflow) consumes.
+  - id: normalize_output
+    type: transform
+    depends_on: [route_extraction]
+    transform_config:
+      template: |
+        {
+          "portal_name": "{steps.validate_extraction.output.portal_name}",
+          "target_report": "{steps.validate_extraction.output.target_report}",
+          "extracted_at": "{run_id}",
+          "row_count": {steps.validate_extraction.output.row_count},
+          "page_count": {steps.validate_extraction.output.page_count},
+          "total_amount": {steps.validate_extraction.output.total_amount},
+          "rows": {steps.validate_extraction.output.rows},
+          "read_only": true,
+          "validation": "passed"
+        }
+
+on_complete:
+  storage_path: "portal-login-2fa-extract-skeleton/{run_id}/extracted-report.json"

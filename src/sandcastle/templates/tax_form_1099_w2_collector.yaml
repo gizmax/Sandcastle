@@ -1,0 +1,715 @@
+# name: Tax Form 1099 W2 Collector
+# description: At tax season, logs into every payroll, brokerage, gig-platform, and contractor portal that posts year-end information returns (1099-NEC/MISC/INT/DIV, W-2, K-1) ONLY as session-gated downloadable PDFs behind login + MFA, retrieves each form, deterministically validates the payee TIN-last4 and box amounts against expectations (refusing any form whose recipient_tin_last4 does not match the expected payee - cross-payee leak guard), files an organized, server-side-encrypted tax packet to secure storage, and HARD-BLOCKS on a human approval before anything is ever transmitted to a preparer or e-file service. The browser is strictly read/download - it has NO path to e-file or submit. A date-window sensor re-polls the 'Tax Documents' page until each expected form is published or the deadline passes; a trajectory-replay guards each portal's login+download path against the seasonal UI redesigns brokers push every January.
+# tags: [tax, 1099, w2, k1, brokerage, payroll, gig, browser, playwright, computer-use, rpa, trajectory-replay, human-approval, pii, encrypted, read-only, provider-neutral]
+# category: general_ai
+
+name: tax-form-1099-w2-collector
+description: >-
+  A tax-season information-return collector for a tax-prep firm or multi-entity
+  family office that must assemble dozens of year-end forms (1099-NEC / MISC /
+  INT / DIV, W-2, K-1) from broker, payroll, gig-app, and bank portals where the
+  forms live ONLY in a login-gated 'Tax Documents' web section as session-gated
+  PDFs. These portals offer NO consumer document API, the download links are
+  JS-generated and expire, and access requires login plus near-universal MFA -
+  there is no http endpoint that returns a 1099 PDF, so an authenticated browser
+  is the only way to retrieve the document.
+
+  FLOW. A date-window SENSOR polls each expected payee-portal pairing's
+  'Tax Documents' page weekly and only proceeds once the expected form is
+  published OR the filing-availability deadline passes (forms generally land late
+  Jan - mid Feb), so the run never spins before forms exist. A LOOP fans out over
+  the expected {payee, portal, form_type} pairings; each iteration runs a BROWSER
+  step in playwright mode (PROVIDER-NEUTRAL - the configured reasoning model
+  authors the login + Tax-Documents navigation + per-form download, and the
+  authoring model is swappable via default_model; computer_use is the documented
+  per-pairing fallback only for the few brokerage portals that render the
+  tax-docs grid in a non-DOM canvas widget). It signs in with the per-pairing
+  credentials_env (NEVER an inline secret), opens Tax Documents, filters to the
+  target tax_year, and downloads each available form, returning a strict
+  output_schema {form_type, tax_year, payer_name, payer_tin_last4,
+  recipient_tin_last4, box_amounts, pdf_path}. captcha_strategy=pause hands the
+  near-certain MFA / CAPTCHA login challenge to a human; max_actions=40 caps each
+  session; capture_screenshots keeps an audit trail. The browser is STRICTLY
+  read/download - e-file, submit, file-return, and pay are explicitly FORBIDDEN
+  in the prompt; it has no path to transmit anything.
+
+  A PARSE step turns each downloaded PDF into text. A deterministic CODE step
+  (NO model - the load-bearing correctness layer) confirms form_type and tax_year
+  match the request, verifies recipient_tin_last4 matches the EXPECTED payee (the
+  cross-payee leak guard - it refuses any form grabbed from the wrong account),
+  and sanity-checks every box amount is numeric and non-negative, emitting
+  VERIFIED vs MISMATCH per form and a completeness map of expected-vs-arrived. A
+  CONDITION routes: any MISMATCH or missing-but-expected form raises a NOTIFY and
+  HOLDS - that form is NOT filed. A second deterministic CODE step files ONLY the
+  VERIFIED forms into a clean, server-side-encrypted packet at
+  client/<tax_year>/<form_type>/ (the engine writes the encrypted bytes via
+  on_complete.storage_path with S3 SSE; this step records the manifest +
+  destination paths). A TRAJECTORY-REPLAY then diffs the fragile portal
+  login+download path against a recorded golden run with fail_below_score=0.9, so
+  a portal's January redesign that would misroute downloads FAILS the run loudly
+  instead of silently grabbing the wrong document. Then the SAFETY gate: NOTHING
+  is transmitted to the tax preparer, e-file service, or shared externally until
+  a human reviews the assembled packet and the completeness checklist and
+  APPROVES - the browser is never allowed to e-file or submit, and that single
+  outbound handoff is the only irreversible action, hard-gated behind APPROVAL.
+  Finally a NOTIFY pings the engagement lead with the completeness checklist
+  (which expected forms arrived vs still pending). The TIN/amount verification is
+  deterministic Python independent of any model, no vendor agent runtime is used,
+  and storage is encrypted - the whole design keeps highly sensitive PII (TINs,
+  income) safe and the only irreversible step human-gated.
+  (connectors: encrypted tax-packet store via storage_path, slack)
+
+default_model: sonnet
+default_timeout: 1800
+
+input_schema:
+  required: ["expected_forms", "client_id", "tax_year"]
+  properties:
+    expected_forms:
+      type: array
+      description: >-
+        The expected payee-portal pairings the loop fans out over - one entry per
+        year-end form the firm expects to collect for this client. Shape per item:
+        {payee (the account holder / entity the form belongs to),
+        expected_recipient_tin_last4 (the LAST 4 of that payee's TIN we expect -
+        the cross-payee leak guard compares the downloaded form's
+        recipient_tin_last4 against THIS), form_type (one of 1099-NEC, 1099-MISC,
+        1099-INT, 1099-DIV, W-2, K-1), payer_name (the broker/payroll/gig issuer),
+        portal, login_url (portal login page), tax_docs_url (the 'Tax Documents'
+        section), browser_mode (playwright default; computer_use only for non-DOM
+        canvas tax-doc grids), credentials_env (NAME of the per-portal env var,
+        NEVER the secret), availability_check_url (page/endpoint the sensor polls
+        to detect the form is published), golden_run_id (recorded login+download
+        trajectory to diff against)}. Secrets are NEVER inlined.
+      default:
+        - payee: "Jane Q. Client"
+          expected_recipient_tin_last4: "4821"
+          form_type: "1099-DIV"
+          payer_name: "Fidelity Brokerage"
+          portal: "fidelity"
+          login_url: "https://login.fidelity.example/login"
+          tax_docs_url: "https://www.fidelity.example/tax/documents"
+          availability_check_url: "https://www.fidelity.example/tax/documents/status?year=2025"
+          browser_mode: "playwright"
+          credentials_env: "TAXDOC_CREDS"
+          golden_run_id: "golden-fidelity-taxdocs-download-2026-01-15"
+        - payee: "Jane Q. Client"
+          expected_recipient_tin_last4: "4821"
+          form_type: "W-2"
+          payer_name: "Acme Payroll Co"
+          portal: "acme-payroll"
+          login_url: "https://my.acmepayroll.example/signin"
+          tax_docs_url: "https://my.acmepayroll.example/tax-forms"
+          availability_check_url: "https://my.acmepayroll.example/tax-forms/status?year=2025"
+          browser_mode: "playwright"
+          credentials_env: "TAXDOC_CREDS"
+          golden_run_id: "golden-acme-payroll-w2-download-2026-01-15"
+        - payee: "Client Holdings LLC"
+          expected_recipient_tin_last4: "7703"
+          form_type: "1099-NEC"
+          payer_name: "GigFlex Platform"
+          portal: "gigflex"
+          login_url: "https://pro.gigflex.example/login"
+          tax_docs_url: "https://pro.gigflex.example/earnings/tax-documents"
+          availability_check_url: "https://pro.gigflex.example/earnings/tax-documents/status?year=2025"
+          browser_mode: "computer_use"
+          credentials_env: "TAXDOC_CREDS"
+          golden_run_id: "golden-gigflex-1099nec-download-2026-01-15"
+    client_id:
+      type: string
+      description: "Client / entity identifier used to build the encrypted packet path client/<tax_year>/<form_type>/ and to scope the engagement."
+      default: "client-jane-q"
+    tax_year:
+      type: integer
+      description: "The tax year the expected forms belong to. The deterministic verifier rejects any downloaded form whose tax_year does not equal this (guards against grabbing a prior-year form)."
+      default: 2025
+    allowed_form_types:
+      type: array
+      description: >-
+        Closed enum a downloaded form_type must normalize into. A form whose type
+        is outside this set is treated as a bad/drifted read and never filed.
+      default:
+        - "1099-NEC"
+        - "1099-MISC"
+        - "1099-INT"
+        - "1099-DIV"
+        - "W-2"
+        - "K-1"
+    availability_deadline:
+      type: string
+      description: >-
+        ISO date the sensor stops waiting for a not-yet-published form. Forms
+        generally appear late Jan - mid Feb; past this date the run proceeds with
+        whatever arrived and the rest are reported as still-pending.
+      default: "2026-02-20"
+    packet_root:
+      type: string
+      description: >-
+        Root of the secure, server-side-encrypted tax-packet store where VERIFIED
+        forms are filed as client/<tax_year>/<form_type>/. The encrypted bytes are
+        written by the engine via on_complete.storage_path (S3 SSE); the file step
+        records the manifest + destination paths. NEVER an unencrypted location.
+      default: "tax-packets"
+    drift_fail_below_score:
+      type: number
+      description: >-
+        Trajectory-replay score floor for the fragile portal login+download path.
+        Set high (0.9) because a broker's January redesign that moved the tax-docs
+        grid could misroute downloads - below this the run FAILS loudly rather than
+        grabbing the wrong document.
+      default: 0.9
+    notify_service:
+      type: string
+      description: "Where to post MISMATCH / hold alerts and the completeness checklist: slack or teams."
+      default: "slack"
+    notify_channel:
+      type: string
+      description: "Channel for the tax-collection alerts and the engagement-lead checklist."
+      default: "#tax-season-collection"
+
+steps:
+  # ---------------------------------------------------------------------------
+  # 1) TRIGGER SENSOR - the date-window gate. Polls the 'Tax Documents'
+  #    availability page weekly and only proceeds once the expected forms are
+  #    published OR the availability deadline passes (year-end forms generally
+  #    land late Jan - mid Feb). This is why the run never spins before forms
+  #    exist. Hard timeout so a never-published form does not hang the run; the
+  #    completeness check downstream reports anything still pending. Pure control
+  #    flow, no model. The first pairing's availability page is the run's gate;
+  #    per-pairing freshness is re-checked inside the browser read.
+  # ---------------------------------------------------------------------------
+  - id: await_forms_published
+    type: sensor
+    sensor_config:
+      url: "{input.expected_forms[0].availability_check_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200 and bool(response.get('published', False))"
+      check_interval: 604800
+      timeout: 2592000
+
+  # ---------------------------------------------------------------------------
+  # 2) LOOP over the expected payee-portal pairings. Each iteration drives ONE
+  #    portal login + per-form download. The loop item (one expected-form def)
+  #    arrives on _input['_item'] and is templated into the browser step's
+  #    start_url, mode, and credentials_env. max_iterations caps the batch size.
+  # ---------------------------------------------------------------------------
+  - id: collect_forms
+    type: loop
+    depends_on: [await_forms_published]
+    loop_config:
+      over: "input.expected_forms"
+      step_ids: [download_form]
+      max_iterations: 80
+
+  # 2a) BROWSER (READ pass - DOWNLOAD-ONLY, PROVIDER-NEUTRAL). Runs in playwright
+  #     mode: the configured reasoning model authors a deterministic Playwright
+  #     login + Tax-Documents navigation + per-form download flow from this prompt,
+  #     and the authoring model is swappable via default_model so the reasoning
+  #     provider swaps freely. computer_use is the documented per-pairing fallback
+  #     (browser_mode == computer_use) ONLY for the few brokerage portals that
+  #     render the tax-docs grid in a non-DOM canvas widget that needs pixel
+  #     clicks. It signs in with the per-pairing credentials_env (NEVER an inline
+  #     secret), opens Tax Documents, filters to the target tax_year, and downloads
+  #     each available form. captcha_strategy=pause hands the near-certain MFA /
+  #     CAPTCHA challenge to a human; max_actions=40 caps each session;
+  #     capture_screenshots keeps an audit trail. STRICTLY read/download: e-file,
+  #     submit, file-return, pay, and any account change are explicitly FORBIDDEN
+  #     here - this step has NO path to transmit anything. Returns ONLY the strict
+  #     output_schema. (loop child step - defined separately, read via _input['_item'])
+  - id: download_form
+    type: browser
+    browser_config:
+      mode: playwright
+      start_url: "{input._item.login_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 180
+      max_actions: 40
+      headless: true
+      credentials_env: "{input._item.credentials_env}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          payee: { type: string }
+          portal: { type: string }
+          payer_name: { type: string }
+          form_type: { type: string }
+          tax_year: { type: integer }
+          payer_tin_last4: { type: string }
+          recipient_tin_last4: { type: string }
+          box_amounts:
+            type: object
+            description: "Map of box label -> numeric amount as read from the portal grid (e.g. {'1a': 1234.56, '2a': 0})."
+          pdf_path: { type: string }
+          form_found: { type: boolean }
+        required: ["form_type", "tax_year", "form_found"]
+    prompt: |
+      You are a tax-prep clerk collecting a year-end information return for payee
+      "{input._item.payee}" from the {input._item.payer_name} portal
+      (portal: {input._item.portal}). This portal exposes NO document API - the
+      form lives ONLY in the login-gated 'Tax Documents' web section as a
+      session-gated, JS-generated PDF whose download link expires. An
+      authenticated browser is the only way to retrieve it.
+
+      Author a deterministic, provider-neutral browser automation that:
+      1. Opens the portal login page ({input._item.login_url}) and signs in using
+         ONLY the credentials supplied via the credentials_env environment
+         variable. NEVER hardcode, echo, or log the secret.
+      2. If a CAPTCHA, MFA, one-time-passcode, or device-verification challenge
+         appears, STOP and hand off to a human (captcha_strategy=pause). Do NOT
+         attempt to solve or bypass it.
+      3. Navigates to the 'Tax Documents' section ({input._item.tax_docs_url}) and
+         filters/selects tax year {input.tax_year}.
+      4. Locates the expected form of type "{input._item.form_type}" and downloads
+         it. Click the download/view-PDF control to retrieve the session-tokenized
+         one-time PDF and record where it was saved (pdf_path). Read the visible
+         form metadata from the page/grid: the payer name, the LAST 4 of the
+         payer's TIN, the LAST 4 of the recipient's TIN, and the box amounts.
+      5. Performs NO write actions of ANY kind. You are STRICTLY FORBIDDEN from
+         e-filing, submitting a return, clicking File / Submit / Transmit / Pay,
+         consenting to e-delivery changes, or altering any account setting. This is
+         DOWNLOAD-ONLY extraction. If a page tries to force a submit/e-file
+         interstitial, STOP and report it - do not click through it.
+
+      Capture only the LAST 4 digits of each TIN - never the full TIN. If the
+      expected form is not yet published for this year, set form_found=false and
+      return without downloading.
+
+      Return ONLY the structured JSON described by the output_schema: payee,
+      portal, payer_name, form_type, tax_year (integer), payer_tin_last4 (4
+      digits), recipient_tin_last4 (4 digits), box_amounts (label -> numeric), the
+      pdf_path where the PDF was saved, and form_found.
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
+
+  # ---------------------------------------------------------------------------
+  # 3) PARSE each downloaded form PDF into text. This gives an INDEPENDENT read of
+  #    the document body (the PDF's own printed TIN-last4 / amounts) that the
+  #    deterministic verifier below cross-checks against the portal grid's
+  #    output_schema values - so a misread grid or the WRONG document is caught,
+  #    not trusted. Provider-neutral document parse.
+  # ---------------------------------------------------------------------------
+  - id: parse_forms
+    type: parse
+    depends_on: [collect_forms]
+    prompt: "{steps.collect_forms.output}"
+    parse_config:
+      output: markdown
+
+  # ---------------------------------------------------------------------------
+  # 4) CODE (deterministic, LOAD-BEARING - NO model). The correctness layer that
+  #    decides VERIFIED vs MISMATCH per form and builds the expected-vs-arrived
+  #    completeness map. For each downloaded form it:
+  #    - confirms form_type normalizes into the allowed enum AND matches the
+  #      expected form_type for that pairing,
+  #    - confirms tax_year equals the requested input.tax_year (no prior-year form),
+  #    - CROSS-PAYEE LEAK GUARD: verifies recipient_tin_last4 (4 digits) equals the
+  #      expected payee's expected_recipient_tin_last4 - refusing any form grabbed
+  #      from the wrong account,
+  #    - sanity-checks every box amount is numeric and non-negative,
+  #    - cross-checks the portal recipient_tin_last4 against the TIN-last4 printed
+  #      in the parsed PDF text when present (wrong-document guard).
+  #    Anything failing is MISMATCH and is NEVER filed. Uses re.search/match/sub
+  #    directly - no compiled patterns, no I/O, no model.
+  # ---------------------------------------------------------------------------
+  - id: verify_forms
+    type: code
+    depends_on: [collect_forms, parse_forms]
+    code_config:
+      language: python
+      code: |
+        # The loop output is a list of per-pairing download envelopes.
+        downloads = _steps.get("collect_forms")
+        if isinstance(downloads, dict):
+            downloads = [downloads]
+        if not isinstance(downloads, list):
+            downloads = []
+
+        # The expected pairings drive the completeness map and the per-payee
+        # expected TIN-last4 lookup (the cross-payee leak guard reference).
+        expected = _input.get("expected_forms") or []
+        if not isinstance(expected, list):
+            expected = []
+
+        allowed = _input.get("allowed_form_types") or [
+            "1099-NEC", "1099-MISC", "1099-INT", "1099-DIV", "W-2", "K-1",
+        ]
+        allowed_set = {str(t).strip().upper() for t in allowed if isinstance(t, str)}
+
+        try:
+            want_year = int(_input.get("tax_year") or 0)
+        except (TypeError, ValueError):
+            want_year = 0
+
+        # The parsed PDF text - used only as a corroborating blob to confirm the
+        # recipient TIN-last4 also appears in the document body (wrong-doc guard).
+        parsed_blob = _steps.get("parse_forms")
+        parsed_text = ""
+        if isinstance(parsed_blob, dict):
+            parsed_text = str(
+                parsed_blob.get("markdown")
+                or parsed_blob.get("text")
+                or parsed_blob.get("output")
+                or ""
+            )
+        elif isinstance(parsed_blob, str):
+            parsed_text = parsed_blob
+
+        def _norm_type(v):
+            s = str(v or "").strip().upper()
+            # Normalize whitespace runs to a single dash so "1099 NEC" == "1099-NEC".
+            s = re.sub(r"[\s_]+", "-", s)
+            return s
+
+        def _last4(v):
+            s = str(v or "").strip()
+            m = re.search(r"(\d{4})\s*$", s)
+            if m:
+                return m.group(1)
+            digits = re.sub(r"\D", "", s)
+            if len(digits) >= 4:
+                return digits[-4:]
+            return ""
+
+        # Build an expected-pairing index keyed by (payee, form_type) so each
+        # download is matched to the payee whose TIN-last4 it MUST carry.
+        expected_index = {}
+        completeness = []
+        for ex in expected:
+            if not isinstance(ex, dict):
+                continue
+            payee = str(ex.get("payee") or "").strip()
+            ftype = _norm_type(ex.get("form_type"))
+            key = payee + "::" + ftype
+            expected_index[key] = {
+                "payee": payee,
+                "form_type": ftype,
+                "payer_name": str(ex.get("payer_name") or ""),
+                "portal": str(ex.get("portal") or ""),
+                "expected_recipient_tin_last4": _last4(ex.get("expected_recipient_tin_last4")),
+            }
+            completeness.append({
+                "payee": payee,
+                "form_type": ftype,
+                "payer_name": str(ex.get("payer_name") or ""),
+                "arrived": False,
+                "status": "pending",
+            })
+
+        verified = []
+        mismatched = []
+        arrived_keys = set()
+
+        for env in downloads:
+            if not isinstance(env, dict):
+                mismatched.append({"reason": "read_not_object", "raw": str(env)[:160]})
+                continue
+
+            form_found = bool(env.get("form_found", True))
+            payee = str(env.get("payee") or "").strip()
+            ftype = _norm_type(env.get("form_type"))
+            key = payee + "::" + ftype
+            exp = expected_index.get(key) or {}
+
+            # A pairing that explicitly reported the form is not yet published is
+            # left pending (not a mismatch) - the completeness map shows it.
+            if not form_found:
+                continue
+
+            arrived_keys.add(key)
+
+            portal_recip4 = _last4(env.get("recipient_tin_last4"))
+            payer4 = _last4(env.get("payer_tin_last4"))
+            exp_recip4 = str(exp.get("expected_recipient_tin_last4") or "")
+
+            try:
+                got_year = int(env.get("tax_year") or 0)
+            except (TypeError, ValueError):
+                got_year = 0
+
+            box_amounts = env.get("box_amounts")
+            if not isinstance(box_amounts, dict):
+                box_amounts = {}
+
+            reasons = []
+
+            # form_type must be a known type AND match what we expected here.
+            if ftype not in allowed_set:
+                reasons.append("form_type_not_in_enum")
+            if exp and exp.get("form_type") and ftype != str(exp.get("form_type")):
+                reasons.append("form_type_mismatch")
+
+            # tax_year must equal the requested year (no prior-year form).
+            if want_year and got_year != want_year:
+                reasons.append("tax_year_mismatch")
+
+            # recipient TIN-last4 must be a 4-digit value.
+            if not re.match(r"^\d{4}$", portal_recip4):
+                reasons.append("bad_recipient_tin_last4")
+
+            # CROSS-PAYEE LEAK GUARD - the downloaded form's recipient TIN-last4
+            # MUST equal the expected payee's TIN-last4. Refuse otherwise.
+            if exp_recip4:
+                if portal_recip4 != exp_recip4:
+                    reasons.append("recipient_tin_payee_mismatch")
+            else:
+                # No expected TIN on file for this pairing - cannot verify ownership.
+                reasons.append("no_expected_tin_on_file")
+
+            # Corroborate the recipient TIN-last4 also appears in the parsed PDF
+            # body when we have one (wrong-document guard). Only a NEGATIVE
+            # signal (text present but the last4 absent) is treated as suspicious.
+            if parsed_text and portal_recip4 and re.match(r"^\d{4}$", portal_recip4):
+                if not re.search(portal_recip4, parsed_text):
+                    reasons.append("recipient_tin_not_in_pdf_text")
+
+            # Box amounts must all be numeric and non-negative.
+            bad_boxes = []
+            clean_boxes = {}
+            for label, amt in box_amounts.items():
+                try:
+                    val = round(float(amt), 2)
+                except (TypeError, ValueError):
+                    bad_boxes.append(str(label))
+                    continue
+                if val < 0:
+                    bad_boxes.append(str(label))
+                    continue
+                clean_boxes[str(label)] = val
+            if bad_boxes:
+                reasons.append("bad_box_amounts")
+
+            record = {
+                "payee": payee,
+                "form_type": ftype,
+                "payer_name": str(env.get("payer_name") or exp.get("payer_name") or ""),
+                "portal": str(env.get("portal") or exp.get("portal") or ""),
+                "tax_year": got_year,
+                "payer_tin_last4": payer4,
+                "recipient_tin_last4": portal_recip4,
+                "expected_recipient_tin_last4": exp_recip4,
+                "box_amounts": clean_boxes,
+                "bad_boxes": bad_boxes,
+                "pdf_path": str(env.get("pdf_path") or ""),
+            }
+
+            if reasons:
+                record["reasons"] = reasons
+                mismatched.append(record)
+            else:
+                verified.append(record)
+
+        # Mark completeness rows that arrived; the rest stay pending.
+        for row in completeness:
+            key = str(row.get("payee") or "") + "::" + str(row.get("form_type") or "")
+            if key in arrived_keys:
+                row["arrived"] = True
+                # Was it VERIFIED or did it MISMATCH?
+                row["status"] = "mismatch"
+                for v in verified:
+                    if str(v.get("payee") or "") + "::" + str(v.get("form_type") or "") == key:
+                        row["status"] = "verified"
+                        break
+
+        pending = [r for r in completeness if not r.get("arrived")]
+        mismatch_or_missing = (len(mismatched) > 0) or (len(pending) > 0)
+
+        result = {
+            "verified": verified,
+            "verified_count": len(verified),
+            "mismatched": mismatched,
+            "mismatched_count": len(mismatched),
+            "completeness": completeness,
+            "pending": pending,
+            "pending_count": len(pending),
+            "expected_count": len(completeness),
+            "arrived_count": len(arrived_keys),
+            "has_mismatch_or_missing": mismatch_or_missing,
+            "all_verified": (len(verified) > 0 and len(mismatched) == 0 and len(pending) == 0),
+        }
+
+  # ---------------------------------------------------------------------------
+  # 5) CONDITION - deterministic routing on the verifier's facts (NOT a model).
+  #    If any form MISMATCHED or an expected form is still missing, raise a NOTIFY
+  #    and HOLD - the hold path still files the clean VERIFIED forms but flags the
+  #    gap. Otherwise go straight to filing. Both branches reach file_packet, so a
+  #    partial collection still files what passed while surfacing what did not.
+  # ---------------------------------------------------------------------------
+  - id: completeness_branch
+    type: condition
+    depends_on: [verify_forms]
+    condition_config:
+      expression: "{steps.verify_forms.output.has_mismatch_or_missing} == True"
+      then: [notify_hold, file_packet]
+      else: [file_packet]
+
+  # 5a) NOTIFY (hold branch) - alert that some forms MISMATCHED or are still
+  #     missing. Those forms are NOT filed; a human resolves the gap. This only
+  #     alerts - it never touches a portal and never transmits anything.
+  - id: notify_hold
+    type: notify
+    notify_config:
+      service: "{input.notify_service}"
+      channel: "{input.notify_channel}"
+      message: >-
+        :warning: Tax collection HOLD for {input.client_id} (TY {input.tax_year}).
+        MISMATCH forms (NOT filed):
+        {steps.verify_forms.output.mismatched_count} - detail:
+        {steps.verify_forms.output.mismatched}. Still PENDING / missing:
+        {steps.verify_forms.output.pending_count} - {steps.verify_forms.output.pending}.
+        VERIFIED so far: {steps.verify_forms.output.verified_count}. The browser
+        was strictly read/download - nothing was e-filed, submitted, or transmitted.
+        Resolve the mismatches / await the pending forms before the packet is
+        approved for the preparer.
+
+  # ---------------------------------------------------------------------------
+  # 6) CODE (deterministic) - file ONLY the VERIFIED forms into a clean,
+  #    server-side-encrypted tax packet at client/<tax_year>/<form_type>/. The
+  #    engine writes the encrypted bytes via on_complete.storage_path (S3 SSE);
+  #    this step records the destination paths + a manifest. NO model, NO
+  #    transmission - filing to encrypted storage is non-destructive and internal.
+  # ---------------------------------------------------------------------------
+  - id: file_packet
+    type: code
+    depends_on: [verify_forms]
+    code_config:
+      language: python
+      code: |
+        ver = _steps.get("verify_forms") or {}
+        if not isinstance(ver, dict):
+            ver = {}
+        verified = ver.get("verified") or []
+        if not isinstance(verified, list):
+            verified = []
+
+        packet_root = str(_input.get("packet_root") or "tax-packets").rstrip("/")
+        client_id = str(_input.get("client_id") or "client")
+        try:
+            tax_year = int(_input.get("tax_year") or 0)
+        except (TypeError, ValueError):
+            tax_year = 0
+
+        def _safe(seg):
+            # Filesystem-safe path segment: letters, digits, dash, dot, underscore.
+            return re.sub(r"[^A-Za-z0-9._-]", "_", str(seg or "unknown"))
+
+        client_safe = _safe(client_id)
+        year_safe = _safe(tax_year)
+
+        manifest = []
+        for f in verified:
+            if not isinstance(f, dict):
+                continue
+            ftype = _safe(f.get("form_type"))
+            payee = _safe(f.get("payee"))
+            # client/<tax_year>/<form_type>/<payee>.pdf inside the encrypted root.
+            dest_path = (
+                packet_root + "/" + client_safe + "/" + year_safe
+                + "/" + ftype + "/" + payee + ".pdf"
+            )
+            manifest.append({
+                "payee": f.get("payee"),
+                "form_type": f.get("form_type"),
+                "payer_name": f.get("payer_name"),
+                "tax_year": f.get("tax_year"),
+                "recipient_tin_last4": f.get("recipient_tin_last4"),
+                "box_amounts": f.get("box_amounts"),
+                "source_pdf": f.get("pdf_path"),
+                "filed_path": dest_path,
+            })
+
+        result = {
+            "manifest": manifest,
+            "filed_count": len(manifest),
+            "packet_root": packet_root,
+            "client_id": client_id,
+            "tax_year": tax_year,
+            "encryption": "s3-sse",
+            "filed": len(manifest) > 0,
+            "note": "Manifest + encrypted destination paths recorded. Bytes land via on_complete.storage_path with S3 SSE. NOTHING transmitted to preparer / e-file - that is human-gated downstream.",
+        }
+
+  # ---------------------------------------------------------------------------
+  # 7) TRAJECTORY-REPLAY - the engine-native reliability guard for the fragile
+  #    portal login+download path. Diffs the live read against a recorded golden
+  #    run and FAILS the run when the replay score drops below
+  #    drift_fail_below_score (0.9) - so a broker's January redesign that moved the
+  #    tax-docs grid or download button, which would otherwise MISROUTE downloads
+  #    to the wrong document, fails LOUDLY before the packet is approved. Cost
+  #    blowup vs golden is rejected too. Deterministic scorer, not a model opinion.
+  #    Placed BEFORE the human approval gate so a drifted run never reaches a human
+  #    as if it were clean.
+  # ---------------------------------------------------------------------------
+  - id: guard_portal_drift
+    type: trajectory-replay
+    depends_on: [file_packet]
+    trajectory_replay_config:
+      golden_run_id: "{input.expected_forms[0].golden_run_id}"
+      fail_below_score: 0.9
+      allow_cost_delta_pct: 10.0
+      cost_budget_usd: 0.5
+
+  # ---------------------------------------------------------------------------
+  # 8) APPROVAL - the MANDATORY human gate before the ONLY irreversible / outbound
+  #    action. NOTHING is transmitted to the tax preparer, the e-file service, or
+  #    shared externally until a human reviews the assembled packet AND the
+  #    completeness checklist and APPROVES. The browser is never allowed to e-file
+  #    or submit; this gate is the single chokepoint for any external handoff.
+  #    BLOCKS until a person signs off; on_timeout: abort means a missed approval
+  #    NEVER transmits the packet. Shows the validated packet + completeness so the
+  #    human authorizes the EXACT set of forms.
+  # ---------------------------------------------------------------------------
+  - id: approve_handoff
+    type: approval
+    depends_on: [guard_portal_drift]
+    approval_config:
+      message: >-
+        AUTHORIZE TAX-PACKET HANDOFF for {input.client_id}, tax year
+        {input.tax_year}. This is the ONLY outbound / irreversible action in the
+        run - the browser was strictly read/download and NEVER e-filed or
+        submitted anything. {steps.file_packet.output.filed_count} VERIFIED forms
+        are filed to encrypted storage. Completeness checklist:
+        {steps.verify_forms.output.completeness}. Still pending / missing:
+        {steps.verify_forms.output.pending}. MISMATCHED (held, NOT filed):
+        {steps.verify_forms.output.mismatched_count}. Approve to release this
+        packet to the tax preparer / e-file service; reject to keep everything
+        internal and unencrypted-store-only with nothing transmitted.
+      show_data: steps.file_packet.output
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: false
+
+  # ---------------------------------------------------------------------------
+  # 9) NOTIFY - on approval, ping the engagement lead with the completeness
+  #    checklist (which expected forms arrived vs still pending) and the filed
+  #    packet location. Runs only after the human approves the handoff. This is the
+  #    deliverable signal; it does not itself transmit forms (the approved handoff
+  #    to the preparer / e-file is the gated action above).
+  # ---------------------------------------------------------------------------
+  - id: notify_engagement_lead
+    type: notify
+    depends_on: [approve_handoff]
+    notify_config:
+      service: "{input.notify_service}"
+      channel: "{input.notify_channel}"
+      message: >-
+        :white_check_mark: Tax packet APPROVED for handoff - {input.client_id}
+        (TY {input.tax_year}). Filed VERIFIED forms:
+        {steps.file_packet.output.filed_count} at
+        {steps.file_packet.output.packet_root}/{input.client_id}/{input.tax_year}/
+        (S3 server-side encrypted). Completeness:
+        {steps.verify_forms.output.arrived_count}/{steps.verify_forms.output.expected_count}
+        expected forms arrived; still pending:
+        {steps.verify_forms.output.pending}. Manifest:
+        {steps.file_packet.output.manifest}. Reminder: all retrieval was
+        read-only; the only transmission is the human-approved handoff to the
+        preparer / e-file.
+
+on_complete:
+  storage_path: "tax-packets/{run_id}/{client_id}/{tax_year}/tax-packet-manifest.json"

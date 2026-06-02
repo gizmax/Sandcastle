@@ -1,0 +1,844 @@
+# name: SaaS Admin Console Seat Audit
+# description: Logs into a SaaS admin console that exposes no user-list export API, drives the authenticated SPA to extract the full per-seat user/role/last-login roster as structured JSON, deterministically validates the extraction, flags dormant and over-privileged seats, and revokes them ONLY behind a single human approval gate - with a trajectory-replay reliability check so a console redesign that breaks pagination is caught before bad data flows.
+# tags: [SaaS, SeatAudit, AccessReview, SOC2, IT-Ops, SpendManagement, Browser, Playwright, TrajectoryReplay, NoExportAPI, DormantSeats, LeastPrivilege]
+# category: devops
+
+name: saas-admin-console-seat-audit
+description: >-
+  A scheduled / on-demand seat audit for IT Operations and SaaS Spend & Security
+  managers at companies juggling 40+ tools where most admin consoles (niche vertical
+  SaaS, legacy seat-based products) ship NO user-directory export API - or gate it
+  behind an Enterprise SKU the buyer does not own. The seat/role/last-login data lives
+  ONLY in the logged-in web admin UI: a JS SPA whose member table is built client-side
+  after auth, so a plain http/firecrawl call hits the login wall and renders nothing.
+
+  Flow: a cheap engine-native SENSOR confirms the console is reachable, then a READ-ONLY
+  browser census (mode: dom) logs in via credentials_env, paginates the entire member
+  table, and returns a STRUCTURED roster via output_schema - users[{email, role,
+  last_login_iso, status, seat_cost}], total_seats, page_count. It mutates nothing. A
+  DETERMINISTIC Python step VALIDATES that extraction with no model: total_seats equals
+  len(users), every email matches an email shape, every last_login parses as ISO, there
+  are no duplicate emails, and page_count > 0 - on any mismatch the run FAILS LOUDLY
+  rather than acting on partial data. A second deterministic step computes the dormant
+  set (no login in > dormant_days) and the over-privileged set (admin role + no login in
+  > stale_admin_days) and proposes a revocation list. A cross-provider RACE wraps an
+  advisory risk read so the reasoning never depends on one vendor. A TRAJECTORY-REPLAY
+  step diffs this run against a golden_run_id and FAILS below 0.85 so a pagination-breaking
+  redesign is caught before stale data reaches a human. Then ONE human APPROVAL lists the
+  exact seats proposed for revocation - NO seat is touched until a person signs off. Only
+  after approval does a per-seat browser WRITE (mode: playwright, capture_screenshots on
+  for audit, max_actions capped) revoke each seat; a post-write dom RE-CENSUS plus a
+  DETERMINISTIC reconcile asserts every revoked seat is gone and no untouched seat changed,
+  and Slack receives the tamper-evident audit summary.
+
+  PROVIDER NEUTRAL: both census (dom) and per-seat revoke (playwright) modes feed the
+  page's accessibility tree + output_schema to whatever reasoning model default_model
+  names; the extraction and the Playwright authoring are swappable across all providers and
+  no vendor agent runtime is in the loop. The load-bearing correctness (validation, dormant/
+  over-privileged sets, reconcile, audit hash) is pure Python; trajectory-replay is a
+  deterministic scorer. READ (census) and WRITE (revoke) are fully separated so a dry-run
+  audit is always possible without touching a single seat.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 1800
+
+input_schema:
+  required: ["console_members_url"]
+  properties:
+    console_members_url:
+      type: string
+      description: "URL of the SaaS admin console members/users page where per-seat email, role, last-login and status are listed (authenticated JS SPA, no export API). The census browser step starts here."
+      default: "https://app.your-saas.com/admin/members"
+      example: "https://app.acme-vertical.com/settings/team/members"
+    console_health_url:
+      type: string
+      description: "A cheap reachability URL for the console (login or health page) the pre-flight sensor polls before spending a browser session. Defaults to the members URL."
+      default: "https://app.your-saas.com/admin/members"
+      example: "https://app.acme-vertical.com/login"
+    seat_url_template:
+      type: string
+      description: "URL template for a single seat's admin page; {email} is substituted per seat during the revocation loop. If the console deep-links by email or user id, set it here."
+      default: "https://app.your-saas.com/admin/members?q={email}"
+      example: "https://app.acme-vertical.com/settings/team/members?search={email}"
+    credentials_env_var:
+      type: string
+      description: "Name of the environment variable holding the admin login (username+password or session token). The value is NEVER inlined into the workflow; the browser steps read it via credentials_env."
+      default: "ADMIN_CONSOLE_CREDS"
+      example: "ACME_ADMIN_CONSOLE_CREDS"
+    dormant_days:
+      type: number
+      description: "A seat is DORMANT if its last login is older than this many days. Dormant seats are candidate revocations (wasted spend)."
+      default: 90
+      example: "90"
+    stale_admin_days:
+      type: number
+      description: "A seat is OVER-PRIVILEGED if it holds an admin/owner role AND has not logged in within this many days - an idle privileged account is a security risk."
+      default: 60
+      example: "60"
+    max_revoke_fraction:
+      type: number
+      description: "Sanity ceiling: if the proposed revocation list exceeds this fraction of ALL observed seats, the plan is flagged as a likely bad extraction and must be reviewed extra-carefully (surfaced to the human approver, never auto-acted)."
+      default: 0.5
+      example: "0.5"
+    golden_run_id:
+      type: string
+      description: "ID of the known-good recorded census run. The trajectory-replay step diffs THIS run against it and fails below the score floor, catching a console redesign that silently broke pagination before stale data reaches the approver."
+      default: "golden-seat-census-2026-05-01"
+      example: "golden-seat-census-2026-05-01"
+    slack_channel:
+      type: string
+      description: "Slack channel for the seat-audit completion summary, revocation report and audit integrity hash."
+      default: "#saas-seat-audit"
+      example: "#it-spend-security"
+
+steps:
+  # ---------------------------------------------------------------------------
+  # 1) PRE-FLIGHT SENSOR - cheap engine-native reachability check before we spend
+  #    a full browser session. Polls the console health/login URL until it answers
+  #    200. Pure control flow, no model, hard timeout so we never wait forever.
+  # ---------------------------------------------------------------------------
+  - id: console_reachable
+    type: sensor
+    sensor_config:
+      url: "{input.console_health_url}"
+      method: GET
+      headers:
+        Accept: "text/html,application/json"
+      condition: "status_code == 200"
+      check_interval: 60
+      timeout: 1800
+
+  # ---------------------------------------------------------------------------
+  # 2) READ-ONLY CENSUS (mode: dom). The reasoning model only AUTHORS a DOM
+  #    extraction from the prompt; output_schema returns the STRUCTURED per-seat
+  #    roster. This step MUTATES NOTHING - no Deactivate/Remove/Delete clicks. It
+  #    paginates the entire member table. credentials_env supplies the admin login
+  #    (never inlined); captcha_strategy: pause hands MFA/CAPTCHA to a human;
+  #    max_actions caps pagination so it cannot click forever. Provider-neutral:
+  #    any of the reasoning providers can drive the accessibility-tree read.
+  # ---------------------------------------------------------------------------
+  - id: census_roster
+    type: browser
+    depends_on: [console_reachable]
+    prompt: >-
+      Log in to the SaaS admin console using the credentials provided via the environment,
+      then open the members / users management page at the start URL. This is a STRICTLY
+      READ-ONLY census: do NOT click any Deactivate, Remove seat, Suspend, Downgrade,
+      Delete, or Invite control - read only. Read EVERY member row, paginating through ALL
+      pages of the table (click next-page / load-more until no more rows appear). For each
+      seat extract: the user's email, their role (e.g. Admin, Owner, Member, Viewer), their
+      last login as an ISO-8601 timestamp (last_login_iso; use the exact value the console
+      shows, converted to ISO if needed; empty string if the console shows 'never'), their
+      current account status (active or inactive/suspended), and the per-seat monthly cost
+      if the console displays one (seat_cost, a number; 0 if not shown). Also report the
+      total number of seats you saw (total_seats) and how many pages you paginated through
+      (page_count). Return ONLY the structured object described by the output schema. If a
+      CAPTCHA, MFA challenge, or unexpected login wall appears, PAUSE for a human rather
+      than guessing.
+    browser_config:
+      mode: dom
+      start_url: "{input.console_members_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 180
+      max_actions: 80
+      headless: true
+      credentials_env: "{input.credentials_env_var}"
+      captcha_strategy: pause
+      capture_screenshots: false
+      output_schema:
+        type: object
+        properties:
+          users:
+            type: array
+            description: "One object per seat in the console member table."
+            items:
+              type: object
+              properties:
+                email: { type: string }
+                role: { type: string }
+                last_login_iso:
+                  type: string
+                  description: "Last login as ISO-8601 (empty string if the seat never logged in)."
+                status:
+                  type: string
+                  enum: ["active", "inactive"]
+                seat_cost:
+                  type: number
+                  description: "Per-seat monthly cost if shown, else 0."
+              required: ["email", "role", "last_login_iso", "status"]
+          total_seats:
+            type: integer
+            description: "Total number of seats the census observed (must equal len(users))."
+          page_count:
+            type: integer
+            description: "Number of pages paginated through (must be > 0)."
+        required: ["users", "total_seats", "page_count"]
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
+
+  # ---------------------------------------------------------------------------
+  # 3) VALIDATE the extraction DETERMINISTICALLY (no model) - the load-bearing
+  #    correctness gate. Asserts total_seats == len(users), every email matches an
+  #    email shape (re.search, not re.compile), every last_login parses as ISO, no
+  #    duplicate emails, page_count > 0. On ANY mismatch ok=False with human-readable
+  #    reasons so a downstream condition can FAIL LOUDLY rather than acting on a
+  #    partial / broken scrape.
+  # ---------------------------------------------------------------------------
+  - id: validate_extraction
+    type: code
+    depends_on: [census_roster]
+    code_config:
+      language: python
+      code: |
+        import re
+        import json
+        from datetime import datetime
+
+        # --- Normalize the browser census (may nest under output/data/result) -----------
+        census = _steps.get('census_roster') or {}
+        if isinstance(census, str):
+            try:
+                census = json.loads(census) if census.strip() else {}
+            except (ValueError, TypeError):
+                census = {}
+        if not isinstance(census, dict):
+            census = {}
+        for key in ('output', 'data', 'result'):
+            inner = census.get(key)
+            if isinstance(inner, dict) and ('users' in inner or 'total_seats' in inner):
+                census = inner
+                break
+
+        users = census.get('users')
+        if not isinstance(users, list):
+            users = []
+        total_seats = census.get('total_seats')
+        page_count = census.get('page_count')
+
+        reasons = []
+
+        # --- total_seats must equal the actual number of extracted rows -----------------
+        try:
+            total_seats_int = int(total_seats)
+        except (TypeError, ValueError):
+            total_seats_int = -1
+        count_ok = (total_seats_int == len(users)) and len(users) > 0
+        if len(users) == 0:
+            reasons.append('census returned zero seats (empty read)')
+        elif total_seats_int != len(users):
+            reasons.append('total_seats ' + str(total_seats) + ' != len(users) ' + str(len(users)))
+
+        # --- page_count must be a positive integer (pagination actually ran) ------------
+        try:
+            page_count_int = int(page_count)
+        except (TypeError, ValueError):
+            page_count_int = 0
+        pages_ok = page_count_int > 0
+        if not pages_ok:
+            reasons.append('page_count is not > 0 (pagination did not run)')
+
+        # --- Per-seat shape: email shape, ISO last_login, no duplicate emails -----------
+        email_pattern = r'^[^@\s]+@[^@\s]+\.[^@\s]+$'
+        seen_emails = set()
+        duplicate_emails = []
+        bad_email_rows = []
+        bad_login_rows = []
+        normalized = []
+        for idx, u in enumerate(users):
+            if not isinstance(u, dict):
+                bad_email_rows.append('row ' + str(idx) + ' is not an object')
+                continue
+            email = str(u.get('email') or '').strip().lower()
+            if not re.search(email_pattern, email):
+                bad_email_rows.append(email or ('row ' + str(idx) + ' empty email'))
+                continue
+            if email in seen_emails:
+                duplicate_emails.append(email)
+            seen_emails.add(email)
+
+            raw_login = str(u.get('last_login_iso') or '').strip()
+            login_ok = True
+            parsed_login = ''
+            if raw_login == '':
+                # 'never logged in' is a valid, meaningful state (maximally dormant).
+                parsed_login = ''
+            else:
+                try:
+                    dt = datetime.fromisoformat(raw_login.replace('Z', '+00:00'))
+                    parsed_login = dt.isoformat()
+                except (ValueError, TypeError):
+                    login_ok = False
+                    bad_login_rows.append(email + ': ' + raw_login)
+            if not login_ok:
+                continue
+
+            role = str(u.get('role') or '').strip()
+            status = str(u.get('status') or 'active').strip().lower()
+            if status not in ('active', 'inactive'):
+                status = 'active'
+            try:
+                seat_cost = float(u.get('seat_cost') or 0)
+            except (TypeError, ValueError):
+                seat_cost = 0.0
+            normalized.append({
+                'email': email,
+                'role': role,
+                'last_login_iso': parsed_login,
+                'never_logged_in': parsed_login == '',
+                'status': status,
+                'seat_cost': seat_cost,
+            })
+
+        emails_ok = len(bad_email_rows) == 0
+        logins_ok = len(bad_login_rows) == 0
+        no_dupes_ok = len(duplicate_emails) == 0
+        if bad_email_rows:
+            reasons.append('rows with invalid email shape: ' + ', '.join(bad_email_rows[:10]))
+        if bad_login_rows:
+            reasons.append('rows whose last_login did not parse as ISO: ' + ', '.join(bad_login_rows[:10]))
+        if duplicate_emails:
+            reasons.append('duplicate emails in roster: ' + ', '.join(sorted(set(duplicate_emails))[:10]))
+
+        ok = bool(count_ok and pages_ok and emails_ok and logins_ok and no_dupes_ok)
+
+        result = {
+            'ok': ok,
+            'count_ok': count_ok,
+            'pages_ok': pages_ok,
+            'emails_ok': emails_ok,
+            'logins_ok': logins_ok,
+            'no_dupes_ok': no_dupes_ok,
+            'seat_count': len(normalized),
+            'page_count': page_count_int,
+            'reasons': reasons,
+            'reason_summary': '; '.join(reasons) if reasons else 'all extraction checks passed',
+            'roster': normalized,
+        }
+
+  # ---------------------------------------------------------------------------
+  # 4) DETERMINISTIC CONDITION - fail loudly on a bad extraction. If validation
+  #    did not pass we route to a notify-and-stop branch; NOTHING downstream
+  #    (replay, approval, revoke) can run on partial data. Clean -> compute the
+  #    revocation plan.
+  # ---------------------------------------------------------------------------
+  - id: extraction_gate
+    type: condition
+    depends_on: [validate_extraction]
+    condition_config:
+      expression: "{steps.validate_extraction.output.ok} == True"
+      then: [compute_revocation_sets]
+      else: [notify_bad_extraction]
+
+  # 4a) BAD-EXTRACTION PATH - the deterministic validation failed. Page the channel
+  #     with exactly why and STOP. No seat is ever touched on a broken scrape.
+  - id: notify_bad_extraction
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: >-
+        BLOCKED: SaaS seat audit ABORTED before any analysis or revocation because the
+        deterministic extraction validation FAILED. The console roster could not be trusted,
+        so nothing was acted on. Reason(s): {steps.validate_extraction.output.reason_summary}.
+        Seats parsed: {steps.validate_extraction.output.seat_count}, pages:
+        {steps.validate_extraction.output.page_count}. Re-check the console UI / pagination and re-run.
+
+  # ---------------------------------------------------------------------------
+  # 5) DETERMINISTIC dormant + over-privileged classification. Pure Python (no
+  #    model): a seat is DORMANT if last login is older than dormant_days (or never
+  #    logged in), OVER-PRIVILEGED if it holds an admin/owner role AND is stale
+  #    beyond stale_admin_days. Builds the proposed revocation list and a sanity
+  #    fraction. The plan a human will sign off on lives here, computed by code.
+  # ---------------------------------------------------------------------------
+  - id: compute_revocation_sets
+    type: code
+    depends_on: [validate_extraction]
+    code_config:
+      language: python
+      code: |
+        from datetime import datetime, timezone
+
+        validated = _steps.get('validate_extraction') or {}
+        roster = validated.get('roster', []) if isinstance(validated, dict) else []
+
+        dormant_days = float(_input.get('dormant_days', 90) or 90)
+        stale_admin_days = float(_input.get('stale_admin_days', 60) or 60)
+        max_revoke_fraction = float(_input.get('max_revoke_fraction', 0.5) or 0.5)
+
+        now = datetime.now(timezone.utc)
+        privileged_terms = ('admin', 'owner', 'superuser', 'super-admin', 'root')
+
+        def _age_days(iso_str):
+            # Age in days since last login; None if the seat never logged in.
+            s = str(iso_str or '').strip()
+            if s == '':
+                return None
+            try:
+                dt = datetime.fromisoformat(s.replace('Z', '+00:00'))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return max(0.0, (now - dt).total_seconds() / 86400.0)
+            except (ValueError, TypeError):
+                return None
+
+        dormant = []
+        over_privileged = []
+        active_seats = []
+        total_monthly_spend = 0.0
+        for seat in roster:
+            if not isinstance(seat, dict):
+                continue
+            email = seat.get('email')
+            role = str(seat.get('role') or '')
+            role_lc = role.lower()
+            status = str(seat.get('status') or 'active').lower()
+            seat_cost = float(seat.get('seat_cost') or 0)
+            age = _age_days(seat.get('last_login_iso'))
+            never = bool(seat.get('never_logged_in'))
+            is_privileged = any(term in role_lc for term in privileged_terms)
+
+            if status == 'active':
+                active_seats.append(seat)
+                total_monthly_spend += seat_cost
+
+            # DORMANT: never logged in, or last login older than dormant_days.
+            is_dormant = (never or (age is not None and age > dormant_days)) and status == 'active'
+            # OVER-PRIVILEGED: privileged role + stale beyond stale_admin_days.
+            is_over_priv = is_privileged and (never or (age is not None and age > stale_admin_days)) and status == 'active'
+
+            entry = {
+                'email': email,
+                'role': role,
+                'last_login_iso': seat.get('last_login_iso'),
+                'last_login_age_days': None if age is None else round(age, 1),
+                'never_logged_in': never,
+                'status': status,
+                'seat_cost': seat_cost,
+                'is_privileged': is_privileged,
+            }
+            if is_dormant:
+                dormant.append({**entry, 'flag': 'dormant'})
+            if is_over_priv:
+                over_privileged.append({**entry, 'flag': 'over_privileged'})
+
+        # Revocation candidates = union of dormant + over-privileged (dedup by email).
+        by_email = {}
+        for row in dormant + over_privileged:
+            em = row['email']
+            if em in by_email:
+                # Merge flags so an over-privileged dormant seat shows both reasons.
+                prev_flags = by_email[em].get('flags', [])
+                if row['flag'] not in prev_flags:
+                    prev_flags.append(row['flag'])
+                by_email[em]['flags'] = prev_flags
+            else:
+                merged = {k: v for k, v in row.items() if k != 'flag'}
+                merged['flags'] = [row['flag']]
+                by_email[em] = merged
+        revoke_candidates = sorted(by_email.values(), key=lambda r: str(r.get('email')))
+
+        total_seats = len(roster)
+        revoke_fraction = (len(revoke_candidates) / total_seats) if total_seats else 0.0
+        fraction_exceeded = revoke_fraction > max_revoke_fraction
+
+        # Estimated monthly savings if every candidate seat is revoked.
+        est_monthly_savings = round(sum(float(r.get('seat_cost') or 0) for r in revoke_candidates), 2)
+
+        result = {
+            'total_seats': total_seats,
+            'active_seat_count': len(active_seats),
+            'dormant_count': len(dormant),
+            'over_privileged_count': len(over_privileged),
+            'revoke_candidate_count': len(revoke_candidates),
+            'revoke_fraction': round(revoke_fraction, 4),
+            'fraction_exceeded': fraction_exceeded,
+            'est_total_monthly_spend': round(total_monthly_spend, 2),
+            'est_monthly_savings': est_monthly_savings,
+            'dormant': dormant,
+            'over_privileged': over_privileged,
+            'revoke_candidates': revoke_candidates,
+            'dormant_days': dormant_days,
+            'stale_admin_days': stale_admin_days,
+        }
+
+  # ---------------------------------------------------------------------------
+  # 6) CROSS-PROVIDER RACE - an ADVISORY risk read of the proposed plan, wrapped
+  #    across two providers (first non-empty wins, failover not a vote) so the
+  #    reasoning never depends on a single vendor. This is advisory only: the
+  #    revocation list itself is the deterministic code output above; this race
+  #    just adds a human-readable risk note for the approver. Branch steps carry
+  #    NO depends_on and pin different models for cross-provider resilience.
+  # ---------------------------------------------------------------------------
+  - id: risk_note_sonnet
+    type: standard
+    model: sonnet
+    prompt: |
+      You are a SaaS access-risk reviewer. In at most 4 sentences (no markdown, no emojis),
+      summarize the risk of the proposed seat-revocation plan for a human approver: how many
+      seats are dormant vs over-privileged, whether the revocation fraction looks plausible or
+      suspiciously high (fraction_exceeded flag), and the estimated monthly savings. Do NOT
+      invent seats. Plan: {steps.compute_revocation_sets.output}
+
+  - id: risk_note_gemini
+    type: standard
+    model: google/gemini-2.5-pro
+    prompt: |
+      You are a SaaS access-risk reviewer. In at most 4 sentences (no markdown, no emojis),
+      summarize the risk of the proposed seat-revocation plan for a human approver: how many
+      seats are dormant vs over-privileged, whether the revocation fraction looks plausible or
+      suspiciously high (fraction_exceeded flag), and the estimated monthly savings. Do NOT
+      invent seats. Plan: {steps.compute_revocation_sets.output}
+
+  - id: advisory_risk_note
+    type: race
+    depends_on: [compute_revocation_sets]
+    race_config:
+      branches:
+        - [risk_note_sonnet]
+        - [risk_note_gemini]
+      validator: "len(str(output).strip()) > 0"
+
+  # ---------------------------------------------------------------------------
+  # 7) CLASSIFY the overall audit severity from the deterministic plan. The model
+  #    only LABELS the cohort; every label routes into the same trajectory-replay
+  #    reliability check, so the classification cannot skip safety - it is purely
+  #    informational for the approver. Swappable model.
+  # ---------------------------------------------------------------------------
+  - id: classify_audit_severity
+    type: classify
+    depends_on: [compute_revocation_sets, advisory_risk_note]
+    classify_config:
+      model: haiku
+      input: "Classify the overall severity of this SaaS seat audit. routine = few dormant seats, no idle admins. notable = meaningful dormant spend OR a handful of over-privileged seats. urgent = several idle admin/owner seats (over_privileged_count high) which is a security exposure. suspicious = the revocation fraction exceeds the sanity ceiling (fraction_exceeded true), suggesting a possibly bad extraction the human must scrutinize. Plan: {steps.compute_revocation_sets.output}. Advisory note: {steps.advisory_risk_note.output}"
+      categories:
+        - routine
+        - notable
+        - urgent
+        - suspicious
+      branches:
+        routine: [replay_vs_golden]
+        notable: [replay_vs_golden]
+        urgent: [replay_vs_golden]
+        suspicious: [replay_vs_golden]
+
+  # ---------------------------------------------------------------------------
+  # 8) TRAJECTORY-REPLAY - the reliability layer. Diffs THIS census run against a
+  #    golden_run_id and FAILS below fail_below_score (UI drift, e.g. a console
+  #    redesign that broke pagination) or on a cost blowup. Deterministic scorer,
+  #    not a model's opinion: it compares observable actions + extracted outputs.
+  #    Catches a silently-broken extraction BEFORE the plan reaches a human.
+  # ---------------------------------------------------------------------------
+  - id: replay_vs_golden
+    type: trajectory-replay
+    depends_on: [classify_audit_severity]
+    trajectory_replay_config:
+      golden_run_id: "{input.golden_run_id}"
+      fail_below_score: 0.85
+      allow_cost_delta_pct: 15.0
+      cost_budget_usd: 0.5
+
+  # ---------------------------------------------------------------------------
+  # 9) APPROVAL - the SINGLE human sign-off. Lists the EXACT seats proposed for
+  #    revocation and the advisory risk note. This is the ONLY place a human
+  #    authorizes mutation; nothing irreversible runs before this returns approved.
+  #    on_timeout: abort means a missed approval NEVER auto-revokes. allow_edit so
+  #    the approver can drop a borderline seat before the loop runs.
+  # ---------------------------------------------------------------------------
+  - id: revocation_approval
+    type: approval
+    depends_on: [replay_vs_golden, compute_revocation_sets]
+    approval_config:
+      message: >-
+        AUTHORIZE SEAT REVOCATION - approve to revoke the listed seats in the admin console,
+        reject to abort with nothing touched. This is the ONLY authorization gate before any
+        seat is changed; review the revoke_candidates list carefully. Dormant:
+        {steps.compute_revocation_sets.output.dormant_count}, over-privileged (idle admins):
+        {steps.compute_revocation_sets.output.over_privileged_count}, total candidates:
+        {steps.compute_revocation_sets.output.revoke_candidate_count} of
+        {steps.compute_revocation_sets.output.total_seats} seats (fraction
+        {steps.compute_revocation_sets.output.revoke_fraction}, sanity-ceiling exceeded:
+        {steps.compute_revocation_sets.output.fraction_exceeded}). Estimated monthly savings:
+        {steps.compute_revocation_sets.output.est_monthly_savings}. Trajectory-replay passed,
+        so the extraction matched the golden run. Advisory risk note:
+        {steps.advisory_risk_note.output}
+      show_data: steps.compute_revocation_sets.output
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: true
+
+  # ---------------------------------------------------------------------------
+  # 10) LOOP over the approved revoke_candidates. Each iteration runs the per-seat
+  #     browser revocation (child revoke_one_seat) reading the current seat via
+  #     _item. Runs ONLY after the human approval above. max_iterations caps the
+  #     batch so a runaway plan cannot scale unbounded.
+  # ---------------------------------------------------------------------------
+  - id: revocation_loop
+    type: loop
+    depends_on: [revocation_approval]
+    loop_config:
+      over: "steps.compute_revocation_sets.output.revoke_candidates"
+      step_ids: [revoke_one_seat]
+      max_iterations: 500
+
+  # 10a) PER-SEAT REVOKE (mode: playwright, the WRITE pass). The reasoning model
+  #      only AUTHORS a Playwright script from the prompt; the mutation itself is
+  #      deterministic Playwright, so any provider can author it and is swappable.
+  #      max_actions is tightly capped so a misnavigation cannot rampage through the
+  #      roster; capture_screenshots is ON for the audit trail of every write;
+  #      captcha_strategy: pause hands a step-up auth to a human. Operates on ONE
+  #      email only. output_schema returns a structured per-seat result.
+  - id: revoke_one_seat
+    type: browser
+    prompt: >-
+      A human has APPROVED revoking this exact seat in the SaaS admin console. The target seat
+      is: {{ _item }}. Log into the console using the environment credentials, navigate to that
+      ONE user's member row (search by their email if needed), open their account, and click the
+      control that REVOKES the seat for that user only - Deactivate, Remove seat, Suspend, or
+      Revoke access, whichever the console exposes. Operate on this single email ONLY; never touch
+      any other member row, and never perform a bulk action. If a confirmation dialog appears,
+      confirm it. If a CAPTCHA or step-up auth appears, PAUSE for a human - do not attempt to
+      solve it. Then read back this seat's resulting account status and return it. Capture a
+      screenshot of the post-revoke state for the audit trail.
+    browser_config:
+      mode: playwright
+      start_url: "{input.seat_url_template}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 120
+      max_actions: 20
+      headless: true
+      credentials_env: "{input.credentials_env_var}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          email: { type: string }
+          action_taken:
+            type: string
+            enum: ["revoked", "skipped", "failed"]
+          post_status:
+            type: string
+            enum: ["active", "inactive"]
+          screenshot_ref: { type: string }
+        required: ["email", "action_taken", "post_status"]
+
+  # ---------------------------------------------------------------------------
+  # 11) RE-CENSUS (mode: dom, read-only) - the post-image of the audit pair. Same
+  #     structured extraction as the original census; no mutation. Used to prove
+  #     the writes landed and nothing else changed.
+  # ---------------------------------------------------------------------------
+  - id: census_after
+    type: browser
+    depends_on: [revocation_loop]
+    prompt: >-
+      Re-open the members / users management page in the SaaS admin console (reload to get fresh
+      state). This is a STRICTLY READ-ONLY re-census after a batch of revocations: do NOT click
+      any Deactivate, Remove, Suspend, Delete, or Invite control. Read EVERY member row,
+      paginating through ALL pages, and extract for each seat the email, current account status
+      (active or inactive), and role. Return ONLY the structured object described by the output
+      schema. If a CAPTCHA or login wall appears, PAUSE for a human.
+    browser_config:
+      mode: dom
+      start_url: "{input.console_members_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 180
+      max_actions: 80
+      headless: true
+      credentials_env: "{input.credentials_env_var}"
+      captcha_strategy: pause
+      capture_screenshots: false
+      output_schema:
+        type: object
+        properties:
+          users:
+            type: array
+            items:
+              type: object
+              properties:
+                email: { type: string }
+                role: { type: string }
+                status:
+                  type: string
+                  enum: ["active", "inactive"]
+              required: ["email", "status"]
+          total_seats:
+            type: integer
+        required: ["users"]
+
+  # ---------------------------------------------------------------------------
+  # 12) DETERMINISTIC RECONCILE (no model) - the load-bearing post-check. Asserts
+  #     EVERY approved+revoked email is now absent/inactive in the after-census, and
+  #     EVERY untouched seat is unchanged (collateral / scope-creep check). Emits a
+  #     drift list of any seat that did not reach the expected state. Pure Python.
+  # ---------------------------------------------------------------------------
+  - id: reconcile_revocations
+    type: code
+    depends_on: [compute_revocation_sets, revocation_loop, census_after]
+    code_config:
+      language: python
+      code: |
+        import json
+
+        plan = _steps.get('compute_revocation_sets') or {}
+        candidates = plan.get('revoke_candidates', []) if isinstance(plan, dict) else []
+        targeted_emails = {str(c.get('email') or '').strip().lower() for c in candidates if isinstance(c, dict)}
+
+        # --- Before status from the validated original roster ---------------------------
+        validated = _steps.get('validate_extraction') or {}
+        before_rows = validated.get('roster', []) if isinstance(validated, dict) else []
+        before_status = {}
+        for s in before_rows:
+            if isinstance(s, dict):
+                em = str(s.get('email') or '').strip().lower()
+                if em:
+                    before_status[em] = str(s.get('status') or 'active').strip().lower()
+
+        # --- After re-census (normalize, may nest) --------------------------------------
+        after = _steps.get('census_after') or {}
+        if isinstance(after, str):
+            try:
+                after = json.loads(after) if after.strip() else {}
+            except (ValueError, TypeError):
+                after = {}
+        if not isinstance(after, dict):
+            after = {}
+        for key in ('output', 'data', 'result'):
+            inner = after.get(key)
+            if isinstance(inner, dict) and 'users' in inner:
+                after = inner
+                break
+        after_rows = after.get('users', []) if isinstance(after, dict) else []
+        after_status = {}
+        for s in after_rows:
+            if isinstance(s, dict):
+                em = str(s.get('email') or '').strip().lower()
+                if em:
+                    after_status[em] = str(s.get('status') or 'active').strip().lower()
+
+        # --- Per-loop browser results, indexed by reported email ------------------------
+        loop_out = _steps.get('revocation_loop') or {}
+        loop_items = loop_out if isinstance(loop_out, list) else (
+            (loop_out.get('results') or loop_out.get('items') or []) if isinstance(loop_out, dict) else []
+        )
+        result_by_email = {}
+        for it in loop_items:
+            if isinstance(it, dict):
+                em = str(it.get('email') or '').strip().lower()
+                if em:
+                    result_by_email[em] = it
+
+        # --- Assert every targeted email is now inactive / gone -------------------------
+        confirmed = []
+        drift = []
+        for em in sorted(targeted_emails):
+            post = after_status.get(em)  # None == no longer on the roster (fully removed)
+            browser_res = result_by_email.get(em, {})
+            row = {
+                'email': em,
+                'before_status': before_status.get(em),
+                'after_status': post if post is not None else 'removed',
+                'browser_action': browser_res.get('action_taken'),
+                'screenshot_ref': browser_res.get('screenshot_ref'),
+            }
+            if post is None or post == 'inactive':
+                confirmed.append(row)
+            else:
+                drift.append({**row, 'drift_reason': 'targeted_but_still_active'})
+
+        # --- Assert no UNTOUCHED seat changed status (collateral / scope-creep) ----------
+        collateral = []
+        for em, before_s in before_status.items():
+            if em in targeted_emails:
+                continue
+            post = after_status.get(em)
+            if post is not None and post != before_s:
+                collateral.append({
+                    'email': em,
+                    'before_status': before_s,
+                    'after_status': post,
+                    'drift_reason': 'untouched_seat_status_changed',
+                })
+
+        all_clean = (len(drift) == 0 and len(collateral) == 0)
+
+        result = {
+            'all_clean': all_clean,
+            'targeted_count': len(targeted_emails),
+            'confirmed_count': len(confirmed),
+            'drift_count': len(drift),
+            'collateral_count': len(collateral),
+            'confirmed': confirmed,
+            'drift': drift,
+            'collateral': collateral,
+        }
+
+  # ---------------------------------------------------------------------------
+  # 13) AUDIT record - deterministic, tamper-evident SHA-256 over the canonical
+  #     audit record (plan counts, approver, per-seat before/after diffs, drift).
+  #     No model. The hash is reproducible byte-for-byte for evidence.
+  # ---------------------------------------------------------------------------
+  - id: audit_record
+    type: code
+    depends_on: [compute_revocation_sets, revocation_approval, reconcile_revocations]
+    code_config:
+      language: python
+      code: |
+        import json
+        import hashlib
+        from datetime import datetime, timezone
+
+        plan = _steps.get('compute_revocation_sets') or {}
+        reconcile = _steps.get('reconcile_revocations') or {}
+        approval = _steps.get('revocation_approval') or {}
+
+        approver = 'unknown'
+        if isinstance(approval, dict):
+            approver = str(approval.get('approver') or approval.get('approved_by') or 'unknown')
+
+        record = {
+            'generated_at': datetime.now(timezone.utc).isoformat(),
+            'approver': approver,
+            'total_seats': plan.get('total_seats'),
+            'dormant_count': plan.get('dormant_count'),
+            'over_privileged_count': plan.get('over_privileged_count'),
+            'revoke_candidate_count': plan.get('revoke_candidate_count'),
+            'est_monthly_savings': plan.get('est_monthly_savings'),
+            'targeted_count': reconcile.get('targeted_count'),
+            'confirmed_count': reconcile.get('confirmed_count'),
+            'drift_count': reconcile.get('drift_count'),
+            'collateral_count': reconcile.get('collateral_count'),
+            'per_seat_diffs': reconcile.get('confirmed', []) + reconcile.get('drift', []),
+            'collateral': reconcile.get('collateral', []),
+            'all_clean': reconcile.get('all_clean'),
+        }
+
+        # Canonical (sorted-key) serialization so the audit hash is reproducible.
+        canonical = json.dumps(record, sort_keys=True, separators=(',', ':'))
+        digest = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+
+        result = {
+            'sha256': digest,
+            'byte_length': len(canonical),
+            'audit_record': record,
+            'canonical_json': canonical,
+        }
+
+  # ---------------------------------------------------------------------------
+  # 14) NOTIFY the channel with the seat-audit result, drift report and audit hash.
+  # ---------------------------------------------------------------------------
+  - id: notify_summary
+    type: notify
+    depends_on: [audit_record, reconcile_revocations]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: "SaaS seat audit complete. Seats: {steps.compute_revocation_sets.output.total_seats} | Dormant: {steps.compute_revocation_sets.output.dormant_count} | Over-privileged: {steps.compute_revocation_sets.output.over_privileged_count} | Revoked (confirmed): {steps.reconcile_revocations.output.confirmed_count} | Drift: {steps.reconcile_revocations.output.drift_count} | Collateral: {steps.reconcile_revocations.output.collateral_count} | All clean: {steps.reconcile_revocations.output.all_clean} | Est. monthly savings: {steps.compute_revocation_sets.output.est_monthly_savings} | Approver: {steps.audit_record.output.audit_record.approver} | Audit sha256 {steps.audit_record.output.sha256}."
+
+on_complete:
+  storage_path: "saas-admin-console-seat-audit/{run_id}/result.json"

@@ -1,0 +1,724 @@
+# name: Insurance Claim FNOL Portal Filer
+# description: Files a structured First-Notice-of-Loss packet onto a carrier or TPA web claims portal - a per-carrier, login-gated SPA with no agency-accessible claims-write API. Each portal has a different multi-step loss wizard, peril-specific dynamic fields, and photo/estimate upload widgets, so agencies re-key the same loss into dozens of portals by hand. This template reads the wizard structure read-only (dom mode), maps the loss with a deterministic validator plus a provider-agnostic peril classify, fills and uploads via a provider-neutral playwright script that STOPS at review, then holds for a human adjuster approval before the binding submit, and asserts the carrier's claim-number pattern deterministically so a false success can never be recorded.
+# tags: [Insurance, FNOL, ClaimsIntake, CarrierPortal, TPA, RPA, Playwright, DOM, HumanInTheLoop, ProviderNeutral]
+# category: general_ai
+
+name: insurance-claim-fnol-portal-filer
+description: >-
+  Takes a completed First-Notice-of-Loss (FNOL) packet - {carrier, policy_no, loss_facts, photos[],
+  estimate_pdf} that has reached status=ready_to_file - and files it on the right carrier or TPA web
+  claims portal on behalf of an insured. Carrier and TPA FNOL portals are per-carrier, login-gated
+  single-page apps with NO standardized or agency-accessible claims-write API: each has its own
+  multi-step loss wizard, peril-specific dynamic fields, and photo/estimate upload widgets, so
+  high-volume agencies, body shops, and property-restoration TPAs re-key the same loss into dozens of
+  portals by hand. This is the canonical no-API, login + JavaScript + file-upload RPA case. The flow is
+  split read-from-write and fails closed. First a DETERMINISTIC code step validates loss-facts
+  completeness for the peril, the policy-number format, and that every referenced media file exists. A
+  condition routes to the correct carrier portal start_url. A provider-neutral dom-mode browser step
+  logs in (credentials_env, captcha_strategy=pause) and EXTRACTS the wizard structure READ-ONLY via
+  output_schema - it writes nothing. A provider-agnostic classify maps loss_facts to the carrier's
+  fields and picks the peril branch, surfacing any unmapped fields. A gate (llm_eval consistency check
+  on dates/amounts/peril codes traceable to the intake, plus a human gate for any unmapped or
+  high-severity loss) must pass before entry. Only then does a playwright-mode browser step fill every
+  wizard step, attach photos to the loss-photo slot and the estimate PDF to the estimate slot, advance
+  to REVIEW and STOP - returning a review screenshot, the entered loss summary, and the attached-file
+  count. A mandatory human adjuster approval gates the binding submission. A second playwright step
+  clicks Submit and captures {claim_number, carrier_ref, submitted_at}; a deterministic code step then
+  asserts the claim_number matches the carrier's expected pattern - the load-bearing success gate, so a
+  silently-failed submit can never be recorded as a filed claim. Finally the insured is notified, the
+  claim number is written back to the claims system via transform, and a report logs the filing. Every
+  browser step rides default_model and stays swappable; the consistency llm_eval and peril classify run
+  provider-agnostically with failover; the condition router and code validators are pure engine logic,
+  so swapping the model never changes filing behavior.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 1800
+
+input_schema:
+  required: ["carrier", "policy_no", "loss_facts", "photos", "estimate_pdf"]
+  properties:
+    carrier:
+      type: string
+      description: "Carrier or TPA key that selects the target portal start_url and the expected claim-number pattern (e.g. statefarm, allstate, sedgwick-tpa)."
+      example: "statefarm"
+    policy_no:
+      type: string
+      description: "The insured's policy number being claimed against. Format-validated deterministically and entered into the FNOL wizard."
+      example: "SF-AUTO-0098127734"
+    loss_facts:
+      type: string
+      description: "Structured loss packet for this FNOL as a JSON string - peril type, date/time of loss, location, description, severity, amounts, parties. Drives field mapping and the consistency check."
+      example: '{"peril":"auto_collision","date_of_loss":"2026-05-28","loss_location":"I-95 mile 42, FL","description":"Rear-ended at a red light","estimated_amount":7350.00,"severity":"moderate","injuries":false,"deductible":500.00}'
+    photos:
+      type: string
+      description: "Comma-separated list of loss-photo file refs (s3/gdrive paths or @file: refs) to attach to the portal's loss-photo upload slot. Existence is validated before any filing."
+      example: "s3://fnol/claim-0098/photo1.jpg,s3://fnol/claim-0098/photo2.jpg,s3://fnol/claim-0098/photo3.jpg"
+    estimate_pdf:
+      type: string
+      description: "File ref to the repair/loss estimate PDF to attach to the portal's estimate upload slot. Existence is validated before any filing."
+      example: "s3://fnol/claim-0098/estimate.pdf"
+    carrier_portal_url:
+      type: string
+      description: "Fallback FNOL wizard start_url if the carrier is not in the built-in router map. The condition step prefers a known carrier route and falls back to this."
+      default: ""
+      example: "https://agents.examplecarrier.com/fnol/new"
+    claim_number_pattern:
+      type: string
+      description: "Regex the carrier's issued claim_number must match (deterministic success gate). Defaults to a generic carrier-claim shape; override per carrier."
+      default: "^[A-Z0-9]{2,6}-[A-Z0-9]{4,}$"
+      example: "^SF-[0-9]{2}-[0-9]{7,10}$"
+    insured_email:
+      type: string
+      description: "Email of the insured to notify with the filed claim number once the carrier confirms."
+      default: ""
+      example: "jane.doe@example.com"
+    claims_system_url:
+      type: string
+      description: "Webhook on the agency claims system that the filed claim_number + carrier_ref are written back to."
+      default: "https://claims.internal/api/fnol/filed"
+      example: "https://claims.internal/api/fnol/filed"
+    notify_channel:
+      type: string
+      description: "Slack channel for the back-office team's filed/blocked notification."
+      default: "#fnol-filing"
+      example: "#fnol-filing"
+    severity_human_threshold:
+      type: string
+      description: "Severity values that force the human gate strategy regardless of mapping (comma-separated). High-severity or injury losses always get a human before entry."
+      default: "high,total_loss,injury"
+      example: "high,total_loss,injury"
+
+steps:
+  # 1) DETERMINISTIC intake validation (sandboxed Python, no model). Confirm loss_facts are complete
+  #    for the given peril, the policy_no matches an acceptable format, and EVERY referenced media file
+  #    ref is present (photos + estimate). Fails CLOSED - nothing routes to a portal on a bad packet.
+  - id: validate_packet
+    type: code
+    code_config:
+      language: python
+      code: |
+        import json
+        # --- Parse the structured loss packet handed in by the intake / extraction upstream. ---
+        raw = _input.get('loss_facts') or ''
+        loss = {}
+        if isinstance(raw, dict):
+            loss = raw
+        else:
+            try:
+                loss = json.loads(raw)
+            except (TypeError, ValueError):
+                loss = {}
+        if not isinstance(loss, dict):
+            loss = {}
+
+        problems = []
+
+        # --- Required core loss fields for ANY peril. ---
+        base_required = ['peril', 'date_of_loss', 'loss_location', 'description', 'severity']
+        for k in base_required:
+            if not str(loss.get(k, '') or '').strip():
+                problems.append('missing loss fact: ' + k)
+
+        peril = str(loss.get('peril', '') or '').strip().lower()
+
+        # --- Peril-specific completeness (dynamic, like the carrier wizards). ---
+        peril_required = {
+            'auto_collision': ['estimated_amount', 'deductible'],
+            'auto_glass': ['estimated_amount'],
+            'property_water': ['estimated_amount', 'loss_location'],
+            'property_fire': ['estimated_amount'],
+            'theft': ['estimated_amount'],
+            'liability': ['parties'],
+        }
+        for k in peril_required.get(peril, ['estimated_amount']):
+            if not str(loss.get(k, '') or '').strip():
+                problems.append('peril ' + (peril or '<none>') + ' requires loss fact: ' + k)
+
+        if not peril:
+            problems.append('peril type is required to choose the wizard branch')
+
+        # --- Policy number format: non-empty, mostly alnum/dash, sane length. ---
+        policy_no = str(_input.get('policy_no', '') or '').strip()
+        policy_ok = False
+        if policy_no:
+            cleaned = policy_no.replace('-', '').replace('_', '')
+            policy_ok = cleaned.isalnum() and (6 <= len(policy_no) <= 40)
+        if not policy_ok:
+            problems.append('policy_no format invalid (expect 6-40 alphanumeric/dash chars)')
+
+        # --- Every referenced media file ref must be present (non-empty). ---
+        photos_raw = _input.get('photos') or ''
+        photo_refs = [p.strip() for p in str(photos_raw).split(',') if p.strip()]
+        if not photo_refs:
+            problems.append('no photo file refs provided')
+        estimate_ref = str(_input.get('estimate_pdf', '') or '').strip()
+        if not estimate_ref:
+            problems.append('estimate_pdf file ref missing')
+
+        # --- Numeric sanity on the amount, used later by the consistency check. ---
+        def _num(v):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return 0.0
+        estimated_amount = _num(loss.get('estimated_amount'))
+        if estimated_amount < 0:
+            problems.append('estimated_amount is negative')
+
+        severity = str(loss.get('severity', '') or '').strip().lower()
+        injuries = bool(loss.get('injuries', False))
+        ok = len(problems) == 0
+
+        result = {
+            'ok': ok,
+            'problems': problems,
+            'peril': peril,
+            'severity': severity,
+            'injuries': injuries,
+            'policy_no': policy_no,
+            'estimated_amount': round(estimated_amount, 2),
+            'date_of_loss': str(loss.get('date_of_loss', '') or ''),
+            'loss_location': str(loss.get('loss_location', '') or ''),
+            'photo_refs': photo_refs,
+            'photo_count': len(photo_refs),
+            'estimate_ref': estimate_ref,
+            'loss_facts': loss,
+        }
+
+  # 1b) Hard stop on a bad packet - never touch a carrier portal with an incomplete loss.
+  - id: packet_gate
+    type: condition
+    depends_on: [validate_packet]
+    condition_config:
+      expression: "{steps.validate_packet.output.ok} == True"
+      then: [route_carrier]
+      else: [notify_blocked]
+
+  # 1c) Blocked branch: tell the back-office the FNOL was NOT filed and why. Nothing was submitted.
+  - id: notify_blocked
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        FNOL for policy {input.policy_no} on carrier {input.carrier} was BLOCKED before any portal
+        entry. Packet validation failed: {steps.validate_packet.output.problems}. No claim was filed.
+
+  # 2) ROUTE to the correct carrier/TPA portal start_url by {carrier} (pure engine logic, no model).
+  #    A known-carrier map; unknown carriers fall back to the supplied carrier_portal_url.
+  - id: route_carrier
+    type: code
+    depends_on: [packet_gate]
+    code_config:
+      language: python
+      code: |
+        carrier = str(_input.get('carrier', '') or '').strip().lower()
+
+        # Per-carrier FNOL wizard start URLs (login-gated SPAs, no claims-write API).
+        routes = {
+            'statefarm':   'https://b2b.statefarm.com/fnol/new',
+            'allstate':    'https://agents.allstate.com/claims/fnol/start',
+            'progressive': 'https://foragentsonly.progressive.com/fnol',
+            'geico':       'https://partners.geico.com/claims/new',
+            'libertymutual': 'https://agent.libertymutual.com/fnol/intake',
+            'sedgwick-tpa': 'https://intake.sedgwick.com/fnol/new',
+            'crawford-tpa': 'https://portal.crawco.com/claims/fnol',
+        }
+
+        fallback = str(_input.get('carrier_portal_url', '') or '').strip()
+        start_url = routes.get(carrier, fallback)
+        known = carrier in routes
+
+        routed = bool(start_url)
+        result = {
+            'carrier': carrier,
+            'start_url': start_url,
+            'known_carrier': known,
+            'routed': routed,
+            'note': ('matched built-in route' if known else
+                     ('using supplied fallback url' if start_url else 'NO route - missing start_url')),
+        }
+
+  # 2b) If no portal URL could be resolved, stop before any browser step.
+  - id: route_gate
+    type: condition
+    depends_on: [route_carrier]
+    condition_config:
+      expression: "{steps.route_carrier.output.routed} == True"
+      then: [read_wizard]
+      else: [notify_no_route]
+
+  - id: notify_no_route
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        FNOL for policy {input.policy_no} could NOT be filed: no portal start_url for carrier
+        {input.carrier} (not in the built-in route map and no carrier_portal_url supplied). No claim filed.
+
+  # 3) READ PASS (dom mode, READ-ONLY). Provider-neutral lightweight DOM read: the reasoning model
+  #    logs in via CARRIER_PORTAL_CREDS (never inlined), opens the FNOL wizard, and EXTRACTS the
+  #    wizard's structure - the ordered steps, each step's fields and any conditional_on logic, and
+  #    the upload slots - WITHOUT entering anything. captcha_strategy=pause hands a portal CAPTCHA to
+  #    a human; max_actions caps clicking; output_schema returns structured JSON to map against.
+  - id: read_wizard
+    type: browser
+    depends_on: [route_gate]
+    prompt: >-
+      You are doing a READ-ONLY reconnaissance of a carrier/TPA First-Notice-of-Loss web wizard. Log
+      in using the credentials provided via the CARRIER_PORTAL_CREDS environment variable, then open
+      the FNOL / new-claim wizard for this loss. DO NOT type into, select, upload to, or submit any
+      field - this is a structure read only. Walk the wizard pages and report its structure: the
+      ordered list of steps, and for each step its fields (name, label, input type, whether required,
+      allowed options if a dropdown, and any conditional_on logic that shows/hides the field based on
+      a prior answer such as the peril type), plus the file UPLOAD slots (which slot takes loss photos
+      and which takes the repair/loss estimate PDF). If a CAPTCHA or step-up auth appears, PAUSE for a
+      human. Context: carrier {input.carrier}, policy {input.policy_no}, peril
+      {steps.validate_packet.output.peril}. Return ONLY the structured object described by the output schema.
+    browser_config:
+      mode: dom
+      start_url: "{steps.route_carrier.output.start_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 300
+      max_actions: 60
+      headless: true
+      credentials_env: "CARRIER_PORTAL_CREDS"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          steps:
+            type: array
+            items:
+              type: object
+              properties:
+                name: { type: string }
+                fields:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name: { type: string }
+                      label: { type: string }
+                      input_type: { type: string }
+                      required: { type: boolean }
+                      options:
+                        type: array
+                        items: { type: string }
+                conditional_on: { type: string }
+          upload_slots:
+            type: array
+            items:
+              type: object
+              properties:
+                slot_name: { type: string }
+                accepts: { type: string }
+                purpose: { type: string }
+
+  # 4) MAP loss_facts -> the carrier's fields and choose the peril branch (provider-agnostic classify
+  #    with failover). It emits the field-fill PLAN and the list of any fields it could NOT confidently
+  #    map (unmapped[]). The branch result also tells the gate whether a human is required.
+  - id: map_fields
+    type: classify
+    depends_on: [read_wizard]
+    model: haiku
+    classify_config:
+      model: haiku
+      input: >-
+        Map a validated First-Notice-of-Loss packet onto a specific carrier FNOL wizard's fields and
+        choose the correct peril branch. Produce a fill PLAN: for each wizard field, the loss-fact (or
+        derived/peril-code value) that should go in it, attaching photos to the loss-photo upload slot
+        and the estimate PDF to the estimate upload slot; and an unmapped[] list of any required field
+        you cannot confidently fill from the packet. Then classify the OVERALL mapping outcome into one
+        category. Use 'clean_auto' when the loss is an auto peril and every required field maps with no
+        unmapped fields; 'clean_property' when it is a property peril and every required field maps with
+        no unmapped fields; 'needs_human' when ANY required field is unmapped OR the severity/injury
+        indicates a high-severity loss that an agent must review before entry; 'unsupported' when the
+        peril does not correspond to any branch the wizard offers. Validated packet:
+        {steps.validate_packet.output} . Wizard structure: {steps.read_wizard.output} .
+        Human-review severities: {input.severity_human_threshold}.
+      categories:
+        - clean_auto
+        - clean_property
+        - needs_human
+        - unsupported
+      branches:
+        clean_auto: [consistency_gate]
+        clean_property: [consistency_gate]
+        needs_human: [consistency_gate]
+        unsupported: [consistency_gate]
+
+  # 5) PRE-ENTRY GATE - ALL strategies must pass before anything is typed into the portal.
+  #    (a) llm_eval consistency: dates/amounts/peril codes internally consistent and traceable to the
+  #        intake (provider-swappable verifier). (b) human: an agent signs off on any unmapped field or
+  #        high-severity loss. This gate is the last stop before the (still reversible) data entry.
+  - id: consistency_gate
+    type: gate
+    depends_on: [map_fields]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are a claims-intake consistency reviewer. Verify the proposed FNOL field mapping is
+              internally consistent and traceable to the source intake BEFORE any data is entered into
+              the carrier portal. Reply with exactly 'approved' only if: the date_of_loss is a real,
+              non-future date; every monetary amount (estimated_amount, deductible) is non-negative and
+              consistent with the packet; the chosen peril branch and any peril codes match the packet's
+              peril; and every planned field value is traceable to a fact in the validated packet with no
+              invented data. Otherwise reply 'rejected' and name each inconsistency. Validated packet:
+              {steps.validate_packet.output} . Mapping/plan + branch: {steps.map_fields.output}
+            input: "{steps.validate_packet.output}"
+            model: google/gemini-2.5-pro
+        - type: human
+          config:
+            message: >-
+              FNOL pre-entry review for policy {input.policy_no} on {input.carrier} (peril
+              {steps.validate_packet.output.peril}, severity {steps.validate_packet.output.severity},
+              amount {steps.validate_packet.output.estimated_amount}). Confirm the field mapping is
+              correct and approve entry into the carrier portal. Reject if any unmapped field or
+              high-severity/injury loss needs handling first. Mapping: {steps.map_fields.output}
+            timeout_hours: 24
+            on_timeout: abort
+
+  # 6) FILL PASS (playwright mode, provider-neutral). The reasoning model AUTHORS a Playwright script
+  #    that re-logs-in via CARRIER_PORTAL_CREDS, fills EVERY wizard step from the approved plan,
+  #    attaches the loss photos to the loss-photo slot and the estimate PDF to the estimate slot,
+  #    advances to the REVIEW/SUMMARY page, and STOPS - it does NOT click Submit. capture_screenshots
+  #    gives an auditable review screenshot; output_schema returns the entered loss summary + attached
+  #    file count for the adjuster to approve. CAPTCHA pauses to a human; max_actions bounds the wizard.
+  - id: fill_to_review
+    type: browser
+    depends_on: [consistency_gate]
+    prompt: >-
+      You are filing a First-Notice-of-Loss on a carrier/TPA web claims wizard. Authenticate using the
+      CARRIER_PORTAL_CREDS environment variable, open the FNOL wizard, and walk it end to end. Using the
+      APPROVED field-fill plan, fill every required field on every wizard step from the validated loss
+      packet, handling peril-specific dynamic fields and waiting for client-side validation to settle
+      before advancing. Attach EVERY loss photo from the packet's photo list to the loss-photo upload
+      slot, and attach the estimate PDF to the estimate upload slot. CRITICAL: advance only to the FINAL
+      REVIEW / SUMMARY page and STOP there - DO NOT click the final Submit / File / Report-Claim button.
+      Submission is a separate, human-approved step. If a CAPTCHA or step-up auth appears, pause for a
+      human. Validated packet: {steps.validate_packet.output} . Approved plan: {steps.map_fields.output} .
+      Policy {input.policy_no}, peril {steps.validate_packet.output.peril}. Return ONLY the structured
+      object: a reference to the captured review screenshot, a human-readable summary of the loss values
+      shown on the review page, the count of files actually attached, and whether the submit button is
+      present and enabled.
+    browser_config:
+      mode: playwright
+      start_url: "{steps.route_carrier.output.start_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 600
+      max_actions: 120
+      headless: true
+      credentials_env: "CARRIER_PORTAL_CREDS"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          review_screenshot: { type: string }
+          entered_loss_summary:
+            type: object
+            properties:
+              policy_no: { type: string }
+              peril: { type: string }
+              date_of_loss: { type: string }
+              loss_location: { type: string }
+              estimated_amount: { type: number }
+              steps_completed: { type: integer }
+          attached_file_count: { type: integer }
+          submit_button_present: { type: boolean }
+
+  # 6b) DETERMINISTIC validation of the FILLED review state (no model). The load-bearing pre-submit
+  #     check: the review must echo the right policy/peril, the attached-file count must equal photos+1
+  #     (estimate), and the submit button must be present (wizard actually reached review). Fails closed.
+  - id: validate_review
+    type: code
+    depends_on: [fill_to_review]
+    code_config:
+      language: python
+      code: |
+        read_out = _steps.get('fill_to_review') or {}
+        if not isinstance(read_out, dict):
+            read_out = {}
+        # Browser payloads may nest under output/data/result.
+        for key in ('output', 'data', 'result'):
+            inner = read_out.get(key)
+            if isinstance(inner, dict) and ('entered_loss_summary' in inner or 'attached_file_count' in inner):
+                read_out = inner
+                break
+
+        packet = _steps.get('validate_packet') or {}
+        if not isinstance(packet, dict):
+            packet = {}
+
+        summary = read_out.get('entered_loss_summary') or {}
+        if not isinstance(summary, dict):
+            summary = {}
+
+        problems = []
+
+        # Review must echo the policy number we intended to file under.
+        want_policy = str(packet.get('policy_no', '') or '').strip()
+        got_policy = str(summary.get('policy_no', '') or '').strip()
+        if want_policy and got_policy and want_policy != got_policy:
+            problems.append('review policy_no ' + got_policy + ' does not match intake ' + want_policy)
+        if not got_policy:
+            problems.append('review page shows no policy_no')
+
+        # Peril on the review page must match the validated peril.
+        want_peril = str(packet.get('peril', '') or '').strip().lower()
+        got_peril = str(summary.get('peril', '') or '').strip().lower()
+        if want_peril and got_peril and want_peril != got_peril:
+            problems.append('review peril ' + got_peril + ' does not match intake ' + want_peril)
+
+        # Attached files must equal the photos plus the single estimate PDF.
+        photo_count = int(packet.get('photo_count', 0) or 0)
+        expected_files = photo_count + 1
+        def _int(v):
+            try:
+                return int(v)
+            except (TypeError, ValueError):
+                return 0
+        attached = _int(read_out.get('attached_file_count'))
+        if attached != expected_files:
+            problems.append('attached file count ' + str(attached) + ' != expected ' + str(expected_files)
+                            + ' (' + str(photo_count) + ' photos + 1 estimate)')
+
+        # The wizard must actually have reached a submit-capable review page.
+        if not read_out.get('submit_button_present'):
+            problems.append('submit button not present - wizard did not reach review')
+
+        # A review screenshot must exist for the adjuster to inspect.
+        review_screenshot = str(read_out.get('review_screenshot', '') or '').strip()
+        if not review_screenshot:
+            problems.append('no review screenshot captured for the adjuster')
+
+        ok = len(problems) == 0
+        result = {
+            'ok': ok,
+            'problems': problems,
+            'policy_no': got_policy or want_policy,
+            'peril': got_peril or want_peril,
+            'attached_file_count': attached,
+            'expected_file_count': expected_files,
+            'review_screenshot': review_screenshot,
+            'entered_loss_summary': summary,
+        }
+
+  # 6c) Hard stop on a bad fill - do NOT advance to the adjuster approval / submit on a bad review read.
+  - id: review_gate
+    type: condition
+    depends_on: [validate_review]
+    condition_config:
+      expression: "{steps.validate_review.output.ok} == True"
+      then: [approve_submit]
+      else: [notify_review_failed]
+
+  - id: notify_review_failed
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        FNOL for policy {input.policy_no} on {input.carrier} reached the portal review page but the
+        deterministic review check FAILED before submission: {steps.validate_review.output.problems}.
+        Nothing was submitted. Re-check the wizard fill and re-run.
+
+  # 7) HUMAN ADJUSTER APPROVAL before the binding submission. The adjuster/agent sees the validated
+  #    review summary and the captured review screenshot and authorizes the IRREVERSIBLE submit. No
+  #    submission can occur without this gate; on_timeout: abort never auto-submits.
+  - id: approve_submit
+    type: approval
+    approval_config:
+      message: >-
+        AUTHORIZE the binding FNOL SUBMISSION for policy {input.policy_no} on {input.carrier}. This is
+        IRREVERSIBLE - it files the claim with the carrier and opens a claim number. The loss is filled
+        and sitting on the portal's review page: peril {steps.validate_review.output.peril},
+        {steps.validate_review.output.attached_file_count} files attached
+        (expected {steps.validate_review.output.expected_file_count}). Review the captured review
+        screenshot - this is the EXACT state you are filing. Approve to submit, reject to abort with
+        nothing filed.
+      show_data: steps.validate_review.output
+      show_images: ["steps.validate_review.output.review_screenshot"]
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: false
+
+  # 8) SUBMIT PASS (playwright mode, WRITE). Only reached AFTER the adjuster approves. Re-opens the
+  #    filled review page and clicks the single final Submit/File button ONCE, then reads the carrier's
+  #    confirmation page and captures {claim_number, carrier_ref, submitted_at}. capture_screenshots
+  #    gives an after-submit audit record; max_actions tightly capped (one confirm action); CAPTCHA pauses.
+  - id: submit_claim
+    type: browser
+    depends_on: [approve_submit]
+    prompt: >-
+      A human adjuster has authorized this IRREVERSIBLE FNOL submission for policy {input.policy_no} on
+      {input.carrier}. Authenticate with CARRIER_PORTAL_CREDS if the session expired, return to the
+      filled FNOL review page, confirm the values still match the approved review, then click the SINGLE
+      final Submit / File / Report-Claim button ONCE to file the claim. Do NOT edit any field and do NOT
+      click submit more than once. If a CAPTCHA or step-up auth appears at this final wall, PAUSE for a
+      human - do not attempt to solve it. Then read the carrier's confirmation page and capture the
+      carrier-issued CLAIM NUMBER, any carrier reference id, and the submitted timestamp. Return ONLY the
+      structured object described by the output schema.
+    browser_config:
+      mode: playwright
+      start_url: "{steps.route_carrier.output.start_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 300
+      max_actions: 20
+      headless: true
+      credentials_env: "CARRIER_PORTAL_CREDS"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          claim_number: { type: string }
+          carrier_ref: { type: string }
+          submitted_at: { type: string }
+          confirmation_screenshot: { type: string }
+
+  # 9) DETERMINISTIC SUCCESS GATE (no model). Assert the carrier-issued claim_number matches the
+  #    carrier's expected pattern. A missing/malformed claim_number means the submit did NOT provably
+  #    land - so a silently-failed submit can NEVER be recorded as a filed claim.
+  - id: assert_claim_number
+    type: code
+    depends_on: [submit_claim]
+    code_config:
+      language: python
+      code: |
+        import re
+        sub = _steps.get('submit_claim') or {}
+        if not isinstance(sub, dict):
+            sub = {}
+        for key in ('output', 'data', 'result'):
+            inner = sub.get(key)
+            if isinstance(inner, dict) and ('claim_number' in inner):
+                sub = inner
+                break
+
+        claim_number = str(sub.get('claim_number', '') or '').strip()
+        carrier_ref = str(sub.get('carrier_ref', '') or '').strip()
+        submitted_at = str(sub.get('submitted_at', '') or '').strip()
+
+        pattern = str(_input.get('claim_number_pattern', '') or '').strip()
+        if not pattern:
+            pattern = '^[A-Z0-9]{2,6}-[A-Z0-9]{4,}$'
+
+        problems = []
+        matched = False
+        if not claim_number:
+            problems.append('carrier returned no claim_number - submission not provably accepted')
+        else:
+            try:
+                matched = bool(re.search(pattern, claim_number))
+            except (TypeError, ValueError):
+                matched = False
+            if not matched:
+                problems.append('claim_number "' + claim_number + '" does not match carrier pattern ' + pattern)
+
+        if not submitted_at:
+            problems.append('no submitted_at timestamp returned')
+
+        filed = bool(claim_number) and matched and (len(problems) == 0)
+
+        result = {
+            'filed': filed,
+            'problems': problems,
+            'claim_number': claim_number,
+            'carrier_ref': carrier_ref,
+            'submitted_at': submitted_at,
+            'pattern': pattern,
+            'policy_no': str(_input.get('policy_no', '') or ''),
+            'carrier': str(_input.get('carrier', '') or ''),
+        }
+
+  # 9b) Branch on the deterministic success gate. Only a provably-filed claim proceeds to recording.
+  - id: filed_gate
+    type: condition
+    depends_on: [assert_claim_number]
+    condition_config:
+      expression: "{steps.assert_claim_number.output.filed} == True"
+      then: [record_claim]
+      else: [notify_submit_unconfirmed]
+
+  # 9c) UNCONFIRMED PATH - submit happened but the claim_number did not validate. Page the team and
+  #     leave the run needing attention. A false success is NEVER recorded.
+  - id: notify_submit_unconfirmed
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        NEEDS ATTENTION: FNOL submit for policy {input.policy_no} on {input.carrier} did NOT return a
+        valid claim_number ({steps.assert_claim_number.output.problems}). Do NOT assume the claim was
+        filed - manually check the carrier portal. The run is left in a needs-attention state.
+
+  # 10a) RECORD - write the validated claim_number + carrier_ref back to the agency claims system.
+  - id: record_claim
+    type: transform
+    depends_on: [filed_gate]
+    transform_config:
+      template: |
+        {
+          "event": "fnol_filed",
+          "carrier": "{steps.assert_claim_number.output.carrier}",
+          "policy_no": "{steps.assert_claim_number.output.policy_no}",
+          "claim_number": "{steps.assert_claim_number.output.claim_number}",
+          "carrier_ref": "{steps.assert_claim_number.output.carrier_ref}",
+          "submitted_at": "{steps.assert_claim_number.output.submitted_at}"
+        }
+
+  # 10b) WRITE-BACK to the claims system webhook (deterministic http POST).
+  - id: writeback_claim
+    type: http
+    depends_on: [record_claim]
+    http_config:
+      url: "{input.claims_system_url}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+      auth: "bearer:{env.CLAIMS_SYSTEM_TOKEN}"
+      body: '{"carrier": "{steps.assert_claim_number.output.carrier}", "policy_no": "{steps.assert_claim_number.output.policy_no}", "claim_number": "{steps.assert_claim_number.output.claim_number}", "carrier_ref": "{steps.assert_claim_number.output.carrier_ref}", "submitted_at": "{steps.assert_claim_number.output.submitted_at}"}'
+
+  # 10c) NOTIFY the insured that the claim was filed, with the carrier-issued claim number.
+  - id: notify_insured
+    type: notify
+    depends_on: [writeback_claim]
+    notify_config:
+      service: gmail
+      channel: "{input.insured_email}"
+      message: >-
+        Your insurance claim has been filed with {steps.assert_claim_number.output.carrier} under policy
+        {input.policy_no}. Your claim number is {steps.assert_claim_number.output.claim_number}
+        (carrier reference {steps.assert_claim_number.output.carrier_ref}), filed at
+        {steps.assert_claim_number.output.submitted_at}. Keep this claim number for any follow-up.
+
+  # 10d) REPORT - log the filing as a branded PDF record for the agency's claim-intake audit trail.
+  - id: filing_report
+    type: report
+    depends_on: [notify_insured]
+    report_config:
+      template: "research-report"
+      format: pdf
+      theme: professional
+      title: "FNOL Filing Record - {steps.assert_claim_number.output.claim_number}"
+      author: "Claims Intake Desk"
+    prompt: >-
+      Produce a formal FNOL filing record PDF from the payload below. Include the carrier, policy number,
+      peril, the carrier-issued claim number and reference, the submitted timestamp, the count of files
+      attached, and a note that the loss packet was deterministically validated, a dual consistency check
+      (llm_eval + human pre-entry gate) passed, a human adjuster approved the binding submission, and the
+      claim number was asserted against the carrier's expected pattern before recording. Filing payload:
+      {steps.assert_claim_number.output} . Review summary: {steps.validate_review.output.entered_loss_summary}
+
+on_complete:
+  storage_path: "insurance-claim-fnol-portal-filer/{input.carrier}/{input.policy_no}/{run_id}/result.json"

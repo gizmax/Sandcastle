@@ -1,0 +1,796 @@
+# name: Onpage Claim And Price Verifier Vs Source Of Truth
+# description: Logs into the live storefront as a real (often member-priced, geo-set) customer, reads what the shopper ACTUALLY sees - the JS-assembled rendered price, '50% off' / '#1 rated' / regulatory claim badges, and the displayed legal disclaimer - then DETERMINISTICALLY diffs each against an authoritative source of truth (price DB + approved-claims register) with screenshot proof of every mismatch for the legal / advertising-standards file. The browser runs in provider-neutral playwright mode (the model only authors the load/extract/screenshot script); the price-tolerance check and claim-vs-register matching are pure Python (re.search on an approved-phrasing whitelist), so the FTC/ASA/EU UCPD verdict never depends on one provider. The browser only READS - never adds to cart or checks out; the sole write is an append-only object-lock WORM evidence PUT, sensor-confirmed before success is declared; filing any takedown/correction ticket is gated behind a human approval.
+# tags: [PriceVerification, ClaimSubstantiation, FTC, ASA, UCPD, PriceParity, MSRP, Browser, Playwright, ObjectLock, WORM, SourceOfTruth, TrajectoryReplay, AdvertisingCompliance, RegulatoryAffairs]
+# category: general_ai
+
+name: onpage-claim-and-price-verifier-vs-source-of-truth
+description: >-
+  A scheduled (daily) or event-triggered on-site price-and-claim verifier for the legal /
+  regulatory-affairs or e-commerce compliance team that must PROVE the live storefront's
+  displayed prices and advertising claims match approved sources (FTC/ASA/EU UCPD
+  substantiation, MSRP / price-parity, MiFID / medical / 'organic' claim controls). The
+  legally relevant artifact is the rendered, personalized, JS-assembled page a customer
+  actually sees - prices injected by a pricing engine, A/B'd claim badges, geo/segment
+  banners, and disclaimers loaded late. NONE of that lives in the static HTML or any product
+  API; the price API may say one number while the rendered PDP shows a stale or wrong one. So
+  this workflow drives a REAL (often logged-in or geo-set) browser to capture the as-displayed
+  truth and screenshot it.
+
+  Flow: (1) an http GET loads the authoritative SOURCE OF TRUTH (price DB + approved-claims
+  register) so expected values are pulled fresh, not hardcoded. (2) a deterministic code step
+  builds the per-item audit list (one entry per SKU / claim location) from the watchlist and
+  the source-of-truth payload, failing CLOSED on malformed input so the loop never runs on
+  garbage. (3) a LOOP runs one audit per watchlist item. (3a) a browser step (mode: playwright,
+  provider-neutral) AUTHORS a deterministic Playwright script: load the live PDP / landing page,
+  set the geo / segment if needed, log in via credentials_env only if member pricing is gated,
+  wait for the price / claim / disclaimer elements to settle, extract the AS-DISPLAYED price,
+  currency, discount badge text, claim strings, and disclaimer text, and screenshot them. It
+  returns a STRUCTURED object via output_schema and performs NO outbound or irreversible action -
+  it only reads and screenshots; it never adds to cart, checks out, or submits anything.
+  captcha_strategy pause hands any bot-check to a human; max_actions caps the session. (4) a
+  DETERMINISTIC code step is the audit verdict, no model: it diffs displayed_price vs the
+  source price within tolerance, checks each claim string against the approved register using
+  re.search on a whitelist of sanctioned phrasings, and verifies a required disclaimer is
+  present for any regulated claim - emitting per-item {match, discrepancy_type, severity}. (5) a
+  GATE with TWO strategies (a non-LLM threshold on the discrepancy count / severity that must
+  pass, and a swappable advisory llm_eval that can only FLAG 'claim looks materially misleading
+  vs register' and CANNOT overturn the deterministic price/claim diff) must both pass. (6) an
+  http PUT seals the mismatches + screenshots + canonical diff JSON to an object-lock
+  COMPLIANCE-mode (WORM) S3 bucket as evidence - the only write, append-only. (7) a sensor
+  re-reads the sealed object until the bucket itself confirms the immutable evidence landed,
+  so a silently-failed seal is never mistaken for proof. (8) a condition routes any HIGH-severity
+  mismatch (wrong price live, unsubstantiated claim) to a human APPROVAL - the legal / pricing
+  owner must sign off before a takedown / correction ticket is filed, the only irreversible
+  outbound action. (9) on approval the correction ticket is filed; (10) the compliance channel
+  is notified and a PDF evidence dossier is emitted; (11) a trajectory-replay diffs this run
+  against a golden run so a storefront redesign that silently breaks the extractor is caught as
+  a regression rather than a false PASS.
+
+  PROVIDER NEUTRAL: the browser runs in playwright mode - the model only authors the
+  load/extract/screenshot script and is fully swappable; the price tolerance check and
+  claim-vs-register matching are deterministic Python (re.search on an approved-phrasing
+  whitelist), so the legal verdict never depends on a specific provider. The single optional
+  llm_eval is advisory-only and pinned to a swappable model. SAFETY: member-pricing / login
+  uses credentials_env only (no inline secrets); captcha_strategy pause hands off to a human on
+  any bot-check; max_actions caps the session and the browser only READS the page and
+  screenshots - it never adds to cart, checks out, or submits anything. The sole write is the
+  append-only object-lock S3 evidence PUT (sensor-confirmed); filing any correction / takedown
+  ticket is gated behind a human approval, so no outbound action happens automatically.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 1800
+
+# Default trigger: a daily cron sweep of the SKU / claim watchlist. Fires 05:00 every day.
+# Override per audit calendar. Alternative event triggers (wire externally): a sensor that
+# fires when the source-of-truth price DB / claims register changes, or a marketing-site
+# deploy webhook.
+schedule: "0 5 * * *"
+
+input_schema:
+  required: ["watchlist", "source_of_truth_url", "evidence_bucket_url"]
+  properties:
+    watchlist:
+      type: string
+      description: >-
+        JSON array of watchlist items to verify, each an object with the live page URL and the
+        SKU / claim-location id to look up in the source of truth, e.g.
+        '[{"sku":"ACME-123","url":"https://shop.acme.com/p/acme-123","geo":"DE","segment":"member"}]'.
+        One browser audit runs per item.
+      default: '[{"sku":"ACME-123","url":"https://shop.acme.com/p/acme-123","geo":"DE","segment":"guest"}]'
+      example: '[{"sku":"ACME-123","url":"https://shop.acme.com/p/acme-123","geo":"DE","segment":"member"},{"sku":"ACME-999","url":"https://shop.acme.com/p/acme-999","geo":"US","segment":"guest"}]'
+    source_of_truth_url:
+      type: string
+      description: >-
+        URL of the authoritative source of truth API (price DB + approved-claims register). The
+        http GET pulls expected prices, currency, the per-SKU approved-claim whitelist, and which
+        claims are regulated (require a disclaimer). NEVER hardcode prices in the workflow.
+      default: "https://pricing.internal.acme.com/api/source-of-truth"
+      example: "https://pricing.internal.acme.com/api/v2/source-of-truth"
+    source_of_truth_token_env:
+      type: string
+      description: >-
+        Name of the environment variable holding the bearer token for the source-of-truth API.
+        The value is NEVER inlined; the http step reads it via the env reference.
+      default: "SOURCE_OF_TRUTH_TOKEN"
+      example: "PRICE_DB_READ_TOKEN"
+    store_login_env:
+      type: string
+      description: >-
+        Name of the environment variable holding the storefront login credentials, used by the
+        browser ONLY when the page is behind login or member pricing. NEVER inline secrets. If the
+        page is fully public, the value is unused.
+      default: "STORE_LOGIN"
+      example: "ACME_MEMBER_LOGIN"
+    evidence_bucket_url:
+      type: string
+      description: >-
+        Base URL of the object-lock (WORM) S3 bucket the mismatch screenshots + canonical diff
+        JSON are sealed to via http PUT with x-amz-object-lock COMPLIANCE mode. This is the ONLY
+        write in the workflow and is append-only evidence for the advertising-standards file.
+      default: "https://s3.eu-west-1.amazonaws.com/price-claim-evidence-worm"
+      example: "https://s3.eu-central-1.amazonaws.com/legal-price-evidence-lock"
+    evidence_token_env:
+      type: string
+      description: >-
+        Name of the environment variable holding the bearer token used to PUT evidence to the
+        object-lock bucket, and to GET it back for the sensor confirmation. NEVER inlined.
+      default: "EVIDENCE_BUCKET_TOKEN"
+      example: "LEGAL_EVIDENCE_BUCKET_TOKEN"
+    object_lock_retain_until:
+      type: string
+      description: >-
+        ISO-8601 timestamp the object-lock retention is set to (x-amz-object-lock-retain-until-date).
+        Until this date the evidence cannot be deleted or overwritten - the WORM guarantee the
+        legal / advertising-standards file relies on.
+      default: "2031-06-01T00:00:00Z"
+      example: "2031-06-01T00:00:00Z"
+    price_tolerance:
+      type: number
+      description: >-
+        Absolute currency tolerance allowed when diffing the displayed price vs the source-of-truth
+        price (covers rounding / minor fees). A displayed price outside this band is a mismatch.
+      default: 0.01
+      example: "0.01"
+    high_severity_min:
+      type: number
+      description: >-
+        Threshold: the run is HIGH severity (routed to the legal / pricing owner approval before
+        any takedown / correction ticket is filed) if its high-severity discrepancy count is at
+        least this many. The deterministic diff, not a model, sets the count.
+      default: 1
+      example: "1"
+    ticketing_url:
+      type: string
+      description: >-
+        URL of the ticketing API a correction / takedown ticket is filed to ONLY after a human
+        approves. This is the single irreversible outbound action and never fires automatically.
+      default: "https://tickets.internal.acme.com/api/correction-tickets"
+      example: "https://jira.acme.com/rest/api/2/issue"
+    ticketing_token_env:
+      type: string
+      description: "Name of the environment variable holding the bearer token for the ticketing API. NEVER inlined."
+      default: "TICKETING_TOKEN"
+      example: "JIRA_API_TOKEN"
+    golden_run_id:
+      type: string
+      description: >-
+        ID of the known-good recorded run. The trajectory-replay step diffs THIS run against it and
+        fails below the score floor, so a storefront redesign that silently breaks the price / claim
+        extractor (e.g. the price selector moved) is caught as a regression, not a false PASS.
+      default: "golden-price-claim-audit-2026-05-01"
+      example: "golden-price-claim-audit-2026-05-01"
+    report_author:
+      type: string
+      description: "Name shown as the author on the per-run PDF evidence dossier (legal / regulatory affairs)."
+      default: "Regulatory Affairs"
+      example: "Advertising Standards Counsel - Acme"
+    compliance_channel:
+      type: string
+      description: "Slack channel the compliance team watches for the discrepancy summary and high-severity routing."
+      default: "#price-claim-compliance"
+      example: "#legal-advertising-standards"
+
+steps:
+  # ---------------------------------------------------------------------------
+  # 1) SOURCE OF TRUTH (http GET) - load authoritative expected prices, currency,
+  #    the per-SKU approved-claim whitelist, and which claims are regulated (need a
+  #    disclaimer). Prices are NEVER hardcoded - they come from the price DB / claims
+  #    register here so the diff is against the real approved values. Bearer token via
+  #    env (never inlined). Read-only.
+  # ---------------------------------------------------------------------------
+  - id: load_source_of_truth
+    type: http
+    http_config:
+      url: "{input.source_of_truth_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.SOURCE_OF_TRUTH_TOKEN}"
+
+  # ---------------------------------------------------------------------------
+  # 2) BUILD AUDIT LIST (deterministic, no model). Parses the watchlist JSON and the
+  #    source-of-truth payload, joins each watchlist item to its approved price /
+  #    claim whitelist by SKU, and tags each with the live URL + geo/segment. Fails
+  #    CLOSED (empty list) on malformed input so the loop never runs on garbage. Pure
+  #    Python, no model decides anything here.
+  # ---------------------------------------------------------------------------
+  - id: build_audit_list
+    type: code
+    depends_on: [load_source_of_truth]
+    code_config:
+      language: python
+      code: |
+        import json
+
+        raw_watch = _input.get('watchlist') or '[]'
+        if isinstance(raw_watch, list):
+            watch = raw_watch
+        else:
+            try:
+                watch = json.loads(str(raw_watch))
+            except (ValueError, TypeError):
+                watch = []
+        if not isinstance(watch, list):
+            watch = []
+
+        # Source-of-truth payload from the http GET. The runtime may nest the JSON body
+        # under output/data/body/response - unwrap defensively without a model.
+        sot = _steps.get('load_source_of_truth') or {}
+        if isinstance(sot, str):
+            try:
+                sot = json.loads(sot) if sot.strip() else {}
+            except (ValueError, TypeError):
+                sot = {}
+        if not isinstance(sot, dict):
+            sot = {}
+        for key in ('output', 'data', 'body', 'response', 'json'):
+            inner = sot.get(key)
+            if isinstance(inner, dict) and ('items' in inner or 'skus' in inner or 'prices' in inner):
+                sot = inner
+                break
+
+        # Build a SKU -> approved record index from the source of truth. Accept a few
+        # common shapes (a list under items/skus/prices, or a dict keyed by sku).
+        sot_index = {}
+        candidates = sot.get('items') or sot.get('skus') or sot.get('prices') or []
+        if isinstance(candidates, dict):
+            candidates = [dict(v or {}, sku=k) for k, v in candidates.items()]
+        if not isinstance(candidates, list):
+            candidates = []
+        for rec in candidates:
+            if not isinstance(rec, dict):
+                continue
+            sku = str(rec.get('sku') or rec.get('id') or '').strip()
+            if not sku:
+                continue
+            sot_index[sku] = rec
+
+        audit_list = []
+        skipped = []
+        seen = set()
+        for item in watch:
+            if not isinstance(item, dict):
+                skipped.append({'reason': 'watchlist item not an object', 'item': str(item)[:120]})
+                continue
+            sku = str(item.get('sku') or item.get('id') or '').strip()
+            url = str(item.get('url') or '').strip()
+            if not sku or not (url.startswith('http://') or url.startswith('https://')):
+                skipped.append({'reason': 'missing sku or invalid url', 'sku': sku, 'url': url})
+                continue
+            key = sku + '|' + url.lower().rstrip('/')
+            if key in seen:
+                continue
+            seen.add(key)
+            sot_rec = sot_index.get(sku) or {}
+            audit_list.append({
+                'sku': sku,
+                'url': url,
+                'geo': str(item.get('geo') or '').strip(),
+                'segment': str(item.get('segment') or 'guest').strip(),
+                # Approved expectations pulled from the source of truth (NOT hardcoded):
+                'expected_price': sot_rec.get('price'),
+                'expected_currency': str(sot_rec.get('currency') or '').strip(),
+                # Whitelist of sanctioned claim phrasings approved for this SKU.
+                'approved_claims': sot_rec.get('approved_claims') if isinstance(sot_rec.get('approved_claims'), list) else [],
+                # Claim phrasings that are regulated and REQUIRE a visible disclaimer.
+                'regulated_claims': sot_rec.get('regulated_claims') if isinstance(sot_rec.get('regulated_claims'), list) else [],
+                'sot_found': sku in sot_index,
+            })
+
+        result = {
+            'audit_list': audit_list,
+            'count': len(audit_list),
+            'skipped': skipped,
+            'source_of_truth_skus': len(sot_index),
+            'ok': len(audit_list) > 0,
+        }
+
+  # ---------------------------------------------------------------------------
+  # 3) LOOP over each watchlist item. Each iteration runs the per-item browser audit
+  #    (child audit_one_item) reading the current target via _item. max_iterations
+  #    caps the sweep so a huge watchlist cannot run unbounded. Downstream depends on
+  #    the loop.
+  # ---------------------------------------------------------------------------
+  - id: audit_loop
+    type: loop
+    depends_on: [build_audit_list]
+    loop_config:
+      over: "steps.build_audit_list.output.audit_list"
+      step_ids: [audit_one_item]
+      max_iterations: 500
+
+  # 3a) PER-ITEM ON-SITE AUDIT (mode: playwright, the READ pass). The reasoning model
+  #     only AUTHORS a deterministic Playwright script from the prompt; the script +
+  #     output_schema make this provider-neutral and a pure READ (load, set geo/segment,
+  #     wait for elements to settle, extract, screenshot). It mutates NOTHING outbound -
+  #     it NEVER adds to cart, checks out, or submits. capture_screenshots ON for the WORM
+  #     evidence; captcha_strategy pause hands any bot-check to a human; max_actions caps
+  #     the session. credentials_env is used ONLY if the page is behind login / member
+  #     pricing (secret never inlined). Operates on ONE item (_item) only.
+  - id: audit_one_item
+    type: browser
+    prompt: >-
+      You are verifying what a real customer ACTUALLY sees on a live storefront page so a legal
+      / advertising-standards diff can be run. The target watchlist item is: {{ _item }}.
+      Author and run a deterministic Playwright script that does EXACTLY this and nothing else:
+      (1) Open the page at {{ _item.url }}. If a geo is given ({{ _item.geo }}), set the store
+      region / locale to it (locale selector, geo cookie, or region switcher) so the personalized
+      price renders. If the segment is 'member' ({{ _item.segment }}) and the page is behind login
+      or member pricing, log in using ONLY the credentials provided via the STORE_LOGIN environment
+      variable - never type any inline secret. If the page is public, do not log in.
+      (2) WAIT for the price, discount badge, claim badges, and legal disclaimer elements to fully
+      settle (the price is injected late by the pricing engine; claim badges may be A/B'd; the
+      disclaimer often loads last). Do not read a half-rendered page.
+      (3) Extract the AS-DISPLAYED values verbatim: displayed_price (the numeric price the customer
+      sees), displayed_currency, discount_badge (the literal text of any '50% off' / sale badge),
+      claim_strings (every marketing / rating / regulatory claim string shown, e.g. '#1 rated',
+      'clinically proven', 'organic'), disclaimer_present (is a legal disclaimer visible), and
+      disclaimer_text (its literal text). List claim strings verbatim - do NOT judge which are
+      approved; the deterministic step does that.
+      (4) Take screenshots of the price area, any claim badges, and the disclaimer for the evidence
+      record (add their references to screenshot_refs).
+      CRITICAL: this is strictly READ + screenshot. Do NOT add to cart, do NOT begin checkout, do
+      NOT click buy/pay, do NOT submit any form or newsletter, do NOT navigate to purchase. If a
+      CAPTCHA or bot-check appears, PAUSE for a human rather than solving it. Return ONLY the
+      structured object described by the output schema.
+    browser_config:
+      mode: playwright
+      start_url: "{{ _item.url }}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 120
+      max_actions: 30
+      headless: true
+      credentials_env: "STORE_LOGIN"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          sku:
+            type: string
+            description: "Echo of the audited SKU (for reconciliation with the source of truth)."
+          url:
+            type: string
+            description: "Echo of the audited live page URL."
+          displayed_price:
+            type: number
+            description: "The numeric price as RENDERED to the customer (after the pricing engine injects it)."
+          displayed_currency:
+            type: string
+            description: "The currency code/symbol shown next to the displayed price."
+          discount_badge:
+            type: string
+            description: "Literal text of any discount / sale badge shown (e.g. '50% off'), empty if none."
+          claim_strings:
+            type: array
+            description: "Every marketing / rating / regulatory claim string displayed (raw, unjudged)."
+            items: { type: string }
+          disclaimer_present:
+            type: boolean
+            description: "Is a legal disclaimer visible on the page?"
+          disclaimer_text:
+            type: string
+            description: "Literal text of the displayed legal disclaimer, empty if none."
+          screenshot_refs:
+            type: array
+            description: "References to the price / claim / disclaimer screenshots captured for the evidence record."
+            items: { type: string }
+        required:
+          - sku
+          - url
+          - displayed_price
+          - claim_strings
+          - disclaimer_present
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
+
+  # ---------------------------------------------------------------------------
+  # 4) DETERMINISTIC DIFF (no model) - the audit-load-bearing verdict. For each item:
+  #    VALIDATE the browser read (reject empty/malformed so a blank scrape never passes),
+  #    diff displayed_price vs the source-of-truth price within price_tolerance, check
+  #    each displayed claim string against the approved register using re.search on a
+  #    whitelist of sanctioned phrasings, and verify a required disclaimer is present for
+  #    any regulated claim. Emits per-item {match, discrepancy_type, severity}. This
+  #    boolean / regex math, NOT any model, is the legal verdict.
+  # ---------------------------------------------------------------------------
+  - id: compute_diff
+    type: code
+    depends_on: [audit_loop, build_audit_list]
+    code_config:
+      language: python
+      code: |
+        import json
+
+        try:
+            tolerance = abs(float(_input.get('price_tolerance', 0.01)))
+        except (TypeError, ValueError):
+            tolerance = 0.01
+
+        # Approved expectations per SKU from the deterministic audit list (sourced from the
+        # price DB / claims register, never a model).
+        audit_meta = _steps.get('build_audit_list') or {}
+        if not isinstance(audit_meta, dict):
+            audit_meta = {}
+        expected_by_sku = {}
+        for entry in (audit_meta.get('audit_list') or []):
+            if isinstance(entry, dict) and entry.get('sku'):
+                expected_by_sku[str(entry['sku'])] = entry
+
+        # Per-item browser results from the loop output.
+        loop_out = _steps.get('audit_loop') or {}
+        if isinstance(loop_out, list):
+            items = loop_out
+        elif isinstance(loop_out, dict):
+            items = loop_out.get('results') or loop_out.get('items') or []
+        else:
+            items = []
+        if not isinstance(items, list):
+            items = []
+
+        def _num(v):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return None
+
+        def _claim_matches_register(displayed_claim, approved_list):
+            # Whitelist match: a displayed claim is APPROVED only if it matches one of the
+            # sanctioned phrasings via a word-boundary, case-insensitive re.search. The
+            # approved phrasing is the pattern; the displayed claim is the text.
+            disp = str(displayed_claim or '').strip()
+            if not disp:
+                return True  # empty string is not a claim
+            for phrase in approved_list:
+                pat = str(phrase or '').strip()
+                if not pat:
+                    continue
+                # Escape the approved phrase so it is treated literally, then bound it.
+                escaped = re.sub(r'([.^$*+?{}\[\]\\|()])', r'\\\1', pat)
+                if re.search(r'(?i)\b' + escaped + r'\b', disp):
+                    return True
+                # Also allow the displayed claim to be a sanctioned substring match the
+                # other way (register phrase fully contained in the displayed string).
+                if re.search(r'(?i)\b' + re.sub(r'([.^$*+?{}\[\]\\|()])', r'\\\1', disp) + r'\b', pat):
+                    return True
+            return False
+
+        per_item = []
+        for raw in items:
+            rec = raw
+            if isinstance(rec, str):
+                try:
+                    rec = json.loads(rec) if rec.strip() else {}
+                except (ValueError, TypeError):
+                    rec = {}
+            if not isinstance(rec, dict):
+                rec = {}
+            for key in ('output', 'data', 'result'):
+                inner = rec.get(key)
+                if isinstance(inner, dict) and 'sku' in inner:
+                    rec = inner
+                    break
+
+            sku = str(rec.get('sku') or '').strip()
+            url = str(rec.get('url') or '').strip()
+            displayed_price = _num(rec.get('displayed_price'))
+            displayed_currency = str(rec.get('displayed_currency') or '').strip()
+            discount_badge = str(rec.get('discount_badge') or '').strip()
+            claim_strings = rec.get('claim_strings')
+            if not isinstance(claim_strings, list):
+                claim_strings = []
+            disclaimer_present = bool(rec.get('disclaimer_present'))
+            disclaimer_text = str(rec.get('disclaimer_text') or '').strip()
+            screenshots = rec.get('screenshot_refs')
+            if not isinstance(screenshots, list):
+                screenshots = []
+
+            exp = expected_by_sku.get(sku) or {}
+            expected_price = _num(exp.get('expected_price'))
+            expected_currency = str(exp.get('expected_currency') or '').strip()
+            approved_claims = exp.get('approved_claims') if isinstance(exp.get('approved_claims'), list) else []
+            regulated_claims = exp.get('regulated_claims') if isinstance(exp.get('regulated_claims'), list) else []
+
+            discrepancies = []
+
+            # --- VALIDATE the read: a trustworthy audit needs a sku and a numeric price.
+            read_ok = True
+            if not sku.startswith(''):
+                pass
+            if not sku:
+                discrepancies.append({'type': 'invalid_read_no_sku', 'severity': 'high'})
+                read_ok = False
+            if displayed_price is None:
+                discrepancies.append({'type': 'invalid_read_no_price', 'severity': 'high'})
+                read_ok = False
+            if not exp.get('sot_found', False) and not expected_by_sku.get(sku):
+                discrepancies.append({'type': 'no_source_of_truth_record', 'severity': 'high'})
+
+            # --- PRICE diff within tolerance (deterministic math) ---------------------
+            if read_ok and expected_price is not None and displayed_price is not None:
+                delta = abs(displayed_price - expected_price)
+                if delta > tolerance:
+                    discrepancies.append({
+                        'type': 'price_mismatch',
+                        'severity': 'high',
+                        'displayed': round(displayed_price, 2),
+                        'expected': round(expected_price, 2),
+                        'delta': round(delta, 2),
+                    })
+            elif read_ok and expected_price is None:
+                discrepancies.append({'type': 'no_expected_price_in_source', 'severity': 'medium'})
+
+            # --- CURRENCY check -------------------------------------------------------
+            if expected_currency and displayed_currency and displayed_currency.upper() != expected_currency.upper():
+                discrepancies.append({
+                    'type': 'currency_mismatch', 'severity': 'medium',
+                    'displayed': displayed_currency, 'expected': expected_currency,
+                })
+
+            # --- CLAIM check vs approved register (re.search whitelist) ---------------
+            unapproved_claims = []
+            for claim in claim_strings:
+                if not _claim_matches_register(claim, approved_claims):
+                    unapproved_claims.append(str(claim).strip())
+            # The discount badge is itself an advertising claim - it must also be approved.
+            if discount_badge and not _claim_matches_register(discount_badge, approved_claims):
+                unapproved_claims.append(discount_badge)
+            if unapproved_claims:
+                discrepancies.append({
+                    'type': 'unsubstantiated_claim', 'severity': 'high',
+                    'claims': unapproved_claims,
+                })
+
+            # --- DISCLAIMER required for any displayed regulated claim ----------------
+            regulated_shown = []
+            for reg in regulated_claims:
+                # A regulated phrasing is "shown" if it appears in any displayed claim.
+                reg_pat = re.sub(r'([.^$*+?{}\[\]\\|()])', r'\\\1', str(reg or '').strip())
+                if not reg_pat:
+                    continue
+                for claim in (claim_strings + [discount_badge]):
+                    if claim and re.search(r'(?i)\b' + reg_pat + r'\b', str(claim)):
+                        regulated_shown.append(str(reg).strip())
+                        break
+            if regulated_shown and not disclaimer_present:
+                discrepancies.append({
+                    'type': 'missing_required_disclaimer', 'severity': 'high',
+                    'regulated_claims_shown': regulated_shown,
+                })
+
+            severities = [str(d.get('severity', 'low')) for d in discrepancies]
+            high_count = severities.count('high')
+            item_severity = 'high' if high_count else ('medium' if 'medium' in severities else ('low' if discrepancies else 'none'))
+
+            per_item.append({
+                'sku': sku,
+                'url': url,
+                'match': len(discrepancies) == 0,
+                'displayed_price': displayed_price,
+                'expected_price': expected_price,
+                'displayed_currency': displayed_currency,
+                'discount_badge': discount_badge,
+                'unapproved_claims': unapproved_claims,
+                'regulated_claims_shown': regulated_shown,
+                'disclaimer_present': disclaimer_present,
+                'discrepancies': discrepancies,
+                'discrepancy_count': len(discrepancies),
+                'high_severity_count': high_count,
+                'severity': item_severity,
+                'screenshot_refs': screenshots,
+            })
+
+        total_items = len(per_item)
+        mismatched = [d for d in per_item if not d['match']]
+        total_discrepancies = sum(d['discrepancy_count'] for d in per_item)
+        high_severity_count = sum(d['high_severity_count'] for d in per_item)
+        max_item_high = max((d['high_severity_count'] for d in per_item), default=0)
+
+        result = {
+            'per_item': per_item,
+            'total_items': total_items,
+            'mismatched_count': len(mismatched),
+            'total_discrepancies': total_discrepancies,
+            'high_severity_count': high_severity_count,
+            'max_item_high_severity': max_item_high,
+            'all_match': total_discrepancies == 0 and total_items > 0,
+            'price_tolerance': tolerance,
+        }
+
+  # ---------------------------------------------------------------------------
+  # 5) GATE - TWO strategies, BOTH must pass, before evidence is sealed:
+  #    (a) a NON-LLM threshold asserting the deterministic verdict is internally
+  #        consistent (the mismatch set cannot exceed the audited set, at least one
+  #        item was audited, high-severity count is non-negative);
+  #    (b) a SWAPPABLE advisory llm_eval that may only FLAG 'a claim looks materially
+  #        misleading vs the register'. It is advisory ONLY - it CANNOT overturn the
+  #        deterministic price/claim diff above (that code output is the source of
+  #        truth). Pinned to a swappable model alias.
+  # ---------------------------------------------------------------------------
+  - id: discrepancy_gate
+    type: gate
+    depends_on: [compute_diff]
+    gate_config:
+      strategies:
+        # (a) NON-LLM threshold: structural consistency of the deterministic verdict.
+        - type: threshold
+          config:
+            input: "{steps.compute_diff.output}"
+            expression: "mismatched_count <= total_items and total_items > 0 and high_severity_count >= 0"
+            description: >-
+              Non-LLM consistency check on the deterministic diff: the mismatched set cannot exceed
+              the audited set, at least one item was audited, and the high-severity count is valid.
+              This strategy reads the boolean math only - it does NOT re-judge prices or claims.
+        # (b) SWAPPABLE advisory llm_eval: flags materially-misleading intent, cannot overturn the diff.
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are an advertising-standards reviewer. You are given the DETERMINISTIC
+              price/claim audit verdict for a set of items. Do NOT recompute or overturn the
+              price diffs or claim matches - they are authoritative. Your ONLY job is an advisory
+              flag: reply 'approved' if the verdict record is internally consistent and safe to
+              seal as evidence (per-item discrepancy lists match their counts, mismatched items
+              are the ones with discrepancies). Reply 'approved' even if discrepancies exist - the
+              presence of violations does not block sealing the evidence; only an INCONSISTENT
+              record should be 'rejected' with the inconsistency named. This is advisory labeling
+              only and cannot change the deterministic count. Verdict: {steps.compute_diff.output}
+            input: "{steps.compute_diff.output}"
+            model: mistral/large
+
+  # ---------------------------------------------------------------------------
+  # 6) SEAL EVIDENCE (the ONLY write) - http PUT the mismatches + screenshots + canonical
+  #    diff JSON to the object-lock S3 bucket in COMPLIANCE mode (WORM). x-amz-object-lock
+  #    -mode COMPLIANCE + retain-until make this append-only, undeletable evidence for the
+  #    advertising-standards file. Bearer token via env (never inlined). Runs only AFTER the
+  #    two-strategy gate passes. Appends an immutable object - no destructive action.
+  # ---------------------------------------------------------------------------
+  - id: seal_evidence_worm
+    type: http
+    depends_on: [discrepancy_gate]
+    http_config:
+      url: "{input.evidence_bucket_url}/{run_id}/price-claim-diff.json"
+      method: PUT
+      headers:
+        Content-Type: "application/json"
+        x-amz-object-lock-mode: "COMPLIANCE"
+        x-amz-object-lock-retain-until-date: "{input.object_lock_retain_until}"
+      auth: "bearer:{env.EVIDENCE_BUCKET_TOKEN}"
+      body: '{"run_id": "{run_id}", "sealed_at": "{input.object_lock_retain_until}", "total_items": "{steps.compute_diff.output.total_items}", "mismatched_count": "{steps.compute_diff.output.mismatched_count}", "total_discrepancies": "{steps.compute_diff.output.total_discrepancies}", "high_severity_count": "{steps.compute_diff.output.high_severity_count}", "max_item_high_severity": "{steps.compute_diff.output.max_item_high_severity}", "per_item": "{steps.compute_diff.output.per_item}"}'
+
+  # ---------------------------------------------------------------------------
+  # 7) CONFIRM SEAL (engine-native SENSOR) - the seal-then-VERIFY core. Re-GET the sealed
+  #    object from the object-lock bucket until the bucket itself confirms the immutable
+  #    evidence landed (HTTP 200 and the object-lock retain-until header / body echoes the
+  #    run). A provider-agnostic boolean over the polled response - pure control flow, no
+  #    model. Hard timeout so we never wait forever; a timeout is NOT treated as a
+  #    successful seal, so a silently-failed PUT can never be mistaken for sealed evidence.
+  # ---------------------------------------------------------------------------
+  - id: confirm_seal
+    type: sensor
+    depends_on: [seal_evidence_worm]
+    sensor_config:
+      url: "{input.evidence_bucket_url}/{run_id}/price-claim-diff.json"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200 and str(response.get('run_id', '')).strip() != ''"
+      check_interval: 30
+      timeout: 1800
+
+  # ---------------------------------------------------------------------------
+  # 8) CONDITION - route on the DETERMINISTIC severity. If any item reaches the high-severity
+  #    floor (wrong price live, unsubstantiated claim), send it to a human APPROVAL: the legal
+  #    / pricing owner reviews the sealed evidence BEFORE any takedown / correction ticket is
+  #    filed. Otherwise skip straight to the dossier. The boolean math decides the branch.
+  # ---------------------------------------------------------------------------
+  - id: route_severity
+    type: condition
+    depends_on: [confirm_seal]
+    condition_config:
+      expression: "{steps.compute_diff.output.max_item_high_severity} >= {input.high_severity_min}"
+      then: [owner_approval, build_dossier]
+      else: [build_dossier]
+
+  # 8a) HIGH-SEVERITY PATH - the SINGLE human gate before anything leaves the org. The legal /
+  #     pricing owner reviews the sealed evidence and the per-item discrepancies and AUTHORIZES
+  #     (or rejects) filing a takedown / correction ticket. NOTHING is filed automatically.
+  #     on_timeout abort means a missed review never auto-files; allow_edit lets the owner trim
+  #     the item set before filing.
+  - id: owner_approval
+    type: approval
+    depends_on: [route_severity]
+    approval_config:
+      message: >-
+        LEGAL / PRICING OWNER REVIEW REQUIRED - one or more live items breached the source of
+        truth at HIGH severity (wrong price live and/or an unsubstantiated advertising claim).
+        Evidence has been sealed to the object-lock WORM bucket and confirmed. APPROVE to authorize
+        filing a takedown / correction ticket, REJECT to hold. Mismatched items:
+        {steps.compute_diff.output.mismatched_count} of {steps.compute_diff.output.total_items};
+        total discrepancies: {steps.compute_diff.output.total_discrepancies}; high-severity
+        discrepancies: {steps.compute_diff.output.high_severity_count}; worst item high-severity
+        count: {steps.compute_diff.output.max_item_high_severity}. Nothing is filed until you approve.
+      show_data: steps.compute_diff.output
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: true
+
+  # 8b) FILE CORRECTION TICKET (the only IRREVERSIBLE OUTBOUND action) - reached ONLY after the
+  #     human approval above. http POST a correction / takedown ticket to the ticketing API.
+  #     Bearer token via env (never inlined). This never fires without sign-off.
+  - id: file_correction_ticket
+    type: http
+    depends_on: [owner_approval]
+    http_config:
+      url: "{input.ticketing_url}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+      auth: "bearer:{env.TICKETING_TOKEN}"
+      body: '{"title": "On-site price/claim correction - run {run_id}", "run_id": "{run_id}", "mismatched_count": "{steps.compute_diff.output.mismatched_count}", "high_severity_count": "{steps.compute_diff.output.high_severity_count}", "evidence_url": "{input.evidence_bucket_url}/{run_id}/price-claim-diff.json", "per_item": "{steps.compute_diff.output.per_item}", "authorized_by_human_approval": true}'
+
+  # ---------------------------------------------------------------------------
+  # 9) REPORT - per-run PDF evidence dossier with embedded mismatch screenshots. Built from the
+  #    deterministic diff + sealed-evidence references so the document the legal / advertising
+  #    -standards file relies on is reproducible. Runs on both branches.
+  # ---------------------------------------------------------------------------
+  - id: build_dossier
+    type: report
+    depends_on: [route_severity]
+    report_config:
+      template: research-report
+      format: pdf
+      theme: professional
+      title: "On-Site Price & Claim vs Source-of-Truth Evidence Dossier - {run_id}"
+      author: "{input.report_author}"
+    prompt: |
+      Produce a per-run on-site price-and-claim compliance evidence dossier (PDF) for the legal /
+      regulatory-affairs file from the DETERMINISTIC audit payload below. Structure it as:
+      1. Executive summary: total items audited ({steps.compute_diff.output.total_items}),
+      mismatched ({steps.compute_diff.output.mismatched_count}), total discrepancies
+      ({steps.compute_diff.output.total_discrepancies}), high-severity discrepancies
+      ({steps.compute_diff.output.high_severity_count}).
+      2. A per-item table: for each item show the SKU, the URL, the displayed price vs the
+      source-of-truth expected price (and delta), the displayed currency, the discount badge, the
+      list of unapproved / unsubstantiated claim strings, any regulated claim shown without a
+      required disclaimer, and the explicit discrepancy list with severities.
+      3. For each mismatched item, embed the captured price / claim / disclaimer screenshots
+      (screenshot_refs) as the timestamped proof of the as-displayed behavior - the legally
+      load-bearing artifact no price API can produce.
+      4. An evidence-integrity note: state that the canonical diff JSON + screenshots were sealed
+      to an object-lock (WORM, COMPLIANCE-mode) bucket and the seal was sensor-confirmed, so the
+      record is tamper-evident and defensible against an FTC / ASA / EU UCPD challenge.
+      Do NOT invent SKUs, prices, or claims - use only the payload.
+      Verdict payload: {steps.compute_diff.output}
+
+  # ---------------------------------------------------------------------------
+  # 10) TRAJECTORY-REPLAY - the reliability layer. Diffs THIS run against a golden_run_id and
+  #     FAILS below fail_below_score (UI drift, e.g. a storefront redesign that moved the price
+  #     selector and silently broke the extractor) or on a cost blowup. Deterministic scorer,
+  #     not a model's opinion: it compares the observable browser actions + extracted outputs.
+  #     Catches a silently-broken extractor (a false PASS) as a regression before it is trusted.
+  # ---------------------------------------------------------------------------
+  - id: replay_vs_golden
+    type: trajectory-replay
+    depends_on: [build_dossier]
+    trajectory_replay_config:
+      golden_run_id: "{input.golden_run_id}"
+      fail_below_score: 0.85
+      allow_cost_delta_pct: 15.0
+      cost_budget_usd: 0.5
+
+  # ---------------------------------------------------------------------------
+  # 11) NOTIFY the compliance channel with the discrepancy summary + evidence + replay verdict.
+  # ---------------------------------------------------------------------------
+  - id: notify_compliance
+    type: notify
+    depends_on: [replay_vs_golden, compute_diff]
+    notify_config:
+      service: slack
+      channel: "{input.compliance_channel}"
+      message: "On-site price/claim vs source-of-truth audit complete. Items: {steps.compute_diff.output.total_items} | Mismatched: {steps.compute_diff.output.mismatched_count} | Total discrepancies: {steps.compute_diff.output.total_discrepancies} | High-severity: {steps.compute_diff.output.high_severity_count} | Worst item high-severity: {steps.compute_diff.output.max_item_high_severity} | Evidence sealed + sensor-confirmed in object-lock WORM bucket for run {run_id} | Per-run PDF dossier generated. High-severity findings (if any) were routed to the legal/pricing owner approval before any correction/takedown ticket was filed."
+
+on_complete:
+  storage_path: "onpage-claim-and-price-verifier-vs-source-of-truth/{run_id}/result.json"

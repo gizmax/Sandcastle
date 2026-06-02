@@ -1,0 +1,543 @@
+# name: Golden Journey Regression Gate
+# description: A pre-release CI gate that, on every staging deploy, re-drives the recorded critical user journeys (signup, paid checkout, onboarding) against the new build in a real browser, scores each against its golden trajectory, and BLOCKS promotion to production unless every journey still passes - making fragile funnel flows a hard release-blocking test instead of a Datadog alert after rollout.
+# tags: [ci, release-gate, browser, playwright, trajectory-replay, regression, golden-run, devops, staging, funnel]
+# category: engineering
+
+name: golden-journey-regression-gate
+description: >-
+  A release gate for the human-visible funnel. Unit and API tests pass while the
+  Pay button silently detaches or step 4 of onboarding white-screens, because the
+  multi-step signup / paid-checkout / onboarding-wizard journeys only exist as
+  rendered browser interactions across SPA routes, iframes, and redirects - there
+  is no API contract test that proves them. This workflow is fired by a staging-
+  deploy webhook (and is re-runnable on demand before a manual promote): it reads
+  the deploy metadata (build id, staging URL, the list of critical journeys to
+  gate), LOOPS over each journey driving the REAL staging build in provider-neutral
+  playwright mode, and for each one runs a TRAJECTORY-REPLAY against that journey's
+  recorded golden run. The replay score (not a model's opinion) is the binding
+  pass/fail: any journey below fail_below_score is a regression.
+
+  The load-bearing decision is mechanical. A deterministic, sandboxed CODE step
+  aggregates the per-journey replay scores and completion booleans into a single
+  release verdict (all-green required) and attaches the failure screenshots. The
+  only irreversible action in the pipeline - promoting the build to production - is
+  held behind a GATE whose human strategy a release owner must explicitly satisfy:
+  a green run lets the advisory llm_eval summarize WHAT changed and the human
+  approve, while ANY regressed journey blocks the gate and forces an explicit human
+  override. A NOTIFY then posts the blocking journey, its replay-score delta, and
+  the failure screenshot to CI/Slack so the release owner sees exactly which flow
+  broke. A DELEGATE can fan the payment leg of a journey to an existing synthetic
+  checkout workflow for a deeper revenue-canary check.
+
+  SAFETY: this gate runs ONLY against STAGING via the http-supplied staging URL,
+  with credentials_env=CI_SYNTH_CREDS (disposable synthetic accounts, never inline
+  secrets). captcha_strategy is fail on purpose - CI must never block on a human, so
+  a CAPTCHA on a journey is reported as a finding, not a pause. max_actions=70 per
+  journey caps runaway scripts and capture_screenshots=true gives an audit trail.
+  Provider neutrality: each journey is reduced to a numeric replay score plus
+  deterministic code aggregation, the playwright authoring rides default_model
+  (swappable), and the gate's llm_eval is advisory-only - no vendor's agent is
+  load-bearing. Swap default_model to dom for cheap non-canvas journeys.
+
+default_model: sonnet
+default_timeout: 1800
+
+input_schema:
+  required: ["deploy_metadata_url", "build_id"]
+  properties:
+    deploy_metadata_url:
+      type: string
+      description: >-
+        CI/deploy API endpoint that returns this staging deploy's metadata: the
+        resolved staging base URL and the list of critical journeys to gate (each
+        with its entry path and golden_run_id). Read by the first http step.
+      default: "https://ci.internal.example.com/api/deploys/{build_id}/gate-manifest"
+    build_id:
+      type: string
+      description: "The staging build / deploy id under test. Echoed into every notify so the release owner knows exactly which build was gated."
+      default: "staging-build-unknown"
+    staging_base_url:
+      type: string
+      description: >-
+        Fallback staging base URL if the deploy-metadata response omits one. The
+        gate ONLY ever drives this staging origin - never production.
+      default: "https://staging.app.example.com"
+    critical_journeys_json:
+      type: string
+      description: >-
+        Fallback JSON array of journeys to gate when the metadata endpoint returns
+        none. Each item: {journey, entry_path, golden_run_id, is_payment_leg}. Used
+        verbatim by the loop; NEVER put secrets here (creds come from credentials_env).
+      default: >-
+        [{"journey":"signup","entry_path":"/signup","golden_run_id":"golden-signup-staging","is_payment_leg":false},{"journey":"paid_checkout","entry_path":"/checkout","golden_run_id":"golden-checkout-staging","is_payment_leg":true},{"journey":"onboarding","entry_path":"/onboarding","golden_run_id":"golden-onboarding-staging","is_payment_leg":false}]
+    fail_below_score:
+      type: number
+      description: "Trajectory-replay similarity floor (0..1). A journey scoring below this is a regression and blocks promotion."
+      default: 0.85
+    browser_mode:
+      type: string
+      description: >-
+        Documented browser-mode choice: 'playwright' (default, provider-neutral -
+        the model authors the script) or 'dom' for cheap read-only checks of non-
+        canvas journeys. Swap the browser step's mode without touching the gate.
+      default: "playwright"
+    checkout_canary_workflow:
+      type: string
+      description: "Existing workflow to delegate the payment leg to for a deeper synthetic revenue-canary check."
+      default: "synthetic_signup_journey_sentinel"
+    ci_slack_channel:
+      type: string
+      description: "CI/Slack channel that receives the gate verdict, the blocking journey, its replay-score delta, and the failure screenshot."
+      default: "#release-gate"
+
+steps:
+  # ---------------------------------------------------------------------------
+  # 1) HTTP - read this staging deploy's gate manifest: the resolved staging base
+  #    URL and the list of critical journeys to gate (each with entry path +
+  #    golden_run_id). This is what binds the run to ONE specific staging build and
+  #    keeps the journey list data-driven, not hardcoded.
+  # ---------------------------------------------------------------------------
+  - id: read_deploy_metadata
+    type: http
+    http_config:
+      url: "{input.deploy_metadata_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.CI_API_TOKEN}"
+      value_map:
+        manifest_staging_base_url: "staging_base_url"
+        manifest_journeys: "journeys"
+
+  # ---------------------------------------------------------------------------
+  # 2) CODE (deterministic) - normalize the manifest into a clean journey list the
+  #    loop iterates over. Prefers the manifest's journeys/staging URL, falls back
+  #    to the input JSON, and absolutizes each entry URL against the staging origin
+  #    so the browser only ever drives staging. No model here - pure shaping.
+  # ---------------------------------------------------------------------------
+  - id: build_journey_plan
+    type: code
+    depends_on: [read_deploy_metadata]
+    code_config:
+      language: python
+      code: |
+        import json
+        meta = _steps.get("read_deploy_metadata")
+        if not isinstance(meta, dict):
+            meta = {}
+
+        # Resolve the staging origin: manifest first, then input fallback.
+        base = str(meta.get("manifest_staging_base_url") or "").strip()
+        if not base:
+            base = str(_input.get("staging_base_url") or "").strip()
+        base = base.rstrip("/")
+
+        # Resolve the journey list: manifest journeys first, else parse the input
+        # JSON fallback. Defend against every malformed shape.
+        journeys = meta.get("manifest_journeys")
+        if not isinstance(journeys, list) or not journeys:
+            raw = str(_input.get("critical_journeys_json") or "").strip()
+            try:
+                parsed = json.loads(raw) if raw else []
+            except (ValueError, TypeError):
+                parsed = []
+            journeys = parsed if isinstance(parsed, list) else []
+
+        plan = []
+        for j in journeys:
+            if not isinstance(j, dict):
+                continue
+            name = str(j.get("journey") or "").strip()
+            entry = str(j.get("entry_path") or j.get("entry_url") or "").strip()
+            golden = str(j.get("golden_run_id") or "").strip()
+            if not name or not golden:
+                # A journey with no name or no golden run cannot be gated.
+                continue
+            # Absolutize the entry URL against the staging origin. If entry is
+            # already absolute (starts with http) keep it but force staging origin
+            # is NOT done here - we trust the manifest's own absolute staging URLs.
+            if entry.startswith("http"):
+                entry_url = entry
+            elif entry.startswith("/"):
+                entry_url = base + entry
+            elif entry:
+                entry_url = base + "/" + entry
+            else:
+                entry_url = base
+            plan.append({
+                "journey": name,
+                "entry_url": entry_url,
+                "golden_run_id": golden,
+                "is_payment_leg": bool(j.get("is_payment_leg", False)),
+            })
+
+        # Guard: a gate with zero journeys is itself a finding - it must NOT silently
+        # pass. We surface this so the verdict step can block on it.
+        result = {
+            "staging_base_url": base,
+            "journeys": plan,
+            "journey_count": len(plan),
+            "no_journeys": len(plan) == 0,
+            "is_staging_origin": base.startswith("http") and ("staging" in base or "localhost" in base),
+        }
+
+  # ---------------------------------------------------------------------------
+  # 3) LOOP over each critical journey. The child browser step (defined separately)
+  #    re-drives that journey against the staging build; downstream depends on the
+  #    loop. max_iterations caps the journey count.
+  # ---------------------------------------------------------------------------
+  - id: drive_journeys
+    type: loop
+    depends_on: [build_journey_plan]
+    loop_config:
+      over: "steps.build_journey_plan.output.journeys"
+      step_ids: [drive_one_journey]
+      max_iterations: 25
+
+  # 3a) BROWSER (READ pass, PROVIDER-NEUTRAL playwright). The model AUTHORS a
+  #     Playwright script from this prompt that drives ONE recorded journey against
+  #     the staging build and returns STRUCTURED JSON via output_schema - the read
+  #     pass the replay scores. Disposable synthetic creds come from credentials_env
+  #     (CI_SYNTH_CREDS), NEVER inline. captcha_strategy=fail: CI must not hang on a
+  #     human, so a CAPTCHA blocking the journey is reported as a finding, not a
+  #     pause. max_actions=70 caps runaway scripts; capture_screenshots=true gives
+  #     the audit trail and the failure screenshot the notify surfaces. The journey
+  #     drives staging only and performs no real-money / irreversible action - the
+  #     ONE irreversible action (promote to prod) lives behind the human gate below.
+  #     (loop child - read item via _input['_item'])
+  - id: drive_one_journey
+    type: browser
+    prompt: >-
+      You are a CI release-gate synthetic user. Author and run a Playwright script
+      that re-drives the "{input._item.journey}" critical user journey against the
+      NEW STAGING BUILD and emits a structured trajectory. This is a pre-release
+      regression check: drive the real rendered flow exactly as the recorded golden
+      run did so the trajectory can be scored against it.
+
+      Start at {input._item.entry_url} (this is the staging origin - you must NEVER
+      navigate to a production host). Authenticate when needed using ONLY the
+      disposable synthetic account supplied via the CI_SYNTH_CREDS environment
+      variable - NEVER hardcode, print, or log the secret.
+
+      Walk every stage of the journey in order, recording each stage name into
+      stages_passed AS you reach it (e.g. for signup: form_loaded, form_filled,
+      submitted, verification, first_login; for paid_checkout: cart, address,
+      payment_form, review, order_placed; for onboarding: welcome, profile, connect,
+      finish). Drive across SPA route changes, into any iframes (e.g. the payment
+      iframe), and through redirects. If the journey is a paid_checkout leg, use the
+      synthetic/test payment instrument from the credentials env against the STAGING
+      payment sandbox - never a real card.
+
+      Set completed=true ONLY if the final stage of the journey succeeds end to end.
+      If anything throws, white-screens, the action button silently detaches, or a
+      stage cannot be reached, set completed=false and put a short human-readable
+      explanation in error_text (otherwise error_text=null). If a CAPTCHA blocks the
+      journey, do NOT try to solve or wait - per captcha_strategy=fail, stop and
+      report it in error_text as a finding ("captcha_blocked: <where>"). Put the
+      object-storage keys of the captured screenshots (especially the failure frame)
+      into screenshot_keys.
+
+      Return ONLY the structured JSON object matching output_schema. No prose.
+    browser_config:
+      mode: playwright
+      start_url: "{input._item.entry_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 120
+      max_actions: 70
+      headless: true
+      credentials_env: "CI_SYNTH_CREDS"
+      captcha_strategy: fail
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          journey:
+            type: string
+            description: "The journey name this run drove (echo of the item's journey)."
+          stages_passed:
+            type: array
+            description: "Ordered stage names reached, for the trajectory diff."
+            items: { type: string }
+          completed:
+            type: boolean
+            description: "True only if the journey's final stage succeeded end to end on staging."
+          error_text:
+            type: ["string", "null"]
+            description: "Short explanation of the first failure / captcha finding, or null when clean."
+          screenshot_keys:
+            type: array
+            description: "Object-storage keys of captured screenshots (incl. the failure frame) for audit + notify."
+            items: { type: string }
+        required: ["journey", "stages_passed", "completed", "error_text", "screenshot_keys"]
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
+
+  # ---------------------------------------------------------------------------
+  # 4) TRAJECTORY-REPLAY - the core regression detector. Loads the golden run for
+  #    EACH journey and scores the candidate trajectory against it, failing below
+  #    fail_below_score (UI drift) or on cost blowup. Deterministic scorer, not a
+  #    model's opinion; provider-neutral (compares observable stages + outputs).
+  #    Note: golden_run_id is supplied per-journey in the manifest; the candidate
+  #    set is the loop's structured output, replayed as a batch against goldens.
+  # ---------------------------------------------------------------------------
+  - id: replay_journeys
+    type: trajectory-replay
+    depends_on: [drive_journeys]
+    trajectory_replay_config:
+      golden_run_id: "{steps.build_journey_plan.output.journeys}"
+      fail_below_score: 0.85
+      allow_cost_delta_pct: 20.0
+      cost_budget_usd: 0.03
+
+  # ---------------------------------------------------------------------------
+  # 5) CODE (deterministic, LOAD-BEARING) - the release verdict. Aggregates per-
+  #    journey replay scores AND the browser completion booleans into ONE all-green
+  #    decision, attaches the failure screenshots, and computes each blocking
+  #    journey's score delta vs the floor. NO model decides release here - this is
+  #    the mechanical pass/fail. Empty/zero-journey gates are forced to BLOCK.
+  # ---------------------------------------------------------------------------
+  - id: compute_release_verdict
+    type: code
+    depends_on: [drive_journeys, replay_journeys]
+    code_config:
+      language: python
+      code: |
+        plan = _steps.get("build_journey_plan") or {}
+        if not isinstance(plan, dict):
+            plan = {}
+        candidates = _steps.get("drive_journeys")
+        if isinstance(candidates, dict):
+            candidates = [candidates]
+        if not isinstance(candidates, list):
+            candidates = []
+        replay = _steps.get("replay_journeys")
+        if not isinstance(replay, dict):
+            replay = {}
+
+        # Configured floor.
+        try:
+            floor = float(_input.get("fail_below_score", 0.85))
+        except (TypeError, ValueError):
+            floor = 0.85
+
+        # Index the per-journey replay scores the replay step surfaced. The backend
+        # may return a list of {journey, score, passed} or a dict keyed by journey;
+        # normalize both, and tolerate a single overall score as a fallback.
+        per_journey = replay.get("per_journey")
+        if per_journey is None:
+            per_journey = replay.get("journeys") or replay.get("results")
+        score_by_journey = {}
+        passed_by_journey = {}
+        if isinstance(per_journey, dict):
+            per_journey = list(per_journey.values())
+        if isinstance(per_journey, list):
+            for r in per_journey:
+                if not isinstance(r, dict):
+                    continue
+                nm = str(r.get("journey") or r.get("name") or "").strip()
+                if not nm:
+                    continue
+                sc = r.get("score", r.get("replay_score"))
+                try:
+                    score_by_journey[nm] = float(sc)
+                except (TypeError, ValueError):
+                    score_by_journey[nm] = 0.0
+                if "passed" in r:
+                    passed_by_journey[nm] = bool(r.get("passed"))
+
+        # A single overall score fallback (used only when no per-journey breakdown).
+        overall_score = replay.get("score", replay.get("replay_score"))
+        try:
+            overall_score = float(overall_score)
+        except (TypeError, ValueError):
+            overall_score = None
+
+        # Index browser completion + screenshots by journey name.
+        cand_by_journey = {}
+        for c in candidates:
+            if not isinstance(c, dict):
+                continue
+            nm = str(c.get("journey") or "").strip()
+            if nm:
+                cand_by_journey[nm] = c
+
+        results = []
+        blocking = []
+        for j in (plan.get("journeys") or []):
+            if not isinstance(j, dict):
+                continue
+            nm = str(j.get("journey") or "").strip()
+            cand = cand_by_journey.get(nm) or {}
+            completed = bool(cand.get("completed", False))
+            err = cand.get("error_text")
+            shots = cand.get("screenshot_keys") or []
+            if not isinstance(shots, list):
+                shots = []
+
+            if nm in score_by_journey:
+                score = score_by_journey[nm]
+            elif overall_score is not None:
+                score = overall_score
+            else:
+                score = 0.0
+
+            if nm in passed_by_journey:
+                replay_ok = passed_by_journey[nm]
+            else:
+                replay_ok = score >= floor
+
+            # A journey passes ONLY if the browser completed it AND the replay score
+            # holds AND no error/captcha finding was reported. All deterministic.
+            has_error = err not in (None, "", "null")
+            journey_ok = completed and replay_ok and (not has_error)
+            delta = round(score - floor, 4)
+
+            entry = {
+                "journey": nm,
+                "completed": completed,
+                "replay_score": round(score, 4),
+                "score_delta_vs_floor": delta,
+                "replay_ok": replay_ok,
+                "error_text": (None if not has_error else str(err)),
+                "screenshot_keys": shots,
+                "passed": journey_ok,
+            }
+            results.append(entry)
+            if not journey_ok:
+                if completed and not replay_ok:
+                    why = "regression: replay score " + str(round(score, 4)) + " below floor " + str(floor)
+                elif has_error:
+                    why = "journey error: " + str(err)
+                else:
+                    why = "journey did not complete on staging"
+                blocking.append({
+                    "journey": nm,
+                    "why": why,
+                    "replay_score": round(score, 4),
+                    "score_delta_vs_floor": delta,
+                    "screenshot_keys": shots,
+                })
+
+        no_journeys = bool(plan.get("no_journeys", False)) or len(results) == 0
+        is_staging = bool(plan.get("is_staging_origin", False))
+
+        # All-green required. A zero-journey gate, a non-staging origin, or any
+        # blocking journey turns the verdict red (release blocked).
+        all_green = (not no_journeys) and is_staging and (len(blocking) == 0)
+
+        # Worst journey for the headline.
+        worst = None
+        if blocking:
+            worst = sorted(blocking, key=lambda b: b.get("score_delta_vs_floor", 0.0))[0]
+
+        verdict = "PASS" if all_green else "BLOCK"
+        result = {
+            "verdict": verdict,
+            "all_green": all_green,
+            "release_blocked": not all_green,
+            "no_journeys": no_journeys,
+            "is_staging_origin": is_staging,
+            "floor": floor,
+            "journey_count": len(results),
+            "results": results,
+            "blocking_journeys": blocking,
+            "blocking_count": len(blocking),
+            "worst_journey": worst,
+            "failure_screenshot_keys": (worst.get("screenshot_keys") if worst else []),
+            "summary": (
+                "All " + str(len(results)) + " journeys green - release may promote."
+                if all_green else
+                "RELEASE BLOCKED: " + str(len(blocking)) + " of " + str(len(results)) +
+                " journeys regressed (or no staging journeys to gate)."
+            ),
+        }
+
+  # ---------------------------------------------------------------------------
+  # 6) DELEGATE - fan the payment leg out to an existing synthetic checkout /
+  #    revenue-canary workflow for a deeper check of the money path. Advisory side
+  #    channel: the binding pass/fail stays the replay scores above. Read-only
+  #    against staging; performs no real charge.
+  # ---------------------------------------------------------------------------
+  - id: deep_checkout_canary
+    type: delegate
+    depends_on: [compute_release_verdict]
+    delegate_config:
+      workflow: "{input.checkout_canary_workflow}"
+      task_description: >-
+        Deep-check the PAID CHECKOUT leg of staging build {input.build_id} as a
+        synthetic revenue canary. Drive the checkout journey end to end against the
+        staging payment sandbox using the disposable CI_SYNTH_CREDS test instrument
+        only - NEVER a real card and NEVER a production host. Return whether the
+        money path completed and any stage where it broke. This is advisory context
+        for the release owner; the binding gate is the trajectory-replay verdict
+        ({steps.compute_release_verdict.output.verdict}).
+      timeout: 900
+
+  # ---------------------------------------------------------------------------
+  # 7) GATE - the promotion control. Strategy 1 (llm_eval) is ADVISORY ONLY: it
+  #    summarizes WHAT changed across the journeys for the human, it does not decide
+  #    release. Strategy 2 (human) is the binding control on the ONE irreversible
+  #    action - promoting to production. ALL strategies must pass. A green verdict
+  #    lets the human approve cleanly; ANY blocking journey forces the human to
+  #    EXPLICITLY override before promotion can proceed. CI never auto-promotes a
+  #    regressed funnel.
+  # ---------------------------------------------------------------------------
+  - id: promotion_gate
+    type: gate
+    depends_on: [compute_release_verdict, deep_checkout_canary]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are an ADVISORY release-diff summarizer - you do NOT decide the
+              release; the deterministic verdict already did. Read the verdict record
+              and reply with exactly one word: "approved" if the record is internally
+              consistent (release_blocked is the logical negation of all_green, and
+              every entry in blocking_journeys has a regression reason), otherwise
+              "rejected" and name the inconsistency. Then, in one extra sentence,
+              summarize WHICH journeys changed and by how much for the human reviewer.
+              Verdict record: {steps.compute_release_verdict.output}
+            input: "{steps.compute_release_verdict.output}"
+            model: sonnet
+        - type: human
+          config:
+            message: >-
+              Release owner: this is the production-promotion gate for build
+              {input.build_id}. The deterministic journey verdict is
+              {steps.compute_release_verdict.output.verdict} (blocking journeys:
+              {steps.compute_release_verdict.output.blocking_count}). APPROVE to
+              promote to production. If any journey regressed, promotion is blocked
+              unless you explicitly override after reviewing the failure screenshots.
+            timeout_hours: 24
+            on_timeout: abort
+
+  # ---------------------------------------------------------------------------
+  # 8) NOTIFY - post the gate result to CI/Slack so the release owner sees exactly
+  #    which flow regressed: the blocking journey, its replay-score delta vs the
+  #    floor, and the failure screenshot. Fires after the gate so the message
+  #    reflects the human's promote/override decision context.
+  # ---------------------------------------------------------------------------
+  - id: notify_release_owner
+    type: notify
+    depends_on: [promotion_gate]
+    notify_config:
+      service: slack
+      channel: "{input.ci_slack_channel}"
+      message: >-
+        Golden Journey Regression Gate for build {input.build_id}:
+        verdict {steps.compute_release_verdict.output.verdict}
+        ({steps.compute_release_verdict.output.summary}).
+        Blocking journeys: {steps.compute_release_verdict.output.blocking_count} of
+        {steps.compute_release_verdict.output.journey_count}. Worst:
+        {steps.compute_release_verdict.output.worst_journey}. Floor
+        {steps.compute_release_verdict.output.floor}. Failure screenshots:
+        {steps.compute_release_verdict.output.failure_screenshot_keys}. A blocked
+        verdict means a critical funnel flow regressed on staging and must NOT be
+        promoted to production without an explicit human override.
+
+on_complete:
+  storage_path: "golden-journey-regression-gate/{run_id}/verdict.json"

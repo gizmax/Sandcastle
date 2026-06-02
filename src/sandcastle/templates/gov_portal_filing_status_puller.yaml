@@ -1,0 +1,607 @@
+# name: Gov Portal Filing Status Puller
+# description: Logs into government / utility / insurance portals that publish case and filing status ONLY behind a per-account login web UI (no API), reads the live status and any newly issued documents for a tracked list of cases, validates every extraction deterministically, replay-tests the fragile portal read against a golden trajectory so a redesign fails loudly, classifies what changed, and ships a daily status digest. Strictly READ-ONLY against external portals - no submit / pay / delete anywhere.
+# tags: [compliance, paralegal, government, permits, insurance, browser, dom, lightpanda, trajectory-replay, rpa, read-only]
+# category: general_ai
+
+name: gov-portal-filing-status-puller
+description: >-
+  Tracks the live status of dozens of cases / filings across government, court,
+  permit, tax-authority, utility, and insurance-carrier portals that expose NO
+  API - status and newly-issued documents live ONLY behind a per-account login on
+  a server-rendered (often ancient, sometimes JS-gated) web UI. An HTTP step loads
+  the tracked {portal, case_id} list from the firm's OWN database. A LOOP fans out
+  over that list; each iteration runs a BROWSER step in dom mode (plain
+  server-rendered portals) - lightpanda is the cheap headless-DOM alternative for
+  JS-gated ones - that signs in with the per-portal credentials_env (NEVER an
+  inline secret), opens the case-lookup page, and returns ONLY a strict
+  output_schema {case_id, status, status_date, next_action_due, new_documents[],
+  amount_due}. It is PURELY a read: no form submission, no write, anywhere.
+  captcha_strategy=pause hands the near-certain portal CAPTCHA / MFA to a human;
+  max_actions=25 caps each per-case session; capture_screenshots keeps an audit
+  trail. A TRAJECTORY-REPLAY step then diffs this fragile portal read against a
+  recorded golden_run_id with fail_below_score=0.85 and a cost budget, so a portal
+  redesign or layout drift FAILS the run loudly instead of returning
+  silently-wrong legal/financial status. A deterministic CODE step VALIDATES every
+  extraction (status in an allowed enum, dates parse, case_id echoes back) and
+  QUARANTINES any row that fails - nothing bad is ever written to the database. A
+  CLASSIFY step flags cases whose status changed, that have a new document, or that
+  have an approaching deadline. A CONDITION routes: if any case became
+  'action_required' or 'denied', a NOTIFY pages the responsible owner; otherwise it
+  just records the clean sweep. A REPORT renders the daily status digest. The
+  reliability is load-bearing in deterministic code + trajectory-replay, never a
+  single model's opinion, and the dom/lightpanda reasoning model is swappable via
+  default_model for provider failover. NO write step exists by design - this
+  template is strictly read-only against external systems, which sidesteps the
+  biggest RPA legality / ToS hazard.
+  (connectors: firm case DB via http, slack)
+
+default_model: sonnet
+default_timeout: 900
+
+input_schema:
+  required: ["case_list_api_url"]
+  properties:
+    case_list_api_url:
+      type: string
+      description: >-
+        Base URL of the firm's OWN database/API that returns the tracked list of
+        cases to check. Each returned row carries {portal, case_id, lookup_url,
+        credentials_env, owner, last_status, last_status_date}. Secrets are NEVER
+        inlined - only the NAME of the per-portal credentials env var is stored.
+      default: "https://cases.internal.example/api/v1"
+    allowed_statuses:
+      type: array
+      description: >-
+        Closed enum a scraped status must fall into after normalization. A row
+        whose status is outside this set is quarantined as a bad/drifted read and
+        never trusted.
+      default:
+        - "received"
+        - "in_review"
+        - "pending_info"
+        - "action_required"
+        - "approved"
+        - "denied"
+        - "closed"
+    golden_run_id:
+      type: string
+      description: >-
+        ID of the known-good recorded portal-read trajectory the replay step diffs
+        the live read against. A portal redesign / layout drift drops the replay
+        score below the floor and fails the run loudly.
+      default: "golden-gov-portal-case-lookup-2026-05-01"
+    deadline_warn_days:
+      type: integer
+      description: >-
+        A case whose next_action_due falls within this many days of the run date is
+        flagged as an approaching deadline by the change classifier.
+      default: 7
+    run_date:
+      type: string
+      description: >-
+        ISO run date (YYYY-MM-DD) used for deterministic deadline math. ISO date
+        string compare is monotonic, so no date library is needed in the sandbox.
+      default: "2026-06-02"
+    notify_service:
+      type: string
+      description: "Where to page the responsible owner on action_required / denied: slack or teams."
+      default: "slack"
+    notify_channel:
+      type: string
+      description: "Channel for the action-required alert."
+      default: "#filings-watch"
+    report_author:
+      type: string
+      description: "Author line on the daily status digest PDF."
+      default: "Compliance Operations"
+
+steps:
+  # ---------------------------------------------------------------------------
+  # 1) HTTP - load the tracked {portal, case_id} list from the firm's OWN case
+  #    database. This is the internal system of record that drives the sweep; it
+  #    is NOT an external portal. Auth via a bearer token from the env, never
+  #    inlined. (connector: firm case DB via http)
+  # ---------------------------------------------------------------------------
+  - id: load_case_list
+    type: http
+    http_config:
+      url: "{input.case_list_api_url}/cases?tracked=true"
+      method: GET
+      auth: "bearer:{env.CASE_DB_TOKEN}"
+      headers:
+        Accept: "application/json"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # ---------------------------------------------------------------------------
+  # 2) CODE - normalize the case DB response into a clean list the loop can fan
+  #    out over. Pure deterministic shaping (defends against the body arriving
+  #    under data/cases/rows), no model. Rows missing a portal, case_id, or
+  #    lookup_url are dropped here so the browser never runs on a junk row.
+  # ---------------------------------------------------------------------------
+  - id: build_case_queue
+    type: code
+    depends_on: [load_case_list]
+    code_config:
+      language: python
+      code: |
+        resp = _steps.get("load_case_list") or {}
+        if not isinstance(resp, dict):
+            resp = {}
+        rows = (
+            resp.get("cases")
+            or resp.get("data")
+            or resp.get("rows")
+            or resp.get("body")
+            or resp.get("json")
+        )
+        if isinstance(rows, dict):
+            rows = rows.get("cases") or rows.get("data") or rows.get("rows") or []
+        if not isinstance(rows, list):
+            rows = []
+
+        queue = []
+        dropped = []
+        for r in rows:
+            if not isinstance(r, dict):
+                dropped.append({"reason": "row_not_object", "raw": str(r)[:160]})
+                continue
+            portal = str(r.get("portal") or "").strip()
+            case_id = str(r.get("case_id") or r.get("id") or "").strip()
+            lookup_url = str(r.get("lookup_url") or "").strip()
+            creds_env = str(r.get("credentials_env") or "").strip()
+            if not portal or not case_id or not lookup_url:
+                dropped.append({
+                    "reason": "missing_required_field",
+                    "portal": portal,
+                    "case_id": case_id,
+                })
+                continue
+            queue.append({
+                "portal": portal,
+                "case_id": case_id,
+                "lookup_url": lookup_url,
+                "credentials_env": creds_env or "PORTAL_CREDS",
+                "owner": str(r.get("owner") or "").strip(),
+                "last_status": str(r.get("last_status") or "").strip().lower(),
+                "last_status_date": str(r.get("last_status_date") or "").strip(),
+            })
+
+        result = {
+            "queue": queue,
+            "queue_size": len(queue),
+            "dropped": dropped,
+            "dropped_count": len(dropped),
+        }
+
+  # ---------------------------------------------------------------------------
+  # 3) LOOP - fan out over the tracked cases. Each iteration runs read_case, the
+  #    provider-neutral dom-mode browser read. The loop item (one case row) is
+  #    delivered on _input['_item'] and read by the browser prompt via templating.
+  # ---------------------------------------------------------------------------
+  - id: read_cases
+    type: loop
+    depends_on: [build_case_queue]
+    loop_config:
+      over: "steps.build_case_queue.output.queue"
+      step_ids: [read_case]
+      max_iterations: 50
+
+  # 3a) BROWSER (dom mode - PROVIDER-NEUTRAL). The configured reasoning model
+  #     authors the login + navigation + extraction from this prompt; dom mode is a
+  #     lightweight server-rendered read (lightpanda is the cheap headless-DOM
+  #     alternative for JS-gated portals) and the authoring model is swappable via
+  #     default_model. This is PURELY the READ pass: it signs in with the per-case
+  #     credentials_env (NEVER an inline secret), opens the case-lookup page, and
+  #     returns ONLY the strict output_schema below. It performs NO form submission
+  #     and NO write of any kind. captcha_strategy=pause hands the near-certain
+  #     portal CAPTCHA / MFA login challenge to a human. max_actions=25 caps each
+  #     per-case session. capture_screenshots keeps an audit trail of every page.
+  #     (loop child step - defined separately, read via _input['_item'])
+  - id: read_case
+    type: browser
+    browser_config:
+      mode: dom
+      start_url: "{input._item.lookup_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 120
+      max_actions: 25
+      headless: true
+      credentials_env: "{input._item.credentials_env}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          case_id: { type: string }
+          portal: { type: string }
+          status: { type: string }
+          status_date: { type: string }
+          next_action_due: { type: string }
+          amount_due: { type: number }
+          new_documents:
+            type: array
+            items:
+              type: object
+              properties:
+                title: { type: string }
+                doc_id: { type: string }
+                issued_date: { type: string }
+                url: { type: string }
+        required: ["case_id", "status"]
+    prompt: |
+      You are automating a government / court / permit / tax-authority / utility /
+      insurance-carrier portal (portal: {input._item.portal}) as a READ-ONLY
+      compliance clerk checking case {input._item.case_id}. There is NO API - this
+      login-gated, often server-rendered (sometimes JS-gated) status page is the
+      ONLY source of truth.
+
+      Navigate the portal deterministically:
+      1. Open the case-lookup page ({input._item.lookup_url}) and sign in using ONLY
+         the credentials supplied by the credentials_env environment variable. NEVER
+         hardcode, echo, or log the secret.
+      2. If a CAPTCHA, MFA, or device-verification challenge appears, STOP and hand
+         off to a human (captcha_strategy=pause). Do not attempt to solve it.
+      3. Look up case {input._item.case_id} and open its status detail page.
+      4. Read the live status, the date that status was set, any stated next-action
+         or response deadline, any amount due, and the list of NEW documents the
+         portal has issued (title, document id, issued date, link).
+      5. Perform NO write actions whatsoever - never submit, file, respond, pay,
+         upload, withdraw, e-sign, or change anything. This is extraction ONLY.
+
+      Return ONLY the structured JSON described by the output_schema: the case_id
+      (echoed back exactly), the portal, the literal status text, status_date,
+      next_action_due, amount_due (numeric, 0 if none), and a new_documents array.
+
+  # ---------------------------------------------------------------------------
+  # 4) TRAJECTORY-REPLAY - the load-bearing reliability check for the fragile
+  #    portal read. Loads the recorded golden trajectory by golden_run_id, diffs
+  #    the live read against it, and FAILS the run when the replay score drops
+  #    below fail_below_score (UI / layout drift from a portal redesign) OR cost
+  #    exceeds the allowed delta / budget. Deterministic scorer, not a model's
+  #    opinion, comparing observable actions + extracted outputs only - so a portal
+  #    redesign fails LOUDLY instead of returning silently-wrong legal status.
+  # ---------------------------------------------------------------------------
+  - id: replay_vs_golden
+    type: trajectory-replay
+    depends_on: [read_cases]
+    trajectory_replay_config:
+      golden_run_id: "{input.golden_run_id}"
+      fail_below_score: 0.85
+      allow_cost_delta_pct: 10.0
+      cost_budget_usd: 0.5
+
+  # ---------------------------------------------------------------------------
+  # 5) CODE - VALIDATE every extraction deterministically before anything is
+  #    trusted. Each row must echo a non-empty case_id, carry a status that
+  #    normalizes into the allowed enum, and have parseable ISO-ish dates. Rows
+  #    that fail are QUARANTINED (never trusted, never written). A portal that
+  #    yielded zero valid rows is surfaced as a likely redesign / auth wall. No
+  #    model in this gate - this is the load-bearing correctness, paired with the
+  #    trajectory-replay above.
+  # ---------------------------------------------------------------------------
+  - id: validate_extractions
+    type: code
+    depends_on: [read_cases, replay_vs_golden]
+    code_config:
+      language: python
+      code: |
+        reads = _steps.get("read_cases")
+        if isinstance(reads, dict):
+            reads = [reads]
+        if not isinstance(reads, list):
+            reads = []
+
+        allowed = _input.get("allowed_statuses") or [
+            "received", "in_review", "pending_info",
+            "action_required", "approved", "denied", "closed",
+        ]
+        allowed_set = {str(s).strip().lower() for s in allowed if isinstance(s, str)}
+
+        # Build the case-row context (last_status, owner, due) keyed by case_id from
+        # the normalized queue, so the change classifier downstream has prior state.
+        queue_ctx = {}
+        bq = _steps.get("build_case_queue") or {}
+        if isinstance(bq, dict):
+            for row in bq.get("queue") or []:
+                if isinstance(row, dict):
+                    queue_ctx[str(row.get("case_id") or "").strip()] = row
+
+        # A loose ISO date guard: YYYY-MM-DD, optionally with a time suffix. Empty
+        # strings are allowed (a case may legitimately have no deadline / doc date).
+        date_pattern = r"^\d{4}-\d{2}-\d{2}([ T].*)?$"
+
+        def _date_ok(v):
+            s = str(v or "").strip()
+            if s == "":
+                return True
+            return bool(re.match(date_pattern, s))
+
+        def _to_amount(v):
+            if v is None or v == "":
+                return 0.0
+            try:
+                return round(float(v), 2)
+            except (TypeError, ValueError):
+                return None
+
+        valid = []
+        quarantined = []
+        seen_case_ids = set()
+
+        for env in reads:
+            if not isinstance(env, dict):
+                quarantined.append({"reason": "read_not_object", "raw": str(env)[:160]})
+                continue
+            case_id = str(env.get("case_id") or "").strip()
+            portal = str(env.get("portal") or "").strip()
+            status_raw = str(env.get("status") or "").strip()
+            status = re.sub(r"[\s\-]+", "_", status_raw.lower())
+            status_date = env.get("status_date")
+            next_due = env.get("next_action_due")
+            amount = _to_amount(env.get("amount_due"))
+            docs = env.get("new_documents")
+            if not isinstance(docs, list):
+                docs = []
+
+            ctx = queue_ctx.get(case_id) or {}
+            reasons = []
+            # case_id must be present and must echo a tracked case from our DB.
+            if not case_id:
+                reasons.append("missing_case_id")
+            elif queue_ctx and case_id not in queue_ctx:
+                reasons.append("unknown_case_id")
+            if status not in allowed_set:
+                reasons.append("status_not_in_enum")
+            if not _date_ok(status_date):
+                reasons.append("bad_status_date")
+            if not _date_ok(next_due):
+                reasons.append("bad_next_action_due")
+            if amount is None:
+                reasons.append("bad_amount_due")
+
+            if reasons:
+                quarantined.append({
+                    "case_id": case_id,
+                    "portal": portal,
+                    "raw_status": status_raw,
+                    "reasons": reasons,
+                })
+                continue
+
+            seen_case_ids.add(case_id)
+            valid.append({
+                "case_id": case_id,
+                "portal": portal,
+                "owner": str(ctx.get("owner") or ""),
+                "status": status,
+                "status_date": str(status_date or ""),
+                "next_action_due": str(next_due or ""),
+                "amount_due": amount,
+                "new_documents": docs,
+                "new_document_count": len(docs),
+                "prior_status": str(ctx.get("last_status") or ""),
+                "prior_status_date": str(ctx.get("last_status_date") or ""),
+            })
+
+        # Cases we were tracking but got no valid read for - probable scrape failure
+        # (login wall / redesign), surfaced rather than silently treated as no-change.
+        missing_reads = []
+        if queue_ctx:
+            for cid in queue_ctx:
+                if cid not in seen_case_ids:
+                    missing_reads.append(cid)
+
+        result = {
+            "valid": valid,
+            "valid_count": len(valid),
+            "quarantined": quarantined,
+            "quarantined_count": len(quarantined),
+            "missing_reads": missing_reads,
+            "missing_read_count": len(missing_reads),
+            "extraction_ok": len(valid) > 0,
+        }
+
+  # ---------------------------------------------------------------------------
+  # 6) CODE - deterministic CHANGE DETECTION over the validated rows. Compares the
+  #    fresh status against the prior status from the DB, detects new documents,
+  #    and computes approaching-deadline using monotonic ISO-date string compare
+  #    against the run_date + deadline_warn_days window. Pure math, no model; this
+  #    produces the change facts the classifier then labels.
+  # ---------------------------------------------------------------------------
+  - id: detect_changes
+    type: code
+    depends_on: [validate_extractions]
+    code_config:
+      language: python
+      code: |
+        extraction = _steps.get("validate_extractions") or {}
+        if not isinstance(extraction, dict):
+            extraction = {}
+        rows = extraction.get("valid") or []
+        if not isinstance(rows, list):
+            rows = []
+
+        run_date = str(_input.get("run_date") or "").strip()
+        try:
+            warn_days = int(_input.get("deadline_warn_days", 7) or 7)
+        except (TypeError, ValueError):
+            warn_days = 7
+
+        # Deterministic warn-window upper bound as an ISO date string. Avoids any
+        # date library: add warn_days to the day component with simple carry-free
+        # month rollover handled by string compare being inclusive on the same month
+        # where possible; if it would overflow the month we widen to month-end+window
+        # by comparing on the YYYY-MM prefix as a fallback.
+        warn_window_end = ""
+        m = re.match(r"^(\d{4})-(\d{2})-(\d{2})", run_date)
+        if m:
+            yr = int(m.group(1))
+            mo = int(m.group(2))
+            day = int(m.group(3))
+            new_day = day + warn_days
+            if new_day <= 28:
+                warn_window_end = "%04d-%02d-%02d" % (yr, mo, new_day)
+            else:
+                # Be conservative: widen the window to the end of next month so we
+                # never MISS a near deadline due to month rollover. False positives
+                # here are acceptable (a human reviews); false negatives are not.
+                nmo = mo + 1
+                nyr = yr
+                if nmo > 12:
+                    nmo = 1
+                    nyr = yr + 1
+                warn_window_end = "%04d-%02d-28" % (nyr, nmo)
+
+        changed = []
+        new_docs = []
+        approaching = []
+        unchanged = []
+
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            case_id = str(r.get("case_id") or "")
+            status = str(r.get("status") or "")
+            prior = str(r.get("prior_status") or "")
+            doc_count = int(r.get("new_document_count") or 0)
+            next_due = str(r.get("next_action_due") or "")
+
+            status_changed = bool(prior) and status != prior
+            has_new_doc = doc_count > 0
+            # Approaching deadline: a non-empty due date that falls on/before the
+            # warn-window end and is not already in the past relative to run_date.
+            is_approaching = False
+            if next_due and run_date and warn_window_end:
+                is_approaching = (next_due >= run_date) and (next_due <= warn_window_end)
+
+            flags = []
+            if status_changed:
+                flags.append("status_changed")
+                changed.append({
+                    "case_id": case_id, "owner": r.get("owner"),
+                    "from": prior, "to": status, "portal": r.get("portal"),
+                })
+            if has_new_doc:
+                flags.append("new_document")
+                new_docs.append({
+                    "case_id": case_id, "owner": r.get("owner"),
+                    "count": doc_count, "documents": r.get("new_documents"),
+                })
+            if is_approaching:
+                flags.append("approaching_deadline")
+                approaching.append({
+                    "case_id": case_id, "owner": r.get("owner"),
+                    "next_action_due": next_due, "status": status,
+                })
+            if not flags:
+                unchanged.append({"case_id": case_id, "status": status})
+
+            r["change_flags"] = flags
+
+        # The portal's own status text drives the escalation set: anything the
+        # firm must act on or that was denied.
+        escalation = [
+            r for r in rows
+            if str(r.get("status") or "") in ("action_required", "denied")
+        ]
+
+        result = {
+            "rows": rows,
+            "changed": changed,
+            "changed_count": len(changed),
+            "new_docs": new_docs,
+            "new_doc_count": len(new_docs),
+            "approaching": approaching,
+            "approaching_count": len(approaching),
+            "unchanged_count": len(unchanged),
+            "escalation": escalation,
+            "escalation_count": len(escalation),
+            "warn_window_end": warn_window_end,
+            "any_change": (len(changed) + len(new_docs) + len(approaching)) > 0,
+            "needs_owner": len(escalation) > 0,
+        }
+
+  # ---------------------------------------------------------------------------
+  # 7) CLASSIFY - label the overall sweep so the digest leads with the right
+  #    headline. Non-load-bearing (the deterministic change facts already exist in
+  #    detect_changes); this is a haiku triage label and is provider-swappable. All
+  #    branches converge on the same routing decision so no information is lost.
+  # ---------------------------------------------------------------------------
+  - id: classify_sweep
+    type: classify
+    depends_on: [detect_changes]
+    classify_config:
+      model: haiku
+      input: "Classify the urgency of this government/insurance portal filing sweep. Use: critical = any case is 'denied' or 'action_required', or a hard deadline is approaching; attention = a status changed or a new document was issued but nothing is action_required/denied; routine = no changes, no new docs, no approaching deadlines. Change facts: {steps.detect_changes.output}"
+      categories:
+        - routine
+        - attention
+        - critical
+      branches:
+        routine: [route_outcome]
+        attention: [route_outcome]
+        critical: [route_outcome]
+
+  # ---------------------------------------------------------------------------
+  # 8) CONDITION - deterministic routing on the change facts (NOT the model label).
+  #    If any case became action_required / denied, page the responsible owner AND
+  #    build the digest. Otherwise just build the digest for the clean sweep. The
+  #    expression reads the deterministic detect_changes.needs_owner flag.
+  # ---------------------------------------------------------------------------
+  - id: route_outcome
+    type: condition
+    depends_on: [detect_changes, classify_sweep]
+    condition_config:
+      expression: "{steps.detect_changes.output.needs_owner} == True"
+      then: [notify_owner, build_digest]
+      else: [build_digest]
+
+  # 8a) NOTIFY (escalation branch) - page the responsible owner with the
+  #     action-required / denied cases so a legal/financial deadline is never
+  #     silently missed. Read-only: this only alerts; it never touches a portal.
+  - id: notify_owner
+    type: notify
+    depends_on: [route_outcome]
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: ":rotating_light: Filing watch: action required. Escalation cases (action_required / denied): {steps.detect_changes.output.escalation}. Status changes: {steps.detect_changes.output.changed}. New documents: {steps.detect_changes.output.new_docs}. Approaching deadlines: {steps.detect_changes.output.approaching}. Quarantined (bad/drifted reads): {steps.validate_extractions.output.quarantined_count}. Missing reads (possible portal redesign / login wall): {steps.validate_extractions.output.missing_reads}. This run was READ-ONLY on all external portals - no submit/file/pay/withdraw actions were taken."
+
+  # ---------------------------------------------------------------------------
+  # 9) REPORT (both branches converge here) - render the daily filing status
+  #    digest PDF: the full status table, what changed, new documents, approaching
+  #    deadlines, the sweep urgency label, plus the reliability footer (replay
+  #    verdict, quarantined rows, missing reads). This is the deliverable.
+  # ---------------------------------------------------------------------------
+  - id: build_digest
+    type: report
+    depends_on: [route_outcome]
+    report_config:
+      template: research-report
+      format: pdf
+      theme: professional
+      title: "Daily Filing Status Digest - {input.run_date}"
+      author: "{input.report_author}"
+    prompt: |
+      Produce a daily filing-status digest PDF for a compliance / paralegal team
+      from the payload below. Lead with the sweep urgency label
+      ({steps.classify_sweep.output}). Then a status table of every tracked case
+      with its current status, status date, next action due, amount due, and new
+      document count. Add sections for: status changes (from -> to), newly issued
+      documents (with titles and links), and approaching deadlines (with owners).
+      End with a RELIABILITY footer: how many extractions were quarantined as
+      bad/drifted reads, which tracked cases got NO valid read (possible portal
+      redesign or login wall), and that the fragile portal read was diffed against
+      a recorded golden trajectory (a redesign would have failed the run). State
+      explicitly that this run was strictly READ-ONLY against all external portals:
+      no submit, file, pay, withdraw, e-sign, or delete actions were taken.
+      Validated status rows: {steps.detect_changes.output.rows}
+      Change facts: {steps.detect_changes.output}
+      Extraction QA: {steps.validate_extractions.output}
+
+on_complete:
+  storage_path: "gov-portal-filing-status-puller/{run_id}/filing-status-digest.json"

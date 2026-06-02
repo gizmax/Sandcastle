@@ -1,0 +1,682 @@
+# name: SaaS Role Permission Remediator
+# description: Downgrade over-privileged roles for a list of users across a SaaS admin console with no bulk-role API - e.g. demote stale admins to member - behind one batch owner-style approval, with a strict downgrade-only guard, a last-admin lockout guard, and full before/after role reconciliation.
+# tags: [IAM, GRC, LeastPrivilege, SOC2, ISO27001, AccessReview, RoleDowngrade, Browser, Playwright, Reconciliation, Audit]
+# category: devops
+
+name: saas-role-permission-remediator
+description: >-
+  Correct over-privileged roles for a list of users on a SaaS admin console that
+  exposes NO bulk role-assignment API on the customer's plan. The only way to change
+  a user's role at scale is to drive the authenticated admin SPA: each user's role is
+  set through a per-user dropdown rendered client-side, so a plain http step cannot
+  authenticate into and operate the role control.
+
+  Flow: a parse step ingests the remediation list into rows
+  {email, current_role_expected, target_role, justification}. A READ-ONLY browser census
+  (mode: dom) snapshots each user's ACTUAL current role + last-active date into a
+  structured before_roles via output_schema - it mutates nothing. A DETERMINISTIC code
+  step builds the safety-diff: it keeps only rows where the observed role matches
+  current_role_expected AND target_role is a STRICT DOWNGRADE (never silently escalates a
+  privilege), and runs a LAST-ADMIN LOCKOUT GUARD that refuses to demote the final
+  remaining admin/owner (org-lockout protection); it emits remediation_plan + a rejected
+  list with reasons. A classify step buckets each planned change by risk (owner->member vs
+  member->viewer). Then ONE human batch approval signs off every planned downgrade and the
+  lockout-guard result, with high-risk rows surfaced for explicit check. Only after that
+  does a loop run a per-user browser step (mode: playwright, max_actions capped,
+  capture_screenshots on) that opens each user, sets the role dropdown to target_role, and
+  confirms. A second dom re-census produces after_roles; a final DETERMINISTIC code
+  reconcile asserts every remediated user now shows target_role, no untouched user changed,
+  and at least one admin still exists (emitting a drift list). A trajectory-replay on the
+  role-set path catches a console redesign of the role dropdown, and Slack is notified with
+  a tamper-evident audit chain of every role transition and the approver.
+
+  PROVIDER NEUTRAL: census/verify are dom extractions and the role change is an authored
+  Playwright script in playwright mode, where the reasoning model only produces
+  selectors/script from the prompt and is swappable across providers. The strict-downgrade
+  check, last-admin lockout guard, and final reconcile are PURE Python, so correctness does
+  not depend on which model authored the browser script. trajectory-replay locks the
+  contract regardless of model.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 1800
+
+input_schema:
+  required: ["remediation_list", "admin_members_url"]
+  properties:
+    remediation_list:
+      type: string
+      description: "Reference to the remediation list (one row per over-privileged user). Accepts @upload:<file_id>, @file:<path>, a URL, or pasted CSV/JSON. Expected columns: email, current_role_expected, target_role, justification."
+      example: "@upload:least-privilege-sweep-2026-06-02.csv"
+    admin_members_url:
+      type: string
+      description: "URL of the SaaS admin console members/users page where per-user roles are listed and the role dropdown lives (authenticated SPA)."
+      default: "https://app.your-saas.com/admin/members"
+      example: "https://app.acme-design.com/settings/team/members"
+    member_url_template:
+      type: string
+      description: "URL template for a single member's admin page; {email} is substituted per user during the role-change loop. If your console deep-links by email or user id, set it here."
+      default: "https://app.your-saas.com/admin/members?q={email}"
+      example: "https://app.acme-design.com/settings/team/members?search={email}"
+    credentials_env_var:
+      type: string
+      description: "Name of the environment variable holding the admin login (username+password or session token). The value is NEVER inlined into the workflow."
+      default: "SAAS_ADMIN_CREDS"
+      example: "ACME_ADMIN_CREDS"
+    role_rank:
+      type: string
+      description: "JSON map of role name -> privilege rank (higher = more privileged). Used by the strict-downgrade guard so a remediation can only LOWER privilege. Roles not listed are treated as rank 0 (unknown) and are never auto-downgraded into."
+      default: '{"owner": 4, "admin": 3, "member": 2, "viewer": 1, "guest": 0}'
+      example: '{"owner": 4, "admin": 3, "manager": 2, "member": 1, "viewer": 0}'
+    privileged_roles:
+      type: string
+      description: "Comma-separated list of role names that count as administrative for the last-admin lockout guard (the run refuses to demote the final remaining holder of any of these)."
+      default: "owner,admin"
+      example: "owner,admin,superadmin"
+    golden_run_id:
+      type: string
+      description: "ID of the known-good recorded role-set run. trajectory-replay diffs the live role-change path against this golden trajectory and fails on console/UI drift of the role dropdown."
+      default: "golden-role-dropdown-set-2026-05-01"
+    slack_channel:
+      type: string
+      description: "Slack channel for the remediation completion summary + drift report."
+      default: "#iam-remediation"
+      example: "#iam-remediation"
+
+steps:
+  # 1) PARSE the remediation list into structured rows
+  #    {email, current_role_expected, target_role, justification}. Deterministic ingest;
+  #    no console contact yet.
+  - id: parse_remediation_list
+    type: parse
+    prompt: "{input.remediation_list}"
+    parse_config:
+      output: json
+
+  # 2) READ-ONLY CENSUS of the live members page (mode: dom). The reasoning model only
+  #    authors a DOM extraction from the prompt; output_schema returns a STRUCTURED
+  #    before_roles for every member row (email, actual_role, last_active, found). This step
+  #    MUTATES NOTHING - it is the pre-image of the audit before/after pair. credentials_env
+  #    supplies the admin login (never inlined); captcha_strategy pauses for a human on a
+  #    CAPTCHA; max_actions caps paging.
+  - id: census_before
+    type: browser
+    depends_on: [parse_remediation_list]
+    prompt: >
+      Log in to the SaaS admin console using the supplied credentials and open the members /
+      users management page. Do NOT open or change any role dropdown, and do NOT click any
+      Save, Update, Remove, Suspend, or Delete control - this is a read-only census. Read
+      every visible member row (paginate through all pages if the list is paginated) and
+      extract, for each member: their email, their CURRENT role exactly as the console shows
+      it (e.g. owner / admin / member / viewer), and their last-active date if shown. Mark
+      found=true for each row you actually read. Return the full roster as structured JSON
+      matching the schema. The remediation list under review is:
+      {steps.parse_remediation_list.output}.
+    browser_config:
+      mode: dom
+      start_url: "{input.admin_members_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 180
+      max_actions: 80
+      headless: true
+      credentials_env: "{input.credentials_env_var}"
+      captcha_strategy: pause
+      capture_screenshots: false
+      output_schema:
+        type: object
+        properties:
+          before_roles:
+            type: array
+            items:
+              type: object
+              properties:
+                email: { type: string }
+                actual_role: { type: string }
+                last_active: { type: string }
+                found: { type: boolean }
+              required: ["email", "actual_role", "found"]
+          total_members_observed: { type: integer }
+        required: ["before_roles"]
+
+  # 3) DETERMINISTIC safety-diff. The load-bearing correctness: keep ONLY rows where the
+  #    observed role matches current_role_expected AND target_role is a STRICT DOWNGRADE by
+  #    rank (never silently escalates), reject everything else with a reason, and run the
+  #    LAST-ADMIN LOCKOUT GUARD that refuses to demote the final remaining admin/owner. Pure
+  #    Python, no model.
+  - id: safety_diff
+    type: code
+    depends_on: [parse_remediation_list, census_before]
+    code_config:
+      language: python
+      code: |
+        import json
+
+        # --- Normalize the parsed remediation list into rows ------------------------------
+        raw_list = _steps['parse_remediation_list']
+        if isinstance(raw_list, str):
+            try:
+                raw_list = json.loads(raw_list) if raw_list.strip() else []
+            except (ValueError, TypeError):
+                raw_list = []
+        if isinstance(raw_list, dict):
+            raw_list = raw_list.get('rows') or raw_list.get('records') or raw_list.get('data') or []
+
+        requested = []
+        requested_allow = set()  # the canonical input allowlist of emails
+        for row in (raw_list or []):
+            if not isinstance(row, dict):
+                continue
+            email = str(row.get('email') or row.get('Email') or row.get('user') or '').strip().lower()
+            if not email:
+                continue
+            cur_exp = str(row.get('current_role_expected') or row.get('current_role') or '').strip().lower()
+            target = str(row.get('target_role') or row.get('target') or '').strip().lower()
+            just = str(row.get('justification') or row.get('reason') or '').strip()
+            requested.append({
+                'email': email,
+                'current_role_expected': cur_exp,
+                'target_role': target,
+                'justification': just,
+            })
+            requested_allow.add(email)
+
+        # --- Role rank map (higher rank == more privilege) --------------------------------
+        raw_rank = _input.get('role_rank') or {}
+        if isinstance(raw_rank, str):
+            try:
+                raw_rank = json.loads(raw_rank) if raw_rank.strip() else {}
+            except (ValueError, TypeError):
+                raw_rank = {}
+        role_rank = {}
+        if isinstance(raw_rank, dict):
+            for k, v in raw_rank.items():
+                try:
+                    role_rank[str(k).strip().lower()] = int(v)
+                except (ValueError, TypeError):
+                    continue
+
+        def rank_of(role):
+            return role_rank.get(str(role or '').strip().lower(), 0)
+
+        # --- Privileged (administrative) role set for the lockout guard -------------------
+        priv_raw = str(_input.get('privileged_roles') or 'owner,admin')
+        privileged_roles = set()
+        for part in priv_raw.split(','):
+            p = part.strip().lower()
+            if p:
+                privileged_roles.add(p)
+
+        # --- Normalize the read-only census into {email: role} ----------------------------
+        census = _steps['census_before'] or {}
+        if isinstance(census, str):
+            try:
+                census = json.loads(census) if census.strip() else {}
+            except (ValueError, TypeError):
+                census = {}
+        before_roles = census.get('before_roles', []) if isinstance(census, dict) else []
+
+        by_email = {}
+        dup_emails = set()
+        admin_holders = set()  # every email currently holding a privileged role
+        for m in before_roles:
+            if not isinstance(m, dict):
+                continue
+            em = str(m.get('email') or '').strip().lower()
+            if not em:
+                continue
+            actual = str(m.get('actual_role') or '').strip().lower()
+            if em in by_email:
+                dup_emails.add(em)
+            by_email[em] = {
+                'email': em,
+                'actual_role': actual,
+                'last_active': m.get('last_active'),
+                'found': bool(m.get('found', True)),
+            }
+            if actual in privileged_roles:
+                admin_holders.add(em)
+
+        total_admins_before = len(admin_holders)
+
+        remediation_plan = []
+        rejected = []
+
+        for req in requested:
+            em = req['email']
+            target = req['target_role']
+            cur_exp = req['current_role_expected']
+
+            if em in dup_emails:
+                rejected.append({**req, 'reason': 'multiple_console_rows_same_email'})
+                continue
+            current = by_email.get(em)
+            if current is None or not current.get('found'):
+                rejected.append({**req, 'reason': 'email_not_found_on_console'})
+                continue
+            actual = current['actual_role']
+
+            # Guard 1: observed role must match what the list expected (stale list reject).
+            if cur_exp and actual != cur_exp:
+                rejected.append({**req, 'actual_role': actual, 'reason': 'observed_role_differs_from_expected'})
+                continue
+            # Guard 2: target must be a known role we can rank.
+            if target not in role_rank:
+                rejected.append({**req, 'actual_role': actual, 'reason': 'unknown_target_role_not_in_rank_map'})
+                continue
+            # Guard 3: STRICT DOWNGRADE ONLY - target rank must be strictly LOWER than current.
+            if rank_of(target) >= rank_of(actual):
+                rejected.append({**req, 'actual_role': actual, 'reason': 'not_a_strict_downgrade_would_escalate_or_noop'})
+                continue
+
+            remediation_plan.append({
+                'email': em,
+                'actual_role': actual,
+                'target_role': target,
+                'last_active': current.get('last_active'),
+                'justification': req['justification'],
+            })
+
+        # --- LAST-ADMIN LOCKOUT GUARD -----------------------------------------------------
+        # Count how many currently-privileged holders this plan would demote OUT of admin.
+        admins_being_demoted = set()
+        for p in remediation_plan:
+            if p['actual_role'] in privileged_roles and p['target_role'] not in privileged_roles:
+                admins_being_demoted.add(p['email'])
+        admins_remaining_after = total_admins_before - len(admins_being_demoted)
+        lockout_guard_ok = admins_remaining_after >= 1
+
+        # If the guard trips, pull the demotions that would zero-out admins back out of the
+        # plan and reject them, so the batch can still proceed for everyone else.
+        if not lockout_guard_ok:
+            survivors = []
+            for p in remediation_plan:
+                if p['email'] in admins_being_demoted:
+                    rejected.append({
+                        'email': p['email'],
+                        'current_role_expected': p['actual_role'],
+                        'target_role': p['target_role'],
+                        'justification': p.get('justification', ''),
+                        'actual_role': p['actual_role'],
+                        'reason': 'would_remove_last_admin_org_lockout_protection',
+                    })
+                else:
+                    survivors.append(p)
+            remediation_plan = survivors
+            # Recompute the guard against the trimmed plan.
+            admins_being_demoted = {
+                p['email'] for p in remediation_plan
+                if p['actual_role'] in privileged_roles and p['target_role'] not in privileged_roles
+            }
+            admins_remaining_after = total_admins_before - len(admins_being_demoted)
+            lockout_guard_ok = admins_remaining_after >= 1
+
+        # --- ALLOWLIST GUARD: no email outside the input list may ever be in the plan -----
+        plan_emails = {p['email'] for p in remediation_plan}
+        scope_violations = sorted(plan_emails - requested_allow)
+        allowlist_ok = len(scope_violations) == 0
+
+        result = {
+            'allowlist_ok': allowlist_ok,
+            'scope_violations': scope_violations,
+            'lockout_guard_ok': lockout_guard_ok,
+            'total_members_observed': len(by_email),
+            'total_admins_before': total_admins_before,
+            'admins_being_demoted': sorted(admins_being_demoted),
+            'admins_remaining_after': admins_remaining_after,
+            'requested_count': len(requested),
+            'plan_count': len(remediation_plan),
+            'rejected_count': len(rejected),
+            'remediation_plan': remediation_plan,
+            'rejected': rejected,
+            'allowlist': sorted(requested_allow),
+        }
+
+  # 4) CLASSIFY each planned change by risk. The ONLY model in the correctness path, and it
+  #    is swappable. owner/admin -> member is high-risk; member -> viewer is lower-risk.
+  #    Every category routes into the single human batch approval; the bucketing surfaces
+  #    high-risk rows for explicit check inside that gate.
+  - id: classify_risk
+    type: classify
+    depends_on: [safety_diff]
+    classify_config:
+      model: haiku
+      input: "Bucket this batch of planned role downgrades by blast radius. high_risk = any demotion out of an administrative/owner role (owner->member, admin->member) or any change touching billing/security scopes; standard_risk = downgrades between non-admin roles (member->viewer). Answer with the single highest-risk bucket present in the plan. Plan: {steps.safety_diff.output.remediation_plan}"
+      categories:
+        - standard_risk
+        - high_risk
+      branches:
+        standard_risk: [batch_approval]
+        high_risk: [batch_approval]
+
+  # 5) APPROVAL: the SINGLE human batch sign-off over the whole remediation_plan and the
+  #    lockout-guard result. This is the ONLY place a human authorizes mutation; nothing
+  #    irreversible runs before this returns approved. High-risk rows are surfaced for
+  #    explicit check; the reviewer sees the validated plan + guard results and can edit
+  #    (e.g. drop a borderline row).
+  - id: batch_approval
+    type: approval
+    depends_on: [classify_risk]
+    approval_config:
+      message: >
+        Least-privilege remediation batch - APPROVE to apply the listed role downgrades,
+        REJECT to abort the whole run. This is the only authorization gate before any role is
+        changed. Cohort risk: {steps.classify_risk.output}. Review every planned downgrade,
+        and individually confirm any HIGH-RISK row (admin/owner being demoted). Downgrade-only
+        is enforced in code (no row can escalate privilege). Lockout guard OK (at least one
+        admin remains): {steps.safety_diff.output.lockout_guard_ok}. Admins remaining after:
+        {steps.safety_diff.output.admins_remaining_after}. Plan size:
+        {steps.safety_diff.output.plan_count}. Rejected (skipped + reported):
+        {steps.safety_diff.output.rejected_count}.
+      show_data: steps.safety_diff.output
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: true
+
+  # 6) LOOP over remediation_plan. Each iteration runs the per-user browser role change (child
+  #    step set_role_one) reading the current user via _item. Runs ONLY after the human
+  #    approval above. max_iterations caps the batch size.
+  - id: role_change_loop
+    type: loop
+    depends_on: [batch_approval]
+    loop_config:
+      over: "steps.safety_diff.output.remediation_plan"
+      step_ids: [set_role_one]
+      max_iterations: 2000
+
+  # 6a) PER-USER role change (mode: playwright). The reasoning model only authors a Playwright
+  #     script from the prompt; the mutation itself is deterministic Playwright, so any
+  #     provider can author it and is swappable. max_actions is tightly capped so a
+  #     misnavigation cannot rampage through the roster; capture_screenshots is ON for audit;
+  #     captcha_strategy pauses for a human. output_schema returns a structured per-user result
+  #     {email, action_taken, new_role_shown}.
+  - id: set_role_one
+    type: browser
+    prompt: >
+      You are correcting the role of exactly ONE user in the SaaS admin console. The target
+      user is: {{ _item }}. Navigate to that user's member row (search by their email if
+      needed) and open their account. Open the per-user ROLE dropdown and set it to the
+      target_role given for this user, then click Save / Update / Confirm so the new role is
+      persisted. Operate on this one email ONLY - never open or change the role dropdown of any
+      other member row, and never set a role higher than target_role. If a confirmation dialog
+      appears, confirm it. Then read back the role the console now shows for this user and
+      return it. Do not navigate to bulk actions or unrelated settings.
+    browser_config:
+      mode: playwright
+      start_url: "{input.member_url_template}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 120
+      max_actions: 25
+      headless: true
+      credentials_env: "{input.credentials_env_var}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          email: { type: string }
+          action_taken: { type: string, enum: ["role_set", "skipped", "failed"] }
+          new_role_shown: { type: string }
+          screenshot_ref: { type: string }
+        required: ["email", "action_taken", "new_role_shown"]
+
+  # 7) RE-CENSUS the roster (mode: dom, read-only) into after_roles - the post-image of the
+  #    audit pair. Same structured extraction as the census; no mutation.
+  - id: census_after
+    type: browser
+    depends_on: [role_change_loop]
+    prompt: >
+      Re-open the members / users management page in the SaaS admin console (reload to get
+      fresh state). This is a read-only re-census after a batch of role changes: do NOT open or
+      change any role dropdown, and do NOT click any Save, Remove, or Delete control. Read every
+      visible member row (paginate through all pages) and extract each member's email, their
+      current role exactly as the console shows it, and their last-active date if shown. Mark
+      found=true for each row read. Return the full roster as structured JSON.
+    browser_config:
+      mode: dom
+      start_url: "{input.admin_members_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 180
+      max_actions: 80
+      headless: true
+      credentials_env: "{input.credentials_env_var}"
+      captcha_strategy: pause
+      capture_screenshots: false
+      output_schema:
+        type: object
+        properties:
+          after_roles:
+            type: array
+            items:
+              type: object
+              properties:
+                email: { type: string }
+                actual_role: { type: string }
+                last_active: { type: string }
+                found: { type: boolean }
+              required: ["email", "actual_role", "found"]
+        required: ["after_roles"]
+
+  # 8) DETERMINISTIC final reconcile. The load-bearing post-check: assert EVERY remediated
+  #    user now shows target_role, EVERY untouched user is unchanged vs the before census, and
+  #    at least one admin still exists. Emits a drift list of any user that did not reach the
+  #    expected state. Pure Python.
+  - id: final_reconcile
+    type: code
+    depends_on: [safety_diff, census_after, role_change_loop]
+    code_config:
+      language: python
+      code: |
+        import json
+
+        plan = _steps['safety_diff'] or {}
+        remediation_plan = plan.get('remediation_plan', []) if isinstance(plan, dict) else []
+        target_by_email = {p['email']: p.get('target_role') for p in remediation_plan}
+        targeted_emails = set(target_by_email.keys())
+
+        priv_raw = str(_input.get('privileged_roles') or 'owner,admin')
+        privileged_roles = set()
+        for part in priv_raw.split(','):
+            p = part.strip().lower()
+            if p:
+                privileged_roles.add(p)
+
+        # --- Before roles (from the original census, re-derived here for the diff) ---------
+        census_b = _steps['census_before'] or {}
+        if isinstance(census_b, str):
+            try:
+                census_b = json.loads(census_b) if census_b.strip() else {}
+            except (ValueError, TypeError):
+                census_b = {}
+        before_rows = census_b.get('before_roles', []) if isinstance(census_b, dict) else []
+        before_role = {}
+        for m in before_rows:
+            if isinstance(m, dict):
+                em = str(m.get('email') or '').strip().lower()
+                if em:
+                    before_role[em] = str(m.get('actual_role') or '').strip().lower()
+
+        # --- After roles ------------------------------------------------------------------
+        census_a = _steps['census_after'] or {}
+        if isinstance(census_a, str):
+            try:
+                census_a = json.loads(census_a) if census_a.strip() else {}
+            except (ValueError, TypeError):
+                census_a = {}
+        after_rows = census_a.get('after_roles', []) if isinstance(census_a, dict) else []
+        after_role = {}
+        for m in after_rows:
+            if isinstance(m, dict):
+                em = str(m.get('email') or '').strip().lower()
+                if em:
+                    after_role[em] = str(m.get('actual_role') or '').strip().lower()
+
+        # --- Per-loop browser results, indexed by reported email --------------------------
+        loop_out = _steps['role_change_loop'] or {}
+        loop_items = loop_out if isinstance(loop_out, list) else (
+            loop_out.get('results') or loop_out.get('items') or []
+        )
+        result_by_email = {}
+        for it in loop_items:
+            if isinstance(it, dict):
+                em = str(it.get('email') or '').strip().lower()
+                if em:
+                    result_by_email[em] = it
+
+        # --- Assert every remediated email now shows its target_role ----------------------
+        confirmed = []
+        drift = []
+        for em in sorted(targeted_emails):
+            want = str(target_by_email.get(em) or '').strip().lower()
+            post = after_role.get(em)
+            browser_res = result_by_email.get(em, {})
+            diff_row = {
+                'email': em,
+                'before_role': before_role.get(em),
+                'target_role': want,
+                'after_role': post,
+                'browser_action': browser_res.get('action_taken'),
+                'new_role_shown': browser_res.get('new_role_shown'),
+                'screenshot_ref': browser_res.get('screenshot_ref'),
+            }
+            if post == want and want != '':
+                confirmed.append(diff_row)
+            else:
+                drift.append({**diff_row, 'drift_reason': 'remediated_but_role_not_target'})
+
+        # --- Assert no UNTOUCHED user changed role (scope-creep / collateral check) --------
+        collateral = []
+        for em, before_r in before_role.items():
+            if em in targeted_emails:
+                continue
+            post = after_role.get(em)
+            if post is not None and post != before_r:
+                collateral.append({
+                    'email': em,
+                    'before_role': before_r,
+                    'after_role': post,
+                    'drift_reason': 'untouched_user_role_changed',
+                })
+
+        # --- At least one admin must still exist AFTER remediation (lockout post-check) ----
+        admins_after = sorted(em for em, r in after_role.items() if r in privileged_roles)
+        admin_still_exists = len(admins_after) >= 1
+
+        all_clean = (len(drift) == 0 and len(collateral) == 0 and admin_still_exists)
+
+        result = {
+            'all_clean': all_clean,
+            'admin_still_exists': admin_still_exists,
+            'admins_after_count': len(admins_after),
+            'targeted_count': len(targeted_emails),
+            'confirmed_count': len(confirmed),
+            'drift_count': len(drift),
+            'collateral_count': len(collateral),
+            'confirmed': confirmed,
+            'drift': drift,
+            'collateral': collateral,
+        }
+
+  # 9) TRAJECTORY-REPLAY on the role-set path. The reliability layer: diffs the live
+  #    role-change trajectory against the golden run and FAILS on UI drift of the role
+  #    dropdown (a console redesign) or cost blowup. Deterministic scorer, provider-neutral -
+  #    it compares observable actions, not model internals.
+  - id: replay_role_set_path
+    type: trajectory-replay
+    depends_on: [final_reconcile]
+    trajectory_replay_config:
+      golden_run_id: "{input.golden_run_id}"
+      fail_below_score: 0.85
+      allow_cost_delta_pct: 15.0
+      cost_budget_usd: 0.50
+
+  # 10) AUDIT chain: deterministic, tamper-evident SHA-256 over the canonical remediation
+  #     record (plan, approver outcome, every per-user role transition before->after, drift,
+  #     lockout-guard result, replay verdict). No model.
+  - id: audit_chain
+    type: code
+    depends_on: [safety_diff, batch_approval, final_reconcile, replay_role_set_path]
+    code_config:
+      language: python
+      code: |
+        import json
+        import hashlib
+        from datetime import datetime, timezone
+
+        plan = _steps['safety_diff'] or {}
+        reconcile = _steps['final_reconcile'] or {}
+        approval = _steps['batch_approval'] or {}
+        replay = _steps['replay_role_set_path'] or {}
+
+        approver = 'unknown'
+        if isinstance(approval, dict):
+            approver = str(approval.get('approver') or approval.get('approved_by') or 'unknown')
+
+        replay_passed = bool(replay.get('passed')) if isinstance(replay, dict) else False
+        replay_score = None
+        if isinstance(replay, dict):
+            replay_score = replay.get('score')
+            if replay_score is None:
+                replay_score = replay.get('replay_score')
+
+        # Build the chain of role transitions (confirmed + drift) for the audit record.
+        transitions = []
+        for row in (reconcile.get('confirmed', []) + reconcile.get('drift', [])):
+            transitions.append({
+                'email': row.get('email'),
+                'from_role': row.get('before_role'),
+                'to_role': row.get('after_role'),
+                'intended_target': row.get('target_role'),
+                'browser_action': row.get('browser_action'),
+                'screenshot_ref': row.get('screenshot_ref'),
+                'reconciled': 'after_role' in row and row.get('after_role') == row.get('target_role'),
+            })
+
+        record = {
+            'generated_at': datetime.now(timezone.utc).isoformat(),
+            'approver': approver,
+            'allowlist_ok': plan.get('allowlist_ok'),
+            'lockout_guard_ok': plan.get('lockout_guard_ok'),
+            'total_admins_before': plan.get('total_admins_before'),
+            'admins_remaining_after': plan.get('admins_remaining_after'),
+            'plan_count': plan.get('plan_count'),
+            'rejected_count': plan.get('rejected_count'),
+            'targeted_count': reconcile.get('targeted_count'),
+            'confirmed_count': reconcile.get('confirmed_count'),
+            'drift_count': reconcile.get('drift_count'),
+            'collateral_count': reconcile.get('collateral_count'),
+            'admin_still_exists': reconcile.get('admin_still_exists'),
+            'role_transitions': transitions,
+            'drift': reconcile.get('drift', []),
+            'collateral': reconcile.get('collateral', []),
+            'rejected': plan.get('rejected', []),
+            'replay_passed': replay_passed,
+            'replay_score': replay_score,
+            'all_clean': reconcile.get('all_clean'),
+        }
+
+        # Canonical (sorted-key) serialization so the audit hash is reproducible byte-for-byte.
+        canonical = json.dumps(record, sort_keys=True, separators=(',', ':'))
+        digest = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+
+        result = {
+            'sha256': digest,
+            'byte_length': len(canonical),
+            'audit_record': record,
+            'canonical_json': canonical,
+        }
+
+  # 11) NOTIFY the IAM channel with the result + drift report + audit integrity hash + replay
+  #     verdict.
+  - id: notify_summary
+    type: notify
+    depends_on: [audit_chain]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: "Role remediation batch complete. Planned: {steps.safety_diff.output.plan_count} | Confirmed at target: {steps.final_reconcile.output.confirmed_count} | Drift (failed): {steps.final_reconcile.output.drift_count} | Collateral (untouched changed): {steps.final_reconcile.output.collateral_count} | Admin still exists: {steps.final_reconcile.output.admin_still_exists} | Lockout guard OK: {steps.safety_diff.output.lockout_guard_ok} | Replay passed: {steps.audit_chain.output.audit_record.replay_passed} | All clean: {steps.final_reconcile.output.all_clean} | Approver: {steps.audit_chain.output.audit_record.approver} | Audit sha256 {steps.audit_chain.output.sha256}."
+
+on_complete:
+  storage_path: "saas-role-permission-remediator/{run_id}/result.json"

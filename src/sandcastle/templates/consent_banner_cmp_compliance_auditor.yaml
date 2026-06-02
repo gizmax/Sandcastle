@@ -1,0 +1,608 @@
+# name: Consent Banner CMP Compliance Auditor
+# description: Drives a real first-visit browser session per in-scope domain to PROVE the cookie/consent banner blocks non-essential trackers BEFORE any consent and honors a 'Reject All' click - the legally load-bearing client-side behavior no API can observe - then deterministically computes violations against a tracker denylist, gates severity (non-LLM threshold + swappable EU llm_eval), seals timestamped screenshots + a canonical network trace to an object-lock WORM S3 bucket, routes high-severity findings to privacy counsel behind a human approval, emits a per-domain PDF dossier, and trajectory-replays against a golden run so a CMP redesign that breaks the audit is caught as a regression, not a silent false-pass.
+# tags: [GDPR, ePrivacy, CNIL, ICO, ConsentBanner, CMP, PriorConsent, CookieAudit, Browser, Playwright, ObjectLock, WORM, TrajectoryReplay, DPO, PrivacyCounsel]
+# category: hr_legal
+
+name: consent-banner-cmp-compliance-auditor
+description: >-
+  A scheduled (weekly) or on-demand consent-banner compliance auditor for the DPO,
+  privacy counsel, or a GDPR/ePrivacy/CNIL audit firm at any EU/UK-facing company.
+  Consent legality lives ENTIRELY in client-side runtime behavior: which scripts and
+  cookies fire BEFORE any click, whether a CMP banner even appears, whether 'Reject
+  All' is as easy and prominent as 'Accept', and whether non-essential trackers still
+  fire AFTER rejection. There is no API for any of this - an http GET sees raw HTML
+  with none of the tag-manager / CMP SDK behavior. It only exists when a REAL browser
+  loads the page on a fresh profile, executes the JS / CMP SDK, and you observe the
+  network requests and document.cookie at each consent state.
+
+  Flow: a deterministic code step builds the per-URL audit list (each URL gets a fresh,
+  consent-free browser context so no prior consent leaks). A LOOP runs one first-visit
+  audit per domain. The browser step (mode: playwright, provider-neutral) only AUTHORS a
+  deterministic Playwright script: load with a clean context, snapshot document.cookie +
+  all network request hosts PRE-interaction, screenshot the banner, programmatically
+  click 'Reject All', then re-snapshot cookies + network hosts POST-reject. It returns a
+  STRUCTURED object via output_schema and NEVER performs any outbound or irreversible
+  action - it only reads and clicks the site's own Reject All. A DETERMINISTIC code step
+  loads an inline tracker-host denylist and computes violations (any non-essential host
+  firing pre-consent OR persisting post-reject) - this boolean math, not any model, is
+  the audit-load-bearing verdict. A GATE with TWO strategies (a non-LLM threshold on the
+  violation booleans, and a swappable EU/local llm_eval that only LABELS severity intent
+  and cannot overturn the deterministic count) must both pass. An http PUT seals the
+  screenshots + canonical JSON trace to an object-lock COMPLIANCE-mode S3 bucket (WORM
+  evidence; the only write, append-only). A CONDITION routes any high-severity violation
+  to a human APPROVAL so privacy counsel reviews BEFORE any complaint or disclosure is
+  filed - nothing leaves the org automatically. A REPORT emits a per-domain PDF dossier
+  with embedded screenshots. Finally a TRAJECTORY-REPLAY diffs this run against a golden
+  run so a CMP redesign that silently breaks the audit is caught as a regression.
+
+  PROVIDER NEUTRAL: the browser step runs in playwright mode - the reasoning model only
+  authors a deterministic Playwright script, so any provider's model can write it and the
+  resulting script is provider-agnostic. The pass/fail verdict is pure Python over a
+  tracker denylist, never the model. The single llm_eval in the gate is severity-labeling
+  only, pinned to a swappable EU/local model and unable to overturn the deterministic
+  violation count. SAFETY: no credentials needed (public first visit); captcha_strategy
+  pause halts for a human on any interstitial; max_actions ~25 caps the session; the
+  object-lock PUT is the only write and is append-only WORM; filing any complaint is gated
+  behind a human approval so nothing leaves the org automatically.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 1800
+
+# Default trigger: a weekly cron sweep of the in-scope domains. Fires 06:00 every Monday.
+# Override per audit calendar. A manual run (CMP / tag-manager config change) or a deploy
+# webhook wired to a sensor are the alternative event triggers.
+schedule: "0 6 * * 1"
+
+input_schema:
+  required: ["domains", "evidence_bucket_url"]
+  properties:
+    domains:
+      type: string
+      description: >-
+        JSON array of in-scope domains / start URLs to audit, each on a fresh consent-free
+        profile (e.g. '["https://www.acme-eu.com","https://shop.acme-eu.com"]'). The first
+        first-visit URL of each domain is where the per-domain browser audit starts.
+      default: '["https://www.example-eu.com"]'
+      example: '["https://www.acme-eu.com","https://shop.acme-eu.com","https://blog.acme-eu.com"]'
+    evidence_bucket_url:
+      type: string
+      description: >-
+        Base URL of the object-lock (WORM) S3 bucket the timestamped screenshots + canonical
+        JSON trace are sealed to via http PUT with x-amz-object-lock COMPLIANCE mode. This is
+        the ONLY write in the workflow and is append-only evidence.
+      default: "https://s3.eu-west-1.amazonaws.com/consent-evidence-worm"
+      example: "https://s3.eu-central-1.amazonaws.com/dpo-consent-evidence-lock"
+    evidence_token_env:
+      type: string
+      description: >-
+        Name of the environment variable holding the bearer token used to PUT evidence to the
+        object-lock bucket. The value is NEVER inlined into the workflow; the http step reads it
+        via the env reference. No site credentials are needed (public first visit).
+      default: "EVIDENCE_BUCKET_TOKEN"
+      example: "DPO_EVIDENCE_BUCKET_TOKEN"
+    object_lock_retain_until:
+      type: string
+      description: >-
+        ISO-8601 timestamp the object-lock retention is set to (x-amz-object-lock-retain-until-date).
+        Until this date the evidence cannot be deleted or overwritten - the WORM guarantee counsel
+        relies on to defend against a CNIL/ICO complaint.
+      default: "2031-06-01T00:00:00Z"
+      example: "2031-06-01T00:00:00Z"
+    tracker_denylist:
+      type: string
+      description: >-
+        Optional JSON array of EXTRA non-essential tracker host suffixes to treat as violations
+        if they fire pre-consent or persist post-reject, merged with the built-in denylist. Use to
+        add org-specific vendors. Essential first-party / CMP SDK hosts are excluded by the code.
+      default: '[]'
+      example: '["cdn.customtracker.io","pixel.partner-adtech.com"]'
+    high_severity_min_violations:
+      type: number
+      description: >-
+        Threshold: a domain is HIGH severity (routed to privacy counsel approval) if its
+        deterministic violation count is at least this many. The boolean math, not a model,
+        decides; this only sets where the high band begins.
+      default: 1
+      example: "1"
+    golden_run_id:
+      type: string
+      description: >-
+        ID of the known-good recorded audit run. The trajectory-replay step diffs THIS run against
+        it and fails below the score floor, so a CMP redesign that silently breaks the audit (e.g.
+        the Reject All selector moved) is caught as a regression rather than a silent false-pass.
+      default: "golden-consent-audit-2026-05-01"
+      example: "golden-consent-audit-2026-05-01"
+    report_author:
+      type: string
+      description: "Name shown as the author on the per-domain PDF compliance dossier (the DPO / privacy counsel)."
+      default: "Data Protection Office"
+      example: "Privacy Counsel - Acme EU"
+    counsel_channel:
+      type: string
+      description: "Slack channel privacy counsel watches for the completed audit summary and high-severity routing."
+      default: "#consent-compliance"
+      example: "#dpo-privacy-counsel"
+
+steps:
+  # ---------------------------------------------------------------------------
+  # 1) BUILD AUDIT LIST (deterministic, no model). Parses the in-scope domains
+  #    JSON, dedupes, and tags each with a fresh consent-free profile id so no
+  #    prior consent leaks between targets. Fails CLOSED (empty list) if the input
+  #    is malformed, so the loop never runs on garbage. Pure Python.
+  # ---------------------------------------------------------------------------
+  - id: build_audit_list
+    type: code
+    code_config:
+      language: python
+      code: |
+        import json
+
+        raw = _input.get('domains') or '[]'
+        if isinstance(raw, list):
+            domains = raw
+        else:
+            try:
+                domains = json.loads(str(raw))
+            except (ValueError, TypeError):
+                domains = []
+        if not isinstance(domains, list):
+            domains = []
+
+        seen = set()
+        audit_list = []
+        for idx, d in enumerate(domains):
+            url = str(d or '').strip()
+            if not url:
+                continue
+            if not (url.startswith('http://') or url.startswith('https://')):
+                url = 'https://' + url
+            key = url.lower().rstrip('/')
+            if key in seen:
+                continue
+            seen.add(key)
+            # Fresh, consent-free browser profile per target: first-visit semantics so
+            # no previously-accepted consent state can leak in and mask a violation.
+            audit_list.append({
+                'start_url': url,
+                'profile_id': 'fresh-consent-free-' + str(idx),
+                'fresh_context': True,
+            })
+
+        result = {
+            'audit_list': audit_list,
+            'count': len(audit_list),
+            'ok': len(audit_list) > 0,
+        }
+
+  # ---------------------------------------------------------------------------
+  # 2) LOOP over each in-scope domain. Each iteration runs the per-domain
+  #    first-visit browser audit (child audit_one_domain) reading the current
+  #    target via _item. max_iterations caps the sweep so a huge list cannot run
+  #    unbounded. Downstream steps depend on the loop.
+  # ---------------------------------------------------------------------------
+  - id: audit_loop
+    type: loop
+    depends_on: [build_audit_list]
+    loop_config:
+      over: "steps.build_audit_list.output.audit_list"
+      step_ids: [audit_one_domain]
+      max_iterations: 200
+
+  # 2a) PER-DOMAIN FIRST-VISIT AUDIT (mode: playwright, the READ pass). The
+  #     reasoning model only AUTHORS a deterministic Playwright script from the
+  #     prompt; the script + output_schema make this provider-neutral and a pure
+  #     READ (load, snapshot, click the site's own Reject All, re-snapshot). It
+  #     mutates NOTHING outbound. capture_screenshots ON for the WORM evidence /
+  #     audit trail; captcha_strategy pause hands any interstitial to a human;
+  #     max_actions ~25 caps the session so it cannot click forever. Operates on
+  #     ONE domain (_item) only.
+  - id: audit_one_domain
+    type: browser
+    prompt: >-
+      You are auditing a single website's cookie/consent banner for ePrivacy / GDPR
+      prior-consent compliance on a FIRST VISIT with NO prior consent. The target is:
+      {{ _item }}. Author and run a deterministic Playwright script that does EXACTLY
+      this and nothing else:
+      (1) Open a CLEAN browser context with NO stored cookies or localStorage so this is
+      a true first visit, and navigate to the target start_url.
+      (2) BEFORE clicking anything, snapshot the current state: list every distinct
+      network request HOST observed so far (cookies_pre = the names+domains in
+      document.cookie; pre_consent_hosts = the set of hosts the page has already
+      contacted), and record whether a consent/cookie banner is visible (banner_present),
+      whether a clearly labelled 'Reject All' / 'Refuse All' / 'Decline' control exists
+      (reject_all_present), and whether that Reject control is as visually prominent and
+      reachable as the Accept control (reject_equal_prominence - same layer, no extra
+      clicks, comparable size/contrast).
+      (3) Take a screenshot of the banner for the evidence record (add its reference to
+      screenshot_refs).
+      (4) Programmatically CLICK the 'Reject All' control. Do NOT accept, do NOT click any
+      other site control, do NOT submit any form, do NOT navigate off-site.
+      (5) AFTER the reject click settles, re-snapshot: cookies_post (document.cookie names
+      +domains now) and post_reject_hosts (the set of hosts contacted at any point, so
+      trackers that fired after rejection are captured). Take a post-reject screenshot.
+      Return ONLY the structured object described by the output schema. List raw observed
+      hosts verbatim - do NOT judge which are trackers; the deterministic step does that.
+      If a CAPTCHA, age gate, or any interstitial appears, PAUSE for a human rather than
+      guessing. This is strictly READ + the site's own Reject All; perform no other action.
+    browser_config:
+      mode: playwright
+      start_url: "{{ _item.start_url }}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 120
+      max_actions: 25
+      headless: true
+      credentials_env: "NONE_PUBLIC_FIRST_VISIT"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          start_url:
+            type: string
+            description: "The audited start URL (echo of the target, for reconciliation)."
+          banner_present:
+            type: boolean
+            description: "Did a consent/cookie banner appear on first visit?"
+          reject_all_present:
+            type: boolean
+            description: "Is a clearly labelled Reject All / Refuse All / Decline control present?"
+          reject_equal_prominence:
+            type: boolean
+            description: "Is Reject All as easy / prominent as Accept (same layer, comparable size, no extra clicks)?"
+          pre_consent_nonessential_hosts:
+            type: array
+            description: "Every distinct network request host observed BEFORE any interaction (raw, unjudged)."
+            items: { type: string }
+          post_reject_nonessential_hosts:
+            type: array
+            description: "Every distinct network request host observed AFTER clicking Reject All (raw, unjudged)."
+            items: { type: string }
+          cookies_pre:
+            type: array
+            description: "Cookies present BEFORE interaction (name and/or domain strings from document.cookie)."
+            items: { type: string }
+          cookies_post:
+            type: array
+            description: "Cookies present AFTER clicking Reject All."
+            items: { type: string }
+          screenshot_refs:
+            type: array
+            description: "References to the banner + pre/post screenshots captured for the evidence record."
+            items: { type: string }
+        required:
+          - start_url
+          - banner_present
+          - reject_all_present
+          - pre_consent_nonessential_hosts
+          - post_reject_nonessential_hosts
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
+
+  # ---------------------------------------------------------------------------
+  # 3) DETERMINISTIC VERDICT (no model) - the audit-load-bearing core. Loads an
+  #    inline tracker-host denylist (merged with any caller-supplied extras),
+  #    VALIDATES the browser extraction shape (reject empty/malformed reads so a
+  #    blank scrape never passes), then computes violations with pure boolean
+  #    math: any denylisted non-essential host firing PRE-consent, or persisting
+  #    POST-reject, is a violation; a missing banner or missing Reject All is a
+  #    violation. The violation COUNT here, not any model, decides pass/fail.
+  # ---------------------------------------------------------------------------
+  - id: compute_verdict
+    type: code
+    depends_on: [audit_loop]
+    code_config:
+      language: python
+      code: |
+        import json
+
+        # --- Built-in non-essential tracker host suffixes (denylist). First-party / CMP
+        #     SDK / essential infra hosts are NOT here, so they never count as violations.
+        builtin_denylist = [
+            'google-analytics.com', 'googletagmanager.com', 'doubleclick.net',
+            'googlesyndication.com', 'googleadservices.com', 'g.doubleclick.net',
+            'facebook.com', 'facebook.net', 'connect.facebook.net', 'fbcdn.net',
+            'hotjar.com', 'hotjar.io', 'mixpanel.com', 'segment.com', 'segment.io',
+            'fullstory.com', 'mouseflow.com', 'clarity.ms', 'amplitude.com',
+            'criteo.com', 'criteo.net', 'taboola.com', 'outbrain.com', 'adnxs.com',
+            'adsrvr.org', 'rubiconproject.com', 'pubmatic.com', 'casalemedia.com',
+            'scorecardresearch.com', 'quantserve.com', 'bing.com', 'bat.bing.com',
+            'linkedin.com', 'licdn.com', 'twitter.com', 't.co', 'tiktok.com',
+            'snap.com', 'pinterest.com', 'yandex.ru', 'mc.yandex.ru', 'matomo.cloud',
+            'cdn.heapanalytics.com', 'heap.io', 'sentry.io', 'newrelic.com', 'nr-data.net',
+        ]
+
+        extra_raw = _input.get('tracker_denylist') or '[]'
+        if isinstance(extra_raw, list):
+            extra = extra_raw
+        else:
+            try:
+                extra = json.loads(str(extra_raw))
+            except (ValueError, TypeError):
+                extra = []
+        if not isinstance(extra, list):
+            extra = []
+        denylist = [str(h).strip().lower() for h in (builtin_denylist + extra) if str(h).strip()]
+
+        def _is_tracker(host):
+            h = str(host or '').strip().lower()
+            if not h:
+                return False
+            # Suffix match so sub.google-analytics.com is caught as well.
+            for suffix in denylist:
+                if h == suffix or h.endswith('.' + suffix):
+                    return True
+            return False
+
+        # --- Gather per-domain browser results from the loop output -----------------------
+        loop_out = _steps.get('audit_loop') or {}
+        if isinstance(loop_out, list):
+            items = loop_out
+        elif isinstance(loop_out, dict):
+            items = loop_out.get('results') or loop_out.get('items') or []
+        else:
+            items = []
+        if not isinstance(items, list):
+            items = []
+
+        per_domain = []
+        invalid_reads = []
+        for raw in items:
+            rec = raw
+            if isinstance(rec, str):
+                try:
+                    rec = json.loads(rec) if rec.strip() else {}
+                except (ValueError, TypeError):
+                    rec = {}
+            if not isinstance(rec, dict):
+                rec = {}
+            # Unwrap a nested output/data/result envelope if the runtime wrapped it.
+            for key in ('output', 'data', 'result'):
+                inner = rec.get(key)
+                if isinstance(inner, dict) and 'start_url' in inner:
+                    rec = inner
+                    break
+
+            start_url = str(rec.get('start_url') or '').strip()
+            banner_present = bool(rec.get('banner_present'))
+            reject_present = bool(rec.get('reject_all_present'))
+            reject_prominent = bool(rec.get('reject_equal_prominence'))
+            pre_hosts = rec.get('pre_consent_nonessential_hosts')
+            post_hosts = rec.get('post_reject_nonessential_hosts')
+            if not isinstance(pre_hosts, list):
+                pre_hosts = []
+            if not isinstance(post_hosts, list):
+                post_hosts = []
+            screenshots = rec.get('screenshot_refs')
+            if not isinstance(screenshots, list):
+                screenshots = []
+
+            # --- VALIDATE the read: a trustworthy audit must at least have a start_url and
+            #     must have observed SOME network hosts (a page that contacted zero hosts
+            #     means the load failed, not that it is clean). Reject before scoring.
+            read_errors = []
+            if not start_url.startswith('http'):
+                read_errors.append('missing/invalid start_url')
+            if len(pre_hosts) == 0 and len(post_hosts) == 0:
+                read_errors.append('zero network hosts observed (load likely failed)')
+            if read_errors:
+                invalid_reads.append({'start_url': start_url or 'unknown', 'errors': read_errors})
+                # Treat an invalid read as a hard FAIL for that domain, not a silent pass.
+
+            # --- DETERMINISTIC violation math (the load-bearing part, NOT a model) ---------
+            pre_trackers = sorted({str(h).strip().lower() for h in pre_hosts if _is_tracker(h)})
+            post_trackers = sorted({str(h).strip().lower() for h in post_hosts if _is_tracker(h)})
+
+            violations = []
+            if not banner_present:
+                violations.append('no_consent_banner_on_first_visit')
+            if not reject_present:
+                violations.append('no_reject_all_control')
+            if banner_present and reject_present and not reject_prominent:
+                violations.append('reject_not_equal_prominence')
+            if pre_trackers:
+                violations.append('nonessential_trackers_fired_pre_consent')
+            if post_trackers:
+                violations.append('nonessential_trackers_persisted_post_reject')
+            if read_errors:
+                violations.append('invalid_or_failed_browser_read')
+
+            per_domain.append({
+                'start_url': start_url,
+                'banner_present': banner_present,
+                'reject_all_present': reject_present,
+                'reject_equal_prominence': reject_prominent,
+                'pre_consent_trackers': pre_trackers,
+                'post_reject_trackers': post_trackers,
+                'pre_consent_tracker_count': len(pre_trackers),
+                'post_reject_tracker_count': len(post_trackers),
+                'violations': violations,
+                'violation_count': len(violations),
+                'compliant': len(violations) == 0,
+                'screenshot_refs': screenshots,
+                'read_errors': read_errors,
+            })
+
+        total_domains = len(per_domain)
+        total_violations = sum(d['violation_count'] for d in per_domain)
+        noncompliant = [d for d in per_domain if not d['compliant']]
+        max_domain_violations = max((d['violation_count'] for d in per_domain), default=0)
+
+        result = {
+            'per_domain': per_domain,
+            'total_domains': total_domains,
+            'noncompliant_count': len(noncompliant),
+            'total_violations': total_violations,
+            'max_domain_violations': max_domain_violations,
+            'invalid_read_count': len(invalid_reads),
+            'invalid_reads': invalid_reads,
+            'all_compliant': total_violations == 0 and total_domains > 0,
+            'denylist_size': len(denylist),
+        }
+
+  # ---------------------------------------------------------------------------
+  # 4) GATE - TWO strategies, BOTH must pass, before evidence is sealed:
+  #    (a) a NON-LLM threshold strategy that asserts the deterministic verdict is
+  #        internally consistent (counts add up, no invalid reads silently passed);
+  #    (b) a SWAPPABLE EU/local llm_eval that LABELS whether the banner meets the
+  #        ePrivacy prior-consent INTENT. The llm_eval is severity-labeling only -
+  #        it CANNOT overturn the deterministic violation count (the code output
+  #        above is the source of truth). Pinned to a swappable model alias.
+  # ---------------------------------------------------------------------------
+  - id: severity_gate
+    type: gate
+    depends_on: [compute_verdict]
+    gate_config:
+      strategies:
+        # (a) NON-LLM threshold: pure structural consistency of the deterministic verdict.
+        - type: threshold
+          config:
+            input: "{steps.compute_verdict.output}"
+            expression: "noncompliant_count <= total_domains and total_domains > 0 and (invalid_read_count == 0 or noncompliant_count >= invalid_read_count)"
+            description: >-
+              Non-LLM consistency check on the deterministic verdict: the noncompliant set
+              cannot exceed the audited set, at least one domain was audited, and any invalid
+              read was counted as noncompliant (never silently passed). This strategy reads the
+              boolean math only - it does not re-judge compliance.
+        # (b) SWAPPABLE EU/local llm_eval: labels prior-consent INTENT, cannot overturn the count.
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are an EU ePrivacy / GDPR prior-consent reviewer. You are given the
+              DETERMINISTIC audit verdict for a set of domains. Do NOT recompute or overturn
+              the violation counts - they are authoritative. Reply with exactly one word:
+              'approved' if the verdict record is internally consistent and safe to seal as
+              evidence (per-domain violation lists match their counts, noncompliant domains
+              are the ones with violations, no invalid read was marked compliant), otherwise
+              'rejected' and name the inconsistency. This is severity-intent labeling only.
+              Verdict: {steps.compute_verdict.output}
+            input: "{steps.compute_verdict.output}"
+            model: mistral/large
+
+  # ---------------------------------------------------------------------------
+  # 5) SEAL EVIDENCE (the ONLY write) - http PUT the screenshots + canonical JSON
+  #    trace to the object-lock S3 bucket in COMPLIANCE mode (WORM). x-amz-object-
+  #    lock-mode COMPLIANCE + retain-until make this append-only, undeletable
+  #    evidence counsel can rely on. Bearer token via env (never inlined). Runs
+  #    only AFTER the two-strategy gate passes. This step performs no destructive
+  #    action - it appends an immutable evidence object.
+  # ---------------------------------------------------------------------------
+  - id: seal_evidence_worm
+    type: http
+    depends_on: [severity_gate]
+    http_config:
+      url: "{input.evidence_bucket_url}/{run_id}/consent-audit-trace.json"
+      method: PUT
+      headers:
+        Content-Type: "application/json"
+        x-amz-object-lock-mode: "COMPLIANCE"
+        x-amz-object-lock-retain-until-date: "{input.object_lock_retain_until}"
+      auth: "bearer:{env.EVIDENCE_BUCKET_TOKEN}"
+      body: '{"run_id": "{run_id}", "sealed_at": "{input.object_lock_retain_until}", "total_domains": "{steps.compute_verdict.output.total_domains}", "noncompliant_count": "{steps.compute_verdict.output.noncompliant_count}", "total_violations": "{steps.compute_verdict.output.total_violations}", "max_domain_violations": "{steps.compute_verdict.output.max_domain_violations}", "invalid_read_count": "{steps.compute_verdict.output.invalid_read_count}", "per_domain": "{steps.compute_verdict.output.per_domain}"}'
+
+  # ---------------------------------------------------------------------------
+  # 6) CONDITION - route on the DETERMINISTIC severity. If any domain reaches the
+  #    high-severity violation floor, send it to a human APPROVAL (privacy counsel
+  #    reviews BEFORE any complaint / disclosure is filed). Otherwise skip straight
+  #    to the dossier. The boolean math decides which branch runs.
+  # ---------------------------------------------------------------------------
+  - id: route_severity
+    type: condition
+    depends_on: [seal_evidence_worm]
+    condition_config:
+      expression: "{steps.compute_verdict.output.max_domain_violations} >= {input.high_severity_min_violations}"
+      then: [counsel_approval, build_dossier]
+      else: [build_dossier]
+
+  # 6a) HIGH-SEVERITY PATH - the SINGLE human gate before anything leaves the org.
+  #     Privacy counsel reviews the sealed evidence and the per-domain violations and
+  #     authorizes (or rejects) filing a CNIL/ICO complaint or a disclosure. NOTHING
+  #     is filed automatically. on_timeout abort means a missed review never auto-files;
+  #     allow_edit lets counsel trim the domain set before filing.
+  - id: counsel_approval
+    type: approval
+    depends_on: [route_severity]
+    approval_config:
+      message: >-
+        PRIVACY COUNSEL REVIEW REQUIRED - one or more domains breached prior-consent at
+        HIGH severity. Evidence has been sealed to the object-lock WORM bucket. APPROVE to
+        authorize filing/escalation (e.g. a CNIL/ICO complaint or an internal disclosure),
+        REJECT to hold. Noncompliant domains:
+        {steps.compute_verdict.output.noncompliant_count} of
+        {steps.compute_verdict.output.total_domains}; total violations:
+        {steps.compute_verdict.output.total_violations}; worst domain violation count:
+        {steps.compute_verdict.output.max_domain_violations}. Nothing is filed or disclosed
+        until you approve.
+      show_data: steps.compute_verdict.output
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: true
+
+  # ---------------------------------------------------------------------------
+  # 7) REPORT - per-domain PDF compliance dossier with embedded screenshots. Built
+  #    from the deterministic verdict + sealed-evidence references so the document
+  #    a DPO defends with is reproducible. Runs on both branches.
+  # ---------------------------------------------------------------------------
+  - id: build_dossier
+    type: report
+    depends_on: [route_severity]
+    report_config:
+      template: research-report
+      format: pdf
+      theme: professional
+      title: "Consent Banner / CMP Prior-Consent Compliance Dossier - {run_id}"
+      author: "{input.report_author}"
+    prompt: |
+      Produce a per-domain ePrivacy / GDPR prior-consent compliance dossier (PDF) for the DPO
+      / privacy counsel from the deterministic audit payload below. Structure it as:
+      1. Executive summary: total domains audited
+      ({steps.compute_verdict.output.total_domains}), noncompliant
+      ({steps.compute_verdict.output.noncompliant_count}), total violations
+      ({steps.compute_verdict.output.total_violations}), worst domain violation count
+      ({steps.compute_verdict.output.max_domain_violations}).
+      2. A per-domain table: for each domain show banner_present, reject_all_present,
+      reject_equal_prominence, the pre-consent tracker hosts that fired before any click,
+      the trackers that persisted after Reject All, the explicit violation list, and the
+      compliant verdict.
+      3. For each noncompliant domain, embed the captured banner / pre / post screenshots
+      (screenshot_refs) as the evidence of the runtime behavior - the legally load-bearing
+      proof that no API can produce.
+      4. An evidence-integrity note: state that the canonical trace + screenshots were sealed
+      to an object-lock (WORM, COMPLIANCE-mode) bucket so the record is tamper-evident and
+      defensible against a regulator complaint.
+      Do NOT invent domains or trackers - use only the payload.
+      Verdict payload: {steps.compute_verdict.output}
+
+  # ---------------------------------------------------------------------------
+  # 8) TRAJECTORY-REPLAY - the reliability layer. Diffs THIS audit run against a
+  #    golden_run_id and FAILS below fail_below_score (UI drift, e.g. a CMP redesign
+  #    that moved or renamed the Reject All selector and broke the audit) or on a
+  #    cost blowup. Deterministic scorer, not a model's opinion: it compares the
+  #    observable browser actions + extracted outputs. Catches a silently-broken
+  #    audit (a false PASS) as a regression before it is trusted.
+  # ---------------------------------------------------------------------------
+  - id: replay_vs_golden
+    type: trajectory-replay
+    depends_on: [build_dossier]
+    trajectory_replay_config:
+      golden_run_id: "{input.golden_run_id}"
+      fail_below_score: 0.85
+      allow_cost_delta_pct: 15.0
+      cost_budget_usd: 0.5
+
+  # ---------------------------------------------------------------------------
+  # 9) NOTIFY privacy counsel with the audit result + evidence + replay verdict.
+  # ---------------------------------------------------------------------------
+  - id: notify_counsel
+    type: notify
+    depends_on: [replay_vs_golden, compute_verdict]
+    notify_config:
+      service: slack
+      channel: "{input.counsel_channel}"
+      message: "Consent banner / CMP audit complete. Domains: {steps.compute_verdict.output.total_domains} | Noncompliant: {steps.compute_verdict.output.noncompliant_count} | Total violations: {steps.compute_verdict.output.total_violations} | Worst domain: {steps.compute_verdict.output.max_domain_violations} | Invalid reads: {steps.compute_verdict.output.invalid_read_count} | Evidence sealed to object-lock WORM bucket for run {run_id} | Per-domain PDF dossier generated. High-severity findings (if any) were routed to privacy counsel approval before any complaint/disclosure."
+
+on_complete:
+  storage_path: "consent-banner-cmp-compliance-auditor/{run_id}/result.json"

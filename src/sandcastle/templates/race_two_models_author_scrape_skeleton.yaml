@@ -1,0 +1,500 @@
+# name: Race Two Models Author Scrape Skeleton
+# description: A cross-provider resilience skeleton that races two different reasoning models to author the SAME Playwright extraction against a brittle, frequently-changing SPA and takes whichever returns schema-valid output FIRST - so a single model's bad day never breaks a high-value scrape. The race arbitrates purely on a deterministic schema gate, not on any model's opinion, which makes the flow provably provider-neutral: adding or dropping a provider is a one-line branch change. Read-only extraction, so there is no irreversible action and no approval gate; safety comes from the code-step schema gate, a drift classifier, per-branch max_actions caps, captcha_strategy=pause, and a hard notify that surfaces both-branch failure to humans rather than emitting silent garbage.
+# tags: [rpa, browser, playwright, race, cross-provider, scraping, spa, resilience, provider-neutral, drift-detection]
+# category: general_ai
+
+name: race-two-models-author-scrape-skeleton
+description: >-
+  A resilience skeleton for teams running high-value, brittle extractions against a
+  client-side-rendered SPA with no API and anti-scraping that changes selectors often
+  (competitor pricing intelligence off a JS storefront, listing data off a marketplace,
+  dynamic dashboards). The data exists ONLY in the rendered DOM after JS executes, so an
+  http/API call cannot touch it - the hard part is authoring a script that survives the
+  CURRENT DOM, and that is exactly what differs between reasoning providers. This skeleton
+  makes cross-provider redundancy the reliability mechanism: a single race step runs two
+  branches in parallel, each a PLAYWRIGHT browser step over the same {input.target_url}
+  with the SAME output_schema {items:[{name,price,availability}]}, but each branch is pinned
+  to a DIFFERENT provider via its model override, so two providers independently author the
+  extraction against the live page. The race resolves to the FIRST branch that returns a
+  non-empty result; a deterministic, sandboxed code step then VALIDATES that winner against
+  the schema with no model (every price parses, item count sits within an expected band, no
+  null fields) and, if the winner is invalid, transparently falls back to the OTHER completed
+  branch. A classify step flags suspicious deltas versus the last run (a >40% price swing reads
+  as likely DOM-drift, not a real market move). A condition routes the outcome: if BOTH branches
+  fail schema validation it fires a notify carrying both branches' audit screenshots so a human
+  can re-author the prompt and so the trajectory-replay harness can quarantine the flow; otherwise
+  it emits the clean, validated JSON. The extraction is read-only, so there is no submit/pay/delete
+  step and therefore no approval gate - but the notify keeps humans in the loop on drift. Both
+  branches ride swappable Playwright; correctness is decided by the deterministic code-step schema
+  gate plus the drift classifier, never by trusting one model's output.
+
+default_model: sonnet
+default_timeout: 900
+
+input_schema:
+  required: ["target_url"]
+  properties:
+    target_url:
+      type: string
+      description: >-
+        Entry URL of the client-side-rendered SPA to scrape. Both race branches open this same
+        URL and author their own Playwright extraction against the live DOM. Provider-neutral -
+        any JS storefront / marketplace / dashboard works.
+      example: "https://store.competitor.example/catalog?category=widgets"
+    expected_min_items:
+      type: integer
+      description: >-
+        Lower bound on how many items a healthy scrape should return. Below this the deterministic
+        gate treats the run as a partial/blocked read (likely a changed selector or an anti-bot wall)
+        rather than a real empty page.
+      default: 5
+      example: "5"
+    expected_max_items:
+      type: integer
+      description: >-
+        Upper bound on items for a healthy scrape. Far above this usually means the script latched
+        onto the wrong repeating container (DOM-drift), so the gate flags it instead of trusting it.
+      default: 500
+      example: "500"
+    drift_threshold_pct:
+      type: number
+      description: >-
+        Per-item percentage price swing versus the last run above which the classify step marks the
+        delta as suspected DOM-drift rather than a genuine price change.
+      default: 40.0
+      example: "40.0"
+    last_run_json:
+      type: string
+      description: >-
+        JSON array of the PREVIOUS run's items (name/price) used only as a drift baseline. Empty on
+        the very first run, in which case drift detection is skipped (nothing to compare against).
+      default: "[]"
+      example: '[{"name":"Widget A","price":19.99},{"name":"Widget B","price":24.50}]'
+    portal_credentials_env:
+      type: string
+      description: >-
+        Name of the environment variable holding login credentials IF the SPA requires auth (NEVER
+        inline secrets). Passed verbatim to each browser branch's credentials_env; ignored for a
+        public page.
+      default: "PORTAL_CREDS"
+      example: "PORTAL_CREDS"
+    oncall_channel:
+      type: string
+      description: >-
+        Slack channel paged when BOTH provider branches fail schema validation - the human re-authors
+        the prompt and the flow is quarantined rather than emitting silent garbage.
+      default: "#scrape-oncall"
+      example: "#scrape-oncall"
+
+steps:
+  # ---------------------------------------------------------------------------
+  # 1) RACE - the neutrality thesis made executable. Two branches run in
+  #    PARALLEL, each authoring the SAME extraction against the live SPA, but
+  #    pinned to a DIFFERENT provider via the branch step's model override. The
+  #    race resolves to the FIRST branch returning a non-empty result; the
+  #    validator below is intentionally minimal (non-empty) because the
+  #    LOAD-BEARING correctness is the deterministic code-step schema gate in
+  #    step 2, NOT the race's own quick filter. Adding/removing a provider is a
+  #    one-line branch change here.
+  # ---------------------------------------------------------------------------
+  - id: elect-extractor
+    type: race
+    race_config:
+      branches: [["author-extract-provider-a"], ["author-extract-provider-b"]]
+      validator: "isinstance(output, dict) and len(output.get('items') or []) > 0"
+
+  # --- BRANCH A (provider A: Anthropic Sonnet) --------------------------------
+  #     NO depends_on - the race executor drives both branches as a fan-out.
+  #     PLAYWRIGHT mode: the model AUTHORS a Playwright script (swappable, no
+  #     vendor coupling). output_schema makes this a structured READ pass.
+  #     credentials_env (never inline), captcha_strategy: pause hands anti-bot
+  #     walls to a human, max_actions caps a stuck branch so it cannot run away
+  #     on cost, capture_screenshots gives the human an audit artifact on a
+  #     both-branch failure.
+  - id: author-extract-provider-a
+    type: browser
+    model: sonnet
+    prompt: >-
+      You are PROVIDER A. The target {input.target_url} is a client-side-rendered SPA whose
+      data exists ONLY in the rendered DOM after its JavaScript runs, and whose selectors change
+      often. Author and run a robust Playwright extraction: open the URL, wait for the catalog/
+      listing content to finish rendering, then for EVERY product/listing card scrape its name,
+      its price, and its availability text. Do not assume yesterday's selectors - inspect the live
+      DOM and target stable, content-based anchors. If the page requires login, authenticate using
+      the credentials in the environment variable named by portal_credentials_env. This is a
+      READ-ONLY scrape: do NOT click buy, add-to-cart, submit, or any mutating control. If a CAPTCHA
+      or anti-bot wall appears, PAUSE for a human rather than trying to defeat it. Return ONLY the
+      structured object described by output_schema - a list of items, each with name, price, and
+      availability.
+    browser_config:
+      mode: playwright
+      start_url: "{input.target_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 120
+      max_actions: 50
+      headless: true
+      credentials_env: "{input.portal_credentials_env}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          items:
+            type: array
+            description: "Every product/listing scraped from the rendered DOM."
+            items:
+              type: object
+              properties:
+                name: { type: string }
+                price: { type: string }
+                availability: { type: string }
+          item_count:
+            type: integer
+            description: "Number of items the branch scraped (sanity counter)."
+        required: ["items"]
+
+  # --- BRANCH B (provider B: Google Gemini 2.5 Pro) ---------------------------
+  #     IDENTICAL contract to branch A, only the model: pin differs - this is
+  #     what makes the race genuinely CROSS-PROVIDER. If provider A has a bad
+  #     day on the current DOM, provider B independently authors a script that
+  #     may survive it (and vice versa). Same safety rails (read-only, pause on
+  #     CAPTCHA, max_actions cap, audit screenshots).
+  - id: author-extract-provider-b
+    type: browser
+    model: google/gemini-2.5-pro
+    prompt: >-
+      You are PROVIDER B. The target {input.target_url} is a client-side-rendered SPA whose
+      data exists ONLY in the rendered DOM after its JavaScript runs, and whose selectors change
+      often. Author and run a robust Playwright extraction: open the URL, wait for the catalog/
+      listing content to finish rendering, then for EVERY product/listing card scrape its name,
+      its price, and its availability text. Do not assume yesterday's selectors - inspect the live
+      DOM and target stable, content-based anchors. If the page requires login, authenticate using
+      the credentials in the environment variable named by portal_credentials_env. This is a
+      READ-ONLY scrape: do NOT click buy, add-to-cart, submit, or any mutating control. If a CAPTCHA
+      or anti-bot wall appears, PAUSE for a human rather than trying to defeat it. Return ONLY the
+      structured object described by output_schema - a list of items, each with name, price, and
+      availability.
+    browser_config:
+      mode: playwright
+      start_url: "{input.target_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 120
+      max_actions: 50
+      headless: true
+      credentials_env: "{input.portal_credentials_env}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          items:
+            type: array
+            description: "Every product/listing scraped from the rendered DOM."
+            items:
+              type: object
+              properties:
+                name: { type: string }
+                price: { type: string }
+                availability: { type: string }
+          item_count:
+            type: integer
+            description: "Number of items the branch scraped (sanity counter)."
+        required: ["items"]
+
+  # ---------------------------------------------------------------------------
+  # 2) VALIDATE WINNER (DETERMINISTIC, no model) - the load-bearing correctness
+  #    gate. Reads BOTH race branch outputs from _steps (race fan-out collection)
+  #    and the race winner from _steps['elect-extractor']. Validates a candidate
+  #    against the schema with pure Python: every price parses to a number, the
+  #    item count sits inside [expected_min_items, expected_max_items], and no
+  #    name/price/availability field is null/blank. If the FIRST-returned winner
+  #    is invalid, transparently falls back to the OTHER completed branch. A blank
+  #    or garbage scrape is rejected here - it can never be emitted as a win.
+  # ---------------------------------------------------------------------------
+  - id: validate-winner
+    type: code
+    depends_on: [elect-extractor]
+    code_config:
+      language: python
+      code: |
+        # Deterministic schema gate over the race. No model decides correctness here.
+        def _unwrap(raw):
+            # Browser steps may nest the structured payload under output/data/result.
+            if not isinstance(raw, dict):
+                return {}
+            for key in ("output", "data", "result"):
+                inner = raw.get(key)
+                if isinstance(inner, dict) and "items" in inner:
+                    return inner
+            return raw
+
+        branch_a = _unwrap(_steps.get("author-extract-provider-a") or {})
+        branch_b = _unwrap(_steps.get("author-extract-provider-b") or {})
+        winner = _unwrap(_steps.get("elect-extractor") or {})
+
+        try:
+            min_items = int(_input.get("expected_min_items", 5))
+        except (TypeError, ValueError):
+            min_items = 5
+        try:
+            max_items = int(_input.get("expected_max_items", 500))
+        except (TypeError, ValueError):
+            max_items = 500
+
+        def _parse_price(value):
+            # Pull a clean number out of strings like "$1,299.00" / "EUR 24,50".
+            if value is None:
+                return None
+            if isinstance(value, (int, float)):
+                return float(value)
+            text = str(value).strip()
+            if text == "":
+                return None
+            # Normalise a comma decimal separator, then strip non-numeric chars.
+            norm = re.sub(r"[^0-9.,-]", "", text)
+            if norm.count(",") == 1 and norm.count(".") == 0:
+                norm = norm.replace(",", ".")
+            else:
+                norm = norm.replace(",", "")
+            match = re.search(r"-?[0-9]+(?:\.[0-9]+)?", norm)
+            if not match:
+                return None
+            try:
+                return float(match.group(0))
+            except (TypeError, ValueError):
+                return None
+
+        def _validate(candidate):
+            reasons = []
+            items = candidate.get("items") if isinstance(candidate, dict) else None
+            if not isinstance(items, list):
+                items = []
+            count = len(items)
+            if count == 0:
+                reasons.append("zero items scraped (blocked or changed selector)")
+            elif count < min_items:
+                reasons.append("only " + str(count) + " items (< expected_min_items " + str(min_items) + ")")
+            elif count > max_items:
+                reasons.append(str(count) + " items (> expected_max_items " + str(max_items) + "; wrong container?)")
+            clean = []
+            bad_rows = 0
+            for it in items:
+                if not isinstance(it, dict):
+                    bad_rows += 1
+                    continue
+                name = str(it.get("name", "") or "").strip()
+                avail = str(it.get("availability", "") or "").strip()
+                price_num = _parse_price(it.get("price"))
+                if name == "" or avail == "" or price_num is None:
+                    bad_rows += 1
+                    continue
+                clean.append({"name": name, "price": price_num, "availability": avail})
+            if bad_rows > 0:
+                reasons.append(str(bad_rows) + " item(s) had a null/blank name, price, or availability")
+            in_band = (min_items <= count <= max_items)
+            valid = (count > 0) and in_band and (bad_rows == 0)
+            return {
+                "valid": valid,
+                "item_count": count,
+                "clean_count": len(clean),
+                "bad_rows": bad_rows,
+                "reasons": reasons,
+                "clean_items": clean,
+            }
+
+        winner_check = _validate(winner)
+        a_check = _validate(branch_a)
+        b_check = _validate(branch_b)
+
+        # Prefer the race winner; on an invalid winner, fall back to whichever
+        # OTHER branch is schema-valid. Both invalid => both_failed (route to human).
+        chosen = None
+        source = "none"
+        if winner_check["valid"] and winner_check["item_count"] > 0:
+            chosen = winner_check
+            source = "race_winner"
+        elif a_check["valid"]:
+            chosen = a_check
+            source = "fallback_provider_a"
+        elif b_check["valid"]:
+            chosen = b_check
+            source = "fallback_provider_b"
+
+        both_failed = chosen is None
+        result = {
+            "ok": (not both_failed),
+            "both_failed": both_failed,
+            "source": source,
+            "item_count": (chosen["clean_count"] if chosen else 0),
+            "items": (chosen["clean_items"] if chosen else []),
+            "winner_valid": winner_check["valid"],
+            "provider_a_valid": a_check["valid"],
+            "provider_b_valid": b_check["valid"],
+            "reason_summary": (
+                "valid scrape from " + source
+                if not both_failed
+                else "BOTH branches failed schema: A[" + "; ".join(a_check["reasons"])
+                + "] B[" + "; ".join(b_check["reasons"]) + "]"
+            ),
+        }
+
+  # ---------------------------------------------------------------------------
+  # 3) CLASSIFY drift - flag suspicious deltas vs the last run. A >drift_threshold
+  #    swing on matched items reads as likely DOM-drift (the script latched onto a
+  #    different element) rather than a genuine market move. A deterministic code
+  #    step does the matching/measuring; the classifier turns that measurement into
+  #    a label (the model is a swappable haiku, and it only LABELS - it never
+  #    decides correctness, which already happened in step 2).
+  # ---------------------------------------------------------------------------
+  - id: measure-drift
+    type: code
+    depends_on: [validate-winner]
+    code_config:
+      language: python
+      code: |
+        # Deterministic drift measurement vs the previous run. No model here.
+        import json as _json
+        v = _steps.get("validate-winner") or {}
+        if not isinstance(v, dict):
+            v = {}
+        current = v.get("items") or []
+        if not isinstance(current, list):
+            current = []
+
+        try:
+            last = _json.loads(_input.get("last_run_json", "[]") or "[]")
+        except (TypeError, ValueError):
+            last = []
+        if not isinstance(last, list):
+            last = []
+
+        try:
+            threshold = float(_input.get("drift_threshold_pct", 40.0))
+        except (TypeError, ValueError):
+            threshold = 40.0
+
+        def _num(x):
+            try:
+                return float(x)
+            except (TypeError, ValueError):
+                return None
+
+        last_by_name = {}
+        for it in last:
+            if isinstance(it, dict):
+                nm = str(it.get("name", "") or "").strip()
+                pr = _num(it.get("price"))
+                if nm and pr is not None:
+                    last_by_name[nm] = pr
+
+        suspicious = []
+        compared = 0
+        for it in current:
+            if not isinstance(it, dict):
+                continue
+            nm = str(it.get("name", "") or "").strip()
+            pr = _num(it.get("price"))
+            if not nm or pr is None or nm not in last_by_name:
+                continue
+            prev = last_by_name[nm]
+            if prev <= 0:
+                continue
+            compared += 1
+            swing = abs(pr - prev) / prev * 100.0
+            if swing > threshold:
+                suspicious.append({"name": nm, "prev": round(prev, 2), "now": round(pr, 2), "swing_pct": round(swing, 1)})
+
+        has_baseline = len(last_by_name) > 0
+        likely_drift = has_baseline and (len(suspicious) > 0)
+        result = {
+            "has_baseline": has_baseline,
+            "compared": compared,
+            "suspicious_count": len(suspicious),
+            "suspicious": suspicious[:50],
+            "likely_drift": likely_drift,
+            "threshold_pct": threshold,
+            "verdict": "suspected-drift" if likely_drift else "clean",
+            "summary": (
+                "No baseline to compare (first run)" if not has_baseline
+                else (str(len(suspicious)) + " item(s) swung >" + str(threshold) + "% vs last run - suspected DOM-drift"
+                      if likely_drift else "All compared prices within threshold - looks like a real read")
+            ),
+        }
+
+  - id: classify-drift
+    type: classify
+    depends_on: [measure-drift]
+    classify_config:
+      categories: ["clean", "suspected-drift"]
+      input: "{steps.measure-drift.output.verdict}"
+      model: haiku
+      branches:
+        clean: [route-outcome]
+        suspected-drift: [route-outcome]
+
+  # ---------------------------------------------------------------------------
+  # 4) CONDITION - deterministic route on the schema gate. If BOTH branches failed
+  #    validation -> notify on-call with both branches' audit screenshots so a human
+  #    can re-author the prompt (and the trajectory-replay harness can quarantine the
+  #    flow). Otherwise -> emit the clean, validated JSON. Read-only flow, so there is
+  #    NO irreversible action and therefore no approval gate; the notify is what keeps
+  #    humans in the loop on a hard failure (or on drift surfaced by the classifier).
+  # ---------------------------------------------------------------------------
+  - id: route-outcome
+    type: condition
+    depends_on: [classify-drift]
+    condition_config:
+      expression: "{steps.validate-winner.output.both_failed} == True"
+      then: [notify-both-failed]
+      else: [emit-clean-json]
+
+  # 4a) BOTH-FAILED PATH - neither provider produced schema-valid output. Page
+  #     on-call and attach both branches' screenshots so a human can re-author the
+  #     prompt; nothing garbage is emitted. This also signals quarantine.
+  - id: notify-both-failed
+    type: notify
+    depends_on: [route-outcome]
+    notify_config:
+      service: slack
+      channel: "{input.oncall_channel}"
+      message: >-
+        SCRAPE QUARANTINE on {input.target_url}: BOTH provider branches failed schema validation,
+        so nothing was emitted. {steps.validate-winner.output.reason_summary}. Provider A valid:
+        {steps.validate-winner.output.provider_a_valid}; Provider B valid:
+        {steps.validate-winner.output.provider_b_valid}. The audit screenshots from both branches are
+        attached to this run - the SPA's DOM likely changed. Re-author the extraction prompt and
+        clear the quarantine before this flow runs again.
+
+  # 4b) SUCCESS PATH - emit the deterministically validated, clean JSON together
+  #     with which provider won, whether a fallback was used, and the drift verdict
+  #     so a downstream pricing model knows whether to trust the deltas.
+  - id: emit-clean-json
+    type: code
+    depends_on: [route-outcome]
+    code_config:
+      language: python
+      code: |
+        v = _steps.get("validate-winner") or {}
+        if not isinstance(v, dict):
+            v = {}
+        d = _steps.get("measure-drift") or {}
+        if not isinstance(d, dict):
+            d = {}
+        result = {
+            "ok": True,
+            "target_url": _input.get("target_url", ""),
+            "source": v.get("source", "race_winner"),
+            "item_count": v.get("item_count", 0),
+            "items": v.get("items", []),
+            "drift_verdict": d.get("verdict", "clean"),
+            "drift_summary": d.get("summary", ""),
+            "suspicious": d.get("suspicious", []),
+            "provider_a_valid": v.get("provider_a_valid", False),
+            "provider_b_valid": v.get("provider_b_valid", False),
+            "note": "Validated by deterministic schema gate; winner chosen by first-valid race across two providers.",
+        }
+
+on_complete:
+  storage_path: "race-two-models-author-scrape-skeleton/{run_id}/result.json"

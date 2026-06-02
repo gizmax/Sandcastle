@@ -1,0 +1,646 @@
+# name: State Sales Tax Efile Filer
+# description: Logs into a US state Department of Revenue e-file portal (CDTFA / NY DTF / TX Comptroller-style login-gated JS wizard with NO public filing API), fills the multi-page monthly/quarterly sales-and-use tax return from your ledger figures, deterministically re-checks the portal's review-page total against the figure computed from the ledger, gates the irreversible Submit behind an llm_eval anomaly check and a human approval that shows the exact figures plus the review screenshot, submits, then archives the confirmation number and receipt screenshot. Triggered on a monthly/quarterly cron OR by a sensor that fires when the upstream ledger period closes. Provider-neutral: both browser steps run Playwright mode (the reasoning model AUTHORS a Playwright script from the prompt + DOM, so any of the 7 providers can drive it), and the load-bearing correctness is deterministic Python + a portal-confirmation sensor, never one model's opinion. Login secrets only via credentials_env=DOR_<STATE>_CREDS, captcha_strategy=pause for the login CAPTCHA, the Submit split into its own approval-gated browser step, max_actions caps the wizard.
+# tags: [SalesTax, Efile, DOR, CDTFA, Compliance, Playwright, RPA, HumanApproval, Sensor, ProviderNeutral, EcommerceTax, Filing]
+# category: general_ai
+
+name: state-sales-tax-efile-filer
+description: >-
+  Files a US state sales-and-use tax return into a state Department of Revenue e-file portal
+  (CDTFA, NY DTF, TX Comptroller and the like) that exposes NO public filing API for most
+  filers - the return can only be lodged through a logged-in, multi-page JavaScript wizard
+  behind a per-state username/password, usually with a CAPTCHA on login. A plain http step
+  cannot authenticate, walk the wizard, or click 'Submit Return'. Built for the tax/compliance
+  manager at a multi-state ecommerce or SaaS company (or an outsourced bookkeeping firm) that
+  must file in 20+ DOR portals every period. Trigger is a monthly/quarterly cron (the top-level
+  schedule) OR the period_closed sensor that fires when the upstream ledger close lands. Step 1
+  pulls the period's taxable sales, exempt sales, and tax collected per jurisdiction from the
+  ledger via http. Step 2 is deterministic sandboxed Python that reconciles gross = taxable +
+  exempt per jurisdiction and recomputes the expected tax, failing CLOSED on any mismatch so a
+  bad ledger never reaches the portal. Step 3 drives the portal in provider-neutral Playwright
+  mode under credentials_env=DOR_<STATE>_CREDS and captcha_strategy=pause: it logs in, opens the
+  return wizard, types each jurisdiction line, advances the pages, and STOPS on the review page
+  WITHOUT submitting, returning {jurisdiction, gross, taxable, tax_due, prefilled_period,
+  review_page_total} via output_schema. Step 4 is the load-bearing deterministic guard: it
+  asserts the portal's review_page_total equals the tax computed in step 2 (within tolerance) and
+  that the period the portal prefilled matches the period we intended - blocking submission if the
+  portal ever drifts from the ledger. Step 5 is a swappable llm_eval gate that flags anomalies
+  (tax_due deviating more than the configured pct from the prior period). Step 6 is a mandatory
+  human approval showing the filled figures and the review screenshot for sign-off. Only on
+  approval does step 7 resume the Playwright session and click Submit ONCE, capturing the
+  confirmation_number and receipt screenshot via output_schema + capture_screenshots. Step 8 polls
+  the portal's own filing-status endpoint with a sensor until it confirms the return as accepted -
+  a clicked Submit is never trusted as a landed filing. Step 9 archives the receipt to object
+  storage via http PUT, and step 10 posts the confirmation number to Slack. Splitting read from
+  write means the approval sees the exact state it authorizes; the deterministic re-check and the
+  confirmation sensor mean a silently-failed filing can never be reported as success. Both browser
+  steps ride default_model and swap freely across providers; the llm_eval and any generated summary
+  are model-agnostic and routable via failover.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 1800
+
+# Default trigger: a monthly/quarterly cron. This example fires 09:00 on the 15th of each month
+# (a typical sales-tax due date). Override per filing calendar. The period_closed sensor below is
+# the alternative event trigger when the upstream ledger close is detected.
+schedule: "0 9 15 * *"
+
+input_schema:
+  required: ["state_code", "ledger_api_url", "portal_login_url", "period"]
+  properties:
+    state_code:
+      type: string
+      description: "Two-letter state code for the DOR being filed (drives credentials_env naming, storage path, and Slack message). e.g. CA, NY, TX."
+      example: "CA"
+    ledger_api_url:
+      type: string
+      description: "Internal ledger/close API that returns this period's per-jurisdiction taxable sales, exempt sales, and tax collected. Pulled by the http step (deterministic)."
+      example: "https://ledger.internal/api/sales-tax/periods/2026-05/jurisdictions?state=CA"
+    portal_login_url:
+      type: string
+      description: "Login URL of the state DOR e-file portal SPA where the return wizard begins (logged-in, no filing API). Templated into both browser steps' start_url."
+      example: "https://onlineservices.cdtfa.ca.gov/_/"
+    period:
+      type: string
+      description: "The filing period this return covers (the portal must prefill the SAME period; the deterministic guard rejects a period mismatch)."
+      example: "2026-05"
+    credentials_env:
+      type: string
+      description: "Name of the environment variable holding the DOR portal login credentials for this state (NEVER inline secrets). Convention: DOR_<STATE>_CREDS. Passed to both browser steps' credentials_env."
+      default: "DOR_CA_CREDS"
+      example: "DOR_CA_CREDS"
+    period_closed_url:
+      type: string
+      description: "Endpoint the period_closed sensor polls; returns 200 with closed=true once the upstream ledger close for this period is finalized (the event-trigger alternative to the cron)."
+      default: "https://ledger.internal/api/sales-tax/periods/status"
+      example: "https://ledger.internal/api/sales-tax/periods/status?state=CA&period=2026-05"
+    portal_status_url:
+      type: string
+      description: "The portal's own filing-status endpoint for this return; the confirmation sensor polls it until the return reads accepted/received. A clicked Submit is never trusted on its own."
+      default: "https://onlineservices.cdtfa.ca.gov/api/returns/status"
+      example: "https://onlineservices.cdtfa.ca.gov/api/returns/status?period=2026-05"
+    receipt_archive_url:
+      type: string
+      description: "Object-storage (S3/MinIO/GCS-compatible) PUT URL where the receipt screenshot + confirmation JSON are archived for audit. The http archive step PUTs to this URL."
+      default: "https://s3.eu-central-1.amazonaws.com/tax-filings-archive"
+      example: "https://s3.eu-central-1.amazonaws.com/tax-filings-archive"
+    tax_tolerance:
+      type: number
+      description: "Absolute currency tolerance allowed when reconciling the portal's review_page_total against the ledger-computed expected tax (covers rounding)."
+      default: 0.01
+      example: "0.01"
+    prior_period_tax:
+      type: number
+      description: "Total tax_due filed for the PRIOR period; the llm_eval anomaly gate flags if this period deviates more than anomaly_pct from it."
+      default: 0
+      example: "18450.00"
+    anomaly_pct:
+      type: number
+      description: "Percent deviation from the prior period's tax_due above which the llm_eval gate flags the return as anomalous for extra human scrutiny."
+      default: 5.0
+      example: "5.0"
+    approval_timeout_hours:
+      type: integer
+      description: "Hours the human submit-approval waits before its timeout fires (on_timeout: abort - a missed approval NEVER auto-submits a return)."
+      default: 24
+      example: "24"
+    sensor_poll_interval_seconds:
+      type: integer
+      description: "Seconds between polls of the portal's filing-status endpoint while waiting for confirmed acceptance."
+      default: 60
+      example: "60"
+    sensor_timeout_seconds:
+      type: integer
+      description: "Hard ceiling in seconds the confirmation sensor waits for the portal to confirm acceptance before the run is routed to needs-attention (never reported as success)."
+      default: 3600
+      example: "3600"
+    notify_channel:
+      type: string
+      description: "Slack channel for the filed/blocked/needs-attention notifications."
+      default: "#sales-tax-filings"
+      example: "#sales-tax-filings"
+
+steps:
+  # 0) EVENT TRIGGER (alternative to the cron): wait until the upstream ledger close for this
+  #    period is finalized. The top-level `schedule` cron is the primary trigger; this sensor lets
+  #    the same workflow be kicked event-driven and block until the ledger is actually closed, so
+  #    we never pull half-closed figures. Deterministic - pure control flow, no model.
+  - id: await_period_close
+    type: sensor
+    sensor_config:
+      url: "{input.period_closed_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200 and bool(response.get('closed', False))"
+      check_interval: 300
+      timeout: 86400
+
+  # 1) PULL the period's per-jurisdiction figures from the ledger. http (deterministic) - the
+  #    authoritative source of truth the whole filing reconciles against.
+  - id: pull_ledger
+    type: http
+    depends_on: [await_period_close]
+    http_config:
+      url: "{input.ledger_api_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.LEDGER_TOKEN}"
+
+  # 2) DETERMINISTIC reconcile + expected-tax compute (sandboxed Python, NO model). For each
+  #    jurisdiction: gross must equal taxable + exempt (within tolerance) and expected tax is
+  #    recomputed as taxable * rate. Fails CLOSED on any mismatch, any missing rate, or empty
+  #    data - so a bad ledger close can never reach the portal. This is load-bearing correctness.
+  - id: reconcile_ledger
+    type: code
+    depends_on: [pull_ledger]
+    code_config:
+      language: python
+      code: |
+        # Deterministic reconciliation of the ledger pull. No model decides correctness here.
+        ledger = _steps.get("pull_ledger") or {}
+        if not isinstance(ledger, dict):
+            ledger = {}
+        # The http step may surface the JSON body under "body"/"json"/"data" or at the top level.
+        body = ledger
+        for key in ("body", "json", "data", "response", "result"):
+            inner = ledger.get(key)
+            if isinstance(inner, dict) and ("jurisdictions" in inner or "lines" in inner):
+                body = inner
+                break
+
+        rows = body.get("jurisdictions")
+        if not isinstance(rows, list):
+            rows = body.get("lines") if isinstance(body.get("lines"), list) else []
+
+        tolerance = abs(float(_input.get("tax_tolerance", 0.01) or 0.01))
+
+        def _num(v, default=0.0):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return default
+
+        # Normalize a numeric string by stripping currency formatting via re.sub (no re.compile).
+        def _clean(v):
+            s = str(v if v is not None else "")
+            s = re.sub(r"[,$\\s]", "", s)
+            return _num(s, 0.0)
+
+        problems = []
+        lines = []
+        total_taxable = 0.0
+        total_exempt = 0.0
+        total_gross = 0.0
+        total_expected_tax = 0.0
+
+        if not rows:
+            problems.append("ledger returned no jurisdiction rows (empty close)")
+
+        for r in rows:
+            if not isinstance(r, dict):
+                problems.append("malformed jurisdiction row (not an object)")
+                continue
+            juris = str(r.get("jurisdiction", r.get("name", "")) or "").strip()
+            gross = _clean(r.get("gross", r.get("gross_sales")))
+            taxable = _clean(r.get("taxable", r.get("taxable_sales")))
+            exempt = _clean(r.get("exempt", r.get("exempt_sales")))
+            rate = _num(r.get("rate", r.get("tax_rate")), -1.0)
+            collected = _clean(r.get("tax_collected", r.get("collected")))
+
+            if not juris:
+                problems.append("a jurisdiction row is missing its name")
+            # gross must equal taxable + exempt
+            if abs(gross - (taxable + exempt)) > max(tolerance, 0.01):
+                problems.append(
+                    juris + ": gross " + str(round(gross, 2))
+                    + " != taxable " + str(round(taxable, 2))
+                    + " + exempt " + str(round(exempt, 2))
+                )
+            if rate < 0:
+                problems.append(juris + ": missing/invalid tax rate")
+                rate = 0.0
+            expected_tax = round(taxable * rate, 2)
+
+            total_taxable += taxable
+            total_exempt += exempt
+            total_gross += gross
+            total_expected_tax += expected_tax
+
+            lines.append({
+                "jurisdiction": juris,
+                "gross": round(gross, 2),
+                "taxable": round(taxable, 2),
+                "exempt": round(exempt, 2),
+                "rate": rate,
+                "expected_tax": expected_tax,
+                "tax_collected": round(collected, 2),
+            })
+
+        total_expected_tax = round(total_expected_tax, 2)
+        ok = len(problems) == 0 and len(lines) > 0
+
+        result = {
+            "ok": ok,
+            "problems": problems,
+            "line_count": len(lines),
+            "lines": lines,
+            "total_gross": round(total_gross, 2),
+            "total_taxable": round(total_taxable, 2),
+            "total_exempt": round(total_exempt, 2),
+            "expected_total_tax": total_expected_tax,
+            "period": str(_input.get("period", "") or ""),
+            "reason_summary": "; ".join(problems) if problems else "ledger reconciles; expected tax computed",
+        }
+
+  # 2b) Hard stop on a bad ledger - nothing touches the portal if reconciliation failed.
+  - id: ledger_gate
+    type: condition
+    depends_on: [reconcile_ledger]
+    condition_config:
+      expression: "{steps.reconcile_ledger.output.ok} == True"
+      then: [fill_return]
+      else: [notify_blocked]
+
+  # 2c) BLOCKED (bad ledger) path - tell the tax team exactly why; no filing was attempted.
+  - id: notify_blocked
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        BLOCKED before filing {input.state_code} sales tax for period {input.period}. The
+        deterministic ledger reconciliation FAILED, so the DOR portal was never touched. Reason(s):
+        {steps.reconcile_ledger.output.reason_summary}. Fix the ledger close and re-run.
+
+  # 3) READ PASS (Playwright, NO submit). The swappable reasoning model AUTHORS a Playwright
+  #    script: log in via credentials_env (DOR_<STATE>_CREDS - never inlined), open the return
+  #    wizard, type each jurisdiction line from the reconciled figures, advance the pages, and STOP
+  #    on the REVIEW page. captcha_strategy=pause hands the login CAPTCHA to a human; max_actions
+  #    bounds the multi-page wizard; output_schema returns structured JSON. No write happens here.
+  - id: fill_return
+    type: browser
+    depends_on: [ledger_gate]
+    prompt: >-
+      You are filing a US state Department of Revenue sales-and-use tax return on a logged-in,
+      multi-page JavaScript e-file portal (CDTFA / NY DTF / TX Comptroller-style). Authenticate
+      using the credentials provided via the environment (do NOT print or echo them). Open the
+      monthly/quarterly sales-and-use tax return wizard for filing period {input.period}. For each
+      jurisdiction line below, type the gross sales, taxable sales, and exempt sales exactly as
+      given, and let the PORTAL compute the tax due. Advance through every wizard page, handling
+      client-side validation (wait for each field to settle before continuing). CRITICAL: stop on
+      the final REVIEW / SUMMARY page and DO NOT click Submit, File, Pay, or any final/confirm
+      button - submission is a separate, human-approved step. Read back the period the portal
+      prefilled and the portal's own grand total of tax due shown on the review page. Reconciled
+      jurisdiction figures (JSON): {steps.reconcile_ledger.output}. Return ONLY the structured
+      object described by the output schema. If a CAPTCHA or step-up auth appears at login, pause
+      for a human rather than guessing.
+    browser_config:
+      mode: playwright
+      start_url: "{input.portal_login_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 600
+      max_actions: 120
+      headless: true
+      credentials_env: "{input.credentials_env}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          jurisdiction_lines:
+            type: array
+            items:
+              type: object
+              properties:
+                jurisdiction: { type: string }
+                gross: { type: number }
+                taxable: { type: number }
+                tax_due: { type: number }
+          prefilled_period:
+            type: string
+            description: "The filing period the portal prefilled into the return (must match input.period)."
+          review_page_total:
+            type: number
+            description: "The grand total of tax due the PORTAL itself computed and shows on the review page."
+          submit_button_present:
+            type: boolean
+            description: "True if the wizard reached the review page with an enabled Submit button (not yet clicked)."
+          review_screenshot_ref:
+            type: string
+            description: "Reference/path of the captured review-page screenshot for the approval and audit archive."
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: abort
+
+  # 4) DETERMINISTIC GUARD (sandboxed Python, NO model): assert the portal's review_page_total
+  #    equals the ledger-computed expected tax within tolerance, AND that the portal prefilled the
+  #    SAME period we intended, AND the Submit button is present (wizard truly reached review).
+  #    ANY drift blocks submission - the portal must have received exactly what we computed.
+  - id: verify_review_total
+    type: code
+    depends_on: [fill_return]
+    code_config:
+      language: python
+      code: |
+        # Deterministic guard: the portal's own review total must match the ledger-computed tax.
+        read_out = _steps.get("fill_return") or {}
+        if not isinstance(read_out, dict):
+            read_out = {}
+        for key in ("output", "data", "result"):
+            inner = read_out.get(key)
+            if isinstance(inner, dict) and ("review_page_total" in inner or "jurisdiction_lines" in inner):
+                read_out = inner
+                break
+
+        recon = _steps.get("reconcile_ledger") or {}
+        if not isinstance(recon, dict):
+            recon = {}
+
+        def _num(v, default=0.0):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return default
+
+        tolerance = abs(_num(_input.get("tax_tolerance"), 0.01))
+        review_total = _num(read_out.get("review_page_total"), 0.0)
+        expected_total = _num(recon.get("expected_total_tax"), 0.0)
+
+        problems = []
+
+        # 4a) Portal review total must reconcile to the ledger-computed expected tax.
+        total_ok = abs(review_total - expected_total) <= max(tolerance, 0.01)
+        if expected_total <= 0:
+            total_ok = False
+            problems.append("ledger expected tax is zero/absent - cannot reconcile portal total")
+        elif not total_ok:
+            problems.append(
+                "portal review total " + str(round(review_total, 2))
+                + " != ledger-computed tax " + str(round(expected_total, 2))
+            )
+
+        # 4b) The portal must have prefilled the SAME period we intended.
+        want_period = str(_input.get("period", "") or "").strip()
+        got_period = str(read_out.get("prefilled_period", "") or "").strip()
+        period_ok = bool(want_period) and (got_period == want_period)
+        if not period_ok:
+            problems.append("period mismatch: portal prefilled '" + got_period + "' but intended '" + want_period + "'")
+
+        # 4c) The wizard must have actually reached a submit-capable review page.
+        submit_ready = bool(read_out.get("submit_button_present", False))
+        if not submit_ready:
+            problems.append("review page not reached / Submit button absent (unsafe to approve)")
+
+        # 4d) Sanity: at least one jurisdiction line came back from the portal.
+        lines = read_out.get("jurisdiction_lines")
+        if not isinstance(lines, list) or len(lines) == 0:
+            problems.append("portal returned no jurisdiction lines (empty read)")
+
+        ok = (total_ok and period_ok and submit_ready and len(problems) == 0)
+
+        result = {
+            "ok": ok,
+            "problems": problems,
+            "review_page_total": round(review_total, 2),
+            "expected_total_tax": round(expected_total, 2),
+            "prefilled_period": got_period,
+            "intended_period": want_period,
+            "submit_ready": submit_ready,
+            "review_screenshot_ref": str(read_out.get("review_screenshot_ref", "") or ""),
+            "reason_summary": "; ".join(problems) if problems else "portal review total matches ledger; period and review page verified",
+        }
+
+  # 4e) Hard stop on portal/ledger drift - no submission if the review total does not reconcile.
+  - id: review_gate
+    type: condition
+    depends_on: [verify_review_total]
+    condition_config:
+      expression: "{steps.verify_review_total.output.ok} == True"
+      then: [anomaly_gate]
+      else: [notify_drift]
+
+  # 4f) DRIFT path - the portal total or period did not match the ledger; surface why, file nothing.
+  - id: notify_drift
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        BLOCKED before Submit on {input.state_code} period {input.period}: the portal's review
+        total did NOT reconcile to the ledger. {steps.verify_review_total.output.reason_summary}
+        (portal {steps.verify_review_total.output.review_page_total} vs ledger
+        {steps.verify_review_total.output.expected_total_tax}). Nothing was submitted - investigate
+        the portal entry or ledger before re-running.
+
+  # 5) SWAPPABLE llm_eval anomaly gate. A verifier model (independently routable across providers)
+  #    flags the return as needing extra scrutiny if tax_due deviates more than anomaly_pct from
+  #    the prior period. It does NOT replace the deterministic guard above - it adds a soft check
+  #    before the human looks. Must pass (or the human still ultimately decides at approval).
+  - id: anomaly_gate
+    type: gate
+    depends_on: [review_gate]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are a sales-tax filing reviewer. The deterministically verified return for state
+              {input.state_code} period {input.period} has a tax due of
+              {steps.verify_review_total.output.expected_total_tax}. The prior period's filed tax
+              due was {input.prior_period_tax}. Answer exactly 'approved' if the current tax due is
+              within {input.anomaly_pct} percent of the prior period (or if the prior period figure
+              is 0, meaning no baseline). Answer exactly 'rejected' and explain if the deviation
+              exceeds {input.anomaly_pct} percent, so a human gives it extra scrutiny. Verified
+              figures: {steps.verify_review_total.output}
+            input: "{steps.verify_review_total.output}"
+            model: google/gemini-2.5-pro
+
+  # 6) MANDATORY HUMAN APPROVAL before the irreversible Submit. Shows the deterministically
+  #    verified figures AND the review-page screenshot, and BLOCKS until a person signs off.
+  #    on_timeout: abort means a missed approval NEVER auto-files a return.
+  - id: approve_filing
+    type: approval
+    depends_on: [anomaly_gate]
+    approval_config:
+      message: >-
+        AUTHORIZE IRREVERSIBLE FILING of the {input.state_code} sales-and-use tax return for period
+        {input.period}. The return is filled and sitting on the portal's review page. Verified tax
+        due: {steps.verify_review_total.output.review_page_total} (ledger-computed
+        {steps.verify_review_total.output.expected_total_tax}), portal-prefilled period
+        {steps.verify_review_total.output.prefilled_period}, checks:
+        {steps.verify_review_total.output.reason_summary}. Review the attached review-page
+        screenshot - this is the EXACT return you are authorizing. Approve to click Submit; reject
+        to abort with nothing filed.
+      show_data: steps.verify_review_total.output
+      show_images: ["steps.fill_return.output.review_screenshot_ref"]
+      timeout_hours: 24
+      on_timeout: abort
+      allow_edit: false
+
+  # 7) WRITE PASS (Playwright, resumed) - reached ONLY after human approval. Re-open the filled
+  #    return, confirm the figures still match, and click the SINGLE final Submit button ONCE.
+  #    captcha_strategy=pause for any final-wall CAPTCHA; capture_screenshots on for the audit
+  #    receipt; max_actions tightly capped (one confirm click, no runaway). Captures the
+  #    confirmation_number + receipt screenshot. Acceptance is NOT trusted from here - the sensor
+  #    below re-reads the portal's own filing-status endpoint to confirm.
+  - id: submit_return
+    type: browser
+    depends_on: [approve_filing]
+    prompt: >-
+      A human has authorized this irreversible sales-tax filing for {input.state_code} period
+      {input.period}. Log into the DOR portal using the environment credentials (do NOT print
+      them), return to the review/summary page of the filled return, confirm the grand total still
+      reads {steps.verify_review_total.output.review_page_total} for period
+      {steps.verify_review_total.output.prefilled_period}, then click the SINGLE final
+      Submit / File button ONCE to lodge the return. Do not re-edit any figures and do not click
+      Submit more than once. If a CAPTCHA or step-up auth appears at this final wall, PAUSE for a
+      human - do not attempt to solve it. Read the confirmation page and capture the
+      portal-issued confirmation number and a screenshot of the receipt. Return ONLY the structured
+      object described by the output schema. Treat this as an attempt - final acceptance is
+      confirmed separately by re-reading the filing-status page.
+    browser_config:
+      mode: playwright
+      start_url: "{input.portal_login_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 300
+      max_actions: 20
+      headless: true
+      credentials_env: "{input.credentials_env}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          submitted:
+            type: boolean
+            description: "True if the UI accepted the final Submit click without an error."
+          confirmation_number:
+            type: string
+            description: "The portal-issued confirmation/reference number for the lodged return."
+          receipt_screenshot_ref:
+            type: string
+            description: "Reference/path of the captured receipt screenshot for the audit archive."
+          confirmation_message:
+            type: string
+            description: "Any on-screen confirmation text the portal rendered after submit."
+    retry:
+      max_attempts: 1
+      backoff: fixed
+      on_failure: abort
+
+  # 8) CONFIRM via the portal's OWN filing-status endpoint - never trust the click alone. Poll
+  #    until the return reads accepted/received OR a confirmation number is present, with a hard
+  #    timeout. Deterministic boolean over the polled JSON - pure control flow, no model.
+  - id: confirm_acceptance
+    type: sensor
+    depends_on: [submit_return]
+    sensor_config:
+      url: "{input.portal_status_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200 and (str(response.get('status', '')).strip().lower() in ('accepted', 'received', 'processed', 'filed', 'confirmed') or bool(str(response.get('confirmation_number', '') or response.get('reference', '') or '').strip()))"
+      check_interval: 60
+      timeout: 3600
+
+  # 9) Deterministically decide acceptance from the sensor's last polled payload, then branch. A
+  #    timeout/non-accepted status yields fail_count>0 so a silent failure is NEVER a false win.
+  - id: evaluate_acceptance
+    type: code
+    depends_on: [confirm_acceptance]
+    code_config:
+      language: python
+      code: |
+        watch = _steps.get("confirm_acceptance") or {}
+        if not isinstance(watch, dict):
+            watch = {}
+        resp = watch.get("response") if isinstance(watch.get("response"), dict) else watch
+        if not isinstance(resp, dict):
+            resp = {}
+
+        status = str(resp.get("status", "") or "").strip().lower()
+        ref = str(resp.get("confirmation_number", "") or resp.get("reference", "") or "").strip()
+
+        # Fall back to the confirmation number the submit step captured if the status page is terse.
+        submit_out = _steps.get("submit_return") or {}
+        if isinstance(submit_out, dict):
+            for key in ("output", "data", "result"):
+                inner = submit_out.get(key)
+                if isinstance(inner, dict) and "confirmation_number" in inner:
+                    submit_out = inner
+                    break
+            if not ref:
+                ref = str(submit_out.get("confirmation_number", "") or "").strip()
+
+        accepted_states = ("accepted", "received", "processed", "filed", "confirmed")
+        confirmed = (status in accepted_states) or bool(ref)
+
+        sensor_satisfied = bool(watch.get("satisfied", watch.get("met", confirmed)))
+        timed_out = bool(watch.get("timed_out", False)) or (not sensor_satisfied and not confirmed)
+
+        result = {
+            "confirmed": bool(confirmed and not timed_out),
+            "status": status,
+            "confirmation_number": ref,
+            "timed_out": timed_out,
+            "fail_count": 0 if (confirmed and not timed_out) else 1,
+        }
+
+  # 9b) Branch on confirmation - archive + notify success, or page on-call (never a false win).
+  - id: acceptance_outcome
+    type: condition
+    depends_on: [evaluate_acceptance]
+    condition_config:
+      expression: "{steps.evaluate_acceptance.output.fail_count} > 0"
+      then: [notify_needs_attention]
+      else: [archive_receipt]
+
+  # 9c) NEEDS-ATTENTION path - Submit was clicked but the portal never confirmed within timeout.
+  #     Page the tax team; the run stays unresolved. A silently-failed filing is surfaced.
+  - id: notify_needs_attention
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        NEEDS ATTENTION: {input.state_code} period {input.period} return was SUBMITTED but the DOR
+        portal has NOT confirmed acceptance within the timeout (last status
+        '{steps.evaluate_acceptance.output.status}', confirmation
+        '{steps.evaluate_acceptance.output.confirmation_number}',
+        timed_out={steps.evaluate_acceptance.output.timed_out}). Do NOT assume the return was
+        accepted - check the portal manually and resolve.
+
+  # 10) ARCHIVE the receipt + confirmation to object storage (S3/MinIO/GCS-compatible) via http
+  #     PUT for the audit trail. Deterministic write to your own archive (not the DOR portal).
+  - id: archive_receipt
+    type: http
+    depends_on: [acceptance_outcome]
+    http_config:
+      url: "{input.receipt_archive_url}/{input.state_code}/{input.period}/receipt.json"
+      method: PUT
+      headers:
+        Content-Type: "application/json"
+      auth: "bearer:{env.ARCHIVE_TOKEN}"
+      body: '{"state": "{input.state_code}", "period": "{input.period}", "confirmation_number": "{steps.evaluate_acceptance.output.confirmation_number}", "portal_status": "{steps.evaluate_acceptance.output.status}", "review_total": "{steps.verify_review_total.output.review_page_total}", "receipt_screenshot_ref": "{steps.submit_return.output.receipt_screenshot_ref}", "review_screenshot_ref": "{steps.verify_review_total.output.review_screenshot_ref}"}'
+
+  # 11) SUCCESS notification with the portal-issued confirmation number.
+  - id: notify_filed
+    type: notify
+    depends_on: [archive_receipt]
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: >-
+        FILED: {input.state_code} sales-and-use tax return for period {input.period} accepted by
+        the DOR portal. Confirmation number
+        {steps.evaluate_acceptance.output.confirmation_number} (tax due
+        {steps.verify_review_total.output.review_page_total}). Receipt + confirmation archived to
+        {input.receipt_archive_url}/{input.state_code}/{input.period}/receipt.json.
+
+on_complete:
+  storage_path: "state-sales-tax-efile-filer/{input.state_code}/{input.period}/{run_id}/result.json"
