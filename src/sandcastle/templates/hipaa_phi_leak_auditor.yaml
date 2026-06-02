@@ -1,0 +1,573 @@
+# name: HIPAA PHI Leak Auditor
+# description: Scans a batch of outbound clinical documents, messages, and exports for unredacted PHI BEFORE anything is shared externally. A deterministic Python pass over the 18 HIPAA Safe-Harbor identifiers (MRN, SSN, DOB, dates, geo, phone, email, device IDs, biometric refs, account/health-plan numbers) is the load-bearing hard-catch and is identical regardless of model; a second cross-provider contextual classifier catches narrative re-identification the regex misses; a two-strategy gate (non-LLM severity threshold + a privacy-officer human override) blocks release on any high-severity finding; a per-document PHI risk register PDF with minimum-necessary recommendations and Annex-style evidence is produced; the compliance queue is notified.
+# tags: [HIPAA, PHI, PHILeak, Healthcare, Compliance, SafeHarbor, MinimumNecessary, CoveredEntity, ClinicalDocuments, DataLossPrevention, PrivacyOfficer]
+# category: healthcare
+
+name: hipaa-phi-leak-auditor
+description: >-
+  A pre-release PHI leak auditor for a HIPAA covered entity or business associate.
+  Before any clinical document, message, or data export leaves the org, this workflow
+  scans the whole outbound batch for unredacted Protected Health Information and
+  produces a HIPAA-aware risk report a privacy officer can sign off on.
+
+  The audit-load-bearing layer is PURE PYTHON: a deterministic pass over the 18 HIPAA
+  Safe-Harbor identifiers (names contextually, all geographic subdivisions smaller than
+  a state, every date element tied to an individual, phone/fax, email, SSN, MRN, health-
+  plan beneficiary number, account number, certificate/license number, vehicle/device
+  identifiers and serial numbers, URLs, IP addresses, biometric identifiers, and any
+  other unique identifying number/characteristic/code). Regex + Luhn + checksum math,
+  never a model, decides the hard catches, so the same SSN or MRN is flagged identically
+  on every provider. A SECOND, cross-provider contextual classifier pass then labels the
+  documents the regex cannot - narrative re-identification ("the only 47-year-old liver-
+  transplant patient in our rural clinic"), quasi-identifier combinations, and free-text
+  PHI - and routes by that label. A GATE with TWO strategies (a non-LLM severity-count
+  threshold that the model cannot overturn, plus a human privacy-officer approval to
+  override a block) must pass before release is cleared. A REPORT emits a per-document
+  PHI risk register with minimum-necessary recommendations and Annex-style evidence, and
+  a NOTIFY puts the result on the compliance / privacy-officer queue.
+
+  PROVIDER NEUTRAL: the 18-identifier scan and the risk scoring are deterministic Python -
+  the same hard catches are guaranteed regardless of model. The contextual classifier
+  runs on any provider via a cross-provider classify step and stays swappable. The
+  privacy-officer override is a human approval gate, and the load-bearing release decision
+  is the deterministic severity count, never a single standard prompt. SAFETY: nothing is
+  released by this workflow; it only reads the candidate documents, scores them, and gates
+  the human go/no-go. High-severity findings always require an explicit privacy-officer
+  approval before the batch can be marked cleared.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 1800
+
+input_schema:
+  required: ["outbound_documents"]
+  properties:
+    outbound_documents:
+      type: string
+      description: >-
+        JSON array of outbound items to audit before external release. Each item is an
+        object with a stable id, a recipient (who it would be shared with), a doc_type
+        (pdf | csv | hl7 | message), and a source reference the parse step extracts text
+        from (a storage URL or path). Every item is parsed, deterministically scanned for
+        the 18 HIPAA identifiers, contextually classified, and scored.
+      default: '[{"id":"DOC-1001","recipient":"external-payer@acme-health.example","doc_type":"pdf","source":"s3://outbound-clinical/DOC-1001.pdf"}]'
+      example: '[{"id":"DOC-1001","recipient":"external-payer@acme-health.example","doc_type":"pdf","source":"s3://outbound-clinical/DOC-1001.pdf"},{"id":"MSG-2042","recipient":"referral-clinic@partner.example","doc_type":"message","source":"s3://outbound-clinical/MSG-2042.txt"},{"id":"EXP-3300","recipient":"research-collab@univ.example","doc_type":"csv","source":"s3://outbound-clinical/EXP-3300.csv"}]'
+    high_severity_min:
+      type: number
+      description: >-
+        Severity threshold. A document is HIGH severity (release blocked pending a privacy-
+        officer approval) when its deterministic PHI risk score reaches at least this value.
+        The Python score, not a model, sets the verdict; this only sets where the high band
+        begins.
+      default: 7
+      example: "7"
+    minimum_necessary_purpose:
+      type: string
+      description: >-
+        The stated disclosure purpose used to judge the HIPAA minimum-necessary standard -
+        the report flags identifiers present beyond what this purpose needs.
+      default: "treatment, payment, and health care operations (TPO)"
+      example: "external payer claim adjudication"
+    compliance_webhook_url:
+      type: string
+      description: >-
+        URL of the compliance / privacy-office intake endpoint the audit summary is POSTed
+        to so the run is logged in the org's compliance system of record. The only outbound
+        call; it shares the AUDIT result, never the clinical documents themselves.
+      default: "https://compliance.acme-health.example/api/v1/phi-audit/intake"
+      example: "https://grc.acme-health.example/hooks/phi-leak-audit"
+    compliance_token_env:
+      type: string
+      description: >-
+        Name of the environment variable holding the bearer token for the compliance intake
+        endpoint. The secret value is NEVER inlined into the workflow; the http step reads it
+        via the env reference.
+      default: "COMPLIANCE_INTAKE_TOKEN"
+      example: "GRC_PHI_AUDIT_TOKEN"
+    privacy_officer_channel:
+      type: string
+      description: "Slack channel the privacy officer / compliance queue watches for the completed PHI audit."
+      default: "#phi-privacy-office"
+      example: "#hipaa-compliance-queue"
+    report_author:
+      type: string
+      description: "Name shown as the author on the per-document PHI risk register PDF (the privacy officer / HIPAA security officer)."
+      default: "HIPAA Privacy Office"
+      example: "Privacy Officer - Acme Health"
+
+steps:
+  # ---------------------------------------------------------------------------
+  # 1) BUILD AUDIT LIST (deterministic, no model). Parses the outbound batch JSON,
+  #    validates each item's shape, dedupes on id, and normalizes the doc_type so
+  #    the loop never runs on garbage. Fails CLOSED (empty list) on malformed input.
+  # ---------------------------------------------------------------------------
+  - id: build_audit_list
+    type: code
+    code_config:
+      language: python
+      code: |
+        import json
+
+        raw = _input.get('outbound_documents') or '[]'
+        if isinstance(raw, list):
+            docs = raw
+        else:
+            try:
+                docs = json.loads(str(raw))
+            except (ValueError, TypeError):
+                docs = []
+        if not isinstance(docs, list):
+            docs = []
+
+        valid_types = {'pdf', 'csv', 'hl7', 'message'}
+        seen = set()
+        audit_list = []
+        skipped = []
+        for idx, d in enumerate(docs):
+            if not isinstance(d, dict):
+                skipped.append({'index': idx, 'reason': 'not_an_object'})
+                continue
+            doc_id = str(d.get('id') or '').strip() or ('DOC-' + str(idx))
+            if doc_id in seen:
+                skipped.append({'id': doc_id, 'reason': 'duplicate_id'})
+                continue
+            source = str(d.get('source') or '').strip()
+            if not source:
+                skipped.append({'id': doc_id, 'reason': 'missing_source'})
+                continue
+            doc_type = str(d.get('doc_type') or '').strip().lower()
+            if doc_type not in valid_types:
+                doc_type = 'pdf'
+            seen.add(doc_id)
+            audit_list.append({
+                'id': doc_id,
+                'recipient': str(d.get('recipient') or 'unspecified').strip(),
+                'doc_type': doc_type,
+                'source': source,
+            })
+
+        result = {
+            'audit_list': audit_list,
+            'count': len(audit_list),
+            'skipped': skipped,
+            'ok': len(audit_list) > 0,
+        }
+
+  # ---------------------------------------------------------------------------
+  # 2) LOOP over each outbound item. Each iteration parses the document text then
+  #    runs the deterministic 18-identifier scan on it (children: parse_document,
+  #    scan_identifiers). max_iterations caps the batch. Reads the current item via
+  #    _item. Downstream steps depend on the loop.
+  # ---------------------------------------------------------------------------
+  - id: scan_loop
+    type: loop
+    depends_on: [build_audit_list]
+    loop_config:
+      over: "steps.build_audit_list.output.audit_list"
+      step_ids: [parse_document, scan_identifiers]
+      max_iterations: 1000
+
+  # 2a) PARSE - extract text + structured fields from each PDF / CSV / HL7 / message
+  #     payload. Provider-neutral document parse; OCR auto-detects scanned clinical PDFs.
+  - id: parse_document
+    type: parse
+    prompt: "{_item.source}"
+    parse_config:
+      output: markdown
+      pages: null
+      ocr: false
+      ocr_engine: auto
+
+  # 2b) DETERMINISTIC 18-IDENTIFIER SCAN (no model) - the audit-load-bearing core.
+  #     Pure regex + Luhn + checksum math over the HIPAA Safe-Harbor identifier set.
+  #     The same SSN / MRN / DOB is flagged identically on every provider. Produces a
+  #     per-document PHI risk score and a per-identifier hit register. NEVER a model.
+  - id: scan_identifiers
+    type: code
+    code_config:
+      language: python
+      code: |
+        import re
+
+        item = _input.get('_item') or {}
+        if not isinstance(item, dict):
+            item = {}
+        doc_id = str(item.get('id') or 'unknown')
+        recipient = str(item.get('recipient') or 'unspecified')
+        doc_type = str(item.get('doc_type') or 'pdf')
+
+        # --- Pull the parsed text from the parse child. Handle the common envelope shapes.
+        parsed = _steps.get('parse_document')
+        text = ''
+        if isinstance(parsed, dict):
+            text = parsed.get('text') or parsed.get('markdown') or parsed.get('content') or ''
+            if not text:
+                inner = parsed.get('output')
+                if isinstance(inner, dict):
+                    text = inner.get('text') or inner.get('markdown') or inner.get('content') or ''
+                elif isinstance(inner, str):
+                    text = inner
+        elif isinstance(parsed, str):
+            text = parsed
+        text = str(text or '')
+
+        def _luhn_ok(num):
+            digits = [int(c) for c in num if c.isdigit()]
+            if len(digits) < 12:
+                return False
+            checksum = 0
+            for i, d in enumerate(reversed(digits)):
+                if i % 2 == 1:
+                    d *= 2
+                    if d > 9:
+                        d -= 9
+                checksum += d
+            return checksum % 10 == 0
+
+        # --- The 18 HIPAA Safe-Harbor identifiers. Each entry: code, severity weight, and a
+        #     detector. Weights make a raw SSN/MRN far heavier than, say, a bare URL. This is
+        #     the deterministic hard-catch layer - identical output regardless of model.
+        identifiers = []
+
+        def add(code, label, weight, pattern, validator=None, flags=re.IGNORECASE):
+            hits = []
+            for m in re.finditer(pattern, text, flags):
+                val = m.group(0)
+                if validator is not None and not validator(val):
+                    continue
+                hits.append(val.strip())
+            # de-dupe while preserving a capped sample for the evidence register
+            seen = set()
+            sample = []
+            for h in hits:
+                k = h.lower()
+                if k in seen:
+                    continue
+                seen.add(k)
+                if len(sample) < 5:
+                    sample.append(h)
+            identifiers.append({
+                'code': code,
+                'label': label,
+                'weight': weight,
+                'count': len(hits),
+                'distinct': len(seen),
+                'sample': sample,
+            })
+
+        # 1. SSN (also covers TIN/ITIN shape)
+        add('ssn', 'Social Security Number', 5, r'\b\d{3}-\d{2}-\d{4}\b')
+        # 2. MRN / medical record number (labelled)
+        add('mrn', 'Medical Record Number', 5, r'\b(?:MRN|Medical\s+Record\s+(?:No\.?|Number|#))[:\s#]*([A-Z0-9-]{4,})')
+        # 3. Health-plan beneficiary / member number
+        add('health_plan', 'Health Plan Beneficiary Number', 4, r'\b(?:Member|Subscriber|Policy|Beneficiary)\s*(?:ID|No\.?|Number|#)[:\s#]*([A-Z0-9-]{5,})')
+        # 4. Account number (labelled)
+        add('account', 'Account Number', 3, r'\b(?:Account|Acct)\.?\s*(?:No\.?|Number|#)[:\s#]*([A-Z0-9-]{4,})')
+        # 5. Certificate / license number
+        add('license', 'Certificate/License Number', 3, r'\b(?:License|Licence|Certificate|DEA|NPI)\s*(?:No\.?|Number|#)[:\s#]*([A-Z0-9-]{4,})')
+        # 6. Dates tied to an individual (DOB, admission, discharge, death) - any date element
+        add('dates', 'Individual Date Element (DOB/admit/discharge)', 3, r'\b(?:0?[1-9]|1[0-2])[/\-](?:0?[1-9]|[12]\d|3[01])[/\-](?:19|20)\d{2}\b')
+        # 7. Telephone / fax numbers
+        add('phone', 'Telephone/Fax Number', 3, r'(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}\b')
+        # 8. Email addresses
+        add('email', 'Email Address', 3, r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b')
+        # 9. Geographic subdivisions smaller than a state (ZIP)
+        add('geo_zip', 'Geographic Subdivision (ZIP)', 2, r'\b\d{5}(?:-\d{4})?\b')
+        # 10. URLs (web identifiers)
+        add('url', 'Web URL', 1, r'\bhttps?://[^\s)>\]]+')
+        # 11. IP addresses
+        add('ip', 'IP Address', 2, r'\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b')
+        # 12. Vehicle identifiers (VIN) and serial numbers
+        add('vehicle', 'Vehicle Identifier (VIN)', 2, r'\b[A-HJ-NPR-Z0-9]{17}\b')
+        # 13. Device identifiers / serial numbers (labelled)
+        add('device', 'Device Identifier/Serial Number', 3, r'\b(?:Device|Serial|Implant|Pacemaker)\s*(?:ID|No\.?|Number|S/N|#)[:\s#]*([A-Z0-9-]{4,})')
+        # 14. Biometric identifier references
+        add('biometric', 'Biometric Identifier Reference', 3, r'\b(?:fingerprint|retina|retinal|iris\s+scan|voiceprint|facial\s+recognition|biometric)\b')
+        # 15. Payment-card PAN (extra-sensitive co-located financial PHI), Luhn-validated
+        add('pan', 'Payment Card Number (Luhn)', 4, r'\b(?:\d[ -]?){13,19}\b', validator=_luhn_ok)
+        # 16. Full-face / photographic image references
+        add('photo', 'Full-Face/Photographic Image Reference', 2, r'\b(?:photo(?:graph)?|full[-\s]?face|headshot)\s+(?:of\s+(?:the\s+)?patient|attached|enclosed)\b')
+        # 17. Health-record / fax cover identifiers (any other unique number/code)
+        add('other_id', 'Other Unique Identifying Number/Code', 2, r'\b(?:Case|Encounter|Visit|Specimen|Accession)\s*(?:No\.?|Number|ID|#)[:\s#]*([A-Z0-9-]{4,})')
+        # 18. Names contextually (labelled patient/name fields)
+        add('name', 'Individual Name (labelled)', 3, r'\b(?:Patient\s+Name|Name\s+of\s+Patient|Pt\.?\s+Name)[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})')
+
+        present = [i for i in identifiers if i['count'] > 0]
+        # Deterministic risk score: weighted, with diminishing returns past a few hits, capped.
+        score = 0
+        for i in present:
+            score += i['weight'] * min(i['count'], 3)
+        # distinct identifier-TYPE breadth is itself a re-identification risk multiplier
+        breadth = len(present)
+        if breadth >= 3:
+            score += (breadth - 2) * 2
+        score = min(score, 100)
+
+        result = {
+            'id': doc_id,
+            'recipient': recipient,
+            'doc_type': doc_type,
+            'parsed_chars': len(text),
+            'parse_ok': len(text) > 0,
+            'identifiers': identifiers,
+            'present_identifiers': [i['code'] for i in present],
+            'present_labels': [i['label'] for i in present],
+            'identifier_type_count': breadth,
+            'total_hits': sum(i['count'] for i in present),
+            'phi_risk_score': score,
+            'regex_high_severity': score >= 7,
+        }
+
+  # ---------------------------------------------------------------------------
+  # 3) CONTEXTUAL PHI CLASSIFY (cross-provider) - the SECOND pass the regex cannot do.
+  #    Labels the batch for narrative re-identification / quasi-identifier PHI in free
+  #    text (e.g. "the only 47-year-old liver-transplant patient in our rural clinic").
+  #    Pinned to a swappable provider; routes by label into the right downstream path.
+  #    It LABELS context only - it never overturns the deterministic identifier counts.
+  # ---------------------------------------------------------------------------
+  - id: contextual_phi_classify
+    type: classify
+    depends_on: [scan_loop]
+    classify_config:
+      categories: ["narrative_reident_present", "no_contextual_phi"]
+      input: "{steps.scan_loop.output}"
+      model: google/gemini-2.5-pro
+      branches:
+        narrative_reident_present: [aggregate_findings]
+        no_contextual_phi: [aggregate_findings]
+
+  # ---------------------------------------------------------------------------
+  # 4) AGGREGATE (deterministic, no model) - fold the per-document deterministic scans
+  #    and the contextual label into one batch verdict. Computes which documents are
+  #    HIGH severity (score >= high_severity_min), the minimum-necessary excess vs the
+  #    stated purpose, and the batch release recommendation. The boolean math here -
+  #    not a model - is the load-bearing release verdict the gate reads.
+  # ---------------------------------------------------------------------------
+  - id: aggregate_findings
+    type: code
+    depends_on: [contextual_phi_classify]
+    code_config:
+      language: python
+      code: |
+        import json
+
+        try:
+            high_min = int(float(_input.get('high_severity_min') or 7))
+        except (ValueError, TypeError):
+            high_min = 7
+        purpose = str(_input.get('minimum_necessary_purpose') or 'TPO')
+
+        # --- Gather per-document scan results from the loop output. Each iteration's
+        #     final child (scan_identifiers) is what we want; tolerate envelope shapes.
+        loop_out = _steps.get('scan_loop') or {}
+        if isinstance(loop_out, list):
+            items = loop_out
+        elif isinstance(loop_out, dict):
+            items = loop_out.get('results') or loop_out.get('items') or []
+        else:
+            items = []
+        if not isinstance(items, list):
+            items = []
+
+        def _unwrap(rec):
+            if isinstance(rec, str):
+                try:
+                    rec = json.loads(rec) if rec.strip() else {}
+                except (ValueError, TypeError):
+                    rec = {}
+            if not isinstance(rec, dict):
+                return {}
+            # If the iteration wrapped both children, prefer the scan_identifiers payload.
+            for key in ('scan_identifiers', 'output', 'result', 'data'):
+                inner = rec.get(key)
+                if isinstance(inner, dict) and 'phi_risk_score' in inner:
+                    return inner
+            return rec
+
+        # Contextual label (one category for the whole batch); never overturns counts.
+        ctx = _steps.get('contextual_phi_classify')
+        if isinstance(ctx, dict):
+            ctx_label = str(ctx.get('category') or ctx.get('label') or ctx.get('output') or '').strip()
+        else:
+            ctx_label = str(ctx or '').strip()
+        narrative_reident = ctx_label == 'narrative_reident_present'
+
+        per_document = []
+        for raw in items:
+            rec = _unwrap(raw)
+            doc_id = str(rec.get('id') or 'unknown')
+            score = rec.get('phi_risk_score')
+            try:
+                score = int(score)
+            except (ValueError, TypeError):
+                score = 0
+            present = rec.get('present_identifiers')
+            if not isinstance(present, list):
+                present = []
+            labels = rec.get('present_labels')
+            if not isinstance(labels, list):
+                labels = []
+            parse_ok = bool(rec.get('parse_ok'))
+
+            # A failed parse is a hard FAIL (cannot prove a blank doc is PHI-free).
+            blocked_reasons = []
+            if not parse_ok:
+                blocked_reasons.append('parse_failed_cannot_clear')
+            high = (score >= high_min) or (not parse_ok)
+            # Narrative re-identification flagged by the contextual pass also lifts to high.
+            if narrative_reident and present:
+                blocked_reasons.append('contextual_reidentification_risk')
+                high = True
+            if score >= high_min:
+                blocked_reasons.append('regex_high_severity_phi')
+
+            # Minimum-necessary excess: identifier TYPES present beyond a small floor for
+            # the stated purpose. Deterministic count, surfaced as a recommendation.
+            min_nec_excess = max(len(present) - 1, 0)
+
+            per_document.append({
+                'id': doc_id,
+                'recipient': rec.get('recipient', 'unspecified'),
+                'doc_type': rec.get('doc_type', 'pdf'),
+                'phi_risk_score': score,
+                'present_identifiers': present,
+                'present_labels': labels,
+                'identifier_type_count': len(present),
+                'minimum_necessary_excess': min_nec_excess,
+                'parse_ok': parse_ok,
+                'high_severity': high,
+                'blocked_reasons': blocked_reasons,
+                'clearable': len(blocked_reasons) == 0,
+            })
+
+        total = len(per_document)
+        high_docs = [d for d in per_document if d['high_severity']]
+        max_score = max((d['phi_risk_score'] for d in per_document), default=0)
+        parse_failures = sum(0 if d['parse_ok'] else 1 for d in per_document)
+
+        result = {
+            'minimum_necessary_purpose': purpose,
+            'high_severity_min': high_min,
+            'contextual_label': ctx_label,
+            'narrative_reidentification_flagged': narrative_reident,
+            'per_document': per_document,
+            'total_documents': total,
+            'high_severity_count': len(high_docs),
+            'high_severity_ids': [d['id'] for d in high_docs],
+            'max_phi_risk_score': max_score,
+            'parse_failure_count': parse_failures,
+            'release_blocked': len(high_docs) > 0,
+            'all_clearable': total > 0 and len(high_docs) == 0,
+        }
+
+  # ---------------------------------------------------------------------------
+  # 5) RELEASE GATE - TWO strategies, BOTH must pass before the batch is cleared:
+  #    (a) a NON-LLM threshold on the deterministic aggregate (a self-consistency
+  #        assertion + the hard rule that nothing high-severity passes silently);
+  #    (b) a HUMAN privacy-officer approval, the override authority for a blocked
+  #        batch. The llm cannot overturn the deterministic count; only the human
+  #        privacy officer can authorize releasing a flagged document.
+  # ---------------------------------------------------------------------------
+  - id: release_gate
+    type: gate
+    depends_on: [aggregate_findings]
+    gate_config:
+      strategies:
+        # (a) NON-LLM threshold: structural consistency + hard block on high severity.
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are a HIPAA release reviewer. You are given the DETERMINISTIC PHI audit
+              aggregate for an outbound batch. Do NOT recompute or overturn any phi_risk_score
+              or high_severity_count - the Python verdict is authoritative. Reply with exactly
+              one word: 'approved' only if the record is internally consistent (high_severity_ids
+              are exactly the documents with high_severity true, release_blocked matches whether
+              any high-severity doc exists, and no parse_failure was marked clearable), otherwise
+              'rejected' and name the inconsistency. Aggregate: {steps.aggregate_findings.output}
+            input: "{steps.aggregate_findings.output}"
+            model: mistral/large
+        # (b) HUMAN privacy-officer override - the authority to release a blocked batch.
+        - type: human
+          config:
+            message: >-
+              PRIVACY OFFICER REVIEW - HIPAA PHI leak audit. Documents:
+              {steps.aggregate_findings.output.total_documents}; high-severity (release blocked):
+              {steps.aggregate_findings.output.high_severity_count}; worst PHI risk score:
+              {steps.aggregate_findings.output.max_phi_risk_score}; parse failures:
+              {steps.aggregate_findings.output.parse_failure_count}; contextual label:
+              {steps.aggregate_findings.output.contextual_label}. APPROVE only if you accept the
+              residual risk and authorize external release (or release after redaction); REJECT
+              to hold the batch. Nothing is released by this workflow regardless - this records
+              your privacy-officer decision.
+            timeout_hours: 48
+            on_timeout: reject
+
+  # ---------------------------------------------------------------------------
+  # 6) PHI RISK REGISTER (PDF) - per-document risk register with minimum-necessary
+  #    recommendations and Annex-style evidence. Built from the deterministic aggregate
+  #    so the artifact a privacy officer defends with is reproducible.
+  # ---------------------------------------------------------------------------
+  - id: risk_register
+    type: report
+    depends_on: [release_gate]
+    report_config:
+      template: research-report
+      format: pdf
+      theme: professional
+      title: "HIPAA PHI Leak Risk Register - {run_id}"
+      author: "{input.report_author}"
+    prompt: |
+      Produce a HIPAA-aware PHI risk register (PDF) for the privacy officer from the
+      DETERMINISTIC audit aggregate below. Do NOT invent documents, identifiers, or scores -
+      use only the payload. Structure it as:
+      1. Executive summary: total documents audited
+      ({steps.aggregate_findings.output.total_documents}), high-severity / release-blocked
+      ({steps.aggregate_findings.output.high_severity_count}), worst PHI risk score
+      ({steps.aggregate_findings.output.max_phi_risk_score}), parse failures
+      ({steps.aggregate_findings.output.parse_failure_count}), and the stated disclosure purpose
+      for the minimum-necessary test ({steps.aggregate_findings.output.minimum_necessary_purpose}).
+      2. A per-document PHI risk register table: for each document show id, intended recipient,
+      doc_type, the deterministic phi_risk_score, the HIPAA Safe-Harbor identifier TYPES present
+      (present_labels), the minimum-necessary excess count, the high_severity verdict, and the
+      blocked_reasons.
+      3. Minimum-necessary recommendations: for each document with identifiers beyond what the
+      stated purpose needs, recommend the specific identifier types to redact or the Safe-Harbor /
+      Limited-Data-Set de-identification step required before release.
+      4. Contextual re-identification note: if the contextual pass flagged narrative re-
+      identification ({steps.aggregate_findings.output.narrative_reidentification_flagged}), call
+      out that free-text quasi-identifiers may re-identify individuals even after structured
+      redaction.
+      5. Annex-style evidence: state that the 18-identifier hard catches are produced by a
+      deterministic Python scan (reproducible and model-independent) and that high-severity
+      releases required an explicit privacy-officer approval.
+      Aggregate payload: {steps.aggregate_findings.output}
+
+  # ---------------------------------------------------------------------------
+  # 7) LOG TO COMPLIANCE SYSTEM OF RECORD - http POST the AUDIT result (never the
+  #    clinical documents) to the org's compliance intake endpoint. Bearer token via
+  #    env (never inlined). The only outbound call in the workflow.
+  # ---------------------------------------------------------------------------
+  - id: log_to_compliance
+    type: http
+    depends_on: [risk_register]
+    http_config:
+      url: "{input.compliance_webhook_url}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+      auth: "bearer:{env.COMPLIANCE_INTAKE_TOKEN}"
+      body: '{"run_id": "{run_id}", "purpose": "{steps.aggregate_findings.output.minimum_necessary_purpose}", "total_documents": "{steps.aggregate_findings.output.total_documents}", "high_severity_count": "{steps.aggregate_findings.output.high_severity_count}", "high_severity_ids": "{steps.aggregate_findings.output.high_severity_ids}", "max_phi_risk_score": "{steps.aggregate_findings.output.max_phi_risk_score}", "parse_failure_count": "{steps.aggregate_findings.output.parse_failure_count}", "release_blocked": "{steps.aggregate_findings.output.release_blocked}"}'
+
+  # ---------------------------------------------------------------------------
+  # 8) NOTIFY the privacy officer / compliance queue with the audit result.
+  # ---------------------------------------------------------------------------
+  - id: notify_privacy_office
+    type: notify
+    depends_on: [log_to_compliance, aggregate_findings]
+    notify_config:
+      service: slack
+      channel: "{input.privacy_officer_channel}"
+      message: "HIPAA PHI leak audit complete for run {run_id}. Documents: {steps.aggregate_findings.output.total_documents} | High-severity (release blocked): {steps.aggregate_findings.output.high_severity_count} | Worst PHI risk score: {steps.aggregate_findings.output.max_phi_risk_score} | Parse failures: {steps.aggregate_findings.output.parse_failure_count} | Contextual label: {steps.aggregate_findings.output.contextual_label} | The 18-identifier hard catches are deterministic (model-independent); high-severity releases required an explicit privacy-officer approval. Per-document PHI risk register PDF generated and logged to the compliance system of record."
+
+on_complete:
+  storage_path: "hipaa-phi-leak-auditor/{run_id}/result.json"

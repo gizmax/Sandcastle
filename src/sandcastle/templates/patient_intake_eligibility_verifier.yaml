@@ -1,0 +1,533 @@
+# name: Patient Intake Eligibility Verifier
+# description: Verifies a new patient's insurance eligibility and benefits before the visit. Minimizes PHI and normalizes member/payer IDs from the intake form, routes to the correct eligibility channel (270/271 clearinghouse vs payer portal), RACES a clearinghouse HTTP 270 request against a provider-neutral read-only payer-portal DOM lookup and takes the fastest valid success, reconciles active coverage / copay / deductible-remaining / prior-auth flags in deterministic code, gates the coverage summary for internal consistency, routes coverage gaps to a staff-action branch, renders an eligibility + benefits summary, and notifies front-desk + patient. Strictly READ-ONLY against payer systems - no claim submission anywhere.
+# tags: [Healthcare, FrontOffice, Eligibility, Benefits, 270-271, Clearinghouse, PayerPortal, PHI, DOM, ReadOnly, ProviderNeutral, NoAPI]
+# category: healthcare
+
+name: patient-intake-eligibility-verifier
+description: >-
+  Pre-visit insurance eligibility + benefits verification for a healthcare front office. Takes a new
+  patient's intake form ({patient, subscriber, payer, plan, service_type}) and confirms, BEFORE the
+  appointment, whether coverage is active and what the patient will owe. A deterministic CODE step
+  minimizes PHI (drops everything except the minimum necessary for an eligibility check) and normalizes
+  the member/payer IDs into the canonical formats the channels expect. A CLASSIFY routes the request to
+  the correct eligibility channel: an EDI 270/271 transaction over a clearinghouse where the payer is
+  reachable, or a per-account payer portal where only a login-gated web UI exists. A RACE then runs BOTH
+  paths concurrently and takes the FASTEST VALID success (first-valid-wins failover, NOT a vote): branch
+  A is a clearinghouse HTTP 270 request returning a 271 benefits payload; branch B is a provider-neutral
+  read-only payer-portal BROWSER read in dom mode that extracts the same benefits into a strict
+  output_schema where no API exists. The DOM extraction model is swappable via default_model - no
+  single vendor. A deterministic CODE step then RECONCILES the winning payload into a canonical coverage
+  summary: active/inactive coverage, copay, coinsurance, deductible-remaining, out-of-pocket-remaining,
+  and a prior-authorization-required flag - all pure arithmetic and lookups, never a model's opinion. A
+  GATE asserts the coverage summary is internally consistent (e.g. deductible-remaining <= deductible,
+  amounts non-negative, status matches the presence of benefits) via a provider-neutral llm_eval. A
+  CONDITION routes any coverage GAP (inactive, term date passed, prior-auth required, plan-not-found)
+  into a staff-action branch that pages the front desk; clean cases skip straight to delivery. A REPORT
+  renders the eligibility + benefits summary PDF the front desk and patient can read, and a NOTIFY
+  alerts the front desk plus (optionally) the patient. The flow is strictly READ-ONLY against external
+  payer systems - it submits no claim, books no auth, and writes nothing back; the load-bearing coverage
+  math lives in deterministic code and the cross-path failover lives in the race, never in a single
+  model prompt.
+  (connectors: clearinghouse via http, payer portal via browser, slack/gmail via notify)
+
+default_model: sonnet
+default_timeout: 900
+
+input_schema:
+  required: ["intake_form", "payer_id", "member_id"]
+  properties:
+    intake_form:
+      type: object
+      description: >-
+        The raw patient intake record from the front-office system: patient demographics, subscriber
+        relationship, payer + plan, and the service_type the visit is for. PHI is minimized downstream
+        before anything leaves the building - only the minimum necessary for an eligibility check is kept.
+      default:
+        patient_first: "Jane"
+        patient_last: "Doe"
+        patient_dob: "1986-04-12"
+        subscriber_relationship: "self"
+        payer_name: "Acme Health"
+        plan_name: "Acme PPO Gold"
+        service_type: "30"
+        ssn: ""
+        phone: "+15555550123"
+        email: "patient@example.com"
+    payer_id:
+      type: string
+      description: >-
+        The payer's identifier as captured on the card / intake form. Normalized downstream into the
+        canonical 5-char CMS/CPID payer id the clearinghouse 270 transaction and the portal lookup expect.
+      default: "ACME1"
+    member_id:
+      type: string
+      description: >-
+        The subscriber's member / policy id from the insurance card. Normalized downstream (uppercased,
+        stray separators stripped) into the canonical format the channels validate against.
+      default: "ZGP-9921-007A"
+    service_type:
+      type: string
+      description: >-
+        EDI service type code the eligibility inquiry is scoped to (270 EQ segment). 30 = health benefit
+        plan coverage (a general eligibility check); 98 = professional physician visit office.
+      default: "30"
+    date_of_service:
+      type: string
+      description: >-
+        Planned date of service (ISO-8601). Used as the eligibility 'as of' date and to test the plan's
+        term date deterministically (ISO date string compare is monotonic - no date library needed).
+      default: "2026-06-15"
+    clearinghouse_base_url:
+      type: string
+      description: >-
+        REST base URL of the eligibility clearinghouse that wraps the EDI 270/271 transaction set. The
+        race's branch-A HTTP step posts the normalized 270 inquiry here and gets a 271 benefits payload.
+      default: "https://edi.clearinghouse.example.com/v1"
+    portal_lookup_url:
+      type: string
+      description: >-
+        Login-gated payer-portal eligibility page used by the race's branch-B read-only DOM browser path
+        for payers that expose NO API. The browser signs in via credentials_env, never an inline secret.
+      default: "https://provider.acmehealth.example.com/eligibility"
+    portal_credentials_env:
+      type: string
+      description: >-
+        NAME of the environment variable holding the payer-portal login. The secret VALUE is never
+        inlined or logged - only the variable name travels through the workflow.
+      default: "ACME_PORTAL_CREDS"
+    api_payer_ids:
+      type: array
+      description: >-
+        Canonical payer ids reachable via the clearinghouse 270/271 API. A normalized payer id in this
+        set is classified to the clearinghouse channel; anything else falls back to the portal DOM path.
+      default: ["ACME1", "BCBS1", "UHC01", "AET01", "CIGNA"]
+    notify_service:
+      type: string
+      description: "Where to alert the front desk on a coverage gap: slack, teams, or gmail."
+      default: "slack"
+    notify_channel:
+      type: string
+      description: "Front-desk channel / address for the eligibility result + any coverage-gap alert."
+      default: "#front-desk-eligibility"
+    report_author:
+      type: string
+      description: "Author line on the eligibility + benefits summary PDF."
+      default: "Patient Access / Front Office"
+
+steps:
+  # ---------------------------------------------------------------------------
+  # 1) CODE - PHI MINIMIZATION + ID NORMALIZATION. Deterministic, no model. Keeps
+  #    only the minimum necessary for an eligibility check (name initials + DOB +
+  #    payer/member/service), drops SSN / phone / email and full names from what
+  #    travels onward, and normalizes the member_id (uppercase, strip separators)
+  #    and payer_id (uppercase, 5-char canonical) into the formats the channels
+  #    expect. This is the safe, canonical inquiry every downstream step reads.
+  # ---------------------------------------------------------------------------
+  - id: minimize_and_normalize
+    type: code
+    code_config:
+      language: python
+      code: |
+        form = _input.get("intake_form") or {}
+        if not isinstance(form, dict):
+            form = {}
+
+        raw_member = str(_input.get("member_id") or form.get("member_id") or "").strip()
+        raw_payer = str(_input.get("payer_id") or "").strip()
+        service_type = str(_input.get("service_type") or form.get("service_type") or "30").strip()
+
+        # Normalize member id: uppercase, drop spaces and separators commonly OCR'd
+        # off an insurance card. Keep alphanumerics only.
+        member_id = re.sub(r"[^A-Za-z0-9]", "", raw_member).upper()
+
+        # Normalize payer id: uppercase, alnum, canonical 5-char CMS/CPID width.
+        payer_norm = re.sub(r"[^A-Za-z0-9]", "", raw_payer).upper()[:5]
+
+        # PHI minimization: keep ONLY the minimum necessary for an eligibility
+        # check. Names are reduced to initials; SSN / phone / email never travel.
+        first = str(form.get("patient_first") or "").strip()
+        last = str(form.get("patient_last") or "").strip()
+        patient_ref = ((first[:1] + last[:1]) or "PT").upper()
+        dob = str(form.get("patient_dob") or "").strip()
+
+        # Validate the minimal record. A missing member id or DOB cannot produce a
+        # trustworthy eligibility result, so flag it for the consistency gate later.
+        problems = []
+        if not member_id:
+            problems.append("missing_member_id")
+        if not payer_norm:
+            problems.append("missing_payer_id")
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", dob):
+            problems.append("bad_or_missing_dob")
+
+        canonical_inquiry = {
+            "patient_ref": patient_ref,        # de-identified: initials only
+            "dob": dob,                        # minimum-necessary identifier
+            "subscriber_relationship": str(form.get("subscriber_relationship") or "self"),
+            "payer_id": payer_norm,
+            "payer_name": str(form.get("payer_name") or ""),
+            "plan_name": str(form.get("plan_name") or ""),
+            "member_id": member_id,
+            "service_type": service_type,
+            "date_of_service": str(_input.get("date_of_service") or "").strip(),
+        }
+
+        result = {
+            "inquiry": canonical_inquiry,
+            "member_id": member_id,
+            "payer_id": payer_norm,
+            "service_type": service_type,
+            "phi_minimized": True,
+            "dropped_fields": ["ssn", "phone", "email", "patient_first", "patient_last"],
+            "problems": problems,
+            "intake_ok": len(problems) == 0,
+        }
+
+  # ---------------------------------------------------------------------------
+  # 2) CLASSIFY - route to the correct eligibility CHANNEL. If the normalized payer
+  #    id is reachable via the clearinghouse 270/271 API it is an 'api' request;
+  #    otherwise the payer only exposes a login-gated portal, so it is a 'portal'
+  #    request. Provider-neutral haiku triage; BOTH branches converge on run_race
+  #    so the race always runs both paths - the classification only records the
+  #    expected primary channel for the report and never drops a step.
+  # ---------------------------------------------------------------------------
+  - id: route_channel
+    type: classify
+    depends_on: [minimize_and_normalize]
+    classify_config:
+      model: haiku
+      input: >-
+        Decide the eligibility channel for this payer. Answer 'api' if the normalized payer_id
+        '{steps.minimize_and_normalize.output.payer_id}' is one of the clearinghouse-reachable payer
+        ids {input.api_payer_ids} (an EDI 270/271 clearinghouse transaction is possible). Answer
+        'portal' if it is NOT in that list (only a login-gated payer web portal exists, no API).
+      categories:
+        - api
+        - portal
+      branches:
+        api: [run_race]
+        portal: [run_race]
+
+  # ---------------------------------------------------------------------------
+  # 3a) RACE BRANCH A - CLEARINGHOUSE HTTP 270. Posts the normalized eligibility
+  #     inquiry as an EDI 270 transaction to the clearinghouse, which returns the
+  #     271 benefits payload. Auth via a bearer token from the env (never inlined).
+  #     This is a READ-ONLY benefits inquiry: it asks "is this member covered and
+  #     what do they owe" - it submits no claim and writes nothing. Defined
+  #     separately, NO depends_on - the race orchestrates it. (connector: clearinghouse)
+  # ---------------------------------------------------------------------------
+  - id: query_clearinghouse_270
+    type: http
+    http_config:
+      url: "{input.clearinghouse_base_url}/eligibility/270"
+      method: POST
+      auth: "bearer:{env.CLEARINGHOUSE_API_KEY}"
+      headers:
+        Accept: "application/json"
+        Content-Type: "application/json"
+      body:
+        transaction: "270"
+        payer_id: "{steps.minimize_and_normalize.output.payer_id}"
+        member_id: "{steps.minimize_and_normalize.output.member_id}"
+        service_type: "{steps.minimize_and_normalize.output.service_type}"
+        date_of_service: "{steps.minimize_and_normalize.output.inquiry.date_of_service}"
+        patient_dob: "{steps.minimize_and_normalize.output.inquiry.dob}"
+        subscriber_relationship: "{steps.minimize_and_normalize.output.inquiry.subscriber_relationship}"
+
+  # 3b) RACE BRANCH B - PAYER-PORTAL READ-ONLY DOM LOOKUP (PROVIDER-NEUTRAL). For
+  #     payers with no API, the configured reasoning model drives a dom-mode read
+  #     of the login-gated eligibility page and extracts the SAME benefits into a
+  #     strict output_schema. The authoring model is swappable via default_model -
+  #     no single vendor. It signs in via credentials_env (NEVER an inline secret),
+  #     reads the member's eligibility + benefits, and performs NO write of any
+  #     kind. Defined separately, NO depends_on - the race orchestrates it.
+  - id: read_portal_eligibility
+    type: browser
+    browser_config:
+      mode: dom
+      start_url: "{input.portal_lookup_url}"
+      viewport_width: 1280
+      viewport_height: 720
+      timeout_seconds: 120
+      max_actions: 25
+      headless: true
+      credentials_env: "{input.portal_credentials_env}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          coverage_active: { type: boolean }
+          plan_name: { type: string }
+          effective_date: { type: string }
+          termination_date: { type: string }
+          copay: { type: number }
+          coinsurance_pct: { type: number }
+          deductible_total: { type: number }
+          deductible_met: { type: number }
+          oop_max_total: { type: number }
+          oop_max_met: { type: number }
+          prior_auth_required: { type: boolean }
+        required: ["coverage_active"]
+    prompt: |
+      You are a READ-ONLY patient-access clerk verifying insurance eligibility on a payer's
+      login-gated provider portal (there is NO API for this payer). Use ONLY the minimum-necessary,
+      already-de-identified inquiry below. Never type, log, or echo any secret.
+
+      Inquiry: {steps.minimize_and_normalize.output.inquiry}
+
+      Steps:
+      1. Open the eligibility page ({input.portal_lookup_url}) and sign in using ONLY the login
+         supplied by the credentials_env environment variable. NEVER hardcode or print the secret.
+      2. If a CAPTCHA / MFA / device-verification challenge appears, STOP and hand off to a human
+         (captcha_strategy=pause). Do not attempt to bypass it.
+      3. Look up the member by member_id '{steps.minimize_and_normalize.output.member_id}' and DOB,
+         scoped to date_of_service '{steps.minimize_and_normalize.output.inquiry.date_of_service}'.
+      4. Read the eligibility status and the in-network benefits: plan name, effective and termination
+         dates, copay, coinsurance percentage, deductible total + amount met, out-of-pocket max total +
+         amount met, and whether prior authorization is required for this service type.
+      5. Perform NO write actions whatsoever - never submit, file, request an auth, or change anything.
+         This is benefits EXTRACTION only.
+
+      Return ONLY the structured JSON in the output_schema. Amounts are numbers (0 if not stated);
+      coverage_active, prior_auth_required are booleans.
+
+  # ---------------------------------------------------------------------------
+  # 3) RACE - run BOTH eligibility paths concurrently and take the FASTEST VALID
+  #    success (first-valid-wins failover, NOT a vote). Whichever of the
+  #    clearinghouse 270/271 HTTP path or the read-only payer-portal DOM path
+  #    returns a well-formed benefits payload FIRST wins. Cross-PATH failover:
+  #    if the clearinghouse is down the portal read still answers, and vice
+  #    versa. The validator accepts either shape (271 'active'/coverage_status
+  #    or the portal's coverage_active boolean).
+  # ---------------------------------------------------------------------------
+  - id: run_race
+    type: race
+    depends_on: [query_clearinghouse_270, read_portal_eligibility]
+    race_config:
+      branches:
+        - [query_clearinghouse_270]
+        - [read_portal_eligibility]
+      # First branch returning a benefits object with a recognizable coverage
+      # status wins. Accepts the clearinghouse 271 shape OR the portal DOM shape.
+      validator: "isinstance(output, dict) and ('coverage_active' in output or 'coverage_status' in output or 'active' in output or 'benefits' in output)"
+
+  # ---------------------------------------------------------------------------
+  # 4) CODE - DETERMINISTIC RECONCILIATION. Pure arithmetic + lookups, no model.
+  #    Normalizes the winning payload (either shape) into ONE canonical coverage
+  #    summary: active/inactive coverage, copay, coinsurance, deductible-remaining,
+  #    out-of-pocket-remaining, and a prior-auth-required flag. Also tests the plan
+  #    term date against the date_of_service with monotonic ISO string compare and
+  #    flags any coverage GAP. The money math is code - never a model's opinion.
+  # ---------------------------------------------------------------------------
+  - id: reconcile_coverage
+    type: code
+    depends_on: [run_race, minimize_and_normalize]
+    code_config:
+      language: python
+      code: |
+        payload = _steps.get("run_race") or {}
+        if not isinstance(payload, dict):
+            payload = {}
+        # The clearinghouse 271 may nest benefits under a key; flatten if so.
+        benefits = payload.get("benefits")
+        if isinstance(benefits, dict):
+            src = {**payload, **benefits}
+        else:
+            src = payload
+
+        inquiry = (_steps.get("minimize_and_normalize") or {}).get("inquiry") or {}
+        dos = str(inquiry.get("date_of_service") or "").strip()
+
+        def num(v, default=0.0):
+            try:
+                return round(float(v), 2)
+            except (TypeError, ValueError):
+                return default
+
+        def boolish(v):
+            if isinstance(v, bool):
+                return v
+            s = str(v or "").strip().lower()
+            return s in ("true", "active", "yes", "y", "1", "in_force", "eligible")
+
+        # Coverage status: accept any of the shapes the two paths can produce.
+        if "coverage_active" in src:
+            active = boolish(src.get("coverage_active"))
+        elif "coverage_status" in src:
+            active = str(src.get("coverage_status") or "").strip().lower() in ("active", "in_force", "eligible")
+        elif "active" in src:
+            active = boolish(src.get("active"))
+        else:
+            active = False
+
+        plan_name = str(src.get("plan_name") or inquiry.get("plan_name") or "").strip()
+        effective_date = str(src.get("effective_date") or "").strip()
+        term_date = str(src.get("termination_date") or src.get("term_date") or "").strip()
+
+        copay = num(src.get("copay"))
+        coinsurance_pct = num(src.get("coinsurance_pct") or src.get("coinsurance"))
+        ded_total = num(src.get("deductible_total"))
+        ded_met = num(src.get("deductible_met"))
+        oop_total = num(src.get("oop_max_total") or src.get("out_of_pocket_max"))
+        oop_met = num(src.get("oop_max_met") or src.get("out_of_pocket_met"))
+        prior_auth = boolish(src.get("prior_auth_required"))
+
+        # Deterministic remaining-balance math, clamped non-negative.
+        ded_remaining = round(max(ded_total - ded_met, 0.0), 2)
+        oop_remaining = round(max(oop_total - oop_met, 0.0), 2)
+
+        # Term-date test: a non-empty term date strictly before the date of service
+        # means coverage has lapsed for this visit (monotonic ISO string compare).
+        termed = bool(term_date) and bool(dos) and term_date < dos
+
+        gaps = []
+        if not active:
+            gaps.append("coverage_inactive")
+        if termed:
+            gaps.append("plan_terminated_before_dos")
+        if prior_auth:
+            gaps.append("prior_authorization_required")
+        if not plan_name and active:
+            gaps.append("plan_not_identified")
+
+        # Estimated patient responsibility at point of service: if the deductible is
+        # not yet met, the visit likely applies to it (capped at remaining); once met,
+        # the copay applies. Estimate only - the front desk confirms at check-in.
+        if active and ded_remaining > 0:
+            est_patient_due = ded_remaining
+            est_basis = "applies_to_deductible_remaining"
+        elif active:
+            est_patient_due = copay
+            est_basis = "copay"
+        else:
+            est_patient_due = 0.0
+            est_basis = "not_covered"
+
+        summary = {
+            "coverage_active": active,
+            "plan_name": plan_name,
+            "effective_date": effective_date,
+            "termination_date": term_date,
+            "date_of_service": dos,
+            "copay": copay,
+            "coinsurance_pct": coinsurance_pct,
+            "deductible_total": ded_total,
+            "deductible_met": ded_met,
+            "deductible_remaining": ded_remaining,
+            "oop_max_total": oop_total,
+            "oop_max_met": oop_met,
+            "oop_max_remaining": oop_remaining,
+            "prior_auth_required": prior_auth,
+            "estimated_patient_due": round(est_patient_due, 2),
+            "estimate_basis": est_basis,
+        }
+
+        result = {
+            "summary": summary,
+            "winning_channel_shape": "portal" if "coverage_active" in payload else "clearinghouse_271",
+            "coverage_gaps": gaps,
+            "gap_count": len(gaps),
+            "has_gap": len(gaps) > 0,
+            "intake_problems": (_steps.get("minimize_and_normalize") or {}).get("problems") or [],
+        }
+
+  # ---------------------------------------------------------------------------
+  # 5) GATE - assert the reconciled coverage summary is INTERNALLY CONSISTENT
+  #    before anyone relies on it. A single provider-neutral llm_eval reviews the
+  #    deterministic summary for logical coherence (deductible-met <= total,
+  #    remaining = total - met, amounts non-negative, an 'active' status actually
+  #    carrying benefits, no missing-required-id contradiction). It must return
+  #    'approved' for the summary to flow to routing + delivery. Model is swappable.
+  # ---------------------------------------------------------------------------
+  - id: consistency_gate
+    type: gate
+    depends_on: [reconcile_coverage]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are an eligibility QA reviewer. Check the reconciled coverage summary for INTERNAL
+              CONSISTENCY only. Answer exactly 'approved' if ALL hold: deductible_met <= deductible_total;
+              deductible_remaining == max(deductible_total - deductible_met, 0); oop_max_met <= oop_max_total;
+              every monetary amount is non-negative; and if coverage_active is true the summary carries plan
+              benefit fields (copay/coinsurance/deductible) rather than being empty. Otherwise answer
+              'rejected' and name the contradiction. Summary: {steps.reconcile_coverage.output.summary} ||
+              Intake problems: {steps.reconcile_coverage.output.intake_problems}
+            model: sonnet
+
+  # ---------------------------------------------------------------------------
+  # 6) CONDITION - deterministic routing on the reconciled GAP facts (NOT a model
+  #    label). If there is any coverage gap (inactive / termed / prior-auth /
+  #    plan-not-identified), route into the staff-action branch that pages the
+  #    front desk AND renders the summary. A clean, active, no-auth case skips
+  #    straight to rendering the summary.
+  # ---------------------------------------------------------------------------
+  - id: route_gaps
+    type: condition
+    depends_on: [reconcile_coverage, consistency_gate]
+    condition_config:
+      expression: "{steps.reconcile_coverage.output.has_gap} == True"
+      then: [render_summary, alert_front_desk]
+      else: [render_summary]
+
+  # 6a) NOTIFY (staff-action branch) - page the front desk with the coverage gap so
+  #     it is resolved BEFORE the patient arrives (re-verify, collect updated card,
+  #     start a prior-auth, or reschedule). Read-only: this only alerts; it never
+  #     touches a payer system.
+  - id: alert_front_desk
+    type: notify
+    depends_on: [route_gaps]
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: ":warning: Pre-visit coverage gap for patient {steps.minimize_and_normalize.output.inquiry.patient_ref} (DOB {steps.minimize_and_normalize.output.inquiry.dob}), payer {steps.minimize_and_normalize.output.payer_id}, DOS {steps.reconcile_coverage.output.summary.date_of_service}. Gaps: {steps.reconcile_coverage.output.coverage_gaps}. Coverage active: {steps.reconcile_coverage.output.summary.coverage_active}. Prior auth required: {steps.reconcile_coverage.output.summary.prior_auth_required}. Estimated patient due: {steps.reconcile_coverage.output.summary.estimated_patient_due}. Resolve before the visit. This check was READ-ONLY against the payer - no claim or auth was submitted."
+
+  # ---------------------------------------------------------------------------
+  # 7) REPORT (both branches converge here) - render the eligibility + benefits
+  #    summary PDF the front desk reviews and the patient receives: coverage
+  #    status, plan, copay/coinsurance, deductible + out-of-pocket remaining,
+  #    prior-auth flag, estimated patient responsibility, and any coverage gaps.
+  #    States explicitly the check was read-only against the payer. This is the
+  #    deliverable.
+  # ---------------------------------------------------------------------------
+  - id: render_summary
+    type: report
+    depends_on: [route_gaps]
+    report_config:
+      template: research-report
+      format: pdf
+      theme: professional
+      title: "Pre-Visit Eligibility & Benefits Summary - {input.date_of_service}"
+      author: "{input.report_author}"
+    prompt: |
+      Produce a pre-visit eligibility + benefits summary PDF for a healthcare front office from the
+      payload below. Lead with the coverage verdict (active / inactive) and the planned date of service.
+      Then a benefits table: plan name, effective + termination dates, copay, coinsurance %, deductible
+      (total / met / REMAINING), out-of-pocket max (total / met / REMAINING), and whether prior
+      authorization is required for this service. Show the ESTIMATED patient responsibility at point of
+      service and its basis (deductible-remaining vs copay), clearly labeled an estimate the front desk
+      confirms at check-in. If there are coverage GAPS, list each with the action the front desk must
+      take before the visit. End with a footer stating: this verification was strictly READ-ONLY against
+      the payer (an eligibility 270/271 / portal benefits read) - no claim, prior-auth request, or write
+      of any kind was submitted; PHI was minimized to the minimum necessary for the check.
+      Coverage summary: {steps.reconcile_coverage.output.summary}
+      Coverage gaps: {steps.reconcile_coverage.output.coverage_gaps}
+      Inquiry (de-identified): {steps.minimize_and_normalize.output.inquiry}
+
+  # ---------------------------------------------------------------------------
+  # 8) NOTIFY - send the finished eligibility result to the front desk (and,
+  #    optionally, the patient) so check-in is fast and the patient knows their
+  #    expected cost ahead of time. Both branches have rendered the summary by now.
+  # ---------------------------------------------------------------------------
+  - id: notify_result
+    type: notify
+    depends_on: [render_summary]
+    notify_config:
+      service: slack
+      channel: "{input.notify_channel}"
+      message: ":white_check_mark: Eligibility verified for {steps.minimize_and_normalize.output.inquiry.patient_ref} (DOB {steps.minimize_and_normalize.output.inquiry.dob}) - DOS {steps.reconcile_coverage.output.summary.date_of_service}. Coverage active: {steps.reconcile_coverage.output.summary.coverage_active}. Plan: {steps.reconcile_coverage.output.summary.plan_name}. Copay: {steps.reconcile_coverage.output.summary.copay}. Deductible remaining: {steps.reconcile_coverage.output.summary.deductible_remaining}. Prior auth required: {steps.reconcile_coverage.output.summary.prior_auth_required}. Estimated patient due: {steps.reconcile_coverage.output.summary.estimated_patient_due}. Gaps: {steps.reconcile_coverage.output.coverage_gaps}. Summary PDF attached. READ-ONLY eligibility check - no claim submitted."
+
+on_complete:
+  storage_path: "patient-intake-eligibility-verifier/{run_id}/eligibility-benefits-summary.json"

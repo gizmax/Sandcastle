@@ -1,0 +1,505 @@
+# name: Prior Authorization Packet Builder
+# description: Assembles a payer-ready prior-authorization request from an uploaded chart + order PDF, checks it against the plan's medical-necessity policy, validates completeness deterministically, gates on traceability plus a human clinician sign-off, and routes any unmet criteria back to the clinic queue before submission. PHI minimization, completeness checks, and the auth-required decision are pure engine logic; the justification draft runs cross-provider with failover so swapping the model never changes which fields the payer requires.
+# tags: [Healthcare, PriorAuthorization, UtilizationManagement, MedicalNecessity, Payer, PHI, HIPAA, HumanInTheLoop, ProviderNeutral]
+# category: healthcare
+
+name: prior-authorization-packet-builder
+description: >-
+  Takes a finished patient chart + order PDF and the target plan, and BUILDS a payer-ready
+  prior-authorization (PA) request - then validates it against that plan's medical-necessity
+  policy before anything leaves the clinic. A parse step extracts diagnoses (ICD-10), the
+  ordered service/procedure (CPT/HCPCS), and the supporting clinical findings from the uploaded
+  document. A DETERMINISTIC code step then performs PHI minimization: it strips identifiers the
+  payer does not need for the auth (full SSN, MRN, address, phone, email, full DOB) and keeps a
+  one-way re-link token so the clinic can rejoin the response to the patient locally - the payload
+  that travels is minimum-necessary by construction. An http step pulls the plan's
+  medical-necessity policy and required-fields list from a generic policy connector. A
+  provider-agnostic classify maps the order to the correct payer auth pathway and flags whether
+  the service is auth-required at all. Two providers (pinned to DIFFERENT models) draft the
+  medical-necessity justification with evidence citations in a first-valid-wins race, so the
+  drafting model is swappable with failover and never on the decision path. A second DETERMINISTIC
+  code step is the load-bearing completeness validator: every payer-required field present, codes
+  well-formed (ICD-10 and CPT/HCPCS regex), and the justification cites real chart facts. A
+  multi-strategy gate then requires an llm_eval traceability check (justification grounded in
+  extracted chart facts, no fabricated evidence) AND a human clinician approval before submission.
+  A report renders the payer-formatted auth packet PDF, and a notify posts to the clinic queue with
+  any unmet criteria. The PHI minimization, completeness math, and auth-required decision are pure
+  engine logic; only the justification prose is model-generated. Swapping the model can never change
+  which fields the payer requires or whether the packet is complete.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 900
+
+input_schema:
+  required: ["chart_document", "member_id", "plan_id"]
+  properties:
+    chart_document:
+      type: file
+      accept: ".pdf,.docx,.png,.jpg,.tiff"
+      description: "The finished chart + order document to build the prior-auth from: progress note / consult, the signed order, and any supporting imaging or lab report. Diagnoses, the ordered service, and clinical findings are extracted from this."
+    member_id:
+      type: string
+      description: "The patient's member id on the target plan (the payer's subscriber id, NOT the clinic MRN). Used as the auth subject; the MRN is stripped during PHI minimization."
+      example: "W123456789"
+    plan_id:
+      type: string
+      description: "Identifier of the target health plan / payer policy whose medical-necessity criteria this auth is checked against. Used to look up the policy + required-fields list."
+      example: "aetna-commercial-ppo"
+    policy_base_url:
+      type: string
+      description: "Base URL of the payer medical-necessity policy connector. The plan_id is appended to fetch the policy document and required-fields list for the requested service."
+      default: "https://policy-connector.internal/payers"
+      example: "https://policy-connector.internal/payers"
+    ordering_provider_npi:
+      type: string
+      description: "NPI of the ordering provider, carried on the auth as the requesting clinician. Retained (not PHI-minimized) because the payer requires it on the request."
+      default: ""
+      example: "1487654321"
+    relink_secret:
+      type: string
+      description: "Env-ref or value the clinic uses to derive the one-way re-link token so it can rejoin the payer response to the local patient record. The raw value never leaves in the payload."
+      default: "{env.PA_RELINK_SECRET}"
+      example: "{env.PA_RELINK_SECRET}"
+    clinic_queue_channel:
+      type: string
+      description: "Slack channel for the clinic's prior-auth work queue where the outcome (and any unmet criteria) is posted."
+      default: "#prior-auth-queue"
+      example: "#prior-auth-queue"
+    approval_timeout_hours:
+      type: number
+      description: "Hours the human clinician approval waits before the gate's timeout aborts the submission (fails closed - nothing leaves on timeout)."
+      default: 48
+      example: "48"
+
+steps:
+  # 1) PARSE the uploaded chart + order PDF into a structured clinical extraction.
+  #    Diagnoses (ICD-10), the ordered service (CPT/HCPCS), and supporting findings.
+  - id: extract_chart
+    type: parse
+    prompt: "{input.chart_document}"
+    parse_config:
+      output: markdown
+      pages: null
+      ocr: true
+      ocr_engine: auto
+
+  # 2) Structure the free-text extraction into auth-relevant fields the downstream code can
+  #    minimize and validate. Model only normalizes text it was GIVEN - it invents no codes.
+  - id: structure_order
+    type: standard
+    depends_on: [extract_chart]
+    prompt: |
+      You are a prior-authorization intake specialist. From the extracted chart + order text
+      below, pull ONLY what is explicitly present. Do not infer or fabricate codes, identifiers,
+      or clinical findings that are not written in the source. If a field is absent, return an
+      empty string or empty list for it.
+
+      IMPORTANT: This is an AI-assisted intake aid. All extracted codes and clinical facts must
+      be verified by a licensed clinician before the auth is submitted.
+
+      Extracted chart + order text:
+      {steps.extract_chart.output.text}
+
+      Member id (subject of the auth): {input.member_id}
+      Ordering provider NPI: {input.ordering_provider_npi}
+
+      Return STRICT JSON matching the schema. clinical_findings must be short verbatim-or-near
+      phrases lifted from the chart (these are the facts the medical-necessity justification will
+      later be traced back to). diagnosis_codes are ICD-10-CM; service_code is the single primary
+      ordered CPT or HCPCS code; supporting_codes are any additional ordered CPT/HCPCS.
+    output_schema:
+      type: object
+      properties:
+        patient_name:
+          type: string
+          description: "Patient name as written in the chart (will be stripped during PHI minimization)."
+        date_of_birth:
+          type: string
+          description: "Patient DOB if present (will be reduced to birth year during PHI minimization)."
+        mrn:
+          type: string
+          description: "Clinic medical record number if present (stripped during PHI minimization)."
+        diagnosis_codes:
+          type: array
+          items:
+            type: string
+          description: "ICD-10-CM diagnosis codes explicitly documented for this order."
+        service_code:
+          type: string
+          description: "The single primary ordered service code (CPT 5-digit or HCPCS letter+4-digit)."
+        service_description:
+          type: string
+          description: "Plain-language description of the ordered service/procedure."
+        supporting_codes:
+          type: array
+          items:
+            type: string
+          description: "Any additional ordered CPT/HCPCS codes."
+        clinical_findings:
+          type: array
+          items:
+            type: string
+          description: "Short verbatim clinical facts from the chart that support medical necessity (e.g. 'failed 6 weeks conservative PT', 'MRI shows L4-L5 herniation')."
+        site_of_service:
+          type: string
+          description: "Where the service will be performed (outpatient, inpatient, office, ASC) if documented."
+
+  # 3) DETERMINISTIC PHI MINIMIZATION (sandboxed Python, NO model). Strip identifiers the payer
+  #    does not need for the auth; keep a one-way re-link token so the clinic can rejoin the
+  #    payer response to the patient locally. The payload that travels is minimum-necessary.
+  - id: minimize_phi
+    type: code
+    depends_on: [structure_order]
+    code_config:
+      language: python
+      code: |
+        import hashlib
+        import re
+
+        order = _steps['structure_order'] or {}
+        member_id = str(_input.get('member_id') or '').strip()
+        plan_id = str(_input.get('plan_id') or '').strip()
+        npi = str(_input.get('ordering_provider_npi') or '').strip()
+        secret = str(_input.get('relink_secret') or '').strip()
+
+        # --- One-way re-link token: clinic re-derives it locally to rejoin the payer response
+        #     to the patient. The raw patient identifiers never travel in the auth payload. ---
+        raw_mrn = str(order.get('mrn') or '').strip()
+        raw_name = str(order.get('patient_name') or '').strip()
+        raw_dob = str(order.get('date_of_birth') or '').strip()
+        relink_seed = f"{secret}|{plan_id}|{member_id}|{raw_mrn}|{raw_name}|{raw_dob}"
+        relink_token = "RL-" + hashlib.sha256(relink_seed.encode('utf-8')).hexdigest()[:24].upper()
+
+        # --- DOB -> birth year only (age/year is auth-relevant; full DOB is not minimum-necessary) ---
+        birth_year = ''
+        ym = re.search(r'(19|20)\d{2}', raw_dob)
+        if ym:
+            birth_year = ym.group(0)
+
+        # --- Scrub any stray direct identifiers from free-text clinical findings ---
+        ssn_pat = r'\b\d{3}-?\d{2}-?\d{4}\b'
+        phone_pat = r'\b\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b'
+        email_pat = r'\b[\w.+-]+@[\w-]+\.[\w.-]+\b'
+        def _scrub(text):
+            t = re.sub(ssn_pat, '[REDACTED-SSN]', str(text or ''))
+            t = re.sub(phone_pat, '[REDACTED-PHONE]', t)
+            t = re.sub(email_pat, '[REDACTED-EMAIL]', t)
+            if raw_mrn:
+                t = t.replace(raw_mrn, '[REDACTED-MRN]')
+            if raw_name:
+                for part in [p for p in raw_name.split() if len(p) > 2]:
+                    t = re.sub(re.escape(part), '[REDACTED-NAME]', t, flags=re.IGNORECASE)
+            return t
+
+        findings = [
+            _scrub(f) for f in (order.get('clinical_findings') or [])
+            if str(f or '').strip()
+        ]
+
+        dx = [str(c).strip().upper() for c in (order.get('diagnosis_codes') or []) if str(c or '').strip()]
+        service_code = str(order.get('service_code') or '').strip().upper()
+        supporting = [str(c).strip().upper() for c in (order.get('supporting_codes') or []) if str(c or '').strip()]
+
+        # The minimum-necessary payload that will travel to the payer.
+        minimized = {
+            'subject_member_id': member_id,       # payer's own subscriber id - allowed
+            'plan_id': plan_id,
+            'birth_year': birth_year,             # year only, not full DOB
+            'ordering_provider_npi': npi,         # payer requires the requesting clinician
+            'diagnosis_codes': dx,
+            'service_code': service_code,
+            'service_description': str(order.get('service_description') or '').strip(),
+            'supporting_codes': supporting,
+            'site_of_service': str(order.get('site_of_service') or '').strip(),
+            'clinical_findings': findings,
+            'relink_token': relink_token,         # clinic re-derives locally; opaque to payer
+        }
+
+        # What we stripped, for the audit trail (values NOT included - only field names).
+        stripped_fields = [
+            name for name, present in [
+                ('patient_name', bool(raw_name)),
+                ('full_date_of_birth', bool(raw_dob)),
+                ('mrn', bool(raw_mrn)),
+            ] if present
+        ]
+
+        result = {
+            'minimized_payload': minimized,
+            'relink_token': relink_token,
+            'stripped_fields': stripped_fields,
+            'has_diagnosis': len(dx) > 0,
+            'has_service_code': bool(service_code),
+        }
+
+  # 4) FETCH the plan's medical-necessity policy + required-fields list from a generic policy
+  #    connector (provider-agnostic http, env-ref auth). plan_id + service_code are templated in.
+  - id: fetch_policy
+    type: http
+    depends_on: [minimize_phi]
+    http_config:
+      url: "{input.policy_base_url}/{input.plan_id}/medical-necessity?service_code={steps.minimize_phi.output.minimized_payload.service_code}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.POLICY_CONNECTOR_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 5) Provider-agnostic CLASSIFY: map the ordered service to the correct payer auth pathway AND
+  #    flag whether the service is even auth-required under this plan's policy. The branch decides
+  #    whether we proceed to draft + validate, or short-circuit to a "no auth required" notice.
+  - id: classify_pathway
+    type: classify
+    depends_on: [fetch_policy]
+    classify_config:
+      model: haiku
+      input: |
+        Decide the prior-authorization pathway for this ordered service under the plan's policy.
+        Use these categories: not_required = the policy clearly states this service needs NO prior
+        authorization for this plan/diagnosis; standard_review = a routine medical-necessity review
+        applies; expedited_review = the order is marked urgent/STAT or the diagnosis is
+        time-sensitive (oncology staging, acute) warranting an expedited pathway; site_of_care =
+        the policy gates the SITE of service (e.g. must be done in-office or ASC, not inpatient)
+        rather than the service itself. Order + minimized facts: {steps.minimize_phi.output.minimized_payload}
+        Plan policy + required fields: {steps.fetch_policy.output}
+      categories:
+        - not_required
+        - standard_review
+        - expedited_review
+        - site_of_care
+      branches:
+        not_required: [notify_no_auth_required]
+        standard_review: [draft_justification_a, draft_justification_b, pick_justification, validate_completeness, traceability_and_signoff_gate, build_packet, notify_clinic_queue]
+        expedited_review: [draft_justification_a, draft_justification_b, pick_justification, validate_completeness, traceability_and_signoff_gate, build_packet, notify_clinic_queue]
+        site_of_care: [draft_justification_a, draft_justification_b, pick_justification, validate_completeness, traceability_and_signoff_gate, build_packet, notify_clinic_queue]
+
+  # ---- NOT-REQUIRED PATH: tell the clinic no auth is needed and stop. No packet built. ----
+  - id: notify_no_auth_required
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.clinic_queue_channel}"
+      message: >-
+        No prior authorization required for service {steps.minimize_phi.output.minimized_payload.service_code}
+        ({steps.minimize_phi.output.minimized_payload.service_description}) under plan {input.plan_id}.
+        Per the payer policy this order can proceed without an auth - no packet was built. Re-link token
+        {steps.minimize_phi.output.relink_token}.
+
+  # ---- AUTH-REQUIRED PATH ----
+  # 6) Two providers DRAFT the medical-necessity justification + evidence citations. Pinned to
+  #    DIFFERENT models so the race below is a real first-valid-wins FAILOVER (not a vote, never
+  #    on the decision path). Each cites only the supplied chart findings - no fabricated evidence.
+  - id: draft_justification_a
+    type: standard
+    model: sonnet
+    prompt: |
+      You are a utilization-review nurse writing a medical-necessity justification for a prior
+      authorization. Using ONLY the facts provided, write a structured justification (no markdown
+      headers, no emojis) that: (a) states the diagnosis and the requested service, (b) explains
+      why the service is medically necessary, and (c) cites the specific chart findings that
+      support it - quote each finding you rely on. Do NOT invent findings, codes, or trial-of-
+      conservative-therapy claims not present in the facts. End with a one-line "Criteria cited:"
+      list of the policy required-fields you addressed.
+
+      IMPORTANT: AI-assisted draft - a licensed clinician must verify before submission.
+
+      Minimized order facts: {steps.minimize_phi.output.minimized_payload}
+      Plan medical-necessity policy + required fields: {steps.fetch_policy.output}
+
+  - id: draft_justification_b
+    type: standard
+    model: google/gemini-2.5-pro
+    prompt: |
+      You are a utilization-review nurse writing a medical-necessity justification for a prior
+      authorization. Using ONLY the facts provided, write a structured justification (no markdown
+      headers, no emojis) that: (a) states the diagnosis and the requested service, (b) explains
+      why the service is medically necessary, and (c) cites the specific chart findings that
+      support it - quote each finding you rely on. Do NOT invent findings, codes, or trial-of-
+      conservative-therapy claims not present in the facts. End with a one-line "Criteria cited:"
+      list of the policy required-fields you addressed.
+
+      IMPORTANT: AI-assisted draft - a licensed clinician must verify before submission.
+
+      Minimized order facts: {steps.minimize_phi.output.minimized_payload}
+      Plan medical-necessity policy + required fields: {steps.fetch_policy.output}
+
+  - id: pick_justification
+    type: race
+    depends_on: [minimize_phi, fetch_policy]
+    race_config:
+      branches:
+        - [draft_justification_a]
+        - [draft_justification_b]
+      validator: "len(str(output).strip()) > 80"
+
+  # 7) DETERMINISTIC COMPLETENESS VALIDATOR (sandboxed Python, NO model). The load-bearing check:
+  #    every payer-required field present, codes well-formed (ICD-10 + CPT/HCPCS regex), and the
+  #    justification references real chart findings. Swapping the draft model cannot change this.
+  - id: validate_completeness
+    type: code
+    depends_on: [pick_justification, fetch_policy, minimize_phi]
+    code_config:
+      language: python
+      code: |
+        import re
+
+        payload = (_steps['minimize_phi'] or {}).get('minimized_payload') or {}
+        policy = _steps['fetch_policy'] or {}
+        justification = str(_steps['pick_justification'] or '')
+
+        # Required fields the payer expects on the request; tolerate a couple of connector shapes,
+        # fall back to a sane default set so the validator is never vacuous.
+        required = (
+            policy.get('required_fields')
+            or policy.get('requiredFields')
+            or (policy.get('policy') or {}).get('required_fields')
+            or ['diagnosis_codes', 'service_code', 'clinical_findings', 'ordering_provider_npi']
+        )
+        if not isinstance(required, list):
+            required = [str(required)]
+
+        # --- presence check against the minimized payload ---
+        missing_fields = []
+        for field in required:
+            f = str(field).strip()
+            val = payload.get(f)
+            if val is None or (isinstance(val, (list, str)) and len(val) == 0):
+                missing_fields.append(f)
+
+        # --- code well-formedness ---
+        icd10_pat = r'^[A-TV-Z]\d[0-9A-Z](\.[0-9A-Z]{1,4})?$'   # ICD-10-CM
+        cpt_pat = r'^\d{5}$'                                      # CPT
+        hcpcs_pat = r'^[A-Z]\d{4}$'                              # HCPCS level II
+
+        malformed_codes = []
+        dx = payload.get('diagnosis_codes') or []
+        if not dx:
+            malformed_codes.append('no diagnosis code present')
+        for c in dx:
+            if not re.match(icd10_pat, str(c).strip().upper()):
+                malformed_codes.append(f"ICD-10 malformed: {c}")
+
+        svc = str(payload.get('service_code') or '').strip().upper()
+        all_service_codes = [svc] + [str(c).strip().upper() for c in (payload.get('supporting_codes') or [])]
+        for c in all_service_codes:
+            if not c:
+                continue
+            if not (re.match(cpt_pat, c) or re.match(hcpcs_pat, c)):
+                malformed_codes.append(f"CPT/HCPCS malformed: {c}")
+        if not svc:
+            malformed_codes.append('no primary service code present')
+
+        # --- justification must actually reference real chart findings (anti-hallucination) ---
+        findings = [str(f) for f in (payload.get('clinical_findings') or []) if str(f).strip()]
+        jl = justification.lower()
+        cited = 0
+        for f in findings:
+            # match on a distinctive token from each finding (longest word >= 5 chars)
+            tokens = sorted([t for t in re.findall(r'[a-zA-Z0-9]{5,}', f)], key=len, reverse=True)
+            if tokens and tokens[0].lower() in jl:
+                cited += 1
+        justification_grounded = (len(findings) == 0) or (cited >= 1)
+        if not findings:
+            missing_fields.append('clinical_findings (none extracted from chart)')
+
+        issues = []
+        if missing_fields:
+            issues.append("missing required fields: " + ", ".join(sorted(set(missing_fields))))
+        if malformed_codes:
+            issues.append("code issues: " + "; ".join(malformed_codes))
+        if not justification_grounded:
+            issues.append("justification does not cite any extracted chart finding")
+        if len(justification.strip()) < 80:
+            issues.append("justification too short to be payer-ready")
+
+        is_complete = len(issues) == 0
+        result = {
+            'is_complete': is_complete,
+            'missing_fields': sorted(set(missing_fields)),
+            'malformed_codes': malformed_codes,
+            'findings_cited': cited,
+            'findings_total': len(findings),
+            'justification_grounded': justification_grounded,
+            'unmet_criteria': issues,
+            'unmet_criteria_text': "; ".join(issues) if issues else "all payer-required fields present and well-formed",
+        }
+
+  # 8) GATE - multi-strategy. ALL must pass before anything leaves the clinic.
+  #    (a) llm_eval traceability: the justification is grounded in the EXTRACTED chart facts with
+  #        no fabricated evidence, and completeness passed. (b) human clinician approval. Fails
+  #        closed on timeout (abort) so an unreviewed packet is never submitted.
+  - id: traceability_and_signoff_gate
+    type: gate
+    depends_on: [validate_completeness, pick_justification]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are a prior-authorization control. Answer exactly 'approved' ONLY if EVERY claim
+              in the justification is traceable to a clinical finding present in the minimized order
+              facts (no fabricated labs, imaging, failed therapies, or codes) AND the completeness
+              validator reported is_complete=true. Otherwise answer 'rejected' and name the
+              untraceable claim or the unmet criterion. You verify traceability only; you do not
+              authorize the service. Justification: {steps.pick_justification.output} ||| Order facts:
+              {steps.minimize_phi.output.minimized_payload} ||| Completeness: {steps.validate_completeness.output}
+            model: haiku
+        - type: human
+          config:
+            message: >-
+              Clinician sign-off before this prior-auth leaves the clinic. Service
+              {steps.minimize_phi.output.minimized_payload.service_code}
+              ({steps.minimize_phi.output.minimized_payload.service_description}), dx
+              {steps.minimize_phi.output.minimized_payload.diagnosis_codes}, plan {input.plan_id}.
+              Completeness: {steps.validate_completeness.output.unmet_criteria_text}. Review the
+              justification for accuracy and approve to submit, or reject to send it back to the queue.
+            timeout_hours: 48
+            on_timeout: abort
+
+  # 9) REPORT - render the payer-formatted prior-auth packet PDF from the approved, minimized data.
+  - id: build_packet
+    type: report
+    depends_on: [traceability_and_signoff_gate]
+    report_config:
+      template: "research-report"
+      format: pdf
+      theme: professional
+      title: "Prior Authorization Request - {input.plan_id} - {steps.minimize_phi.output.minimized_payload.service_code}"
+      author: "Prior Authorization Desk"
+    prompt: >-
+      Produce a payer-ready prior-authorization request packet PDF from the data below. Sections, in
+      order: (1) Request header - target plan {input.plan_id}, subject member id
+      {steps.minimize_phi.output.minimized_payload.subject_member_id}, requesting provider NPI
+      {steps.minimize_phi.output.minimized_payload.ordering_provider_npi}, re-link token
+      {steps.minimize_phi.output.relink_token}; (2) Requested service - code
+      {steps.minimize_phi.output.minimized_payload.service_code}, description, site of service,
+      supporting codes; (3) Diagnoses - {steps.minimize_phi.output.minimized_payload.diagnosis_codes};
+      (4) Medical-necessity justification with cited chart findings -
+      {steps.pick_justification.output}; (5) Completeness attestation - this packet passed a
+      deterministic completeness validator ({steps.validate_completeness.output.unmet_criteria_text}),
+      an llm_eval traceability check, and a human clinician sign-off; PHI was minimized (stripped:
+      {steps.minimize_phi.output.stripped_fields}). Add a footer: AI-assisted, clinician-attested;
+      verify against the plan's current policy before final submission.
+
+  # 10) NOTIFY the clinic prior-auth queue with the outcome and any unmet criteria.
+  - id: notify_clinic_queue
+    type: notify
+    depends_on: [build_packet, validate_completeness]
+    notify_config:
+      service: slack
+      channel: "{input.clinic_queue_channel}"
+      message: >-
+        Prior-auth packet built for service {steps.minimize_phi.output.minimized_payload.service_code}
+        ({steps.minimize_phi.output.minimized_payload.service_description}), plan {input.plan_id}, dx
+        {steps.minimize_phi.output.minimized_payload.diagnosis_codes}. Completeness:
+        {steps.validate_completeness.output.unmet_criteria_text}. Traceability + clinician sign-off
+        passed; PDF generated and ready to submit. Re-link token
+        {steps.minimize_phi.output.relink_token}. Any unmet criteria above must be resolved before
+        submission.
+
+on_complete:
+  storage_path: "prior-authorization-packet-builder/{run_id}/result.json"

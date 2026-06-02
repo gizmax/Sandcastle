@@ -65,6 +65,10 @@
       --cat-engineering: #3B82F6;
       --cat-hr_legal: #10B981;
       --cat-general_ai: #9CA3AF;
+      --cat-compliance_grc: #14B8A6;
+      --cat-healthcare: #06B6D4;
+      --cat-fintech_banking: #6366F1;
+      --cat-llmops_ai_eng: #EC4899;
     }
 
     html {
@@ -545,6 +549,10 @@
     .pill[data-cat="engineering"].active { background: var(--cat-engineering); }
     .pill[data-cat="hr_legal"].active { background: var(--cat-hr_legal); color: #000; }
     .pill[data-cat="general_ai"].active { background: var(--cat-general_ai); color: #000; }
+    .pill[data-cat="compliance_grc"].active { background: var(--cat-compliance_grc); color: #000; }
+    .pill[data-cat="healthcare"].active { background: var(--cat-healthcare); color: #000; }
+    .pill[data-cat="fintech_banking"].active { background: var(--cat-fintech_banking); }
+    .pill[data-cat="llmops_ai_eng"].active { background: var(--cat-llmops_ai_eng); }
 
     /* Sort */
     .sort-select {
@@ -622,6 +630,10 @@
     .card[data-cat="engineering"]::before { background: var(--cat-engineering); }
     .card[data-cat="hr_legal"]::before { background: var(--cat-hr_legal); }
     .card[data-cat="general_ai"]::before { background: var(--cat-general_ai); }
+    .card[data-cat="compliance_grc"]::before { background: var(--cat-compliance_grc); }
+    .card[data-cat="healthcare"]::before { background: var(--cat-healthcare); }
+    .card[data-cat="fintech_banking"]::before { background: var(--cat-fintech_banking); }
+    .card[data-cat="llmops_ai_eng"]::before { background: var(--cat-llmops_ai_eng); }
 
     .card-header-row {
       display: flex;
@@ -2469,6 +2481,18 @@
           </button>
           <button class="pill" data-cat="general_ai">
             <span class="dot" style="background:var(--cat-general_ai)"></span>General AI
+          </button>
+          <button class="pill" data-cat="compliance_grc">
+            <span class="dot" style="background:var(--cat-compliance_grc)"></span>Compliance &amp; GRC
+          </button>
+          <button class="pill" data-cat="healthcare">
+            <span class="dot" style="background:var(--cat-healthcare)"></span>Healthcare
+          </button>
+          <button class="pill" data-cat="fintech_banking">
+            <span class="dot" style="background:var(--cat-fintech_banking)"></span>Fintech &amp; Banking
+          </button>
+          <button class="pill" data-cat="llmops_ai_eng">
+            <span class="dot" style="background:var(--cat-llmops_ai_eng)"></span>LLMOps &amp; AI Eng
           </button>
         </div>
         <div class="filter-right">

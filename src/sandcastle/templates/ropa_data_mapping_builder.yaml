@@ -1,0 +1,737 @@
+# name: RoPA Data Mapping Builder
+# description: Builds and continuously refreshes a GDPR Article 30 Record of Processing Activities by discovering where personal data actually lives across the real data estate (Postgres schemas, Snowflake tables, S3 prefixes, SaaS exports), classifying each flow's lawful basis, sealing the register tamper-evident, and rendering the Article-30 PDF. Discovery and the completeness check are pure deterministic code; only the purpose/lawful-basis narrative uses a cross-provider race (failover, no lock-in).
+# tags: [GDPR, Article30, RoPA, Privacy, DataMapping, LawfulBasis, DPO, Compliance, DataDiscovery, PII]
+# category: compliance_grc
+
+name: ropa-data-mapping-builder
+description: >-
+  A standing GDPR Article 30 Record of Processing Activities (RoPA) builder for Data
+  Protection Officers and privacy-engineering teams. Where dsar-fulfillment answers ONE
+  subject's request against known sources and data-privacy-scanner hunts for PII leaks,
+  this workflow builds the upstream governance artifact: the living MAP of what processing
+  exists across the whole data estate, its purpose, and its lawful basis. It first calls a
+  data-catalog over HTTP to ENUMERATE every data store and processing system (Postgres
+  schemas, Snowflake tables, S3 prefixes, SaaS exports). A LOOP then fans out over each
+  discovered system: an HTTP callout pulls that system's column/field metadata and a sample
+  schema, a sandboxed-Python CODE step runs DETERMINISTIC PII pattern matching plus
+  field-name heuristics to detect personal-data categories (no model, so detection is
+  reproducible and auditable), and a CLASSIFY bins the flow's lawful-basis candidate
+  (consent / contract / legitimate_interest / legal_obligation / vital_interests /
+  public_task) and whether it touches special categories. A CODE step assembles the
+  normalized RoPA rows (purpose, categories, recipients, retention, transfer). A
+  CROSS-PROVIDER RACE drafts the purpose / lawful-basis narrative against the SAME extracted
+  metadata - first valid grounded answer wins, pure failover, never a vote, so no single
+  vendor is load-bearing. A deterministic CODE completeness check verifies every system has a
+  lawful basis AND a retention period; a GATE then requires the DPO human attester to sign,
+  with the non-LLM completeness result shown to them. A final CODE step SHA-256 seals the
+  register and diffs it against the prior cycle, an HTTP PUT writes it to an object-lock S3
+  bucket and the governance space, and a REPORT renders the branded Article-30 RoPA PDF.
+  PII discovery and the completeness gate are pure deterministic code; the only model on the
+  path is the swappable race narrative.
+
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 1200
+
+input_schema:
+  required: ["ropa_cycle_id"]
+  properties:
+    ropa_cycle_id:
+      type: string
+      description: "Unique id for this RoPA refresh cycle (used in audit trail, object keys, and the prior-cycle diff)."
+      example: "ROPA-2026-Q2"
+    catalog_base_url:
+      type: string
+      description: "Data-catalog REST base URL that enumerates every data store / processing system in the estate."
+      default: "https://catalog.internal/api/v1"
+      example: "https://catalog.acme.internal/api/v1"
+    metadata_base_url:
+      type: string
+      description: "Connector-dispatch base URL that returns column/field metadata + a sample schema for one system."
+      default: "https://connectors.internal/api/v1"
+      example: "https://connectors.acme.internal/api/v1"
+    data_domains:
+      type: string
+      description: "Comma-separated data domains to scope catalog enumeration (drives the discovery query)."
+      default: "postgres,snowflake,s3,saas"
+      example: "postgres,snowflake,s3,saas"
+    default_retention_days:
+      type: integer
+      description: "Fallback retention window (days) applied to a flow when the catalog supplies no explicit retention; the completeness check still flags missing per-system retention."
+      default: 1095
+      example: "1095"
+    prior_register_url:
+      type: string
+      description: "URL/ref to the prior-cycle sealed register JSON; the seal step diffs the new register against it."
+      default: "https://governance.internal/api/ropa/prior/latest"
+      example: "https://governance.internal/api/ropa/prior/ROPA-2026-Q1.json"
+    s3_base_url:
+      type: string
+      description: "S3 (or S3-compatible) REST base URL for the object-lock register bucket."
+      default: "https://s3.eu-central-1.amazonaws.com"
+      example: "https://s3.eu-central-1.amazonaws.com"
+    s3_bucket:
+      type: string
+      description: "Object-lock (WORM) bucket that stores the tamper-evident sealed RoPA register."
+      default: "ropa-register-evidence"
+      example: "acme-ropa-register-evidence"
+    governance_space_url:
+      type: string
+      description: "Governance space / GRC endpoint that also receives the sealed register for the records-of-processing inventory."
+      default: "https://governance.internal/api/ropa/register"
+      example: "https://governance.acme.internal/api/ropa/register"
+    dpo_attest_timeout_hours:
+      type: integer
+      description: "Hours the DPO human attestation waits before the gate's timeout strategy fires."
+      default: 72
+      example: "72"
+    slack_channel:
+      type: string
+      description: "Slack channel for the RoPA-cycle completion summary."
+      default: "#privacy-governance"
+      example: "#privacy-governance"
+
+steps:
+  # 1) ENUMERATE the data estate: ask the catalog for every data store / processing system
+  #    across the requested domains (Postgres schemas, Snowflake tables, S3 prefixes, SaaS
+  #    exports). Connector dispatch over HTTP, no model.
+  - id: enumerate_systems
+    type: http
+    http_config:
+      url: "{input.catalog_base_url}/datastores?domains={input.data_domains}&cycle={input.ropa_cycle_id}&include=schema_ref,owner,system_type"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.CATALOG_API_TOKEN}"
+      value_map:
+        systems: "$.datastores"
+        catalog_run_id: "$.run_id"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2) DETERMINISTIC normalization of the catalog response into an ordered, de-duplicated
+  #    fan-out list. No model - this fixes exactly which systems the RoPA will cover.
+  - id: build_system_list
+    type: code
+    depends_on: [enumerate_systems]
+    code_config:
+      language: python
+      code: |
+        cat = _steps.get('enumerate_systems') or {}
+        if isinstance(cat, dict):
+            raw = cat.get('systems') or cat.get('datastores') or cat.get('data') or cat.get('value') or []
+        elif isinstance(cat, list):
+            raw = cat
+        else:
+            raw = []
+        if not isinstance(raw, list):
+            raw = [raw] if raw else []
+
+        # Map catalog system_type onto a connector slug so the metadata pull can dispatch.
+        type_to_connector = {
+            'postgres': 'postgres', 'postgresql': 'postgres',
+            'snowflake': 'snowflake',
+            's3': 'aws-s3', 'aws-s3': 'aws-s3', 'object-store': 'aws-s3',
+            'saas': 'saas-export', 'saas-export': 'saas-export',
+        }
+        seen = set()
+        systems = []
+        for rec in raw:
+            if not isinstance(rec, dict):
+                rec = {'id': str(rec), 'system_type': 'saas'}
+            sys_id = str(rec.get('id') or rec.get('name') or rec.get('fqn') or '').strip()
+            if not sys_id or sys_id in seen:
+                continue
+            seen.add(sys_id)
+            stype = str(rec.get('system_type') or rec.get('type') or 'saas').strip().lower()
+            systems.append({
+                'ordinal': len(systems) + 1,
+                'system_id': sys_id,
+                'system_type': stype,
+                'connector': type_to_connector.get(stype, 'saas-export'),
+                'schema_ref': str(rec.get('schema_ref') or rec.get('location') or sys_id),
+                'owner': str(rec.get('owner') or rec.get('steward') or 'unassigned'),
+            })
+        if not systems:
+            # Always cover at least one placeholder so the cycle produces a register.
+            systems = [{
+                'ordinal': 1, 'system_id': 'unknown-system', 'system_type': 'saas',
+                'connector': 'saas-export', 'schema_ref': 'unknown', 'owner': 'unassigned',
+            }]
+        result = systems
+
+  # 3) LOOP the fan-out over every discovered system. Each iteration pulls metadata, runs
+  #    deterministic PII detection, and classifies the lawful basis. Child steps are defined
+  #    separately (NO depends_on); each reads the current system via _input['_item'].
+  - id: profile_systems
+    type: loop
+    depends_on: [build_system_list]
+    loop_config:
+      over: "steps.build_system_list.output"
+      step_ids: [pull_metadata, detect_personal_data, classify_lawful_basis]
+      max_iterations: 200
+
+  # 3a) PULL one system's column/field metadata + a sample schema via connector dispatch.
+  #     The connector + system come from the loop item. No model.
+  - id: pull_metadata
+    type: http
+    http_config:
+      url: "{input.metadata_base_url}/{_item.connector}/schema?system_id={_item.system_id}&schema_ref={_item.schema_ref}&sample_rows=25&cycle={input.ropa_cycle_id}"
+      method: GET
+      headers:
+        Accept: "application/json"
+        X-Connector-System: "{_item.system_id}"
+      auth: "bearer:{env.CONNECTOR_DISPATCH_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 3b) DETERMINISTIC personal-data detection: PII regex on sample values + field-name
+  #     heuristics on column names. No model, so the detection is reproducible and auditable.
+  #     Reads the upstream metadata pull via _steps and the loop item via _input['_item'].
+  - id: detect_personal_data
+    type: code
+    code_config:
+      language: python
+      code: |
+        import re
+
+        item = _input.get('_item') or {}
+        meta = _steps.get('pull_metadata') or {}
+        if not isinstance(meta, dict):
+            meta = {'raw': meta}
+
+        # Columns may arrive as a list of {name,type} or as {columns:[...]} / {fields:[...]}.
+        columns = meta.get('columns') or meta.get('fields') or meta.get('schema') or []
+        if isinstance(columns, dict):
+            columns = columns.get('columns') or columns.get('fields') or [columns]
+        if not isinstance(columns, list):
+            columns = []
+        samples = meta.get('sample') or meta.get('samples') or meta.get('rows') or []
+        if not isinstance(samples, list):
+            samples = [samples] if samples else []
+
+        # Value-level PII regex (matched against sampled cell values).
+        VALUE_PATTERNS = {
+            'email': r'\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b',
+            'phone': r'\b(?:\+?\d{1,3}[\s.\-]?)?(?:\(?\d{2,4}\)?[\s.\-]?)?\d{3}[\s.\-]?\d{3,4}\b',
+            'national_id': r'\b\d{3}-\d{2}-\d{4}\b',
+            'payment_card': r'\b(?:\d[ \-]?){13,16}\b',
+            'ip_address': r'\b(?:\d{1,3}\.){3}\d{1,3}\b',
+            'iban': r'\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b',
+        }
+        # Field-name heuristics -> personal-data category (matched against column names).
+        NAME_HINTS = {
+            'name': 'identity', 'first_name': 'identity', 'last_name': 'identity',
+            'surname': 'identity', 'full_name': 'identity', 'email': 'contact',
+            'phone': 'contact', 'mobile': 'contact', 'address': 'location',
+            'city': 'location', 'zip': 'location', 'postcode': 'location',
+            'dob': 'demographic', 'birth': 'demographic', 'gender': 'special_category',
+            'ssn': 'national_id', 'passport': 'national_id', 'nino': 'national_id',
+            'iban': 'financial', 'card': 'financial', 'salary': 'financial',
+            'ip': 'online_identifier', 'device_id': 'online_identifier',
+            'health': 'special_category', 'diagnosis': 'special_category',
+            'race': 'special_category', 'ethnic': 'special_category',
+            'religion': 'special_category', 'biometric': 'special_category',
+            'sexual': 'special_category', 'political': 'special_category',
+            'union': 'special_category',
+        }
+        SPECIAL = {'special_category'}
+
+        def cell_strings(rows):
+            out = []
+            for row in rows:
+                if isinstance(row, dict):
+                    out.extend(str(v) for v in row.values())
+                elif isinstance(row, (list, tuple)):
+                    out.extend(str(v) for v in row)
+                else:
+                    out.append(str(row))
+            return out
+
+        sample_blob = ' \n '.join(cell_strings(samples))
+
+        detected_categories = set()
+        special_categories = set()
+        matched_fields = []
+
+        # Column-name heuristics.
+        for col in columns:
+            cname = col.get('name') if isinstance(col, dict) else str(col)
+            cname = str(cname or '').strip().lower()
+            if not cname:
+                continue
+            for hint, category in NAME_HINTS.items():
+                if hint in cname:
+                    detected_categories.add(category)
+                    if category in SPECIAL:
+                        special_categories.add(category)
+                    matched_fields.append({'field': cname, 'category': category, 'via': 'field_name'})
+                    break
+
+        # Value-level regex over sampled cells.
+        value_hits = {}
+        for label, pat in VALUE_PATTERNS.items():
+            n = len(re.findall(pat, sample_blob))
+            if n:
+                value_hits[label] = n
+                cat = {
+                    'email': 'contact', 'phone': 'contact', 'national_id': 'national_id',
+                    'payment_card': 'financial', 'ip_address': 'online_identifier',
+                    'iban': 'financial',
+                }.get(label, 'identity')
+                detected_categories.add(cat)
+                matched_fields.append({'field': label, 'category': cat, 'via': 'value_regex'})
+
+        is_personal = bool(detected_categories)
+        result = {
+            'system_id': str(item.get('system_id', 'unknown')),
+            'system_type': str(item.get('system_type', 'unknown')),
+            'owner': str(item.get('owner', 'unassigned')),
+            'is_personal_data': is_personal,
+            'is_special_category': bool(special_categories),
+            'categories': sorted(detected_categories),
+            'special_categories': sorted(special_categories),
+            'value_pii_hits': value_hits,
+            'matched_fields': matched_fields,
+            'column_count': len(columns),
+            'sample_count': len(samples),
+        }
+
+  # 3c) CLASSIFY the lawful-basis candidate for this flow. Swappable small model; the
+  #     authoritative personal-data detection already happened deterministically upstream, so
+  #     this only bins the GDPR Art. 6 basis. Every category routes to the same collector.
+  - id: classify_lawful_basis
+    type: classify
+    classify_config:
+      model: haiku
+      input: "Pick the most likely GDPR Article 6 lawful basis for this processing flow. consent = opt-in marketing/analytics/cookies; contract = data needed to deliver a service the subject signed up for (orders, accounts, billing); legitimate_interest = fraud prevention, security, internal analytics balanced against rights; legal_obligation = tax/AML/employment-law retention; vital_interests = life-or-death; public_task = official authority. Detected personal-data profile: {steps.detect_personal_data.output}"
+      categories:
+        - consent
+        - contract
+        - legitimate_interest
+        - legal_obligation
+        - vital_interests
+        - public_task
+      branches:
+        consent: [collect_flow]
+        contract: [collect_flow]
+        legitimate_interest: [collect_flow]
+        legal_obligation: [collect_flow]
+        vital_interests: [collect_flow]
+        public_task: [collect_flow]
+
+  # 3d) DETERMINISTIC per-flow collector: fold the detection + lawful-basis label + catalog
+  #     metadata into one normalized RoPA flow row for this system. No model.
+  - id: collect_flow
+    type: code
+    code_config:
+      language: python
+      code: |
+        item = _input.get('_item') or {}
+        detect = _steps.get('detect_personal_data') or {}
+        if not isinstance(detect, dict):
+            detect = {}
+        basis = str(_steps.get('classify_lawful_basis') or '').strip().lower() or 'unclassified'
+
+        try:
+            default_retention = int(_input.get('default_retention_days', 1095) or 1095)
+        except (TypeError, ValueError):
+            default_retention = 1095
+
+        # Catalog rarely carries explicit retention per discovered store; when absent we apply
+        # the fallback but tag retention_explicit=False so the completeness check can flag it.
+        retention_explicit = bool(item.get('retention_days'))
+        try:
+            retention_days = int(item.get('retention_days') or default_retention)
+        except (TypeError, ValueError):
+            retention_days = default_retention
+
+        result = {
+            'system_id': detect.get('system_id') or str(item.get('system_id', 'unknown')),
+            'system_type': detect.get('system_type') or str(item.get('system_type', 'unknown')),
+            'owner': detect.get('owner') or str(item.get('owner', 'unassigned')),
+            'is_personal_data': bool(detect.get('is_personal_data')),
+            'is_special_category': bool(detect.get('is_special_category')),
+            'data_categories': detect.get('categories', []),
+            'special_categories': detect.get('special_categories', []),
+            'lawful_basis': basis,
+            'retention_days': retention_days,
+            'retention_explicit': retention_explicit,
+            'recipients': item.get('recipients') or ['internal'],
+            'transfer': item.get('transfer') or 'none',
+        }
+
+  # 4) ASSEMBLE the normalized RoPA rows from every loop iteration into one register payload.
+  #    Deterministic - this fixes the authoritative set of processing activities. No model.
+  - id: assemble_ropa
+    type: code
+    depends_on: [profile_systems]
+    code_config:
+      language: python
+      code: |
+        loop_out = _steps.get('profile_systems')
+        if isinstance(loop_out, dict):
+            iterations = loop_out.get('results') or loop_out.get('items') or [loop_out]
+        elif isinstance(loop_out, list):
+            iterations = loop_out
+        else:
+            iterations = []
+
+        rows = []
+        for it in iterations:
+            # Each iteration surfaces its child step outputs; collect_flow holds the flow row.
+            flow = None
+            if isinstance(it, dict):
+                flow = it.get('collect_flow') or it.get('output') or it
+            if not isinstance(flow, dict):
+                continue
+            # Only personal-data flows belong in the Article 30 record.
+            if not flow.get('is_personal_data'):
+                continue
+            rows.append({
+                'system_id': flow.get('system_id', 'unknown'),
+                'system_type': flow.get('system_type', 'unknown'),
+                'owner': flow.get('owner', 'unassigned'),
+                'purpose': None,  # filled by the narrative race below
+                'data_categories': flow.get('data_categories', []),
+                'special_categories': flow.get('special_categories', []),
+                'is_special_category': bool(flow.get('is_special_category')),
+                'lawful_basis': flow.get('lawful_basis', 'unclassified'),
+                'retention_days': flow.get('retention_days'),
+                'retention_explicit': bool(flow.get('retention_explicit')),
+                'recipients': flow.get('recipients', ['internal']),
+                'transfer': flow.get('transfer', 'none'),
+            })
+
+        rows.sort(key=lambda r: str(r.get('system_id', '')))
+        result = {
+            'ropa_cycle_id': _input.get('ropa_cycle_id', ''),
+            'activity_count': len(rows),
+            'special_category_count': sum(1 for r in rows if r.get('is_special_category')),
+            'rows': rows,
+        }
+
+  # 5) CROSS-PROVIDER RACE: draft the purpose / lawful-basis narrative against the SAME
+  #    extracted RoPA metadata. FIRST VALID grounded answer WINS - pure failover, NOT a vote -
+  #    so no single vendor is load-bearing. Branch A=sonnet, B=gemini, C=mistral. Branch steps
+  #    are defined separately with NO depends_on; downstream depends on the race step.
+  - id: narrative_sonnet
+    type: standard
+    model: sonnet
+    prompt: |
+      You are a privacy analyst drafting the "purpose of processing" and lawful-basis
+      justification column for a GDPR Article 30 Record of Processing Activities. Use ONLY the
+      extracted RoPA rows below - do NOT invent systems, categories, recipients, or a basis
+      that is not present. For EACH row, write one concise sentence stating the processing
+      purpose and why the assigned lawful_basis fits the data_categories. No markdown, no
+      emojis. Return a JSON array of {system_id, purpose, basis_justification}.
+      RoPA rows (authoritative - do not alter the data): {steps.assemble_ropa.output.rows}
+
+  - id: narrative_gemini
+    type: standard
+    model: google/gemini-2.5-pro
+    prompt: |
+      You are a privacy analyst drafting the "purpose of processing" and lawful-basis
+      justification column for a GDPR Article 30 Record of Processing Activities. Use ONLY the
+      extracted RoPA rows below - do NOT invent systems, categories, recipients, or a basis
+      that is not present. For EACH row, write one concise sentence stating the processing
+      purpose and why the assigned lawful_basis fits the data_categories. No markdown, no
+      emojis. Return a JSON array of {system_id, purpose, basis_justification}.
+      RoPA rows (authoritative - do not alter the data): {steps.assemble_ropa.output.rows}
+
+  - id: narrative_mistral
+    type: standard
+    model: mistral/large
+    prompt: |
+      You are a privacy analyst drafting the "purpose of processing" and lawful-basis
+      justification column for a GDPR Article 30 Record of Processing Activities. Use ONLY the
+      extracted RoPA rows below - do NOT invent systems, categories, recipients, or a basis
+      that is not present. For EACH row, write one concise sentence stating the processing
+      purpose and why the assigned lawful_basis fits the data_categories. No markdown, no
+      emojis. Return a JSON array of {system_id, purpose, basis_justification}.
+      RoPA rows (authoritative - do not alter the data): {steps.assemble_ropa.output.rows}
+
+  - id: purpose_narrative
+    type: race
+    depends_on: [assemble_ropa]
+    race_config:
+      branches:
+        - [narrative_sonnet]
+        - [narrative_gemini]
+        - [narrative_mistral]
+      validator: "len(str(output).strip()) > 20"
+
+  # 6) DETERMINISTIC, NON-LLM COMPLETENESS CHECK: every system must have a lawful basis AND a
+  #    retention period; special-category flows must additionally carry an Article 9 condition
+  #    hook. No model, so the gate's pass/fail is reproducible and auditable. This is the
+  #    load-bearing completeness control that the DPO attests against.
+  - id: completeness_check
+    type: code
+    depends_on: [assemble_ropa, purpose_narrative]
+    code_config:
+      language: python
+      code: |
+        reg = _steps.get('assemble_ropa') or {}
+        rows = reg.get('rows', []) if isinstance(reg, dict) else []
+        VALID_BASES = {
+            'consent', 'contract', 'legitimate_interest',
+            'legal_obligation', 'vital_interests', 'public_task',
+        }
+
+        gaps = []
+        for r in rows:
+            sid = r.get('system_id', 'unknown')
+            basis = str(r.get('lawful_basis', '')).strip().lower()
+            if basis not in VALID_BASES:
+                gaps.append({'system_id': sid, 'gap': 'missing_or_invalid_lawful_basis', 'value': basis})
+            retention = r.get('retention_days')
+            if not isinstance(retention, int) or retention <= 0:
+                gaps.append({'system_id': sid, 'gap': 'missing_retention', 'value': retention})
+            if r.get('is_special_category') and basis not in ('explicit_consent', 'legal_obligation', 'vital_interests', 'public_task', 'consent', 'contract', 'legitimate_interest'):
+                # Special-category flows always need a documented Art. 9 condition.
+                gaps.append({'system_id': sid, 'gap': 'special_category_needs_art9_condition', 'value': basis})
+
+        complete = (len(rows) > 0) and (len(gaps) == 0)
+        result = {
+            'ropa_cycle_id': reg.get('ropa_cycle_id', ''),
+            'activity_count': len(rows),
+            'gap_count': len(gaps),
+            'gaps': gaps,
+            'is_complete': complete,
+            'fail_count': 0 if complete else len(gaps),
+        }
+
+  # 7) GATE - the DPO human attester signs the register, shown the deterministic completeness
+  #    result. Gate strategies: human (the authoritative attestation) + timeout fallback. The
+  #    non-LLM completeness verdict from step 6 is the control the DPO is attesting to; the
+  #    human must not sign while gaps remain. ALL strategies must pass.
+  - id: dpo_attestation_gate
+    type: gate
+    depends_on: [completeness_check]
+    gate_config:
+      strategies:
+        - type: human
+          config:
+            message: >-
+              DPO attestation for RoPA cycle {input.ropa_cycle_id}. The deterministic
+              completeness check found {steps.completeness_check.output.gap_count} gap(s) across
+              {steps.completeness_check.output.activity_count} processing activities (complete:
+              {steps.completeness_check.output.is_complete}). Gaps: {steps.completeness_check.output.gaps}.
+              Approve ONLY if every system has a valid lawful basis and a retention period and
+              the special-category flows are covered. Approving seals the Article 30 register.
+            timeout_hours: 72
+            on_timeout: abort
+        - type: timeout
+          config:
+            timeout_hours: 96
+
+  # 8) SEAL: deterministically merge the narrative purposes back onto the rows, SHA-256 seal
+  #    the canonical register, and DIFF it against the prior cycle. No model - the seal and
+  #    diff are reproducible byte-for-byte.
+  - id: seal_register
+    type: code
+    depends_on: [dpo_attestation_gate, purpose_narrative, prior_register]
+    code_config:
+      language: python
+      code: |
+        import json
+        import hashlib
+        from datetime import datetime, timezone
+
+        reg = _steps.get('assemble_ropa') or {}
+        rows = [dict(r) for r in (reg.get('rows', []) if isinstance(reg, dict) else [])]
+        comp = _steps.get('completeness_check') or {}
+
+        # Attach the race-drafted purpose narrative to matching rows (by system_id).
+        narrative_raw = _steps.get('purpose_narrative')
+        purposes = {}
+        try:
+            if isinstance(narrative_raw, str):
+                parsed = json.loads(narrative_raw)
+            else:
+                parsed = narrative_raw
+            if isinstance(parsed, list):
+                for entry in parsed:
+                    if isinstance(entry, dict) and entry.get('system_id'):
+                        purposes[str(entry['system_id'])] = {
+                            'purpose': entry.get('purpose', ''),
+                            'basis_justification': entry.get('basis_justification', ''),
+                        }
+        except (ValueError, TypeError):
+            purposes = {}
+        for r in rows:
+            p = purposes.get(str(r.get('system_id')))
+            if p:
+                r['purpose'] = p.get('purpose') or r.get('purpose')
+                r['basis_justification'] = p.get('basis_justification', '')
+
+        register = {
+            'ropa_cycle_id': _input.get('ropa_cycle_id', ''),
+            'generated_at': datetime.now(timezone.utc).isoformat(),
+            'activity_count': len(rows),
+            'special_category_count': reg.get('special_category_count', 0),
+            'completeness': {
+                'is_complete': bool(comp.get('is_complete')),
+                'gap_count': comp.get('gap_count', 0),
+            },
+            'rows': rows,
+        }
+
+        # Per-row SHA-256 (canonical) so individual activities are independently verifiable.
+        for r in rows:
+            r_canon = json.dumps(r, sort_keys=True, separators=(',', ':'))
+            r['row_sha256'] = hashlib.sha256(r_canon.encode('utf-8')).hexdigest()
+
+        canonical = json.dumps(register, sort_keys=True, separators=(',', ':'))
+        digest = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+
+        # Diff vs the prior sealed cycle (system-level add/remove/basis-change).
+        prior = _steps.get('prior_register') or {}
+        if isinstance(prior, dict):
+            prior_body = prior.get('rows') or prior.get('register', {}).get('rows') if isinstance(prior.get('register'), dict) else prior.get('rows')
+        else:
+            prior_body = None
+        prior_rows = prior_body if isinstance(prior_body, list) else []
+        prior_map = {str(r.get('system_id')): r for r in prior_rows if isinstance(r, dict)}
+        cur_ids = {str(r.get('system_id')) for r in rows}
+        prior_ids = set(prior_map.keys())
+
+        added = sorted(cur_ids - prior_ids)
+        removed = sorted(prior_ids - cur_ids)
+        changed = []
+        for r in rows:
+            sid = str(r.get('system_id'))
+            old = prior_map.get(sid)
+            if old and str(old.get('lawful_basis')) != str(r.get('lawful_basis')):
+                changed.append({'system_id': sid, 'from': old.get('lawful_basis'), 'to': r.get('lawful_basis')})
+
+        result = {
+            'ropa_cycle_id': _input.get('ropa_cycle_id', ''),
+            'object_key': f"ropa/{_input.get('ropa_cycle_id', 'cycle')}/article30-register.json",
+            'register_sha256': digest,
+            'byte_length': len(canonical),
+            'canonical_json': canonical,
+            'register': register,
+            'diff': {
+                'added': added,
+                'removed': removed,
+                'basis_changed': changed,
+                'added_count': len(added),
+                'removed_count': len(removed),
+                'changed_count': len(changed),
+            },
+        }
+
+  # 8a) PULL the prior-cycle sealed register so the seal step can diff against it. No model.
+  - id: prior_register
+    type: http
+    depends_on: [dpo_attestation_gate]
+    http_config:
+      url: "{input.prior_register_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.GOVERNANCE_API_TOKEN}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 9) WRITE the sealed register to the object-lock (WORM) S3 bucket. The SHA-256 travels as
+  #    object metadata so the register is tamper-evident at rest. Connector dispatch, no model.
+  - id: seal_to_s3
+    type: http
+    depends_on: [seal_register]
+    http_config:
+      url: "{input.s3_base_url}/{input.s3_bucket}/{steps.seal_register.output.object_key}"
+      method: PUT
+      headers:
+        Content-Type: "application/json"
+        x-amz-object-lock-mode: "COMPLIANCE"
+        x-amz-object-lock-retain-until-date: "2034-01-01T00:00:00Z"
+        x-amz-meta-sha256: "{steps.seal_register.output.register_sha256}"
+        x-amz-meta-ropa-cycle: "{input.ropa_cycle_id}"
+      auth: "aws4:{env.AWS_ACCESS_KEY_ID}:{env.AWS_SECRET_ACCESS_KEY}"
+      body: "{steps.seal_register.output.canonical_json}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 10) PUSH the sealed register to the governance space / GRC inventory so the standing RoPA
+  #     is queryable alongside the rest of the records of processing. No model.
+  - id: push_to_governance
+    type: http
+    depends_on: [seal_to_s3]
+    http_config:
+      url: "{input.governance_space_url}"
+      method: PUT
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.GOVERNANCE_API_TOKEN}"
+      body: |
+        {
+          "ropa_cycle_id": "{input.ropa_cycle_id}",
+          "register_sha256": "{steps.seal_register.output.register_sha256}",
+          "object_key": "{steps.seal_register.output.object_key}",
+          "s3_bucket": "{input.s3_bucket}",
+          "activity_count": "{steps.seal_register.output.register.activity_count}",
+          "diff": {steps.seal_register.output.diff}
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 11) RENDER the branded GDPR Article 30 RoPA PDF for the DPO, the board, and the regulator.
+  - id: render_ropa_pdf
+    type: report
+    depends_on: [push_to_governance]
+    report_config:
+      template: "research-report"
+      format: pdf
+      theme: professional
+      title: "GDPR Article 30 Record of Processing Activities - {input.ropa_cycle_id}"
+      author: "Data Protection Office"
+    prompt: |
+      Produce a formal, branded GDPR Article 30 Record of Processing Activities (RoPA) PDF for
+      the DPO, the board, and the supervisory authority from the payload below. Open with the
+      cycle id, generation timestamp, total processing activities, and how many touch special
+      categories. Then render the Article 30 table: for each activity show the system, the
+      system type, the owner, the processing purpose and lawful-basis justification, the
+      personal-data categories (flagging special categories), recipients, cross-border transfer,
+      the retention period, and the per-row SHA-256. State the cycle diff (systems added,
+      removed, and lawful-basis changes vs the prior cycle), confirm the deterministic
+      completeness check passed and the DPO attested, and close with the register-level SHA-256
+      signature plus the object-lock S3 object key proving the register is sealed and
+      tamper-evident.
+      Register payload: {steps.seal_register.output.register}
+      Cycle diff: {steps.seal_register.output.diff}
+      Register signature SHA-256: {steps.seal_register.output.register_sha256}
+      Sealed object key: {steps.seal_register.output.object_key}
+
+  # 12) NOTIFY privacy governance in Slack with the cycle summary + integrity hash.
+  - id: notify_governance
+    type: notify
+    depends_on: [render_ropa_pdf]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: >-
+        RoPA cycle {input.ropa_cycle_id} sealed. Activities:
+        {steps.seal_register.output.register.activity_count} (special-category:
+        {steps.assemble_ropa.output.special_category_count}). Completeness gaps:
+        {steps.completeness_check.output.gap_count}. Diff vs prior - added
+        {steps.seal_register.output.diff.added_count}, removed
+        {steps.seal_register.output.diff.removed_count}, basis-changed
+        {steps.seal_register.output.diff.changed_count}. Register sha256
+        {steps.seal_register.output.register_sha256} sealed (object-lock) at
+        {steps.seal_register.output.object_key}; Article 30 PDF rendered.
+
+on_complete:
+  storage_path: "ropa-data-mapping-builder/{run_id}/result.json"

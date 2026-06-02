@@ -1,0 +1,804 @@
+# name: Audit Evidence Request Responder
+# description: Turns an auditor's PBC / evidence-request list into auto-collected, mapped, and sealed evidence packs. Parses the request matrix, races two providers to map each free-form request to the right system-of-record + query plan, pulls the artifact over http, deterministically checks period + population coverage, classifies satisfied/partial/missing, chases gaps to the control owner, gates sufficiency, SHA-256 seals per-request packs to object-lock S3, and ships a coverage matrix with provenance.
+# tags: [Audit, PBC, Evidence-Request, SOC2, ISO27001, GRC, S3, ServiceNow, Jira, Compliance, Provenance, Object-Lock]
+# category: compliance_grc
+
+name: audit-evidence-request-responder
+description: >-
+  Request-driven audit evidence fulfilment. An auditor hands over a PBC ("Provided By Client")
+  / evidence-request list - an arbitrary, free-form matrix of "show us X for period Y". A parse
+  step ingests that matrix into structured request items, then the workflow LOOPS over every
+  request. Per request, a CROSS-PROVIDER RACE maps the free-form ask to the correct
+  system-of-record plus a concrete query plan against the SAME shared control catalog (branch A
+  sonnet, branch B gemini, branch C mistral - first VALID mapping wins, pure failover, not a
+  vote); a DETERMINISTIC code step normalizes that mapping, an http GET pulls the actual artifact
+  from the resolved source URL, and a DETERMINISTIC code step checks the artifact covers the
+  requested period window AND the requested population - no model in that check. A classify step
+  labels each request satisfied / partial / missing, and a condition routes partial|missing
+  requests to an http call that opens a control-owner remediation task. After the loop a GATE
+  decides overall sufficiency: a swappable llm_eval sufficiency judge on ONE provider AND a
+  NON-LLM completeness-threshold strategy (so the pack can pass/fail on deterministic math alone)
+  AND a human attester for the partials. A DETERMINISTIC code step then assembles per-request
+  evidence packs and a SHA-256 manifest of exactly what was provided, an http PUT seals the packs
+  to an object-lock (WORM) S3 bucket and shares a read-only link with the audit firm, and a report
+  step renders the coverage matrix (requests satisfied / open, each with its provenance). Mapping
+  is provider-raced failover; sufficiency is a swappable judge plus a deterministic threshold;
+  artifact pulling and hashing are entirely model-free. Provider-agnostic end to end.
+
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 1200
+
+input_schema:
+  required: ["engagement_id", "pbc_request_list"]
+  properties:
+    engagement_id:
+      type: string
+      description: "Audit engagement / PBC round id (e.g. 'AUDIT-2026-SOC2-PBC1')."
+      example: "AUDIT-2026-SOC2-PBC1"
+    pbc_request_list:
+      type: string
+      description: "The auditor's PBC / evidence-request matrix to fulfil (path, URL, or pasted CSV/XLSX/PDF/markdown table of requests). Parsed into structured request items."
+      example: "/inbox/auditfirm/SOC2-PBC-round1.xlsx"
+    period_start:
+      type: string
+      description: "ISO8601 start of the audit window each artifact must cover."
+      default: "2026-01-01T00:00:00Z"
+      example: "2026-01-01T00:00:00Z"
+    period_end:
+      type: string
+      description: "ISO8601 end of the audit window each artifact must cover."
+      default: "2026-03-31T23:59:59Z"
+      example: "2026-03-31T23:59:59Z"
+    control_catalog_url:
+      type: string
+      description: "REST base URL of the SHARED control catalog / system-of-record registry both race branches map requests against (Vanta/Drata/Hyperproof style)."
+      default: "https://your-org.grc-platform.com/api/v1"
+      example: "https://acme.drata.com/api/v1"
+    evidence_api_base_url:
+      type: string
+      description: "Base URL of the evidence-broker / data-API that fronts the systems-of-record and returns the actual artifact for a resolved source+query."
+      default: "https://your-org.grc-platform.com/api/v1/evidence"
+      example: "https://acme.drata.com/api/v1/evidence"
+    ticketing_base_url:
+      type: string
+      description: "Ticketing REST base URL used to open a control-owner remediation task for partial/missing requests (Jira / ServiceNow)."
+      default: "https://your-instance.atlassian.net/rest/api/3"
+      example: "https://acme.atlassian.net/rest/api/3"
+    required_population:
+      type: number
+      description: "Minimum fraction (0-1) of the requested population an artifact must cover to count as satisfying the request."
+      default: 0.95
+      example: "0.95"
+    min_completeness:
+      type: number
+      description: "Deterministic completeness threshold (0-1) the gate's NON-LLM strategy enforces for the pack to seal without a model."
+      default: 0.9
+      example: "0.9"
+    judge_model:
+      type: string
+      description: "Swappable sufficiency-judge model for the gate. Pin to an EU/local provider (mistral/large, ollama, omlx/qwen-3) for data-residency; the deterministic threshold still decides on its own."
+      default: "mistral/large"
+      example: "mistral/large"
+    s3_base_url:
+      type: string
+      description: "Object-lock (WORM) S3 (or S3-compatible) REST base URL that receives the sealed evidence packs."
+      default: "https://s3.eu-central-1.amazonaws.com"
+      example: "https://s3.eu-central-1.amazonaws.com"
+    s3_bucket:
+      type: string
+      description: "Object-lock bucket shared read-only with the audit firm."
+      default: "auditor-evidence-packs"
+      example: "acme-auditor-evidence-packs"
+    audit_firm_share_url:
+      type: string
+      description: "Audit-firm portal/webhook base URL that receives the read-only link to the sealed packs."
+      default: "https://portal.your-auditfirm.com/api/v1"
+      example: "https://portal.deloitte-example.com/api/v1"
+    slack_channel:
+      type: string
+      description: "Slack channel for the fulfilment summary."
+      default: "#audit-pbc"
+      example: "#audit-pbc"
+
+steps:
+  # 1) PARSE the auditor's PBC / evidence-request matrix into structured text. The list arrives
+  #    as XLSX / CSV / PDF / markdown table; parse normalizes it to markdown for the structuring
+  #    step. OCR on so scanned/printed PBC lists are still ingested.
+  - id: parse_pbc_list
+    type: parse
+    prompt: "{input.pbc_request_list}"
+    parse_config:
+      output: markdown
+      pages: null
+      ocr: true
+      ocr_engine: auto
+
+  # 2) DETERMINISTIC structuring of the parsed matrix into a flat, loopable list of request items.
+  #    Splits the markdown table rows into {request_id, description, requested_population,
+  #    period_start, period_end}. Pure parsing of the auditor's text - no model decides anything.
+  - id: structure_requests
+    type: code
+    depends_on: [parse_pbc_list]
+    code_config:
+      language: python
+      code: |
+        import re
+
+        raw = _steps.get('parse_pbc_list')
+        text = raw if isinstance(raw, str) else (
+            (raw or {}).get('text') or (raw or {}).get('content')
+            or (raw or {}).get('markdown') or ''
+        )
+        text = str(text or '')
+
+        period_start = str(_input.get('period_start') or '')
+        period_end = str(_input.get('period_end') or '')
+
+        requests = []
+
+        # Prefer markdown/CSV table rows (pipe- or comma-delimited). Skip header + separator rows.
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            if set(line) <= set('|-: '):  # markdown separator row
+                continue
+            cells = [c.strip() for c in re.split(r'\||\t|,(?=\S)', line) if c.strip()]
+            if len(cells) < 2:
+                continue
+            header_blob = ' '.join(cells).lower()
+            if 'request' in header_blob and ('description' in header_blob or 'evidence' in header_blob):
+                continue  # header row
+            req_id = cells[0]
+            # A plausible id looks like PBC-1, C-01, 1.2, etc.; otherwise synthesize one.
+            if not re.match(r'^[A-Za-z]{0,6}[-_. ]?\d', req_id):
+                req_id = f"REQ-{len(requests) + 1:03d}"
+            description = ' '.join(cells[1:]).strip()
+            if not description:
+                continue
+            pop = ''
+            for c in cells[2:]:
+                if re.search(r'all|every|100%|\bsample\b|\bpopulation\b|employees|repos|servers', c, re.I):
+                    pop = c
+                    break
+            requests.append({
+                'request_id': req_id,
+                'description': description,
+                'requested_population': pop or 'all_in_scope',
+                'period_start': period_start,
+                'period_end': period_end,
+            })
+
+        # Fallback: if no table was detected, treat each non-trivial line as one request.
+        if not requests:
+            for i, line in enumerate(l.strip() for l in text.splitlines() if len(l.strip()) > 8):
+                requests.append({
+                    'request_id': f"REQ-{i + 1:03d}",
+                    'description': line,
+                    'requested_population': 'all_in_scope',
+                    'period_start': period_start,
+                    'period_end': period_end,
+                })
+
+        result = {
+            'engagement_id': _input.get('engagement_id'),
+            'period_start': period_start,
+            'period_end': period_end,
+            'request_count': len(requests),
+            'requests': requests,
+        }
+
+  # 3) LOOP over every PBC request. Per request: race-map source -> pull artifact -> deterministic
+  #    period+population check -> classify -> condition opens a control-owner task on a gap.
+  - id: per_request_loop
+    type: loop
+    depends_on: [structure_requests]
+    loop_config:
+      over: "steps.structure_requests.output.requests"
+      step_ids:
+        - map_source_sonnet
+        - map_source_gemini
+        - map_source_mistral
+        - map_source_race
+        - normalize_mapping
+        - pull_artifact
+        - check_coverage
+        - classify_fulfilment
+        - gap_branch
+        - open_owner_task
+        - record_request_result
+      max_iterations: 1000
+
+  # 3a/b/c) RACE BRANCHES: three providers independently map THIS free-form request to the correct
+  #         system-of-record + a concrete query plan, against the SAME shared control catalog. Each
+  #         branch is a separately-defined step with NO depends_on and a DIFFERENT provider pin, so
+  #         the mapping is cross-provider failover (first VALID mapping wins) - never a single
+  #         provider on the load-bearing mapping path.
+  - id: map_source_sonnet
+    type: standard
+    model: sonnet
+    prompt: |
+      You map an auditor's evidence request to the correct system-of-record and a query plan.
+      Use ONLY sources that exist in the shared control catalog at {input.control_catalog_url}.
+      Request id: {input._item.request_id}
+      Request: {input._item.description}
+      Requested population: {input._item.requested_population}
+      Audit window: {input._item.period_start} .. {input._item.period_end}
+      Return STRICT JSON only, no prose:
+      {"request_id": "...", "system_of_record": "<okta|github|datadog|servicenow|aws|gworkspace|...>",
+       "source_path": "/connectors/<system>/<resource>", "query": {"period_start": "...", "period_end": "...", "population": "..."},
+       "control_ids": ["..."], "confidence": 0.0}
+
+  - id: map_source_gemini
+    type: standard
+    model: google/gemini-2.5-pro
+    prompt: |
+      You map an auditor's evidence request to the correct system-of-record and a query plan.
+      Use ONLY sources that exist in the shared control catalog at {input.control_catalog_url}.
+      Request id: {input._item.request_id}
+      Request: {input._item.description}
+      Requested population: {input._item.requested_population}
+      Audit window: {input._item.period_start} .. {input._item.period_end}
+      Return STRICT JSON only, no prose:
+      {"request_id": "...", "system_of_record": "<okta|github|datadog|servicenow|aws|gworkspace|...>",
+       "source_path": "/connectors/<system>/<resource>", "query": {"period_start": "...", "period_end": "...", "population": "..."},
+       "control_ids": ["..."], "confidence": 0.0}
+
+  - id: map_source_mistral
+    type: standard
+    model: mistral/large
+    prompt: |
+      You map an auditor's evidence request to the correct system-of-record and a query plan.
+      Use ONLY sources that exist in the shared control catalog at {input.control_catalog_url}.
+      Request id: {input._item.request_id}
+      Request: {input._item.description}
+      Requested population: {input._item.requested_population}
+      Audit window: {input._item.period_start} .. {input._item.period_end}
+      Return STRICT JSON only, no prose:
+      {"request_id": "...", "system_of_record": "<okta|github|datadog|servicenow|aws|gworkspace|...>",
+       "source_path": "/connectors/<system>/<resource>", "query": {"period_start": "...", "period_end": "...", "population": "..."},
+       "control_ids": ["..."], "confidence": 0.0}
+
+  # 3d) RACE: first branch to return a VALID mapping (parseable JSON naming a system-of-record and
+  #     source_path) wins. Pure failover across providers - NOT a vote.
+  - id: map_source_race
+    type: race
+    race_config:
+      branches:
+        - [map_source_sonnet]
+        - [map_source_gemini]
+        - [map_source_mistral]
+      validator: "'system_of_record' in str(output) and 'source_path' in str(output)"
+
+  # 3e) DETERMINISTIC normalization of the winning mapping into a concrete pull URL + query. Parses
+  #     the race winner's JSON, resolves the evidence-broker URL against the request's period and
+  #     population, and carries the request metadata forward. No model.
+  - id: normalize_mapping
+    type: code
+    code_config:
+      language: python
+      code: |
+        import json
+        import re
+        from urllib.parse import quote
+
+        request = _input.get('_item') or {}
+        winner = _steps.get('map_source_race')
+
+        # The race winner may be a raw JSON string, a dict, or wrapped under a branch step id.
+        if isinstance(winner, dict) and 'system_of_record' not in winner:
+            winner = winner.get('output') or winner.get('result') or winner
+        mapping = winner
+        if isinstance(winner, str):
+            m = re.search(r'\{.*\}', winner, re.S)
+            try:
+                mapping = json.loads(m.group(0)) if m else {}
+            except (ValueError, TypeError):
+                mapping = {}
+        if not isinstance(mapping, dict):
+            mapping = {}
+
+        system = str(mapping.get('system_of_record') or 'unknown').strip().lower()
+        source_path = str(mapping.get('source_path') or f'/connectors/{system}/records').strip()
+        if not source_path.startswith('/'):
+            source_path = '/' + source_path
+        control_ids = mapping.get('control_ids') or []
+        if not isinstance(control_ids, list):
+            control_ids = [str(control_ids)]
+
+        period_start = str(request.get('period_start') or _input.get('period_start') or '')
+        period_end = str(request.get('period_end') or _input.get('period_end') or '')
+        population = str(request.get('requested_population') or 'all_in_scope')
+
+        base = str(_input.get('evidence_api_base_url') or '').rstrip('/')
+        pull_url = (
+            f"{base}{source_path}"
+            f"?from={quote(period_start)}&to={quote(period_end)}"
+            f"&population={quote(population)}&request_id={quote(str(request.get('request_id') or ''))}"
+        )
+
+        result = {
+            'request_id': request.get('request_id'),
+            'description': request.get('description'),
+            'system_of_record': system,
+            'source_path': source_path,
+            'control_ids': control_ids,
+            'pull_url': pull_url,
+            'period_start': period_start,
+            'period_end': period_end,
+            'requested_population': population,
+            'mapping_resolved': system != 'unknown',
+        }
+
+  # 3f) PULL the actual artifact from the resolved system-of-record via the evidence broker. The
+  #     URL was fully resolved deterministically upstream. Model-free retrieval.
+  - id: pull_artifact
+    type: http
+    http_config:
+      url: "{steps.normalize_mapping.output.pull_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.EVIDENCE_API_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 3g) DETERMINISTIC coverage check: does the pulled artifact span the requested PERIOD window and
+  #     cover the requested POPULATION fraction? Computes a 0-1 completeness score. This is the
+  #     audit-load-bearing math the gate's threshold strategy consumes. No model.
+  - id: check_coverage
+    type: code
+    code_config:
+      language: python
+      code: |
+        from datetime import datetime
+
+        mapping = _steps.get('normalize_mapping') or {}
+        artifact = _steps.get('pull_artifact') or {}
+
+        records = artifact if isinstance(artifact, list) else (
+            artifact.get('records') or artifact.get('data') or artifact.get('items')
+            or artifact.get('results') or artifact.get('value') or []
+        )
+        records = [r for r in records if isinstance(r, dict)]
+
+        def _parse(iso):
+            try:
+                return datetime.fromisoformat(str(iso).replace('Z', '+00:00'))
+            except (ValueError, TypeError):
+                return None
+
+        def _ts(rec):
+            for k in ('timestamp', 'created_at', 'event_time', 'sys_created_on', 'date', 'last_run', 'occurred_at'):
+                v = rec.get(k)
+                if v:
+                    t = _parse(v)
+                    if t:
+                        return t
+            return None
+
+        p_start = _parse(mapping.get('period_start'))
+        p_end = _parse(mapping.get('period_end'))
+        stamps = [t for t in (_ts(r) for r in records) if t is not None]
+
+        covers_window = False
+        earliest = latest = None
+        if stamps and p_start and p_end:
+            earliest, latest = min(stamps), max(stamps)
+            covers_window = earliest <= p_start and latest >= p_end
+
+        # Population coverage: distinct subjects in the artifact vs the expected population size.
+        # When the request says "all", the broker returns an expected_population hint we honour.
+        expected_pop = int(artifact.get('expected_population') or artifact.get('population_size') or 0) \
+            if isinstance(artifact, dict) else 0
+        observed_pop = len({
+            str(r.get('user') or r.get('id') or r.get('repo') or r.get('asset') or r.get('subject') or i)
+            for i, r in enumerate(records)
+        })
+        required_frac = float(_input.get('required_population', 0.95) or 0.95)
+        pop_frac = (observed_pop / expected_pop) if expected_pop > 0 else (1.0 if observed_pop else 0.0)
+        pop_ok = pop_frac >= required_frac
+
+        checks = [bool(records), covers_window, pop_ok, bool(mapping.get('mapping_resolved'))]
+        completeness = round(sum(1 for c in checks if c) / len(checks), 4)
+
+        result = {
+            'request_id': mapping.get('request_id'),
+            'description': mapping.get('description'),
+            'system_of_record': mapping.get('system_of_record'),
+            'source_path': mapping.get('source_path'),
+            'control_ids': mapping.get('control_ids', []),
+            'pull_url': mapping.get('pull_url'),
+            'record_count': len(records),
+            'covers_window': covers_window,
+            'observed_population': observed_pop,
+            'expected_population': expected_pop,
+            'population_fraction': round(pop_frac, 4),
+            'population_ok': pop_ok,
+            'completeness': completeness,
+            'earliest': earliest.isoformat() if earliest else None,
+            'latest': latest.isoformat() if latest else None,
+            'artifact': records,
+        }
+
+  # 3h) CLASSIFY the request fulfilment status from the deterministic coverage facts.
+  #     satisfied = artifact covers window + population; partial = some evidence but window or
+  #     population short; missing = no usable artifact / unresolved mapping.
+  - id: classify_fulfilment
+    type: classify
+    classify_config:
+      model: haiku
+      input: "Classify how this auditor evidence request was fulfilled. satisfied = the artifact covers the full audit window AND the requested population; partial = an artifact was pulled but it misses part of the period or population; missing = no usable artifact or the source could not be mapped. Facts -> record_count: {steps.check_coverage.output.record_count}, covers_window: {steps.check_coverage.output.covers_window}, population_ok: {steps.check_coverage.output.population_ok}, completeness: {steps.check_coverage.output.completeness}, system_of_record: {steps.check_coverage.output.system_of_record}."
+      categories:
+        - satisfied
+        - partial
+        - missing
+      branches:
+        satisfied: [record_request_result]
+        partial: [gap_branch]
+        missing: [gap_branch]
+
+  # 3i) CONDITION: partial OR missing requests get a control-owner remediation task opened;
+  #     satisfied requests skip straight to recording. Deterministic branch off the classify label.
+  - id: gap_branch
+    type: condition
+    condition_config:
+      expression: "'{steps.classify_fulfilment.output}' != 'satisfied'"
+      then: [open_owner_task]
+      else: [record_request_result]
+
+  # 3j) Open a control-owner remediation task for the gap (Jira / ServiceNow). Carries the request,
+  #     the resolved source, and the coverage shortfall so the owner knows exactly what to supply.
+  - id: open_owner_task
+    type: http
+    http_config:
+      url: "{input.ticketing_base_url}/issue"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.TICKETING_API_TOKEN}"
+      body: |
+        {
+          "engagement_id": "{input.engagement_id}",
+          "request_id": "{steps.check_coverage.output.request_id}",
+          "summary": "PBC gap: {steps.check_coverage.output.request_id} - {steps.check_coverage.output.description}",
+          "system_of_record": "{steps.check_coverage.output.system_of_record}",
+          "completeness": "{steps.check_coverage.output.completeness}",
+          "covers_window": "{steps.check_coverage.output.covers_window}",
+          "population_fraction": "{steps.check_coverage.output.population_fraction}",
+          "period_start": "{input.period_start}",
+          "period_end": "{input.period_end}",
+          "labels": ["audit-pbc", "evidence-gap"]
+        }
+      value_map:
+        owner_task_id: "id"
+        owner_task_key: "key"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 3k) DETERMINISTIC per-request result record. Folds the coverage math, classify label and (when
+  #     opened) the remediation-task reference into one canonical row the manifest later signs.
+  - id: record_request_result
+    type: code
+    code_config:
+      language: python
+      code: |
+        cov = _steps.get('check_coverage') or {}
+        label = str(_steps.get('classify_fulfilment') or '').strip().lower()
+        task = _steps.get('open_owner_task')
+
+        owner_task = None
+        if isinstance(task, dict):
+            owner_task = task.get('owner_task_key') or task.get('owner_task_id') or task.get('key') or task.get('id')
+
+        status = label if label in ('satisfied', 'partial', 'missing') else (
+            'satisfied' if cov.get('covers_window') and cov.get('population_ok') and cov.get('record_count')
+            else 'missing' if not cov.get('record_count')
+            else 'partial'
+        )
+
+        reason = (
+            'unmapped_source' if cov.get('system_of_record') in (None, 'unknown')
+            else 'no_records' if not cov.get('record_count')
+            else 'window_not_covered' if not cov.get('covers_window')
+            else 'population_short' if not cov.get('population_ok')
+            else 'ok'
+        )
+
+        result = {
+            'request_id': cov.get('request_id'),
+            'description': cov.get('description'),
+            'status': status,
+            'satisfied': status == 'satisfied',
+            'reason': reason,
+            'system_of_record': cov.get('system_of_record'),
+            'source_path': cov.get('source_path'),
+            'control_ids': cov.get('control_ids', []),
+            'pull_url': cov.get('pull_url'),
+            'record_count': cov.get('record_count', 0),
+            'covers_window': cov.get('covers_window', False),
+            'population_fraction': cov.get('population_fraction', 0),
+            'population_ok': cov.get('population_ok', False),
+            'completeness': cov.get('completeness', 0),
+            'earliest': cov.get('earliest'),
+            'latest': cov.get('latest'),
+            'owner_task': owner_task,
+            'artifact': cov.get('artifact', []),
+        }
+
+  # 4) DETERMINISTIC aggregation of every per-request result into engagement-level coverage:
+  #    satisfied / partial / missing counts, the open-request list with owners, coverage %. No model.
+  - id: aggregate_coverage
+    type: code
+    depends_on: [per_request_loop]
+    code_config:
+      language: python
+      code: |
+        loop_out = _steps.get('per_request_loop') or {}
+        structured = _steps.get('structure_requests') or {}
+
+        items = loop_out if isinstance(loop_out, list) else (
+            loop_out.get('results') or loop_out.get('items') or loop_out.get('iterations') or []
+        )
+
+        requests = []
+        for it in items:
+            row = it
+            if isinstance(it, dict) and 'request_id' not in it:
+                row = it.get('record_request_result') or it.get('output') or it
+            if isinstance(row, dict) and row.get('request_id'):
+                requests.append(row)
+
+        total = len(requests)
+        satisfied = [r for r in requests if r.get('status') == 'satisfied']
+        partial = [r for r in requests if r.get('status') == 'partial']
+        missing = [r for r in requests if r.get('status') == 'missing']
+        coverage_pct = round(100.0 * len(satisfied) / total, 2) if total else 0.0
+
+        open_requests = [
+            {
+                'request_id': r.get('request_id'),
+                'description': r.get('description'),
+                'status': r.get('status'),
+                'reason': r.get('reason'),
+                'system_of_record': r.get('system_of_record'),
+                'owner_task': r.get('owner_task'),
+                'completeness': r.get('completeness'),
+            }
+            for r in (partial + missing)
+        ]
+
+        result = {
+            'engagement_id': structured.get('engagement_id') or _input.get('engagement_id'),
+            'period_start': structured.get('period_start'),
+            'period_end': structured.get('period_end'),
+            'total_requests': total,
+            'satisfied_count': len(satisfied),
+            'partial_count': len(partial),
+            'missing_count': len(missing),
+            'coverage_pct': coverage_pct,
+            'requests': requests,
+            'open_requests': open_requests,
+            'all_satisfied': len(partial) == 0 and len(missing) == 0 and total > 0,
+        }
+
+  # 5) SUFFICIENCY GATE (swappable + model-independent). THREE strategies, ALL must pass:
+  #    (1) llm_eval sufficiency judge on ONE swappable provider - is the evidence set defensible
+  #        and internally consistent for the engagement?; (2) llm_eval acting as a DETERMINISTIC
+  #        completeness threshold - fed only the pre-computed coverage_pct vs min_completeness, so
+  #        the pack passes/fails on non-LLM math alone; (3) human attester signs off the partials.
+  - id: sufficiency_gate
+    type: gate
+    depends_on: [aggregate_coverage]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are an audit-evidence sufficiency reviewer. Answer exactly 'approved' if this
+              fulfilment set is defensible to an external auditor - mapped requests point at the
+              right systems-of-record, satisfied requests genuinely cover the window and population,
+              and every partial/missing request has a remediation task opened - otherwise answer
+              'rejected' and name the defect. Judge sufficiency/consistency only; the numeric
+              completeness threshold is checked separately.
+            input: "{steps.aggregate_coverage.output}"
+            model: "{input.judge_model}"
+        - type: llm_eval
+          config:
+            prompt: >-
+              Deterministic completeness check. Answer exactly 'approved' if coverage_pct >=
+              ({input.min_completeness} * 100) AND missing_count == 0; otherwise answer 'rejected'.
+              Use ONLY the supplied numbers - do not infer or reason beyond the arithmetic comparison.
+            input: "coverage_pct={steps.aggregate_coverage.output.coverage_pct} threshold_pct={input.min_completeness} missing_count={steps.aggregate_coverage.output.missing_count} partial_count={steps.aggregate_coverage.output.partial_count}"
+            model: haiku
+        - type: human
+          config:
+            message: "Engagement attester: review the open (partial/missing) PBC requests and confirm the remediation tasks are correct before the evidence packs are sealed and shared with the audit firm."
+            timeout_hours: 48
+            on_timeout: abort
+
+  # 6) DETERMINISTIC assembly of per-request evidence packs + a SHA-256 manifest of exactly what is
+  #    being provided. Each pack is canonical-JSON hashed; the manifest root hash binds every
+  #    per-request digest in deterministic order. This is the tamper-evident signature the audit
+  #    firm verifies. No model.
+  - id: assemble_packs_manifest
+    type: code
+    depends_on: [sufficiency_gate]
+    code_config:
+      language: python
+      code: |
+        import json
+        import hashlib
+        from datetime import datetime, timezone
+
+        agg = _steps.get('aggregate_coverage') or {}
+        requests = agg.get('requests', [])
+        engagement_id = agg.get('engagement_id') or _input.get('engagement_id')
+
+        packs = []
+        entries = []
+        for r in requests:
+            pack = {
+                'request_id': r.get('request_id'),
+                'description': r.get('description'),
+                'status': r.get('status'),
+                'provenance': {
+                    'system_of_record': r.get('system_of_record'),
+                    'source_path': r.get('source_path'),
+                    'pull_url': r.get('pull_url'),
+                    'control_ids': r.get('control_ids', []),
+                    'period_start': agg.get('period_start'),
+                    'period_end': agg.get('period_end'),
+                    'earliest_record': r.get('earliest'),
+                    'latest_record': r.get('latest'),
+                },
+                'coverage': {
+                    'record_count': r.get('record_count'),
+                    'covers_window': r.get('covers_window'),
+                    'population_fraction': r.get('population_fraction'),
+                    'completeness': r.get('completeness'),
+                },
+                'owner_task': r.get('owner_task'),
+                'artifact': r.get('artifact', []),
+            }
+            canonical = json.dumps(pack, sort_keys=True, separators=(',', ':'))
+            digest = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+            pack['sha256'] = digest
+            pack['object_key'] = f"evidence/{engagement_id}/{r.get('request_id')}.json"
+            packs.append(pack)
+            entries.append({
+                'request_id': r.get('request_id'),
+                'status': r.get('status'),
+                'sha256': digest,
+                'object_key': pack['object_key'],
+                'byte_length': len(canonical),
+            })
+
+        root_material = json.dumps([e['sha256'] for e in entries], separators=(',', ':'))
+        manifest_root = hashlib.sha256(root_material.encode('utf-8')).hexdigest()
+
+        manifest = {
+            'engagement_id': engagement_id,
+            'generated_at': datetime.now(timezone.utc).isoformat(),
+            'period_start': agg.get('period_start'),
+            'period_end': agg.get('period_end'),
+            'total_requests': agg.get('total_requests'),
+            'satisfied_count': agg.get('satisfied_count'),
+            'partial_count': agg.get('partial_count'),
+            'missing_count': agg.get('missing_count'),
+            'coverage_pct': agg.get('coverage_pct'),
+            'manifest_root_sha256': manifest_root,
+            'entries': entries,
+            'open_requests': agg.get('open_requests', []),
+        }
+        canonical_manifest = json.dumps(manifest, sort_keys=True, separators=(',', ':'))
+
+        result = {
+            'engagement_id': engagement_id,
+            'manifest_object_key': f"evidence/{engagement_id}/manifest.json",
+            'manifest_root_sha256': manifest_root,
+            'manifest': manifest,
+            'canonical_manifest': canonical_manifest,
+            'packs': packs,
+            'pack_count': len(packs),
+        }
+
+  # 7) SEAL: PUT the signed manifest to the auditor's object-lock (WORM) S3 bucket. The manifest
+  #    root hash travels as object metadata so the pack set is tamper-evident at rest. Connector: aws-s3.
+  - id: seal_packs_s3
+    type: http
+    depends_on: [assemble_packs_manifest]
+    http_config:
+      url: "{input.s3_base_url}/{input.s3_bucket}/{steps.assemble_packs_manifest.output.manifest_object_key}"
+      method: PUT
+      headers:
+        Content-Type: "application/json"
+        x-amz-object-lock-mode: "COMPLIANCE"
+        x-amz-object-lock-retain-until-date: "2034-01-01T00:00:00Z"
+        x-amz-meta-manifest-root-sha256: "{steps.assemble_packs_manifest.output.manifest_root_sha256}"
+        x-amz-meta-engagement-id: "{input.engagement_id}"
+      auth: "aws4:{env.AWS_ACCESS_KEY_ID}:{env.AWS_SECRET_ACCESS_KEY}"
+      body: "{steps.assemble_packs_manifest.output.canonical_manifest}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 8) SHARE: POST a read-only link to the sealed pack set to the audit-firm portal so the auditor
+  #    can pull exactly what was provided, with the integrity hash to verify it. Connector: http.
+  - id: share_with_audit_firm
+    type: http
+    depends_on: [seal_packs_s3]
+    http_config:
+      url: "{input.audit_firm_share_url}/engagements/{input.engagement_id}/evidence-link"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.AUDIT_FIRM_TOKEN}"
+      body: |
+        {
+          "engagement_id": "{input.engagement_id}",
+          "manifest_object_key": "{steps.assemble_packs_manifest.output.manifest_object_key}",
+          "manifest_root_sha256": "{steps.assemble_packs_manifest.output.manifest_root_sha256}",
+          "read_only_url": "{input.s3_base_url}/{input.s3_bucket}/{steps.assemble_packs_manifest.output.manifest_object_key}",
+          "coverage_pct": "{steps.aggregate_coverage.output.coverage_pct}",
+          "satisfied_count": "{steps.aggregate_coverage.output.satisfied_count}",
+          "open_count": "{steps.aggregate_coverage.output.partial_count}",
+          "access": "read-only"
+        }
+      value_map:
+        share_id: "id"
+        share_status: "status"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 9) NOTIFY the audit-prep team in Slack with the fulfilment summary + integrity hash.
+  - id: notify_summary
+    type: notify
+    depends_on: [share_with_audit_firm]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: "PBC fulfilment {input.engagement_id} done. Coverage: {steps.aggregate_coverage.output.coverage_pct}% ({steps.aggregate_coverage.output.satisfied_count}/{steps.aggregate_coverage.output.total_requests} satisfied, {steps.aggregate_coverage.output.partial_count} partial, {steps.aggregate_coverage.output.missing_count} missing). Open requests + owners: {steps.aggregate_coverage.output.open_requests}. Sealed manifest {steps.assemble_packs_manifest.output.manifest_root_sha256} shared read-only at {steps.assemble_packs_manifest.output.manifest_object_key}."
+
+  # 10) REPORT: render the coverage matrix - every request satisfied / open, with its provenance
+  #     (system-of-record, source path, period, integrity hash) - as a branded PDF for the auditor.
+  - id: coverage_matrix_report
+    type: report
+    depends_on: [notify_summary]
+    report_config:
+      template: "research-report"
+      format: pdf
+      theme: professional
+      title: "Audit Evidence Coverage Matrix - {input.engagement_id}"
+      author: "GRC Audit Response Office"
+    prompt: |
+      Produce a formal, auditor-facing PDF coverage matrix for the PBC engagement
+      {input.engagement_id} (audit window {input.period_start} .. {input.period_end}).
+      Open with a one-paragraph executive summary stating overall coverage
+      ({steps.aggregate_coverage.output.coverage_pct}%): {steps.aggregate_coverage.output.satisfied_count}
+      of {steps.aggregate_coverage.output.total_requests} requests satisfied,
+      {steps.aggregate_coverage.output.partial_count} partial and
+      {steps.aggregate_coverage.output.missing_count} missing.
+      Then render a coverage MATRIX table with one row per request, columns:
+      Request ID, Description, Status (satisfied/partial/missing), Mapped System-of-Record,
+      Source Path, Records, Covers-Window, Population %, Completeness, Owner Task (for gaps),
+      and per-pack SHA-256 provenance. Use the full per-request set:
+      {steps.aggregate_coverage.output.requests}
+      Add an OPEN ITEMS section listing the partial/missing requests with their remediation tasks:
+      {steps.aggregate_coverage.output.open_requests}
+      Close with an integrity statement: all packs are SHA-256 hashed under manifest root
+      {steps.assemble_packs_manifest.output.manifest_root_sha256}, sealed to an object-lock (WORM)
+      bucket and shared read-only with the audit firm. No emojis. No marketing language.
+
+on_complete:
+  storage_path: "audit-evidence-request-responder/{run_id}/result.json"

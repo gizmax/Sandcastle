@@ -1,0 +1,651 @@
+# name: Transaction Fraud Triage & SAR Router
+# description: Watches a flagged-transaction / account-alert queue, enriches each event with account history + device/IP + counterparty + prior-alert context, tags AML typologies, scores fraud/financial-crime risk with deterministic SAR-threshold + aggregation math, gates clear cases to auto-close and high-risk cases to a human investigator, drafts a SAR-style investigator narrative, branches close/monitor/file-SAR, and produces a case-file PDF before paging fraud-ops / the FIU queue.
+# tags: [Fintech, Banking, AML, BSA, SAR, Fraud, Transaction-Monitoring, FinancialCrime, Typology, FIU]
+# category: fintech_banking
+
+name: transaction-fraud-triage-sar-router
+description: >-
+  Financial-crime transaction-monitoring triage that turns a stream of flagged transactions and
+  account alerts into routed, defensible SAR/BSA outcomes. A SENSOR watches the transaction /
+  alert queue (TMS feed) until new flagged events land, a deterministic CODE step normalizes the
+  feed into one event list, and a LOOP fans out over each flagged event. Inside the loop an HTTP
+  step enriches the event with account history, device/IP, counterparty, and prior-alert context
+  from the core-banking / case-management API, a CLASSIFY step tags the AML typology (structuring,
+  account_takeover, mule, card_not_present), a DETERMINISTIC CODE step computes the fraud /
+  financial-crime risk score, applies the SAR reporting threshold and 30-day aggregation logic, and
+  decides the per-event disposition - none of that math is a model. A second CODE step aggregates
+  every scored event into one case ledger and counts how many cleared the SAR threshold. A GATE
+  (LLM completeness eval + a human investigator review with a timeout) lets clear cases auto-close
+  while routing above-threshold cases to a human; only after the gate does a provider-neutral LLM
+  draft the SAR-style investigator narrative grounded strictly in the enriched facts, with
+  cross-provider failover so no single model is load-bearing. A CONDITION branches the case to
+  CLOSE / MONITOR / FILE_SAR off the deterministic ledger, a REPORT renders the case-file PDF with
+  the decision rationale, and a NOTIFY pages fraud-ops / the FIU queue. The model assists the
+  narrative but never sets the regulatory threshold - the threshold and aggregation are pure
+  reproducible code. (connectors: tms, core-banking, case-management, slack)
+
+default_model: sonnet
+default_timeout: 900
+
+input_schema:
+  required: ["institution_id"]
+  properties:
+    institution_id:
+      type: string
+      description: "Reporting financial institution identifier used on the SAR / case file (e.g. BSA filer id)."
+      example: "FI-008812"
+    tms_base_url:
+      type: string
+      description: "Transaction-monitoring system (TMS) REST base URL exposing the flagged-alert queue/feed."
+      default: "https://tms.your-bank.internal/api/v1"
+      example: "https://tms.acmebank.internal/api/v1"
+    tms_queue:
+      type: string
+      description: "Name of the TMS alert queue to watch and drain (e.g. 'aml-flagged', 'fraud-realtime')."
+      default: "aml-flagged"
+      example: "aml-flagged"
+    core_banking_base_url:
+      type: string
+      description: "Core-banking / case-management REST base URL used to enrich each flagged event."
+      default: "https://corebank.your-bank.internal/api/v2"
+      example: "https://corebank.acmebank.internal/api/v2"
+    sar_threshold_amount:
+      type: number
+      description: "BSA SAR reporting threshold in the reporting currency. Aggregated suspicious activity at/above this amount is SAR-eligible (US SAR floor is $5,000)."
+      default: 5000
+      example: "5000"
+    structuring_threshold_amount:
+      type: number
+      description: "Cash-transaction reporting (CTR) ceiling that structuring tries to stay below (US is $10,000). Repeated activity just below this drives the structuring score."
+      default: 10000
+      example: "10000"
+    aggregation_window_days:
+      type: number
+      description: "Look-back window (days) over which related transactions are aggregated for the SAR-threshold test."
+      default: 30
+      example: "30"
+    risk_review_threshold:
+      type: number
+      description: "Risk score (0-100) at/above which a case must go to a human investigator instead of auto-closing."
+      default: 60
+      example: "60"
+    sensor_timeout:
+      type: number
+      description: "Max seconds the queue sensor waits for new flagged events before the run ends."
+      default: 86400
+      example: "86400"
+    report_author:
+      type: string
+      description: "Author / desk name stamped on the case-file PDF."
+      default: "Financial Crime Investigations Unit"
+      example: "Financial Crime Investigations Unit"
+    fraud_ops_channel:
+      type: string
+      description: "Slack channel watched by fraud-ops / the FIU SAR-filing queue."
+      default: "#fraud-ops-sar"
+      example: "#fraud-ops-sar"
+
+steps:
+  # 1) SENSOR: watch the TMS flagged-alert queue until it reports pending events (HTTP 200 with a
+  #    non-empty queue). This is the feed the whole triage drains. No model.
+  - id: watch_alert_queue
+    type: sensor
+    sensor_config:
+      url: "{input.tms_base_url}/queues/{input.tms_queue}/status"
+      method: GET
+      headers:
+        Accept: "application/json"
+      condition: "status_code == 200"
+      check_interval: 60
+      timeout: 86400
+
+  # 2) HTTP: drain the flagged events from the TMS queue once the sensor fires. Pull each alert with
+  #    its base transaction facts (amount, channel, account, counterparty, timestamps). (connector: tms)
+  - id: fetch_flagged_events
+    type: http
+    depends_on: [watch_alert_queue]
+    http_config:
+      url: "{input.tms_base_url}/queues/{input.tms_queue}/alerts?status=open&include=transaction,counterparty&limit=200"
+      method: GET
+      auth: "bearer:{env.TMS_API_TOKEN}"
+      headers:
+        Accept: "application/json"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 3) CODE: normalize the TMS payload into ONE flat list of flagged events the loop can fan over.
+  #    Tolerates the common envelope shapes (list / {alerts:[]} / {data:[]}). No model.
+  - id: normalize_events
+    type: code
+    depends_on: [fetch_flagged_events]
+    code_config:
+      language: python
+      code: |
+        raw = _steps.get("fetch_flagged_events") or {}
+        if isinstance(raw, list):
+            alerts = raw
+        elif isinstance(raw, dict):
+            alerts = raw.get("alerts") or raw.get("data") or raw.get("results") or []
+        else:
+            alerts = []
+        if not isinstance(alerts, list):
+            alerts = []
+
+        def _num(v):
+            try:
+                return round(float(v or 0), 2)
+            except (TypeError, ValueError):
+                return 0.0
+
+        events = []
+        for a in alerts:
+            if not isinstance(a, dict):
+                continue
+            txn = a.get("transaction") if isinstance(a.get("transaction"), dict) else {}
+            cp = a.get("counterparty") if isinstance(a.get("counterparty"), dict) else {}
+            events.append({
+                "alert_id": str(a.get("id") or a.get("alert_id") or ""),
+                "account_id": str(a.get("account_id") or txn.get("account_id") or ""),
+                "rule_code": str(a.get("rule_code") or a.get("rule") or ""),
+                "amount": _num(txn.get("amount", a.get("amount", 0))),
+                "currency": str(txn.get("currency") or a.get("currency") or "USD"),
+                "channel": str(txn.get("channel") or a.get("channel") or "unknown"),
+                "direction": str(txn.get("direction") or a.get("direction") or "unknown"),
+                "txn_timestamp": str(txn.get("timestamp") or a.get("timestamp") or ""),
+                "counterparty_id": str(cp.get("id") or txn.get("counterparty_id") or ""),
+                "counterparty_country": str(cp.get("country") or ""),
+                "ip_address": str(a.get("ip_address") or txn.get("ip_address") or ""),
+                "device_id": str(a.get("device_id") or txn.get("device_id") or ""),
+            })
+
+        result = {
+            "events": events,
+            "event_count": len(events),
+            "queue": _input.get("tms_queue", ""),
+        }
+
+  # 4) LOOP over each flagged event. Each iteration enriches the event, tags its typology, scores
+  #    its risk, and drafts a per-event narrative. The loop item arrives on _input['_item'].
+  - id: triage_events
+    type: loop
+    depends_on: [normalize_events]
+    loop_config:
+      over: "steps.normalize_events.output.events"
+      step_ids: [enrich_event, classify_typology, score_event_risk, draft_event_narrative]
+      max_iterations: 500
+
+  # 4a) HTTP (loop child): ENRICH this event with account history, device/IP, counterparty, and
+  #     prior-alert context from core-banking / case-management. (connector: core-banking)
+  - id: enrich_event
+    type: http
+    http_config:
+      url: "{input.core_banking_base_url}/accounts/{input._item.account_id}/risk-context?include=history,device,ip,counterparty,prior_alerts&window_days={input.aggregation_window_days}"
+      method: GET
+      auth: "bearer:{env.CORE_BANKING_TOKEN}"
+      headers:
+        Accept: "application/json"
+        X-Alert-Id: "{input._item.alert_id}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 4b) CLASSIFY (loop child): tag the AML typology. Provider-neutral and swappable - the label only
+  #     drives the typology-specific weighting and narrative framing; the dollars + threshold are code.
+  - id: classify_typology
+    type: classify
+    depends_on: [enrich_event]
+    classify_config:
+      model: haiku
+      input: >-
+        Tag the most likely AML / financial-crime typology for this flagged banking event. Use:
+        structuring = many transactions kept just below the cash-reporting ceiling to avoid a CTR;
+        account_takeover = sudden new device/IP/geo plus out-of-pattern transfers draining an account;
+        mule = a pass-through account receiving funds then quickly forwarding them to third parties;
+        card_not_present = online/keyed card spend with mismatched device/IP/billing geography.
+        Event: {input._item}. Enrichment context: {steps.enrich_event.output}.
+      categories:
+        - structuring
+        - account_takeover
+        - mule
+        - card_not_present
+      branches:
+        structuring: [score_event_risk]
+        account_takeover: [score_event_risk]
+        mule: [score_event_risk]
+        card_not_present: [score_event_risk]
+
+  # 4c) CODE (loop child): the LOAD-BEARING decision. Deterministic fraud / financial-crime risk
+  #     score, SAR-threshold test, and 30-day aggregation. NO LLM - this replays identically and is
+  #     what routes the case. Reads the loop item, the enrichment, and the typology label.
+  - id: score_event_risk
+    type: code
+    depends_on: [enrich_event, classify_typology]
+    code_config:
+      language: python
+      code: |
+        item = _input.get("_item") or {}
+        if not isinstance(item, dict):
+            item = {}
+        enrich = _steps.get("enrich_event") or {}
+        if not isinstance(enrich, dict):
+            enrich = {}
+        typology = str(_steps.get("classify_typology") or "").strip().lower()
+        if typology not in ("structuring", "account_takeover", "mule", "card_not_present"):
+            typology = "unknown"
+
+        def _num(v):
+            try:
+                return round(float(v or 0), 2)
+            except (TypeError, ValueError):
+                return 0.0
+
+        try:
+            sar_threshold = float(_input.get("sar_threshold_amount", 5000) or 5000)
+        except (TypeError, ValueError):
+            sar_threshold = 5000.0
+        try:
+            structuring_ceiling = float(_input.get("structuring_threshold_amount", 10000) or 10000)
+        except (TypeError, ValueError):
+            structuring_ceiling = 10000.0
+        try:
+            window_days = int(float(_input.get("aggregation_window_days", 30) or 30))
+        except (TypeError, ValueError):
+            window_days = 30
+
+        amount = _num(item.get("amount", 0))
+
+        # --- Aggregation: sum related activity over the look-back window from enrichment. The
+        #     enrichment exposes recent related transactions for this account/counterparty. ---
+        history = enrich.get("recent_transactions")
+        if not isinstance(history, list):
+            history = enrich.get("history") if isinstance(enrich.get("history"), list) else []
+        aggregated = amount
+        related_count = 1
+        near_ceiling_count = 0
+        for h in history:
+            if not isinstance(h, dict):
+                continue
+            h_amt = _num(h.get("amount", 0))
+            aggregated += h_amt
+            related_count += 1
+            # Structuring signal: transaction sits in the 0.7x-1.0x band below the CTR ceiling.
+            if 0.7 * structuring_ceiling <= h_amt < structuring_ceiling:
+                near_ceiling_count += 1
+        aggregated = round(aggregated, 2)
+        if 0.7 * structuring_ceiling <= amount < structuring_ceiling:
+            near_ceiling_count += 1
+
+        # --- Deterministic risk factors (each contributes points to a 0-100 score) ----------
+        prior_alerts = enrich.get("prior_alerts")
+        prior_alert_count = len(prior_alerts) if isinstance(prior_alerts, list) else _num(enrich.get("prior_alert_count", 0))
+        device_new = bool(enrich.get("new_device", enrich.get("device_first_seen", False)))
+        ip_new = bool(enrich.get("new_ip", enrich.get("ip_first_seen", False)))
+        geo_mismatch = bool(enrich.get("geo_mismatch", False))
+        high_risk_cp = bool(enrich.get("counterparty_high_risk", False))
+        cp_country = str(item.get("counterparty_country") or enrich.get("counterparty_country") or "")
+        sanctioned_geo = cp_country.upper() in ("IR", "KP", "SY", "CU", "RU")
+        fast_passthrough = bool(enrich.get("fast_passthrough", enrich.get("rapid_movement", False)))
+
+        score = 0.0
+        reasons = []
+
+        if aggregated >= sar_threshold:
+            score += 30
+            reasons.append("aggregated_at_or_above_sar_threshold")
+        elif aggregated >= 0.5 * sar_threshold:
+            score += 15
+            reasons.append("aggregated_above_half_sar_threshold")
+
+        if near_ceiling_count >= 2:
+            score += 20
+            reasons.append("repeated_just_below_ctr_ceiling")
+        elif near_ceiling_count == 1:
+            score += 8
+            reasons.append("single_just_below_ctr_ceiling")
+
+        if prior_alert_count >= 3:
+            score += 15
+            reasons.append("repeat_subject_3plus_prior_alerts")
+        elif prior_alert_count >= 1:
+            score += 7
+            reasons.append("prior_alert_history")
+
+        if device_new and (ip_new or geo_mismatch):
+            score += 15
+            reasons.append("new_device_plus_new_ip_or_geo")
+        elif device_new or ip_new or geo_mismatch:
+            score += 7
+            reasons.append("device_ip_or_geo_anomaly")
+
+        if high_risk_cp:
+            score += 10
+            reasons.append("high_risk_counterparty")
+        if sanctioned_geo:
+            score += 20
+            reasons.append("sanctioned_or_high_risk_jurisdiction")
+        if fast_passthrough:
+            score += 12
+            reasons.append("rapid_passthrough_movement")
+
+        # --- Typology-specific weighting (label nudges, code decides) ------------------------
+        typology_weight = {
+            "structuring": 8 if near_ceiling_count >= 1 else 0,
+            "account_takeover": 8 if (device_new or ip_new or geo_mismatch) else 0,
+            "mule": 8 if fast_passthrough else 0,
+            "card_not_present": 8 if geo_mismatch else 0,
+            "unknown": 0,
+        }.get(typology, 0)
+        score += typology_weight
+
+        score = round(min(score, 100.0), 1)
+
+        # --- SAR eligibility is a deterministic test, not a model call ----------------------
+        sar_eligible = aggregated >= sar_threshold and score >= 50
+
+        if score >= 80:
+            band = "critical"
+        elif score >= 60:
+            band = "high"
+        elif score >= 35:
+            band = "elevated"
+        else:
+            band = "low"
+
+        result = {
+            "alert_id": item.get("alert_id", ""),
+            "account_id": item.get("account_id", ""),
+            "typology": typology,
+            "amount": amount,
+            "aggregated_amount": aggregated,
+            "related_count": related_count,
+            "aggregation_window_days": window_days,
+            "near_ceiling_count": near_ceiling_count,
+            "prior_alert_count": prior_alert_count,
+            "risk_score": score,
+            "risk_band": band,
+            "sar_eligible": sar_eligible,
+            "reasons": reasons,
+        }
+
+  # 4d) STANDARD (loop child): per-event SAR-style narrative grounded ONLY in the enriched facts and
+  #     the deterministic score. The model writes prose; it never changes the score or the SAR test.
+  - id: draft_event_narrative
+    type: standard
+    depends_on: [score_event_risk]
+    prompt: |
+      You are a financial-crime investigator drafting a SAR-style narrative for ONE flagged event.
+      Write 2-3 sentences (no markdown, no emojis) covering: who/what (account and counterparty),
+      what activity was flagged, the tagged typology, and why it is or is not suspicious. Ground
+      every claim in the facts below - do NOT invent amounts and do NOT restate or change the risk
+      score or SAR eligibility (those are already decided in code).
+
+      Flagged event: {input._item}
+      Enrichment context: {steps.enrich_event.output}
+      Typology tag: {steps.classify_typology.output}
+      Deterministic risk + SAR decision: {steps.score_event_risk.output}
+
+  # 5) CODE: aggregate every scored event from the loop into ONE case ledger - total exposure,
+  #    SAR-eligible count, highest risk band, and whether the case needs a human. Pure code; this is
+  #    the routing input for the gate and the close/monitor/file-SAR branch.
+  - id: build_case_ledger
+    type: code
+    depends_on: [triage_events]
+    code_config:
+      language: python
+      code: |
+        loop_out = _steps.get("triage_events")
+        # The loop surfaces a list of per-iteration child outputs (the last child = narrative, but
+        # the score is carried inside each iteration's score_event_risk output when present).
+        if isinstance(loop_out, list):
+            iterations = loop_out
+        elif isinstance(loop_out, dict):
+            iterations = loop_out.get("results") or loop_out.get("items") or [loop_out]
+        else:
+            iterations = []
+
+        def _num(v):
+            try:
+                return round(float(v or 0), 2)
+            except (TypeError, ValueError):
+                return 0.0
+
+        def _extract_score(entry):
+            # Each iteration may be the score dict directly, or a wrapper holding the child outputs.
+            if isinstance(entry, dict):
+                if "risk_score" in entry and "sar_eligible" in entry:
+                    return entry
+                inner = entry.get("score_event_risk")
+                if isinstance(inner, dict):
+                    return inner
+                steps_map = entry.get("steps")
+                if isinstance(steps_map, dict) and isinstance(steps_map.get("score_event_risk"), dict):
+                    return steps_map["score_event_risk"]
+            return {}
+
+        try:
+            risk_review_threshold = float(_input.get("risk_review_threshold", 60) or 60)
+        except (TypeError, ValueError):
+            risk_review_threshold = 60.0
+
+        ledger = []
+        total_exposure = 0.0
+        sar_eligible_count = 0
+        review_required_count = 0
+        max_score = 0.0
+        typology_tally = {}
+
+        for entry in iterations:
+            s = _extract_score(entry)
+            if not s:
+                continue
+            score = _num(s.get("risk_score", 0))
+            agg = _num(s.get("aggregated_amount", 0))
+            sar_eligible = bool(s.get("sar_eligible", False))
+            total_exposure += agg
+            max_score = max(max_score, score)
+            if sar_eligible:
+                sar_eligible_count += 1
+            if score >= risk_review_threshold:
+                review_required_count += 1
+            typ = str(s.get("typology", "unknown"))
+            typology_tally[typ] = typology_tally.get(typ, 0) + 1
+            ledger.append({
+                "alert_id": s.get("alert_id", ""),
+                "account_id": s.get("account_id", ""),
+                "typology": typ,
+                "aggregated_amount": agg,
+                "risk_score": score,
+                "risk_band": s.get("risk_band", ""),
+                "sar_eligible": sar_eligible,
+                "reasons": s.get("reasons", []),
+            })
+
+        ledger.sort(key=lambda x: -_num(x.get("risk_score")))
+        total_exposure = round(total_exposure, 2)
+
+        # Case-level disposition is deterministic.
+        if sar_eligible_count > 0:
+            disposition = "file_sar"
+        elif review_required_count > 0 or max_score >= 35:
+            disposition = "monitor"
+        else:
+            disposition = "close"
+
+        result = {
+            "institution_id": _input.get("institution_id", ""),
+            "events_triaged": len(ledger),
+            "total_exposure": total_exposure,
+            "sar_eligible_count": sar_eligible_count,
+            "review_required_count": review_required_count,
+            "max_risk_score": max_score,
+            "disposition": disposition,
+            "needs_human_review": review_required_count > 0 or sar_eligible_count > 0,
+            "typology_tally": typology_tally,
+            "ledger": ledger,
+        }
+
+  # 6) GATE: clear cases auto-close, above-threshold cases go to a human investigator. The LLM eval
+  #    only checks the ledger is internally complete; the HUMAN strategy is the investigator decision.
+  #    Both strategies must pass before any SAR narrative is committed.
+  - id: investigator_gate
+    type: gate
+    depends_on: [build_case_ledger]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are a SAR quality-control reviewer. Answer exactly 'approved' if this case ledger is
+              internally complete - every ledger line has a risk_score and an explicit sar_eligible
+              flag, the case disposition is one of close/monitor/file_sar, and the totals are present -
+              otherwise answer 'rejected' and name the missing field. Do NOT re-judge the risk math.
+            input: "{steps.build_case_ledger.output}"
+            model: sonnet
+        - type: human
+          config:
+            message: "Financial-crime investigator: review the scored case ledger. Confirm the disposition (close / monitor / file SAR) and that the SAR-eligible events warrant a filing before the narrative and case file are produced."
+            timeout_hours: 24
+            on_timeout: abort
+
+  # 7) Provider-neutral SAR narrative with CROSS-PROVIDER failover (first non-empty wins, NOT a vote).
+  #    Branch A=sonnet, B=gemini, C=mistral. The narrative is grounded in the deterministic ledger;
+  #    no single provider is load-bearing and the threshold was already set in code.
+  - id: narrative_sonnet
+    type: standard
+    model: sonnet
+    prompt: |
+      You are a financial-crime investigator writing the consolidated SAR-style narrative for this
+      case (no markdown, no emojis). In 4-6 sentences state: the institution, how many events were
+      triaged, the dominant AML typologies, the total aggregated exposure, how many events are
+      SAR-eligible, and the recommended disposition. Ground every figure strictly in the ledger;
+      do not invent amounts and do not change the disposition.
+
+      Case ledger (already computed in code): {steps.build_case_ledger.output}
+
+  - id: narrative_gemini
+    type: standard
+    model: google/gemini-2.5-pro
+    prompt: |
+      You are a financial-crime investigator writing the consolidated SAR-style narrative for this
+      case (no markdown, no emojis). In 4-6 sentences state: the institution, how many events were
+      triaged, the dominant AML typologies, the total aggregated exposure, how many events are
+      SAR-eligible, and the recommended disposition. Ground every figure strictly in the ledger;
+      do not invent amounts and do not change the disposition.
+
+      Case ledger (already computed in code): {steps.build_case_ledger.output}
+
+  - id: narrative_mistral
+    type: standard
+    model: mistral/large
+    prompt: |
+      You are a financial-crime investigator writing the consolidated SAR-style narrative for this
+      case (no markdown, no emojis). In 4-6 sentences state: the institution, how many events were
+      triaged, the dominant AML typologies, the total aggregated exposure, how many events are
+      SAR-eligible, and the recommended disposition. Ground every figure strictly in the ledger;
+      do not invent amounts and do not change the disposition.
+
+      Case ledger (already computed in code): {steps.build_case_ledger.output}
+
+  - id: sar_narrative
+    type: race
+    depends_on: [investigator_gate]
+    race_config:
+      branches:
+        - [narrative_sonnet]
+        - [narrative_gemini]
+        - [narrative_mistral]
+      validator: "len(str(output).strip()) > 0"
+
+  # 8) CONDITION: branch the case on the deterministic disposition. FILE_SAR pushes the case to FIU
+  #    and produces the case file + pages fraud-ops; CLOSE/MONITOR post the matching outcome. The
+  #    branch reads the code ledger, never a model.
+  - id: route_disposition
+    type: condition
+    depends_on: [build_case_ledger, sar_narrative]
+    condition_config:
+      expression: "{steps.build_case_ledger.output.disposition} == 'file_sar'"
+      then: [file_sar_case, build_case_file, notify_fiu_queue]
+      else: [notify_close_or_monitor]
+
+  # 8a) HTTP (FILE_SAR path): push the case to the case-management / FIU system as a SAR-pending
+  #     record with the ledger and narrative embedded. (connector: case-management)
+  - id: file_sar_case
+    type: http
+    http_config:
+      url: "{input.core_banking_base_url}/sar-cases"
+      method: POST
+      auth: "bearer:{env.CASE_MGMT_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      body: |
+        {
+          "institution_id": "{input.institution_id}",
+          "status": "sar_pending",
+          "total_exposure": {steps.build_case_ledger.output.total_exposure},
+          "sar_eligible_count": {steps.build_case_ledger.output.sar_eligible_count},
+          "disposition": "{steps.build_case_ledger.output.disposition}",
+          "narrative": "{steps.sar_narrative.output}",
+          "ledger": {steps.build_case_ledger.output.ledger}
+        }
+      value_map:
+        case_reference: "id"
+        case_status: "status"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 8b) REPORT (FILE_SAR path): render the case-file PDF with the decision rationale, the SAR-style
+  #     narrative, and the full scored ledger for the FIU and the audit trail.
+  - id: build_case_file
+    type: report
+    depends_on: [file_sar_case]
+    report_config:
+      template: research-report
+      format: pdf
+      theme: professional
+      title: "Fraud Triage & SAR Case File - {input.institution_id}"
+      author: "{input.report_author}"
+    prompt: |
+      Assemble the financial-crime case-file PDF for institution {input.institution_id}.
+
+      Lead with an executive disposition line: events triaged
+      ({steps.build_case_ledger.output.events_triaged}), total aggregated exposure
+      (${steps.build_case_ledger.output.total_exposure}), SAR-eligible events
+      ({steps.build_case_ledger.output.sar_eligible_count}), and the case disposition
+      ({steps.build_case_ledger.output.disposition}).
+
+      Then include:
+      - The consolidated SAR-style investigator narrative: {steps.sar_narrative.output}
+      - The decision rationale: the SAR threshold and 30-day aggregation logic are deterministic
+        code; the model only drafted the narrative and never set the regulatory threshold.
+      - A per-event table from the ledger (alert id, account, typology, aggregated amount, risk
+        score, risk band, SAR-eligible flag, reasons): {steps.build_case_ledger.output.ledger}
+      - The filed case reference: {steps.file_sar_case.output}
+      - The typology breakdown: {steps.build_case_ledger.output.typology_tally}
+
+  # 8c) NOTIFY (FILE_SAR path): page fraud-ops / the FIU SAR-filing queue with the case reference,
+  #     exposure, and SAR-eligible count. (connector: slack)
+  - id: notify_fiu_queue
+    type: notify
+    depends_on: [build_case_file]
+    notify_config:
+      service: slack
+      channel: "{input.fraud_ops_channel}"
+      message: ":rotating_light: SAR-pending case routed to FIU for {input.institution_id}. Events triaged: {steps.build_case_ledger.output.events_triaged}, SAR-eligible: {steps.build_case_ledger.output.sar_eligible_count}, total exposure: ${steps.build_case_ledger.output.total_exposure}, max risk score: {steps.build_case_ledger.output.max_risk_score}. Case ref: {steps.file_sar_case.output}. Narrative: {steps.sar_narrative.output}"
+
+  # 8d) NOTIFY (CLOSE / MONITOR path): post the auto-close or monitor outcome with the ledger summary
+  #     for the audit trail. Reached when no event cleared the SAR threshold. (connector: slack)
+  - id: notify_close_or_monitor
+    type: notify
+    notify_config:
+      service: slack
+      channel: "{input.fraud_ops_channel}"
+      message: ":white_check_mark: Fraud triage complete for {input.institution_id} - disposition {steps.build_case_ledger.output.disposition} (no SAR-eligible events). Events triaged: {steps.build_case_ledger.output.events_triaged}, max risk score: {steps.build_case_ledger.output.max_risk_score}, total exposure: ${steps.build_case_ledger.output.total_exposure}. {steps.sar_narrative.output}"
+
+on_complete:
+  storage_path: "transaction-fraud-triage-sar-router/{run_id}/case-file.json"

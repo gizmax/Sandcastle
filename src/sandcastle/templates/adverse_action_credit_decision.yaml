@@ -1,0 +1,569 @@
+# name: Adverse Action Credit Decision
+# description: Fair-lending credit decision from application data + bureau pulls. A DETERMINISTIC Python policy engine (DTI, score cutoffs, capacity, exclusionary hard-stops) - not a model - sets the lend/decline outcome and derives the principal decline drivers. A classify maps a decline to ECOA / Reg-B principal reason codes, a two-judge + human gate proves the stated reasons match the actual decision drivers (no fair-lending mismatch), a condition branches approve/decline/refer, a provider-agnostic race drafts the adverse-action notice from the reason codes ONLY, a report assembles the decision record + notice + reason-code audit log, and notify pushes the applicant + the lending system.
+# tags: [Fintech, Lending, Credit-Decision, ECOA, Reg-B, Adverse-Action, Fair-Lending, Reason-Codes, Underwriting, Compliance]
+# category: fintech_banking
+category: fintech_banking
+
+name: adverse-action-credit-decision
+description: >
+  Runs a fair-lending consumer credit decision from application data and live bureau /
+  cashflow-underwriting pulls, then auto-generates a compliant ECOA / Reg-B adverse-action
+  notice with the principal reasons whenever the application is declined. Bureau attributes,
+  the credit score and any cashflow-underwriting signals are fetched over HTTP connectors. A
+  DETERMINISTIC Python policy engine - never a model - applies the lending rules (DTI ceiling,
+  score cutoff, residual-capacity floor, and exclusionary hard-stops) and emits the lend /
+  decline / refer decision PLUS the ranked principal decision drivers; the model can therefore
+  never silently change a lending outcome. A CLASSIFY maps each decline driver to the specific
+  ECOA / Regulation B principal reason code. A GATE then proves the stated reason codes are
+  consistent with the actual deterministic decision drivers (a two-judge cross-provider
+  consistency eval so no single vendor can wave through a fair-lending mismatch) and adds a
+  human underwriter approval for borderline / override cases. A CONDITION branches into approve,
+  decline or refer. On a decline a provider-agnostic RACE drafts the adverse-action notice text
+  from the reason codes ONLY (failover across two providers, first valid draft wins). A REPORT
+  assembles the decision record + adverse-action notice + reason-code audit log into a PDF, and
+  NOTIFY pushes the outcome to the applicant and back into the core lending system. Reason-code
+  mapping and notice drafting are provider-agnostic with failover and a consistency gate; the
+  decision rules and reason derivation are deterministic code; bureau pulls are HTTP connectors.
+  No vendor-specific model is required.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 900
+
+input_schema:
+  required: ["application_id", "applicant_ssn_token", "requested_amount", "annual_income"]
+  properties:
+    application_id:
+      type: string
+      description: "Loan / credit application id this decision is attached to."
+      example: "APP-2026-0091347"
+    applicant_ssn_token:
+      type: string
+      description: "Tokenized / vaulted SSN reference used to pull the bureau file (never the raw SSN)."
+      example: "tok_ssn_8f3a9c21"
+    requested_amount:
+      type: number
+      description: "Credit amount requested by the applicant, in USD."
+      example: "18000"
+    annual_income:
+      type: number
+      description: "Applicant stated annual gross income, in USD. Verified against cashflow pull downstream."
+      example: "72000"
+    monthly_debt_payments:
+      type: number
+      description: "Existing total monthly debt service (excluding the requested loan), in USD. Used for DTI."
+      default: 0
+      example: "1450"
+    monthly_housing_cost:
+      type: number
+      description: "Monthly rent or mortgage cost, in USD. Counts toward residual-capacity / DTI."
+      default: 0
+      example: "1800"
+    requested_term_months:
+      type: number
+      description: "Requested repayment term in months, used to estimate the new monthly payment."
+      default: 36
+      example: "36"
+    apr_estimate:
+      type: number
+      description: "Estimated annual percentage rate (decimal, e.g. 0.149 for 14.9%) used to size the new payment."
+      default: 0.149
+      example: "0.149"
+    min_score:
+      type: number
+      description: "Minimum credit score cutoff for an automated approval. Below this is a decline driver."
+      default: 660
+      example: "660"
+    max_dti:
+      type: number
+      description: "Maximum back-end debt-to-income ratio (decimal) allowed for approval, e.g. 0.43."
+      default: 0.43
+      example: "0.43"
+    min_residual_income:
+      type: number
+      description: "Minimum monthly residual income (USD) required after all debt + housing + new payment."
+      default: 800
+      example: "800"
+    bureau_api_base:
+      type: string
+      description: "REST base URL of the credit-bureau attribute / score service (e.g. Experian / Equifax style)."
+      default: "https://api.credit-bureau.example.com/v2"
+      example: "https://api.experian.example.com/v2"
+    cashflow_api_base:
+      type: string
+      description: "REST base URL of the cashflow-underwriting / bank-data aggregator (e.g. Plaid-style assets/income)."
+      default: "https://api.cashflow-underwriting.example.com/v1"
+      example: "https://api.plaid.example.com/v1"
+    lending_system_base_url:
+      type: string
+      description: "REST base URL of the core lending / loan-origination system the decision is written back to."
+      default: "https://api.los.example.com/v1"
+      example: "https://api.los.example.com/v1"
+    report_author:
+      type: string
+      description: "Author / department shown on the generated decision-record + adverse-action PDF."
+      default: "Credit Risk - Decisioning Unit"
+      example: "Credit Risk - Decisioning Unit"
+    applicant_channel:
+      type: string
+      description: "Slack / ops channel where the applicant-facing outcome notice is posted for delivery + the LOS write-back is announced."
+      default: "#lending-decisions"
+      example: "#lending-decisions"
+
+steps:
+  # 1) HTTP: pull the bureau file - credit score + risk attributes (delinquencies, utilization,
+  #    derogatory marks, inquiries, public records) keyed off the tokenized SSN. Real bureau connector.
+  - id: pull_bureau_attributes
+    type: http
+    responsibility: "Pull the applicant's bureau credit score and risk attributes for the policy engine."
+    source_hint: "Lending decisions require the real bureau file, not the applicant's stated history."
+    owner: "credit-risk-eng"
+    http_config:
+      url: "{input.bureau_api_base}/credit-report?ssn_token={input.applicant_ssn_token}&application_id={input.application_id}"
+      method: GET
+      auth: "bearer:{env.BUREAU_API_KEY}"
+      headers:
+        Accept: "application/json"
+      value_map:
+        credit_score: "score.value"
+        delinquencies_12m: "attributes.delinquencies_12m"
+        revolving_utilization: "attributes.revolving_utilization"
+        derogatory_marks: "attributes.derogatory_marks"
+        bankruptcies: "attributes.bankruptcies"
+        inquiries_6m: "attributes.inquiries_6m"
+        oldest_tradeline_months: "attributes.oldest_tradeline_months"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2) HTTP: pull cashflow-underwriting signals (verified deposits, NSF/overdraft count,
+  #    income consistency) from the bank-data aggregator to validate stated income + capacity.
+  - id: pull_cashflow_underwriting
+    type: http
+    responsibility: "Pull verified cashflow signals (deposits, NSF, income stability) for capacity checks."
+    source_hint: "Stated income must be validated against real bank cashflow before extending capacity."
+    owner: "credit-risk-eng"
+    http_config:
+      url: "{input.cashflow_api_base}/underwriting?application_id={input.application_id}&ssn_token={input.applicant_ssn_token}"
+      method: GET
+      auth: "bearer:{env.CASHFLOW_API_KEY}"
+      headers:
+        Accept: "application/json"
+      value_map:
+        verified_monthly_income: "income.verified_monthly"
+        nsf_count_90d: "risk.nsf_count_90d"
+        avg_daily_balance: "balances.avg_daily"
+        income_stability_score: "income.stability_score"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 3) DETERMINISTIC POLICY ENGINE - the lending decision. Pure rules, NO model. Computes DTI,
+  #    score cutoff, residual capacity and exclusionary hard-stops, and emits the decision PLUS
+  #    the RANKED principal decision drivers that the reason codes must trace back to.
+  - id: policy_engine
+    type: code
+    depends_on: [pull_bureau_attributes, pull_cashflow_underwriting]
+    responsibility: "Apply lending policy deterministically: DTI, score cutoff, capacity, hard-stops; derive drivers."
+    source_hint: "Compliance/Legal require the lend/decline outcome and its drivers to be reproducible and model-independent."
+    owner: "credit-risk-eng"
+    code_config:
+      language: python
+      code: |
+        # Deterministic fair-lending policy engine. The lend/decline/refer outcome and the
+        # ranked principal decision drivers are identical regardless of any model. Reads upstream
+        # HTTP outputs via _steps and workflow inputs via _input. ECOA/Reg-B reason mapping happens
+        # downstream off the drivers this step emits - the model can never change the outcome.
+        bureau = _steps['pull_bureau_attributes'] or {}
+        cashflow = _steps['pull_cashflow_underwriting'] or {}
+        if not isinstance(bureau, dict):
+            bureau = {}
+        if not isinstance(cashflow, dict):
+            cashflow = {}
+
+        def _num(d, key, default=0.0):
+            try:
+                v = d.get(key)
+                return float(v) if v is not None else float(default)
+            except (TypeError, ValueError):
+                return float(default)
+
+        # --- Inputs / policy thresholds -----------------------------------
+        requested = _num(_input, 'requested_amount', 0)
+        stated_income = _num(_input, 'annual_income', 0)
+        monthly_debt = _num(_input, 'monthly_debt_payments', 0)
+        housing = _num(_input, 'monthly_housing_cost', 0)
+        term = _num(_input, 'requested_term_months', 36) or 36
+        apr = _num(_input, 'apr_estimate', 0.149)
+        min_score = _num(_input, 'min_score', 660)
+        max_dti = _num(_input, 'max_dti', 0.43)
+        min_residual = _num(_input, 'min_residual_income', 800)
+
+        # --- Bureau attributes --------------------------------------------
+        score = _num(bureau, 'credit_score', 0)
+        delinquencies = _num(bureau, 'delinquencies_12m', 0)
+        utilization = _num(bureau, 'revolving_utilization', 0)
+        derogatory = _num(bureau, 'derogatory_marks', 0)
+        bankruptcies = _num(bureau, 'bankruptcies', 0)
+        oldest_tradeline = _num(bureau, 'oldest_tradeline_months', 0)
+
+        # --- Cashflow signals (validate stated income) --------------------
+        verified_monthly = _num(cashflow, 'verified_monthly_income', 0)
+        nsf_90d = _num(cashflow, 'nsf_count_90d', 0)
+        stated_monthly = stated_income / 12.0 if stated_income else 0.0
+        # Use the lower of stated vs verified monthly income when a verified figure exists.
+        if verified_monthly > 0:
+            income_monthly = min(stated_monthly, verified_monthly) if stated_monthly else verified_monthly
+        else:
+            income_monthly = stated_monthly
+
+        # --- Estimate the new monthly payment (amortized) -----------------
+        r = apr / 12.0
+        n = int(term) if term else 36
+        if requested > 0 and n > 0:
+            if r > 0:
+                new_payment = requested * (r * (1 + r) ** n) / (((1 + r) ** n) - 1)
+            else:
+                new_payment = requested / n
+        else:
+            new_payment = 0.0
+
+        # --- Back-end DTI + residual capacity -----------------------------
+        total_monthly_obligations = monthly_debt + housing + new_payment
+        dti = (total_monthly_obligations / income_monthly) if income_monthly > 0 else 1.0
+        residual_income = income_monthly - total_monthly_obligations
+
+        # --- Exclusionary hard-stops (regulatory / fraud floor) -----------
+        hard_stop = False
+        drivers = []  # ranked principal decision drivers; (severity, code, human_label)
+
+        if income_monthly <= 0:
+            hard_stop = True
+            drivers.append({'severity': 1, 'driver': 'no_verifiable_income',
+                            'detail': 'No verifiable monthly income could be established.'})
+        if bankruptcies >= 1:
+            hard_stop = True
+            drivers.append({'severity': 1, 'driver': 'active_bankruptcy_or_public_record',
+                            'detail': 'Bankruptcy / public record present on the bureau file.'})
+
+        # --- Graded decline drivers (each maps to an ECOA reason downstream) ---
+        if score > 0 and score < min_score:
+            drivers.append({'severity': 2, 'driver': 'credit_score_below_cutoff',
+                            'detail': f'Credit score {int(score)} is below the {int(min_score)} cutoff.'})
+        if dti > max_dti:
+            drivers.append({'severity': 2, 'driver': 'debt_to_income_too_high',
+                            'detail': f'Back-end DTI {round(dti, 3)} exceeds the {max_dti} ceiling.'})
+        if residual_income < min_residual:
+            drivers.append({'severity': 2, 'driver': 'insufficient_residual_capacity',
+                            'detail': f'Monthly residual income {round(residual_income, 2)} is below the {min_residual} floor.'})
+        if delinquencies >= 2:
+            drivers.append({'severity': 3, 'driver': 'delinquent_credit_obligations',
+                            'detail': f'{int(delinquencies)} delinquencies in the last 12 months.'})
+        if derogatory >= 1:
+            drivers.append({'severity': 3, 'driver': 'derogatory_public_or_collection_records',
+                            'detail': f'{int(derogatory)} derogatory mark(s) on file.'})
+        if utilization > 0.80:
+            drivers.append({'severity': 3, 'driver': 'excessive_revolving_utilization',
+                            'detail': f'Revolving utilization {round(utilization, 3)} is excessive.'})
+        if nsf_90d >= 3:
+            drivers.append({'severity': 3, 'driver': 'unstable_cashflow_nsf_activity',
+                            'detail': f'{int(nsf_90d)} NSF/overdraft events in 90 days.'})
+
+        # Rank drivers by severity (1 = hard-stop, most material first). ECOA requires the
+        # PRINCIPAL (most material) reasons - cap at the top 4 to match adverse-action conventions.
+        drivers.sort(key=lambda d: (d['severity'], d['driver']))
+        principal_drivers = drivers[:4]
+
+        # --- Deterministic outcome ----------------------------------------
+        # Borderline band: close to the cutoffs -> REFER for human underwriting rather than auto-decline.
+        near_score = (score > 0 and (min_score - 20) <= score < min_score)
+        near_dti = (max_dti < dti <= max_dti + 0.03)
+        borderline = (not hard_stop) and (near_score or near_dti) and len(principal_drivers) <= 2
+
+        if hard_stop:
+            decision = 'decline'
+        elif not drivers:
+            decision = 'approve'
+        elif borderline:
+            decision = 'refer'
+        else:
+            decision = 'decline'
+
+        result = {
+            'application_id': _input.get('application_id'),
+            'decision': decision,
+            'borderline': borderline,
+            'hard_stop': hard_stop,
+            'credit_score': int(score),
+            'dti': round(dti, 4),
+            'residual_income': round(residual_income, 2),
+            'new_monthly_payment': round(new_payment, 2),
+            'income_monthly_used': round(income_monthly, 2),
+            'thresholds': {
+                'min_score': min_score, 'max_dti': max_dti,
+                'min_residual_income': min_residual,
+            },
+            'principal_drivers': principal_drivers,
+            'driver_keys': [d['driver'] for d in principal_drivers],
+            'driver_count': len(principal_drivers),
+            'requested_amount': requested,
+        }
+
+  # 4) CONDITION: branch on the deterministic outcome. Approve -> write-back path. Decline ->
+  #    map reason codes, gate, draft notice. Refer -> human underwriter review then notify.
+  - id: route_decision
+    type: condition
+    depends_on: [policy_engine]
+    responsibility: "Branch approve vs decline vs refer strictly off the deterministic policy outcome."
+    source_hint: "The branch must follow the code-derived decision, never a model's opinion."
+    owner: "credit-risk-eng"
+    condition_config:
+      expression: "'{steps.policy_engine.output.decision}' == 'decline'"
+      then: [map_reason_codes]
+      else: [refer_or_approve_review]
+
+  # --- DECLINE PATH -------------------------------------------------------
+  # 5) CLASSIFY: map each deterministic decline DRIVER to the specific ECOA / Reg-B principal
+  #    reason code. Provider-agnostic, swappable model; it only LABELS drivers, it cannot change them.
+  - id: map_reason_codes
+    type: classify
+    depends_on: [route_decision]
+    responsibility: "Map the deterministic decline drivers to ECOA / Reg-B principal reason codes."
+    source_hint: "Reg-B requires the principal reasons; the mapping must trace to the code-derived drivers only."
+    owner: "compliance-ops"
+    classify_config:
+      model: haiku
+      input: >
+        Map the MOST MATERIAL deterministic decline driver below to exactly ONE ECOA / Regulation B
+        adverse-action principal reason category. credit_history = delinquencies, derogatory /
+        collection records, or score below cutoff driven by repayment history. excessive_obligations =
+        debt-to-income too high, insufficient residual capacity, or excessive revolving utilization.
+        insufficient_income = no verifiable income or income too low to support the obligation.
+        derogatory_public_record = bankruptcy or public record. unable_to_verify = cashflow / NSF
+        instability or information that could not be verified. Choose the single best category for the
+        top driver. Principal drivers (ranked, most material first): {steps.policy_engine.output.principal_drivers}
+      categories:
+        - credit_history
+        - excessive_obligations
+        - insufficient_income
+        - derogatory_public_record
+        - unable_to_verify
+      branches:
+        credit_history: [reason_consistency_gate]
+        excessive_obligations: [reason_consistency_gate]
+        insufficient_income: [reason_consistency_gate]
+        derogatory_public_record: [reason_consistency_gate]
+        unable_to_verify: [reason_consistency_gate]
+
+  # 6) GATE: prove the stated ECOA reason codes are CONSISTENT with the actual deterministic decision
+  #    drivers (no fair-lending mismatch) AND get a human underwriter sign-off. TWO cross-provider
+  #    llm_eval judges (sonnet + gemini) so no single vendor can wave a mismatch through; plus a human.
+  - id: reason_consistency_gate
+    type: gate
+    depends_on: [map_reason_codes]
+    responsibility: "Prove the ECOA reason codes match the real decision drivers (no fair-lending mismatch) + human approval."
+    source_hint: "Fair-lending exposure if the notice reasons diverge from the actual drivers; two providers must agree."
+    owner: "fair-lending-officer"
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >
+              You are a fair-lending compliance reviewer. Confirm the assigned ECOA / Reg-B reason
+              category is CONSISTENT with the deterministic decline drivers - i.e. the stated reason
+              actually traces to the most material code-derived driver and no driver was invented or
+              dropped. Answer exactly 'approved' ONLY if the reason category faithfully reflects the
+              drivers; otherwise 'rejected' and name the mismatch. Assigned reason category:
+              {steps.map_reason_codes.output} || Deterministic drivers: {steps.policy_engine.output.principal_drivers}
+              || Decision: {steps.policy_engine.output.decision}
+            model: sonnet
+        - type: llm_eval
+          config:
+            prompt: >
+              Independent second-judge fair-lending review (different provider). Verify the ECOA
+              reason category is consistent with the deterministic decline drivers and matches the
+              most material driver. Answer exactly 'approved' if consistent, otherwise 'rejected'.
+              Reason category: {steps.map_reason_codes.output} || Drivers:
+              {steps.policy_engine.output.principal_drivers} || Decision: {steps.policy_engine.output.decision}
+            model: google/gemini-2.5-pro
+        - type: human
+          config:
+            message: >
+              Underwriter sign-off: confirm the ECOA principal reason codes match the deterministic
+              decision drivers for application {input.application_id} and approve the adverse-action
+              decision (handle any borderline / override here before the notice is issued).
+            timeout_hours: 48
+            on_timeout: abort
+
+  # 7) RACE: draft the adverse-action notice text from the REASON CODES ONLY, failing over across
+  #    two providers (first valid draft wins; cross-provider so wording never blocks on one vendor).
+  - id: draft_adverse_action_notice
+    type: race
+    depends_on: [reason_consistency_gate]
+    responsibility: "Draft the adverse-action notice from the reason codes only, with cross-provider failover."
+    source_hint: "Notice wording must never block on a single provider outage; first valid draft wins."
+    owner: "compliance-ops"
+    race_config:
+      branches:
+        - [draft_notice_sonnet]
+        - [draft_notice_mistral]
+      validator: "len(str(output)) > 50"
+
+  - id: draft_notice_sonnet
+    type: standard
+    model: sonnet
+    responsibility: "Primary draft of the ECOA adverse-action notice from the reason codes."
+    source_hint: "Race branch A - default provider."
+    owner: "compliance-ops"
+    prompt: |
+      Draft a compliant ECOA / Regulation B ADVERSE-ACTION NOTICE for credit application
+      {input.application_id}. Write the notice text ONLY from the principal reason codes and their
+      labels provided below. Do NOT introduce any new reason, do NOT cite specific bureau attribute
+      values, and do NOT speculate beyond the stated principal reasons.
+
+      State, in plain language: (1) that the application for credit was not approved; (2) the
+      principal reason(s) for the decision, drawn verbatim from the reason categories below; (3) the
+      applicant's right to a free copy of the credit report used and the right to dispute its
+      accuracy with the bureau; (4) the ECOA notice that a creditor may not discriminate on a
+      prohibited basis. Keep it formal and factual. No markdown headers, no emojis.
+
+      Decision: {steps.policy_engine.output.decision}
+      ECOA principal reason category: {steps.map_reason_codes.output}
+      Principal reason drivers (labels only, authoritative): {steps.policy_engine.output.principal_drivers}
+
+  - id: draft_notice_mistral
+    type: standard
+    model: mistral/large
+    responsibility: "Failover draft of the ECOA adverse-action notice from the reason codes."
+    source_hint: "Race branch B - cross-provider failover so the notice never blocks on one vendor."
+    owner: "compliance-ops"
+    prompt: |
+      Draft a compliant ECOA / Regulation B ADVERSE-ACTION NOTICE for credit application
+      {input.application_id}. Write the notice text ONLY from the principal reason codes and their
+      labels provided below. Do NOT introduce any new reason, do NOT cite specific bureau attribute
+      values, and do NOT speculate beyond the stated principal reasons.
+
+      State, in plain language: (1) that the application for credit was not approved; (2) the
+      principal reason(s) for the decision, drawn verbatim from the reason categories below; (3) the
+      applicant's right to a free copy of the credit report used and the right to dispute its
+      accuracy with the bureau; (4) the ECOA notice that a creditor may not discriminate on a
+      prohibited basis. Keep it formal and factual. No markdown headers, no emojis.
+
+      Decision: {steps.policy_engine.output.decision}
+      ECOA principal reason category: {steps.map_reason_codes.output}
+      Principal reason drivers (labels only, authoritative): {steps.policy_engine.output.principal_drivers}
+
+  # 8) REPORT: assemble the decision record + adverse-action notice + reason-code audit log into a
+  #    PDF artifact the lender retains for ECOA recordkeeping. Decline path.
+  - id: decision_report
+    type: report
+    depends_on: [draft_adverse_action_notice]
+    responsibility: "Render the decision record + adverse-action notice + reason-code audit log to PDF."
+    source_hint: "ECOA recordkeeping requires the decision, reasons and notice retained together."
+    owner: "compliance-ops"
+    report_config:
+      template: research-report
+      format: pdf
+      theme: professional
+      title: "Adverse Action Decision Record - {input.application_id}"
+      author: "{input.report_author}"
+    prompt: |
+      Assemble the credit decision package PDF for application {input.application_id}.
+
+      Section 1 - Decision Record (deterministic, authoritative):
+      Decision: {steps.policy_engine.output.decision}
+      Credit score: {steps.policy_engine.output.credit_score}   Back-end DTI: {steps.policy_engine.output.dti}
+      Residual income: {steps.policy_engine.output.residual_income}
+      New monthly payment: {steps.policy_engine.output.new_monthly_payment}
+      Policy thresholds: {steps.policy_engine.output.thresholds}
+
+      Section 2 - Adverse Action Notice (verbatim, ready to send):
+      {steps.draft_adverse_action_notice.output}
+
+      Section 3 - Reason-Code Audit Log:
+      - ECOA principal reason category: {steps.map_reason_codes.output}
+      - Ranked principal decision drivers (code-derived): {steps.policy_engine.output.principal_drivers}
+      - Driver keys: {steps.policy_engine.output.driver_keys}
+      - Consistency gate (two-judge + human) result is recorded upstream of this report.
+
+  # 9) NOTIFY (decline path): push the adverse-action outcome to the applicant-delivery /
+  #    lending-decisions channel for delivery and LOS attachment.
+  - id: notify_applicant_decline
+    type: notify
+    depends_on: [decision_report]
+    responsibility: "Announce the adverse-action outcome + notice PDF for applicant delivery and LOS attachment."
+    source_hint: "Adverse-action notices must be delivered to the applicant and logged on the file."
+    owner: "compliance-ops"
+    notify_config:
+      service: slack
+      channel: "{input.applicant_channel}"
+      message: >
+        Adverse action issued for application {input.application_id}. Decision:
+        {steps.policy_engine.output.decision}. ECOA principal reason: {steps.map_reason_codes.output}.
+        Decision record + adverse-action notice PDF is ready for applicant delivery and LOS attachment.
+
+  # --- APPROVE / REFER PATH ----------------------------------------------
+  # 10) APPROVAL: approve outcomes are written back automatically; refer outcomes get a human
+  #     underwriter review here before write-back. (route_decision.else lands here.)
+  - id: refer_or_approve_review
+    type: approval
+    depends_on: [route_decision]
+    responsibility: "Human underwriter review for refer cases; approvals pass through to write-back."
+    source_hint: "Borderline 'refer' outcomes need an underwriter before booking; approvals are auto-booked."
+    owner: "underwriting"
+    approval_config:
+      message: >
+        Application {input.application_id} resolved to '{steps.policy_engine.output.decision}'.
+        Review the deterministic decision (score {steps.policy_engine.output.credit_score},
+        DTI {steps.policy_engine.output.dti}, residual {steps.policy_engine.output.residual_income})
+        and approve booking, or send back. Borderline={steps.policy_engine.output.borderline}.
+      show_data: steps.policy_engine.output
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: true
+
+  # 11) HTTP: write the approved / referred-then-approved decision back into the core lending system.
+  - id: writeback_lending_system
+    type: http
+    depends_on: [refer_or_approve_review]
+    responsibility: "Write the approved decision back to the core lending / origination system."
+    source_hint: "The booking system is the system of record; the decision must be posted there."
+    owner: "credit-risk-eng"
+    http_config:
+      url: "{input.lending_system_base_url}/applications/{input.application_id}/decision"
+      method: POST
+      auth: "bearer:{env.LENDING_SYSTEM_API_KEY}"
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      body:
+        decision: "{steps.policy_engine.output.decision}"
+        credit_score: "{steps.policy_engine.output.credit_score}"
+        dti: "{steps.policy_engine.output.dti}"
+        residual_income: "{steps.policy_engine.output.residual_income}"
+        requested_amount: "{steps.policy_engine.output.requested_amount}"
+        principal_drivers: "{steps.policy_engine.output.driver_keys}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 12) NOTIFY (approve/refer path): announce the booked decision to the lending channel.
+  - id: notify_lending_system
+    type: notify
+    depends_on: [writeback_lending_system]
+    responsibility: "Announce the booked approve/refer decision back to the lending team channel."
+    source_hint: "Approved bookings need a visible trail in the team channel for awareness."
+    owner: "credit-risk-eng"
+    notify_config:
+      service: slack
+      channel: "{input.applicant_channel}"
+      message: >
+        Decision booked for application {input.application_id}: {steps.policy_engine.output.decision}
+        (score {steps.policy_engine.output.credit_score}, DTI {steps.policy_engine.output.dti}).
+        Written back to the lending system: {steps.writeback_lending_system.output}.
+
+on_complete:
+  storage_path: "adverse-action-credit-decision/{run_id}/result.json"

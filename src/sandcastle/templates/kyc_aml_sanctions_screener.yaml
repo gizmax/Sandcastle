@@ -1,0 +1,591 @@
+# name: KYC/AML Sanctions Screener
+# description: Screens a new customer against sanctions / PEP / watchlist sources and adverse media, resolves true hits vs false positives, scores AML risk deterministically, routes any hit to a human compliance analyst, and seals a CDD/EDD case file with every source logged.
+# tags: [KYC, AML, Sanctions, PEP, OFAC, Watchlist, AdverseMedia, EntityResolution, CDD, EDD, Compliance, BSA, Fintech, Banking]
+# category: fintech_banking
+
+name: kyc-aml-sanctions-screener
+description: >
+  The AML decisioning engine for new-customer onboarding. A DETERMINISTIC Python step first
+  normalizes and validates the applicant's identity fields (name, DOB, nationality, address,
+  document) and builds the screening keys (normalized full name, name tokens, DOB key, ISO
+  country). A cross-source RACE then fans out parallel HTTP queries to multiple
+  sanctions / PEP / watchlist providers plus an adverse-media web search and takes the first
+  provider that returns a usable list of candidate hits (provider failover, NOT a vote). A
+  swappable CLASSIFY step performs entity resolution - deciding for each candidate whether it
+  is a true hit or a false positive on name / DOB / geography - and runs on any provider with
+  failover. The load-bearing AML RISK SCORE is then computed in pure Python from match
+  severity, geography, product risk, and PEP status - never by a model. A compliance GATE
+  auto-clears genuinely low-risk applicants but forces a mandatory human compliance-analyst
+  review on any potential hit or elevated score. A REPORT assembles the CDD/EDD case file
+  logging every source and every decision, a CONDITION routes the outcome to cleared vs
+  blocked vs escalate-to-EDD, and a NOTIFY pushes the decision to the onboarding system and
+  the compliance queue. The hard list-match, validation, and scoring logic is fully
+  model-independent.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 900
+
+input_schema:
+  required: ["applicant_id", "full_name"]
+  properties:
+    applicant_id:
+      type: string
+      description: "Unique id for this onboarding applicant / case."
+      example: "KYC-2026-008431"
+    full_name:
+      type: string
+      description: "Applicant legal full name as submitted on the application."
+      example: "Ivan Petrov"
+    date_of_birth:
+      type: string
+      description: "Applicant date of birth (ISO 8601 yyyy-mm-dd) used for DOB disambiguation."
+      default: ""
+      example: "1979-04-12"
+    nationality:
+      type: string
+      description: "Applicant nationality / country of residence (ISO 3166-1 alpha-2 or country name)."
+      default: ""
+      example: "RU"
+    address:
+      type: string
+      description: "Residential address used for geography risk and entity resolution."
+      default: ""
+      example: "Tverskaya St 12, Moscow"
+    document_number:
+      type: string
+      description: "National id / passport number captured at onboarding (used for the audit record)."
+      default: ""
+      example: "P1234567"
+    product:
+      type: string
+      description: "Product the applicant is onboarding to (drives product-risk weighting)."
+      default: "retail_account"
+      example: "correspondent_banking"
+    sanctions_api_url:
+      type: string
+      description: "Primary sanctions/PEP/watchlist screening REST base (OpenSanctions, Dow Jones, ComplyAdvantage, Refinitiv World-Check)."
+      default: "https://api.opensanctions.org/search/default"
+      example: "https://api.opensanctions.org/search/default"
+    sanctions_api_url_secondary:
+      type: string
+      description: "Secondary watchlist provider used for race failover (different vendor)."
+      default: "https://api.complyadvantage.com/searches"
+      example: "https://api.complyadvantage.com/searches"
+    adverse_media_url:
+      type: string
+      description: "Adverse-media / negative-news web search endpoint queried in parallel."
+      default: "https://api.exa.ai/search"
+      example: "https://api.exa.ai/search"
+    onboarding_api_url:
+      type: string
+      description: "Onboarding/core-banking REST endpoint that receives the screening decision."
+      default: "https://your-core.example.com/api/onboarding"
+      example: "https://acme-bank.example.com/api/onboarding"
+    case_store_base_url:
+      type: string
+      description: "Object store (S3-compatible) REST base where the CDD/EDD case file is archived."
+      default: "https://s3.eu-central-1.amazonaws.com"
+      example: "https://s3.eu-central-1.amazonaws.com"
+    case_store_bucket:
+      type: string
+      description: "Bucket that holds the sealed CDD/EDD case files for audit retention."
+      default: "kyc-case-files"
+      example: "acme-kyc-case-files"
+    high_risk_countries:
+      type: string
+      description: "Comma-separated ISO alpha-2 (or names) treated as high-risk geography (FATF grey/black list + your policy)."
+      default: "IR,KP,SY,RU,BY,MM,CU,AF"
+      example: "IR,KP,SY,RU,BY,MM,CU,AF"
+    clear_threshold:
+      type: number
+      description: "AML risk score (0-100) strictly below which an applicant auto-clears with no human review."
+      default: 30
+      example: "30"
+    block_threshold:
+      type: number
+      description: "AML risk score (0-100) at or above which the applicant is blocked / SAR-candidate."
+      default: 75
+      example: "75"
+    report_author:
+      type: string
+      description: "Author shown on the CDD/EDD case-file PDF."
+      default: "BSA/AML Compliance"
+      example: "BSA/AML Compliance"
+    slack_channel:
+      type: string
+      description: "Compliance-queue Slack channel for the screening decision."
+      default: "#aml-compliance-queue"
+      example: "#aml-compliance-queue"
+
+steps:
+  # 1) DETERMINISTIC identity normalization + validation. The audit-load-bearing prep:
+  #    validate required fields, normalize the name, derive DOB/country keys, build the
+  #    screening query string and name tokens used by every downstream source. No model.
+  - id: normalize_identity
+    type: code
+    code_config:
+      language: python
+      code: |
+        import re
+        import unicodedata
+
+        full_name = str(_input.get('full_name') or '').strip()
+        dob = str(_input.get('date_of_birth') or '').strip()
+        nationality = str(_input.get('nationality') or '').strip()
+        address = str(_input.get('address') or '').strip()
+        product = str(_input.get('product') or 'retail_account').strip().lower()
+
+        # --- Normalize the name: strip accents, collapse whitespace, uppercase, drop punctuation.
+        def _normalize(text):
+            text = unicodedata.normalize('NFKD', text)
+            text = ''.join(c for c in text if not unicodedata.combining(c))
+            text = re.sub(r'[^A-Za-z0-9 ]+', ' ', text)
+            text = re.sub(r'\s+', ' ', text).strip().upper()
+            return text
+
+        norm_name = _normalize(full_name)
+        name_tokens = [t for t in norm_name.split(' ') if t]
+
+        # --- Validate the required identity fields; collect machine-readable errors.
+        validation_errors = []
+        if len(name_tokens) < 2:
+            validation_errors.append('name_too_short_min_two_tokens')
+        dob_ok = bool(re.match(r'^\d{4}-\d{2}-\d{2}$', dob))
+        if dob and not dob_ok:
+            validation_errors.append('dob_not_iso8601')
+        dob_year = dob[:4] if dob_ok else ''
+        # DOB key = year + month-day, used by entity resolution to disambiguate same-name hits.
+        dob_key = dob.replace('-', '') if dob_ok else ''
+
+        # --- Country key: accept ISO alpha-2 or a name; keep raw for the audit trail.
+        country_raw = nationality
+        country_key = country_raw.upper()[:2] if len(country_raw) >= 2 else country_raw.upper()
+
+        result = {
+            'applicant_id': _input.get('applicant_id'),
+            'valid': len(validation_errors) == 0,
+            'validation_errors': validation_errors,
+            'normalized_name': norm_name,
+            'name_tokens': name_tokens,
+            'query_string': ' '.join(name_tokens),
+            'dob': dob,
+            'dob_key': dob_key,
+            'dob_year': dob_year,
+            'country_key': country_key,
+            'country_raw': country_raw,
+            'address': address,
+            'product': product,
+            'document_number': str(_input.get('document_number') or ''),
+        }
+
+  # 2) CROSS-SOURCE RACE: fan out parallel HTTP queries to multiple sanctions/PEP/watchlist
+  #    providers + an adverse-media search. FIRST source that returns a usable candidate list
+  #    wins (provider failover, NOT a vote). Each branch is a different connector.
+  #    Branch steps are DEFINED SEPARATELY below with NO depends_on.
+  - id: query_sanctions_primary
+    type: http
+    http_config:
+      url: "{input.sanctions_api_url}?q={steps.normalize_identity.output.query_string}&schema=Person&countries={steps.normalize_identity.output.country_key}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.SANCTIONS_API_KEY}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  - id: query_sanctions_secondary
+    type: http
+    http_config:
+      url: "{input.sanctions_api_url_secondary}?search_term={steps.normalize_identity.output.query_string}&birth_year={steps.normalize_identity.output.dob_year}&fuzziness=0.6"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.SANCTIONS_API_KEY_SECONDARY}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  - id: query_adverse_media
+    type: http
+    http_config:
+      url: "{input.adverse_media_url}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.ADVERSE_MEDIA_API_KEY}"
+      body: |
+        {
+          "query": "{steps.normalize_identity.output.normalized_name} fraud OR money laundering OR sanctions OR bribery OR terrorism OR indictment",
+          "numResults": 10,
+          "type": "keyword"
+        }
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  - id: screening_sources_race
+    type: race
+    depends_on: [normalize_identity]
+    race_config:
+      branches:
+        - [query_sanctions_primary]
+        - [query_sanctions_secondary]
+        - [query_adverse_media]
+      validator: "len(str(output).strip()) > 0"
+
+  # 3) DETERMINISTIC candidate extraction: flatten whichever provider won the race into a
+  #    uniform candidate list (name, list, score, dob, country) so entity-resolution and
+  #    scoring read one shape regardless of vendor. No model.
+  - id: extract_candidates
+    type: code
+    depends_on: [screening_sources_race, normalize_identity]
+    code_config:
+      language: python
+      code: |
+        ident = _steps['normalize_identity'] or {}
+        raw = _steps['screening_sources_race']
+
+        # The winning provider payload can be a dict or list in several shapes; coalesce.
+        if isinstance(raw, dict):
+            rows = (raw.get('results') or raw.get('hits') or raw.get('matches')
+                    or raw.get('data') or raw.get('content') or [])
+        elif isinstance(raw, list):
+            rows = raw
+        else:
+            rows = []
+        if not isinstance(rows, list):
+            rows = [rows] if rows else []
+
+        applicant_tokens = set(ident.get('name_tokens', []))
+
+        candidates = []
+        for row in rows:
+            if not isinstance(row, dict):
+                # adverse-media providers may return bare strings/URLs
+                candidates.append({
+                    'source_type': 'adverse_media',
+                    'name': '',
+                    'list': 'negative_news',
+                    'provider_score': None,
+                    'dob': '',
+                    'country': '',
+                    'snippet': str(row)[:300],
+                    'token_overlap': 0.0,
+                })
+                continue
+            name = str(row.get('caption') or row.get('name') or row.get('title')
+                       or row.get('matched_name') or '').strip()
+            # Provider's own match/relevance score if present (varies by vendor).
+            pscore = row.get('score') or row.get('match_score') or row.get('relevance')
+            try:
+                pscore = float(pscore) if pscore is not None else None
+            except (TypeError, ValueError):
+                pscore = None
+            props = row.get('properties') if isinstance(row.get('properties'), dict) else {}
+            datasets = row.get('datasets') or row.get('lists') or props.get('topics') or []
+            list_label = (','.join(datasets) if isinstance(datasets, list)
+                          else str(datasets)) or str(row.get('list') or 'unknown')
+            cand_dob = str(row.get('birthDate') or row.get('dob')
+                           or (props.get('birthDate') or [''])[0] if isinstance(props.get('birthDate'), list)
+                           else props.get('birthDate') or '').strip()
+            cand_country = str(row.get('country') or (props.get('country') or [''])[0]
+                               if isinstance(props.get('country'), list)
+                               else row.get('country') or '').strip()
+
+            # Deterministic name-token overlap (Jaccard) for the resolver to lean on.
+            cand_tokens = set(str(name).upper().replace('-', ' ').split())
+            inter = applicant_tokens & cand_tokens
+            union = applicant_tokens | cand_tokens
+            overlap = round(len(inter) / len(union), 3) if union else 0.0
+
+            is_media = bool(row.get('url') or row.get('publishedDate') or 'news' in list_label.lower())
+            candidates.append({
+                'source_type': 'adverse_media' if is_media else 'sanctions_pep_watchlist',
+                'name': name,
+                'list': list_label,
+                'provider_score': pscore,
+                'dob': cand_dob,
+                'country': cand_country,
+                'snippet': str(row.get('snippet') or row.get('summary') or '')[:300],
+                'token_overlap': overlap,
+            })
+
+        sanctions_hits = [c for c in candidates if c['source_type'] == 'sanctions_pep_watchlist']
+        media_hits = [c for c in candidates if c['source_type'] == 'adverse_media']
+
+        result = {
+            'applicant_id': ident.get('applicant_id'),
+            'candidate_count': len(candidates),
+            'sanctions_candidate_count': len(sanctions_hits),
+            'media_candidate_count': len(media_hits),
+            'has_any_candidate': len(candidates) > 0,
+            'candidates': candidates,
+        }
+
+  # 4) CLASSIFY entity resolution: for the candidate set, decide true_hit vs false_positive
+  #    vs needs_review on name / DOB / geography. The ONLY model in the path and it is
+  #    swappable to any provider; every category falls through to the deterministic scorer.
+  - id: resolve_entity
+    type: classify
+    depends_on: [extract_candidates]
+    classify_config:
+      model: sonnet
+      input: >
+        You are an AML entity-resolution analyst. Decide whether the screening candidates are
+        the SAME real person as the applicant or a coincidental name match. Use name-token
+        overlap, date of birth, and country/geography. Rules: 'clear_false_positive' = no
+        candidate, or all candidates have weak name overlap AND a conflicting DOB/country;
+        'confirmed_true_hit' = a candidate with strong name match AND matching DOB or country
+        AND it sits on a sanctions/PEP/watchlist; 'needs_human_review' = a plausible match that
+        cannot be confidently confirmed or cleared (adverse media, partial DOB, fuzzy name).
+        Applicant: name={steps.normalize_identity.output.normalized_name},
+        dob={steps.normalize_identity.output.dob}, country={steps.normalize_identity.output.country_key}.
+        Candidates: {steps.extract_candidates.output.candidates}
+      categories:
+        - clear_false_positive
+        - needs_human_review
+        - confirmed_true_hit
+      branches:
+        clear_false_positive: [score_aml_risk]
+        needs_human_review: [score_aml_risk]
+        confirmed_true_hit: [score_aml_risk]
+
+  # 5) DETERMINISTIC AML RISK SCORE. The load-bearing decision: a transparent 0-100 score from
+  #    match severity (resolver verdict + list type), geography, product risk, and PEP status.
+  #    Never a model - the hard list-match logic lives here.
+  - id: score_aml_risk
+    type: code
+    depends_on: [extract_candidates, resolve_entity, normalize_identity]
+    code_config:
+      language: python
+      code: |
+        ident = _steps['normalize_identity'] or {}
+        extracted = _steps['extract_candidates'] or {}
+        verdict = str(_steps['resolve_entity'] or '').strip().lower()
+        candidates = extracted.get('candidates', [])
+
+        hrc_raw = str(_input.get('high_risk_countries') or '')
+        high_risk = {c.strip().upper() for c in hrc_raw.replace(';', ',').split(',') if c.strip()}
+        clear_threshold = float(_input.get('clear_threshold', 30) or 30)
+        block_threshold = float(_input.get('block_threshold', 75) or 75)
+
+        score = 0
+        factors = []
+
+        # --- (a) Match severity from the entity-resolution verdict.
+        if verdict == 'confirmed_true_hit':
+            score += 60
+            factors.append('confirmed_true_hit:+60')
+        elif verdict == 'needs_human_review':
+            score += 35
+            factors.append('needs_human_review:+35')
+        else:
+            factors.append('clear_false_positive:+0')
+
+        # --- (b) List-type severity (deterministic scan of the candidate lists).
+        combined_lists = ' '.join(str(c.get('list', '')).lower() for c in candidates)
+        is_sanctioned = any(k in combined_lists for k in ('sanction', 'ofac', 'sdn', 'un_', 'eu_fsf', 'consolidated'))
+        is_pep = any(k in combined_lists for k in ('pep', 'politically'))
+        is_media = any(c.get('source_type') == 'adverse_media' for c in candidates)
+        if is_sanctioned and verdict != 'clear_false_positive':
+            score += 20
+            factors.append('on_sanctions_list:+20')
+        if is_pep:
+            score += 10
+            factors.append('pep_exposure:+10')
+        if is_media and verdict != 'clear_false_positive':
+            score += 8
+            factors.append('adverse_media:+8')
+
+        # --- (c) Geography risk.
+        country = str(ident.get('country_key', '')).upper()
+        country_raw = str(ident.get('country_raw', '')).upper()
+        if country in high_risk or any(hr and hr in country_raw for hr in high_risk):
+            score += 15
+            factors.append('high_risk_geography:+15')
+
+        # --- (d) Product risk.
+        product = str(ident.get('product', '')).lower()
+        high_risk_products = ('correspondent', 'crypto', 'private_bank', 'trade_finance', 'money_service')
+        if any(p in product for p in high_risk_products):
+            score += 12
+            factors.append('high_risk_product:+12')
+
+        # --- (e) Identity-validation penalty (unverifiable identity raises risk).
+        if not ident.get('valid', True):
+            score += 10
+            factors.append('identity_validation_failed:+10')
+
+        score = max(0, min(100, score))
+
+        # --- Deterministic disposition. A potential hit can never silently auto-clear.
+        potential_hit = verdict in ('confirmed_true_hit', 'needs_human_review')
+        if verdict == 'confirmed_true_hit' or score >= block_threshold:
+            disposition = 'block'
+        elif (not potential_hit) and score < clear_threshold:
+            disposition = 'auto_clear'
+        else:
+            disposition = 'escalate_edd'
+
+        result = {
+            'applicant_id': ident.get('applicant_id'),
+            'risk_score': score,
+            'risk_factors': factors,
+            'resolver_verdict': verdict,
+            'is_sanctioned': is_sanctioned,
+            'is_pep': is_pep,
+            'is_adverse_media': is_media,
+            'potential_hit': potential_hit,
+            'disposition': disposition,
+            'requires_human_review': disposition != 'auto_clear',
+            'clear_threshold': clear_threshold,
+            'block_threshold': block_threshold,
+        }
+
+  # 6) COMPLIANCE GATE: auto-clear genuinely low-risk applicants, but force a MANDATORY human
+  #    compliance-analyst review on any potential hit or elevated score. An LLM control-eval
+  #    AND (when escalation is needed) a human analyst must BOTH pass. All strategies must pass.
+  - id: compliance_review_gate
+    type: gate
+    depends_on: [score_aml_risk]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >
+              You are an AML control reviewer. Answer exactly 'approved' if this screening
+              record is internally consistent - the disposition matches the rule (block on
+              confirmed_true_hit or score>=block_threshold; auto_clear only when there is NO
+              potential hit and score<clear_threshold; otherwise escalate_edd) and every risk
+              factor is supported by the data. Otherwise answer 'rejected' and name the defect.
+            input: "{steps.score_aml_risk.output}"
+            model: sonnet
+        - type: human
+          config:
+            message: "Compliance analyst: review this KYC/AML screening. Approve to accept the disposition; reject to override and force EDD. Any potential sanctions/PEP/adverse-media hit must be dispositioned by a human before onboarding proceeds."
+            timeout_hours: 48
+            on_timeout: abort
+
+  # 7) REPORT: assemble the CDD/EDD case file logging EVERY source queried and EVERY decision
+  #    (identity, all candidates, resolver verdict, score breakdown, disposition, analyst sign-off).
+  - id: case_file
+    type: report
+    depends_on: [compliance_review_gate]
+    report_config:
+      template: research-report
+      format: pdf
+      theme: professional
+      title: "CDD/EDD Case File - {input.applicant_id} ({input.full_name})"
+      author: "{input.report_author}"
+    prompt: |
+      Assemble the Customer Due Diligence / Enhanced Due Diligence case file for AML audit.
+      Log every source queried and every decision so a regulator can reconstruct the outcome.
+
+      Section 1 - Applicant identity (as validated):
+      {steps.normalize_identity.output}
+
+      Section 2 - Screening sources + candidate hits (sanctions / PEP / watchlist + adverse media):
+      {steps.extract_candidates.output}
+
+      Section 3 - Entity-resolution verdict (true hit vs false positive on name/DOB/geography):
+      {steps.resolve_entity.output}
+
+      Section 4 - Deterministic AML risk score + factor breakdown + disposition:
+      {steps.score_aml_risk.output}
+
+      Section 5 - Compliance gate / analyst review outcome:
+      {steps.compliance_review_gate.output}
+
+  # 8) ARCHIVE the case file to the audit object store (retention). Real persistence path.
+  - id: archive_case_file
+    type: http
+    depends_on: [case_file]
+    http_config:
+      url: "{input.case_store_base_url}/{input.case_store_bucket}/cases/{input.applicant_id}/cdd-edd-case-file.pdf"
+      method: PUT
+      headers:
+        Content-Type: "application/pdf"
+        x-amz-meta-applicant-id: "{input.applicant_id}"
+        x-amz-meta-risk-score: "{steps.score_aml_risk.output.risk_score}"
+        x-amz-meta-disposition: "{steps.score_aml_risk.output.disposition}"
+      auth: "aws4:{env.AWS_ACCESS_KEY_ID}:{env.AWS_SECRET_ACCESS_KEY}"
+      body: "{steps.case_file.output}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 9) CONDITION: route the final outcome to cleared vs blocked vs escalate-to-EDD.
+  #    Deterministic branch off the score step's disposition. No model.
+  - id: route_outcome
+    type: condition
+    depends_on: [score_aml_risk, archive_case_file]
+    condition_config:
+      expression: "{steps.score_aml_risk.output.disposition} == 'block'"
+      then: [post_block_decision]
+      else: [post_clear_or_edd_decision]
+
+  # 9a) BLOCKED / SAR-candidate path: tell the onboarding system to reject and freeze.
+  - id: post_block_decision
+    type: http
+    http_config:
+      url: "{input.onboarding_api_url}/applicants/{input.applicant_id}/decision"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.ONBOARDING_API_TOKEN}"
+      body: |
+        {
+          "applicant_id": "{input.applicant_id}",
+          "decision": "blocked",
+          "aml_risk_score": "{steps.score_aml_risk.output.risk_score}",
+          "disposition": "{steps.score_aml_risk.output.disposition}",
+          "sar_candidate": true
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 9b) CLEARED or ESCALATE-TO-EDD path: pass the disposition through; onboarding continues
+  #     for auto_clear, or moves to EDD work-queue for escalate_edd.
+  - id: post_clear_or_edd_decision
+    type: http
+    http_config:
+      url: "{input.onboarding_api_url}/applicants/{input.applicant_id}/decision"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.ONBOARDING_API_TOKEN}"
+      body: |
+        {
+          "applicant_id": "{input.applicant_id}",
+          "decision": "{steps.score_aml_risk.output.disposition}",
+          "aml_risk_score": "{steps.score_aml_risk.output.risk_score}",
+          "disposition": "{steps.score_aml_risk.output.disposition}",
+          "sar_candidate": false
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # 10) NOTIFY the compliance queue with the screening decision + integrity references.
+  - id: notify_compliance_queue
+    type: notify
+    depends_on: [route_outcome]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: "KYC/AML screening {input.applicant_id} ({input.full_name}) -> {steps.score_aml_risk.output.disposition} | risk score {steps.score_aml_risk.output.risk_score}/100 | resolver: {steps.score_aml_risk.output.resolver_verdict} | sanctioned={steps.score_aml_risk.output.is_sanctioned} pep={steps.score_aml_risk.output.is_pep} media={steps.score_aml_risk.output.is_adverse_media} | case file archived at cases/{input.applicant_id}/cdd-edd-case-file.pdf."
+
+on_complete:
+  storage_path: "kyc-aml-sanctions-screener/{run_id}/result.json"

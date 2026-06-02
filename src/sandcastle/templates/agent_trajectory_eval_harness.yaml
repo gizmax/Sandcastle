@@ -1,0 +1,576 @@
+# name: Agent Trajectory Eval Harness
+# description: Replay recorded agent task trajectories and regression-gate your agent on task-success, tool-call correctness, step-efficiency, and cost against a stored baseline.
+# tags: [llmops, agent-eval, trajectory, regression, ci, tool-use, evaluation, cost]
+# category: llmops_ai_eng
+
+name: agent-trajectory-eval-harness
+description: >-
+  Agent CI in a box. Loads a suite of recorded agent task trajectories
+  (goal + environment fixture + expected final-state outcome), then for every
+  task fans out a sub-workflow that re-runs the agent harness against a
+  DETERMINISTIC, fixtured mock tool layer (http stubs) so runs are reproducible
+  and provider-neutral. A deterministic Python step then scores every task with
+  no model in the loop: it asserts task-success against the expected final state,
+  validates each tool call against an allowed tool/arg schema, and computes
+  step-count and token-cost per task. An llm_eval gate grades trajectory QUALITY
+  (sane path, no needless loops, no thrash) and a classify step tags each failure
+  by mode (wrong-tool / hallucinated-arg / infinite-loop / gave-up). A second
+  deterministic step aggregates success-rate, median-steps, and cost-per-task and
+  diffs them against the stored baseline; a threshold gate FAILS the run on any
+  success-rate drop or cost-per-task regression, and a Slack scorecard ships the
+  regressed tasks plus a failure-mode histogram. Because the agent's reasoning
+  model is default_model, the SAME suite scores an agent on any of the 7
+  providers and surfaces the cost/quality tradeoff per provider - success and
+  tool-call correctness are deterministic assertions, never one vendor's eval.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 1200
+
+input_schema:
+  required: ["suite_id"]
+  properties:
+    suite_id:
+      type: string
+      description: "Identifier of the recorded trajectory suite to replay (used for the scorecard and storage path)."
+      default: "agent-suite-2026-06-01"
+      example: "checkout-agent-regression-suite"
+    suite_url:
+      type: string
+      description: >-
+        REST endpoint that returns the recorded agent task suite as JSON: a list
+        of tasks, each with goal, environment fixture, expected final-state, and
+        the allowed tool schema. Provider-neutral fixture store.
+      default: "https://fixtures.example.com/agent-suites/agent-suite-2026-06-01.json"
+      example: "https://fixtures.example.com/agent-suites/checkout-agent.json"
+    tool_stub_base_url:
+      type: string
+      description: >-
+        Base URL of the DETERMINISTIC mock/fixtured tool layer the replayed agent
+        calls instead of real tools. Stubs return canned responses so every replay
+        is byte-reproducible regardless of which provider runs the agent.
+      default: "https://tool-stubs.example.com"
+      example: "https://localhost:8089"
+    baseline_url:
+      type: string
+      description: >-
+        REST endpoint returning the stored baseline metrics (success_rate,
+        median_steps, cost_per_task) the new run is regression-gated against.
+      default: "https://fixtures.example.com/agent-suites/agent-suite-2026-06-01-baseline.json"
+      example: "https://fixtures.example.com/baselines/checkout-agent.json"
+    success_rate_drop_tolerance:
+      type: number
+      description: "Max allowed absolute drop in success-rate vs baseline before the run fails (e.g. 0.02 = 2pp)."
+      default: 0.02
+      example: "0.02"
+    cost_regression_tolerance_pct:
+      type: number
+      description: "Max allowed % increase in median cost-per-task vs baseline before the run fails."
+      default: 10.0
+      example: "10.0"
+    cost_per_1k_input_tokens:
+      type: number
+      description: "Price assumption (USD per 1k input tokens) for the deterministic per-task cost computation."
+      default: 0.003
+      example: "0.003"
+    cost_per_1k_output_tokens:
+      type: number
+      description: "Price assumption (USD per 1k output tokens) for the deterministic per-task cost computation."
+      default: 0.015
+      example: "0.015"
+    slack_channel:
+      type: string
+      description: "Slack channel the regression scorecard is posted to."
+      default: "#agent-evals"
+      example: "#agent-ci"
+
+steps:
+  # ---------------------------------------------------------------------------
+  # 1) LOAD the recorded trajectory suite (goal + fixture + expected outcome +
+  #    allowed tool schema) from the fixture store. Pure read.
+  # ---------------------------------------------------------------------------
+  - id: load_suite
+    type: http
+    http_config:
+      url: "{input.suite_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.FIXTURE_API_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # ---------------------------------------------------------------------------
+  # 2) LOAD the stored baseline metrics the new run is gated against. Pure read.
+  # ---------------------------------------------------------------------------
+  - id: load_baseline
+    type: http
+    http_config:
+      url: "{input.baseline_url}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.FIXTURE_API_TOKEN}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: skip
+
+  # ---------------------------------------------------------------------------
+  # 3) SHAPE the suite into a clean task list for fan-out. Deterministic: it
+  #    normalizes whatever envelope the fixture store returns (bare list,
+  #    {"tasks": [...]}, {"data": [...]}) into a uniform list of task objects,
+  #    each carrying goal, fixture, expected final-state, and tool schema.
+  # ---------------------------------------------------------------------------
+  - id: shape_tasks
+    type: code
+    depends_on: [load_suite]
+    code_config:
+      language: python
+      code: |
+        suite = _steps['load_suite']
+        if isinstance(suite, str):
+            try:
+                import json as _json
+                suite = _json.loads(suite) if suite.strip() else {}
+            except (ValueError, TypeError):
+                suite = {}
+        if isinstance(suite, list):
+            raw_tasks = suite
+        elif isinstance(suite, dict):
+            raw_tasks = suite.get('tasks') or suite.get('data') or suite.get('items') or []
+        else:
+            raw_tasks = []
+
+        tasks = []
+        for idx, t in enumerate(raw_tasks):
+            if not isinstance(t, dict):
+                continue
+            task_id = str(t.get('id') or t.get('task_id') or ('task-' + str(idx)))
+            goal = str(t.get('goal') or t.get('prompt') or t.get('objective') or '')
+            fixture = t.get('fixture') or t.get('environment') or t.get('env') or {}
+            expected = t.get('expected') or t.get('expected_final_state') or t.get('expected_outcome') or {}
+            allowed_tools = t.get('allowed_tools') or t.get('tool_schema') or t.get('tools') or []
+            # Build a compact, model-readable spec the agent harness sub-workflow
+            # replays. tool_stub_base is injected so the agent hits the fixtured
+            # tool layer rather than real tools.
+            spec_lines = [
+                'AGENT TRAJECTORY REPLAY',
+                'task_id: ' + task_id,
+                'goal: ' + goal,
+                'tool_stub_base: ' + str(_input.get('tool_stub_base_url', '')),
+                'allowed_tools: ' + str(allowed_tools),
+                'environment_fixture: ' + str(fixture),
+                'expected_final_state: ' + str(expected),
+                'Replay the agent against ONLY the stubbed tools above; emit the '
+                'ordered tool-call trajectory, the final state reached, and token usage.',
+            ]
+            tasks.append({
+                'task_id': task_id,
+                'goal': goal,
+                'fixture': fixture,
+                'expected': expected,
+                'allowed_tools': allowed_tools,
+                'text': '\n'.join(spec_lines),
+            })
+
+        result = {
+            'suite_id': _input.get('suite_id'),
+            'task_count': len(tasks),
+            'tasks': tasks,
+        }
+
+  # ---------------------------------------------------------------------------
+  # 4) FAN-OUT replay: for every task, run the agent harness sub-workflow against
+  #    the deterministic fixtured tool layer. parallel_over maps each shaped task
+  #    into the existing 'summarize' harness (stands in for the agent runner);
+  #    _item.text carries the full replay spec including the tool-stub base URL,
+  #    so the agent calls stubs - making the run reproducible & provider-neutral.
+  # ---------------------------------------------------------------------------
+  - id: replay_agent_tasks
+    type: sub_workflow
+    depends_on: [shape_tasks]
+    sub_workflow:
+      workflow: "summarize"
+      parallel_over: "steps.shape_tasks.output.tasks"
+      input_mapping:
+        text: "_item.text"
+        format: "structured"
+      max_concurrent: 5
+
+  # ---------------------------------------------------------------------------
+  # 5) DETERMINISTIC per-task scoring - the load-bearing eval. NO model. For each
+  #    task it: (a) asserts task-success via final-state match against expected,
+  #    (b) validates every tool call against the allowed tool/arg schema,
+  #    (c) computes step-count, and (d) computes token-cost from the input prices.
+  #    Produces a per-task scored record + suite-level rollup the gate/classify
+  #    steps consume.
+  # ---------------------------------------------------------------------------
+  - id: score_tasks
+    type: code
+    depends_on: [shape_tasks, replay_agent_tasks]
+    code_config:
+      language: python
+      code: |
+        import json
+        import statistics
+
+        shaped = _steps['shape_tasks'] or {}
+        tasks = shaped.get('tasks', []) if isinstance(shaped, dict) else []
+
+        replays = _steps['replay_agent_tasks']
+        if isinstance(replays, dict):
+            replays = replays.get('results') or replays.get('items') or list(replays.values())
+        if not isinstance(replays, list):
+            replays = [replays]
+
+        cost_in = float(_input.get('cost_per_1k_input_tokens', 0.003) or 0.0)
+        cost_out = float(_input.get('cost_per_1k_output_tokens', 0.015) or 0.0)
+
+        def _as_obj(x):
+            if isinstance(x, dict):
+                return x
+            if isinstance(x, str):
+                try:
+                    v = json.loads(x)
+                    return v if isinstance(v, dict) else {'final_state': x}
+                except (ValueError, TypeError):
+                    return {'final_state': x}
+            return {}
+
+        def _norm(v):
+            # Canonicalize a value for stable comparison (order-independent dicts).
+            return json.dumps(v, sort_keys=True, separators=(',', ':'), default=str)
+
+        scored = []
+        for idx, task in enumerate(tasks):
+            replay = _as_obj(replays[idx]) if idx < len(replays) else {}
+
+            # --- (a) TASK-SUCCESS: final-state assertion against expected ------
+            expected = task.get('expected') or {}
+            final_state = replay.get('final_state') or replay.get('final') or replay.get('result') or {}
+            if isinstance(expected, dict) and expected:
+                success = all(
+                    _norm(final_state.get(k)) == _norm(v)
+                    for k, v in expected.items()
+                ) if isinstance(final_state, dict) else False
+            else:
+                # No structured expectation: success iff a non-empty final state exists.
+                success = bool(final_state) and str(final_state).strip() not in ('', '{}', 'None')
+
+            # --- (b) TOOL-CALL VALIDITY against the allowed schema ------------
+            allowed = task.get('allowed_tools') or []
+            allowed_map = {}
+            for spec in allowed:
+                if isinstance(spec, dict):
+                    nm = str(spec.get('name') or spec.get('tool') or '')
+                    args = spec.get('args') or spec.get('parameters') or spec.get('arguments') or []
+                    allowed_map[nm] = set(args) if isinstance(args, (list, set)) else set()
+                elif isinstance(spec, str):
+                    allowed_map[spec] = None  # name-only allow, no arg constraint
+
+            trajectory = replay.get('tool_calls') or replay.get('trajectory') or replay.get('steps') or []
+            if not isinstance(trajectory, list):
+                trajectory = []
+
+            tool_violations = []
+            seen_signatures = []
+            for call in trajectory:
+                if not isinstance(call, dict):
+                    continue
+                name = str(call.get('tool') or call.get('name') or call.get('action') or '')
+                args = call.get('args') or call.get('arguments') or call.get('params') or {}
+                arg_keys = set(args.keys()) if isinstance(args, dict) else set()
+                seen_signatures.append((name, _norm(args)))
+                if name not in allowed_map:
+                    tool_violations.append({'tool': name, 'reason': 'wrong_tool'})
+                else:
+                    constraint = allowed_map[name]
+                    if constraint is not None:
+                        extra = arg_keys - constraint
+                        if extra:
+                            tool_violations.append({
+                                'tool': name,
+                                'reason': 'hallucinated_arg',
+                                'unknown_args': sorted(extra),
+                            })
+
+            tool_calls_valid = len(tool_violations) == 0
+
+            # --- (c) STEP-COUNT and loop detection ----------------------------
+            step_count = len(trajectory)
+            # Infinite-loop heuristic: same (tool, args) signature repeated >= 3x.
+            sig_counts = {}
+            for sig in seen_signatures:
+                sig_counts[sig] = sig_counts.get(sig, 0) + 1
+            max_repeat = max(sig_counts.values()) if sig_counts else 0
+            looped = max_repeat >= 3
+
+            # --- (d) TOKEN-COST from declared usage + price assumptions -------
+            usage = replay.get('usage') or replay.get('token_usage') or {}
+            in_tok = float(usage.get('input_tokens') or usage.get('prompt_tokens') or 0)
+            out_tok = float(usage.get('output_tokens') or usage.get('completion_tokens') or 0)
+            cost = round((in_tok / 1000.0) * cost_in + (out_tok / 1000.0) * cost_out, 6)
+
+            scored.append({
+                'task_id': task.get('task_id'),
+                'goal': task.get('goal'),
+                'success': bool(success),
+                'tool_calls_valid': bool(tool_calls_valid),
+                'tool_violations': tool_violations,
+                'step_count': step_count,
+                'looped': bool(looped),
+                'max_repeat': max_repeat,
+                'input_tokens': in_tok,
+                'output_tokens': out_tok,
+                'cost_usd': cost,
+                'final_state': final_state,
+                'passed': bool(success) and bool(tool_calls_valid) and not looped,
+            })
+
+        total = len(scored)
+        passed_n = sum(1 for s in scored if s['passed'])
+        success_n = sum(1 for s in scored if s['success'])
+        steps_list = [s['step_count'] for s in scored] or [0]
+        costs_list = [s['cost_usd'] for s in scored] or [0.0]
+
+        result = {
+            'suite_id': shaped.get('suite_id'),
+            'total_tasks': total,
+            'passed': passed_n,
+            'success_count': success_n,
+            'success_rate': round(success_n / total, 4) if total else 0.0,
+            'pass_rate': round(passed_n / total, 4) if total else 0.0,
+            'median_steps': statistics.median(steps_list),
+            'median_cost_per_task': round(statistics.median(costs_list), 6),
+            'total_cost_usd': round(sum(costs_list), 6),
+            'scored_tasks': scored,
+            'failing_tasks': [s for s in scored if not s['passed']],
+        }
+
+  # ---------------------------------------------------------------------------
+  # 6) QUALITY GATE (llm_eval) - grades TRAJECTORY quality the assertions cannot:
+  #    is the path sane, are there needless loops / thrash, does it look like a
+  #    competent agent run rather than flailing? This is advisory grading on top
+  #    of the deterministic pass/fail; the swappable model is pinned for stable
+  #    judging. The deterministic score above remains load-bearing.
+  # ---------------------------------------------------------------------------
+  - id: trajectory_quality_gate
+    type: gate
+    depends_on: [score_tasks]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are an agent-trajectory quality reviewer. Examine the scored
+              tasks. Answer exactly 'approved' if the trajectories look like sane,
+              efficient agent runs - reasonable step counts, no obvious needless
+              loops or repeated thrashing, tool calls progressing toward the goal.
+              Answer 'rejected' and name the worst-offending task_id if you see
+              pervasive looping, flailing, or trajectories that wander without
+              progress. Judge PATH QUALITY, not whether a single assertion passed.
+            input: "{steps.score_tasks.output}"
+            model: sonnet
+
+  # ---------------------------------------------------------------------------
+  # 7) CLASSIFY the dominant failure mode across the failing tasks so the
+  #    scorecard carries an actionable histogram. The single swappable model in
+  #    the labeling path; every category funnels into the deterministic aggregate.
+  # ---------------------------------------------------------------------------
+  - id: classify_failure_modes
+    type: classify
+    depends_on: [score_tasks, trajectory_quality_gate]
+    classify_config:
+      model: haiku
+      input: >-
+        Tag the DOMINANT failure mode across these failing agent tasks. Use:
+        wrong_tool = agent called a tool not in the allowed schema;
+        hallucinated_arg = agent passed arguments not in the tool's schema;
+        infinite_loop = agent repeated the same tool call without progress;
+        gave_up = agent stopped without reaching the expected final state.
+        Failing tasks (with tool_violations, looped flags, success flags):
+        {steps.score_tasks.output.failing_tasks}
+      categories:
+        - wrong_tool
+        - hallucinated_arg
+        - infinite_loop
+        - gave_up
+      branches:
+        wrong_tool: [aggregate_vs_baseline]
+        hallucinated_arg: [aggregate_vs_baseline]
+        infinite_loop: [aggregate_vs_baseline]
+        gave_up: [aggregate_vs_baseline]
+
+  # ---------------------------------------------------------------------------
+  # 8) DETERMINISTIC AGGREGATE vs BASELINE - the regression decision. NO model.
+  #    Diffs this run's success-rate, median-steps, and median cost-per-task
+  #    against the stored baseline, applies the configured tolerances, and emits
+  #    a single boolean `regressed` plus a per-failure-mode histogram. This is the
+  #    authoritative verdict the threshold gate enforces.
+  # ---------------------------------------------------------------------------
+  - id: aggregate_vs_baseline
+    type: code
+    depends_on: [score_tasks, classify_failure_modes]
+    code_config:
+      language: python
+      code: |
+        import json
+
+        score = _steps['score_tasks'] or {}
+        dominant_mode = str(_steps['classify_failure_modes'] or '').strip().lower()
+
+        base = _steps['load_baseline']
+        if isinstance(base, str):
+            try:
+                base = json.loads(base) if base.strip() else {}
+            except (ValueError, TypeError):
+                base = {}
+        if not isinstance(base, dict):
+            base = {}
+
+        def _f(d, *keys, default=0.0):
+            for k in keys:
+                if isinstance(d, dict) and k in d and d[k] is not None:
+                    try:
+                        return float(d[k])
+                    except (TypeError, ValueError):
+                        continue
+            return float(default)
+
+        cur_success = _f(score, 'success_rate')
+        cur_steps = _f(score, 'median_steps')
+        cur_cost = _f(score, 'median_cost_per_task')
+
+        base_success = _f(base, 'success_rate', default=cur_success)
+        base_steps = _f(base, 'median_steps', default=cur_steps)
+        base_cost = _f(base, 'median_cost_per_task', 'cost_per_task', default=cur_cost)
+
+        drop_tol = float(_input.get('success_rate_drop_tolerance', 0.02) or 0.0)
+        cost_tol_pct = float(_input.get('cost_regression_tolerance_pct', 10.0) or 0.0)
+
+        success_drop = round(base_success - cur_success, 4)
+        success_regressed = success_drop > drop_tol
+
+        if base_cost > 0:
+            cost_change_pct = round(((cur_cost - base_cost) / base_cost) * 100.0, 2)
+        else:
+            cost_change_pct = 0.0
+        cost_regressed = cost_change_pct > cost_tol_pct
+
+        regressed = bool(success_regressed or cost_regressed)
+
+        # Failure-mode histogram from the deterministic per-task tool_violations
+        # (not the model label) so it is reproducible; classify gives the headline.
+        scored = score.get('scored_tasks', [])
+        histogram = {'wrong_tool': 0, 'hallucinated_arg': 0, 'infinite_loop': 0, 'gave_up': 0}
+        for s in scored:
+            if s.get('passed'):
+                continue
+            tagged = False
+            for v in s.get('tool_violations', []):
+                reason = v.get('reason')
+                if reason in histogram:
+                    histogram[reason] += 1
+                    tagged = True
+            if s.get('looped'):
+                histogram['infinite_loop'] += 1
+                tagged = True
+            if not s.get('success') and not tagged:
+                histogram['gave_up'] += 1
+
+        regressed_tasks = []
+        for s in scored:
+            if not s.get('passed'):
+                regressed_tasks.append({
+                    'task_id': s.get('task_id'),
+                    'success': s.get('success'),
+                    'tool_calls_valid': s.get('tool_calls_valid'),
+                    'looped': s.get('looped'),
+                    'step_count': s.get('step_count'),
+                    'cost_usd': s.get('cost_usd'),
+                })
+
+        result = {
+            'suite_id': score.get('suite_id'),
+            'regressed': regressed,
+            'success_regressed': success_regressed,
+            'cost_regressed': cost_regressed,
+            'current': {
+                'success_rate': cur_success,
+                'pass_rate': _f(score, 'pass_rate'),
+                'median_steps': cur_steps,
+                'median_cost_per_task': cur_cost,
+                'total_cost_usd': _f(score, 'total_cost_usd'),
+            },
+            'baseline': {
+                'success_rate': base_success,
+                'median_steps': base_steps,
+                'median_cost_per_task': base_cost,
+            },
+            'deltas': {
+                'success_drop': success_drop,
+                'cost_change_pct': cost_change_pct,
+            },
+            'tolerances': {
+                'success_rate_drop_tolerance': drop_tol,
+                'cost_regression_tolerance_pct': cost_tol_pct,
+            },
+            'dominant_failure_mode': dominant_mode or 'none',
+            'failure_mode_histogram': histogram,
+            'regressed_tasks': regressed_tasks,
+            'verdict': 'REGRESSION' if regressed else 'PASS',
+        }
+
+  # ---------------------------------------------------------------------------
+  # 9) THRESHOLD GATE - the CI fail. An llm_eval strategy reads the deterministic
+  #    `regressed` verdict and the deltas, and mechanically returns approved only
+  #    when there is no success-rate or cost-per-task regression. The decision is
+  #    fully determined by the code above; the gate is the enforcement point that
+  #    blocks the pipeline on regression.
+  # ---------------------------------------------------------------------------
+  - id: regression_threshold_gate
+    type: gate
+    depends_on: [aggregate_vs_baseline]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >-
+              You are a strict CI regression gate. Read the aggregate verdict.
+              Answer exactly 'approved' if and ONLY if the field `regressed` is
+              false (no success-rate drop beyond tolerance and no cost-per-task
+              regression beyond tolerance). If `regressed` is true, answer
+              'rejected' and state whether it was a success-rate or cost
+              regression using the deltas. Do not second-guess the numbers - they
+              are authoritative.
+            input: "{steps.aggregate_vs_baseline.output}"
+            model: sonnet
+
+  # ---------------------------------------------------------------------------
+  # 10) SCORECARD - post the result (regressed tasks + failure-mode histogram +
+  #     current vs baseline metrics) to Slack. Ships on pass and on regression so
+  #     the team always sees the trend.
+  # ---------------------------------------------------------------------------
+  - id: post_scorecard
+    type: notify
+    depends_on: [regression_threshold_gate]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: >-
+        Agent trajectory eval [{input.suite_id}]: {steps.aggregate_vs_baseline.output.verdict}.
+        success_rate {steps.aggregate_vs_baseline.output.current.success_rate} (baseline
+        {steps.aggregate_vs_baseline.output.baseline.success_rate}, drop
+        {steps.aggregate_vs_baseline.output.deltas.success_drop}), median_steps
+        {steps.aggregate_vs_baseline.output.current.median_steps}, cost/task
+        {steps.aggregate_vs_baseline.output.current.median_cost_per_task} (change
+        {steps.aggregate_vs_baseline.output.deltas.cost_change_pct}%). Dominant failure mode:
+        {steps.aggregate_vs_baseline.output.dominant_failure_mode}. Failure histogram:
+        {steps.aggregate_vs_baseline.output.failure_mode_histogram}. Regressed tasks:
+        {steps.aggregate_vs_baseline.output.regressed_tasks}.
+
+on_complete:
+  storage_path: "llmops/agent-trajectory-eval/{input.suite_id}/{run_id}.json"

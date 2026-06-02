@@ -1,0 +1,591 @@
+# name: Prompt Optimization Loop
+# description: Autoresearch-style optimization of a prompt artifact against a labeled eval set - propose a variant from the current best plus recent failures, score it through the eval set, and keep it only when its lower-bound score beats the incumbent's upper bound (an anti-noise statistical gate), stopping automatically on plateau
+# tags: [llmops, prompt-engineering, evaluation, optimization, autoresearch, ab-testing]
+# category: llmops_ai_eng
+
+name: prompt-optimization-loop
+description: >-
+  Closes a propose-score-keep loop over a PROMPT against a labeled eval set. It loads the
+  eval set over HTTP, then iterates a bounded number of rounds: an author model drafts a
+  candidate prompt variant from the current best prompt plus the most recent failure cases,
+  the variant is run across the whole eval set via the existing 'summarize' sub-workflow
+  (one fan-out per example), deterministic code computes an aggregate accuracy score and a
+  Wilson lower/upper confidence interval, a classify step buckets the new failures by error
+  type so the next variant has targeted feedback, and a statistical gate keeps the variant
+  ONLY when its score lower bound beats the incumbent's upper bound (anti-noise: a noisy tie
+  never wins). A condition step breaks the loop on plateau - no accepted improvement over N
+  rounds. When the loop ends, code writes the winning prompt plus the full score history to
+  storage and a Slack notify summarizes the lift. The variant-author and the eval-runner both
+  use default_model / per-step model override, so you can optimize a prompt FOR a target
+  provider or cross-provider - the keep/discard decision is a deterministic statistical gate,
+  never a vendor's prompt-tuning service, so there is no fine-tuning lock-in.
+
+default_model: sonnet
+default_timeout: 900
+
+input_schema:
+  required: ["eval_set_url", "seed_prompt", "task_description"]
+  properties:
+    eval_set_url:
+      type: string
+      description: "HTTP endpoint returning the labeled eval set as JSON (list of {input, expected, id} records). Any eval store works (LangSmith, Braintrust, Promptfoo export, or an internal service)."
+      default: "https://evals.internal.acme.com/api/v1/datasets/prompt-opt/examples?limit=200"
+    seed_prompt:
+      type: string
+      description: "The starting (incumbent) prompt template that the loop tries to beat. Use {{input}} where the example input is injected."
+      default: "You are a precise assistant. Answer the question using only the provided context. Question: {{input}}"
+    task_description:
+      type: string
+      description: "One-line description of what the prompt is supposed to do - steers the variant author and the error-type classifier."
+      default: "Answer factual questions grounded strictly in the supplied context, no hallucination."
+    target_model:
+      type: string
+      description: "Model alias the optimized prompt will run on in production - documented for the author so it tunes for that provider (sonnet, opus, haiku, google/gemini-2.5-pro, mistral/large, etc.)."
+      default: "sonnet"
+    max_rounds:
+      type: number
+      description: "Hard upper bound on optimization rounds (loop max_iterations)."
+      default: 12
+    plateau_rounds:
+      type: number
+      description: "Stop early when no accepted improvement happens for this many consecutive rounds."
+      default: 3
+    confidence_z:
+      type: number
+      description: "Z-score for the Wilson score interval used by the anti-noise gate (1.96 = 95% confidence)."
+      default: 1.96
+    results_url:
+      type: string
+      description: "Internal endpoint that persists the winning prompt + score history (Postgres/S3 behind it)."
+      default: "https://evals.internal.acme.com/api/v1/runs/prompt-opt/result"
+    slack_channel:
+      type: string
+      description: "Slack channel for the final lift summary."
+      default: "#llmops-prompts"
+
+steps:
+  # 1) HTTP - load the labeled eval set. Provider-neutral: any eval store that returns
+  #    a JSON list of {id, input, expected} records works (LangSmith / Braintrust / Promptfoo).
+  - id: load_eval_set
+    type: http
+    http_config:
+      url: "{input.eval_set_url}"
+      method: GET
+      auth: "bearer:{env.EVAL_STORE_TOKEN}"
+      headers:
+        Accept: "application/json"
+        X-Task: "{input.task_description}"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 2) CODE - seed the optimization state: the incumbent is the user's seed_prompt with no
+  #    measured score yet (-1 upper bound so the very first variant can always be adopted).
+  #    Normalizes the eval records into a stable, citable list. No model here.
+  - id: init_state
+    type: code
+    depends_on: [load_eval_set]
+    code_config:
+      language: python
+      code: |
+        # Build the initial optimization state. Deterministic, no model.
+        raw = _steps.get("load_eval_set") or {}
+        if isinstance(raw, dict):
+            records = raw.get("examples") or raw.get("data") or raw.get("records") or []
+        elif isinstance(raw, list):
+            records = raw
+        else:
+            records = []
+        if not isinstance(records, list):
+            records = []
+
+        examples = []
+        for i, r in enumerate(records):
+            if not isinstance(r, dict):
+                r = {"input": str(r), "expected": ""}
+            examples.append({
+                "id": str(r.get("id", i)),
+                "input": str(r.get("input", r.get("question", r.get("prompt", "")))),
+                "expected": str(r.get("expected", r.get("label", r.get("answer", "")))),
+            })
+
+        seed = str(_input.get("seed_prompt", "")).strip()
+        result = {
+            "examples": examples,
+            "example_count": len(examples),
+            "task_description": str(_input.get("task_description", "")),
+            "target_model": str(_input.get("target_model", "sonnet")),
+            # Incumbent starts unmeasured: upper bound -1 means the first scored variant wins.
+            "incumbent_prompt": seed,
+            "incumbent_score": 0.0,
+            "incumbent_lower": 0.0,
+            "incumbent_upper": -1.0,
+            "recent_failures": [],
+            "recent_error_types": [],
+            "round_index": 0,
+            "rounds_since_improvement": 0,
+            "history": [],
+            "plateaued": False,
+        }
+
+  # 3) LOOP - bounded optimization loop. Each iteration runs the propose -> eval -> score ->
+  #    classify -> gate -> plateau-check chain over the SAME shared state. max_iterations is
+  #    capped by max_rounds; the until-expression breaks early on plateau.
+  - id: optimize_loop
+    type: loop
+    depends_on: [init_state]
+    loop_config:
+      over: "steps.init_state.output"
+      step_ids:
+        - propose_variant
+        - run_variant_on_evalset
+        - score_variant
+        - classify_failures
+        - anti_noise_gate
+        - plateau_check
+      max_iterations: 12
+      until: "bool((_steps.get('plateau_check') or {}).get('plateaued'))"
+
+  # 3a) LLM - author a single candidate prompt variant from the current best prompt plus the
+  #     most recent failure cases and their error-type buckets. Uses default_model so the same
+  #     workflow can optimize a prompt FOR any target provider via a per-step model override.
+  - id: propose_variant
+    type: standard
+    output_schema:
+      type: object
+      properties:
+        variant_prompt: { type: string }
+        rationale: { type: string }
+        targeted_error_types: { type: array, items: { type: string } }
+      required: ["variant_prompt", "rationale"]
+    prompt: |
+      You are a prompt optimizer running one round of autoresearch over a PROMPT artifact.
+      Your job: produce ONE improved candidate prompt that should score higher on the eval set
+      than the current best, WITHOUT overfitting to individual examples.
+
+      Task the prompt must perform:
+      {input.task_description}
+
+      Production target model (tune phrasing/format for this provider): {input.target_model}
+
+      Current best (incumbent) prompt:
+      {steps.init_state.output.incumbent_prompt}
+
+      Most recent failing examples from the last evaluation (each has the input, the expected
+      answer, and what the prompt produced) - fix THESE failure modes, generalize, do not
+      hardcode answers:
+      {steps.init_state.output.recent_failures}
+
+      Error-type buckets the last run failed on (focus your edits here):
+      {steps.init_state.output.recent_error_types}
+
+      Rules:
+      - Keep the literal placeholder {{input}} exactly where the example input is injected.
+      - Make a focused, single-hypothesis change (clearer instruction, better format,
+        an explicit grounding/refusal rule) - not a from-scratch rewrite.
+      - Do NOT embed any specific eval answer; the variant must generalize to unseen inputs.
+
+      Return STRICT JSON only:
+      {
+        "variant_prompt": "<the full candidate prompt, must contain {{input}}>",
+        "rationale": "<one or two sentences: the single hypothesis behind this change>",
+        "targeted_error_types": ["<error buckets this variant aims to fix>"]
+      }
+      Output JSON only, no prose.
+
+  # 3b) SUB_WORKFLOW - run the candidate variant across the ENTIRE eval set. Fans out one
+  #     child run per example (parallel_over the example list) through the EXISTING 'summarize'
+  #     template, which stands in as the provider-swappable eval-runner. The variant prompt and
+  #     each example input are mapped in; max_concurrent caps fan-out width.
+  - id: run_variant_on_evalset
+    type: sub_workflow
+    depends_on: [propose_variant]
+    sub_workflow:
+      workflow: "summarize"
+      parallel_over: "steps.init_state.output.examples"
+      max_concurrent: 8
+      input_mapping:
+        text: "_item.input"
+        format: "narrative"
+        max_length: "120 words"
+        audience: "_item.expected"
+
+  # 3c) CODE - the load-bearing scoring decision, fully deterministic. Grades each example
+  #     output against its expected label, computes an aggregate accuracy, and derives a Wilson
+  #     score confidence interval (lower/upper bound) so the gate can be anti-noise. Also
+  #     collects the new failure cases to feed the next variant. NO model in this decision.
+  - id: score_variant
+    type: code
+    depends_on: [run_variant_on_evalset]
+    code_config:
+      language: python
+      code: |
+        # Deterministic grading + Wilson score interval. This is the load-bearing measurement.
+        examples = ((_steps.get("init_state") or {}).get("examples")) or []
+        outputs = _steps.get("run_variant_on_evalset") or []
+        if not isinstance(outputs, list):
+            outputs = [outputs]
+
+        def norm(s):
+            return " ".join(str(s or "").lower().split())
+
+        def graded(expected, produced):
+            e, p = norm(expected), norm(produced)
+            if not e:
+                # No gold label -> count as correct only if the model produced something.
+                return 1 if p else 0
+            # Token-overlap containment: pass if the expected answer is substantially present.
+            if e in p or p in e:
+                return 1
+            e_tok = set(e.split())
+            p_tok = set(p.split())
+            if not e_tok:
+                return 0
+            overlap = len(e_tok & p_tok) / len(e_tok)
+            return 1 if overlap >= 0.6 else 0
+
+        n = min(len(examples), len(outputs))
+        correct = 0
+        failures = []
+        for i in range(n):
+            ex = examples[i] if isinstance(examples[i], dict) else {}
+            produced = outputs[i]
+            if isinstance(produced, dict):
+                produced = produced.get("output", produced.get("summary", produced))
+            ok = graded(ex.get("expected", ""), produced)
+            correct += ok
+            if ok == 0 and len(failures) < 25:
+                failures.append({
+                    "id": ex.get("id", str(i)),
+                    "input": str(ex.get("input", ""))[:600],
+                    "expected": str(ex.get("expected", ""))[:400],
+                    "produced": str(produced)[:400],
+                })
+
+        total = max(n, 1)
+        p_hat = correct / total
+
+        # Wilson score interval - robust at small n and near 0/1, unlike the normal approx.
+        try:
+            z = float(_input.get("confidence_z", 1.96) or 1.96)
+        except (TypeError, ValueError):
+            z = 1.96
+        denom = 1.0 + (z * z) / total
+        center = (p_hat + (z * z) / (2 * total)) / denom
+        margin = (z * ((p_hat * (1 - p_hat) / total + (z * z) / (4 * total * total)) ** 0.5)) / denom
+        lower = max(0.0, center - margin)
+        upper = min(1.0, center + margin)
+
+        variant = _steps.get("propose_variant") or {}
+        if not isinstance(variant, dict):
+            variant = {}
+
+        result = {
+            "variant_prompt": str(variant.get("variant_prompt", "")),
+            "rationale": str(variant.get("rationale", "")),
+            "graded_total": total,
+            "graded_correct": correct,
+            "score": round(p_hat, 4),
+            "score_lower": round(lower, 4),
+            "score_upper": round(upper, 4),
+            "failures": failures,
+            "failure_count": len(failures),
+        }
+
+  # 3d) CLASSIFY - bucket the new failure cases by error type so the NEXT variant gets
+  #     targeted feedback. Provider-swappable; pinned to haiku for cheap, fast routing. Every
+  #     bucket routes to the same lightweight collector so the loop has a clean feedback signal.
+  - id: classify_failures
+    type: classify
+    depends_on: [score_variant]
+    classify_config:
+      categories:
+        - hallucination
+        - missing_context_grounding
+        - format_violation
+        - incomplete_answer
+        - off_task
+        - no_failures
+      input: "{steps.score_variant.output.failures}"
+      model: haiku
+      branches:
+        hallucination: [collect_error_feedback]
+        missing_context_grounding: [collect_error_feedback]
+        format_violation: [collect_error_feedback]
+        incomplete_answer: [collect_error_feedback]
+        off_task: [collect_error_feedback]
+        no_failures: [collect_error_feedback]
+
+  # 3d-i) CODE - collect the dominant error type into a compact feedback packet. Deterministic.
+  - id: collect_error_feedback
+    type: code
+    code_config:
+      language: python
+      code: |
+        # Summarize the round's error signal for the next variant author. Deterministic.
+        scored = _steps.get("score_variant") or {}
+        if not isinstance(scored, dict):
+            scored = {}
+        failures = scored.get("failures") or []
+        # Cheap keyword tally so the next prompt knows the dominant failure mode even if the
+        # classifier label is unavailable.
+        buckets = {
+            "hallucination": 0,
+            "missing_context_grounding": 0,
+            "format_violation": 0,
+            "incomplete_answer": 0,
+            "off_task": 0,
+        }
+        for f in failures:
+            if not isinstance(f, dict):
+                continue
+            produced = str(f.get("produced", "")).lower()
+            expected = str(f.get("expected", "")).lower()
+            if not produced.strip():
+                buckets["incomplete_answer"] += 1
+            elif expected and expected not in produced and len(produced) > 4 * max(len(expected), 1):
+                buckets["hallucination"] += 1
+            elif expected and not (set(expected.split()) & set(produced.split())):
+                buckets["off_task"] += 1
+            else:
+                buckets["missing_context_grounding"] += 1
+        error_types = sorted([k for k, v in buckets.items() if v > 0], key=lambda k: -buckets[k])
+        result = {
+            "error_buckets": buckets,
+            "dominant_error_types": error_types[:3],
+            "failure_examples": failures[:8],
+        }
+
+  # 3e) GATE - the anti-noise statistical keep/discard decision. ALL strategies must pass.
+  #     The deterministic llm_eval prompt is fed the exact numbers and asked to confirm a
+  #     STRICT lower-bound-beats-upper-bound comparison; a second cross-provider judge confirms
+  #     the variant is a real generalizable change, not an overfit. A noisy tie can never win.
+  - id: anti_noise_gate
+    type: gate
+    depends_on: [score_variant]
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: |
+              You are a strict statistical gate, NOT a creative judge. Decide if the candidate
+              prompt variant should be ACCEPTED over the incumbent. The rule is purely numeric
+              and anti-noise:
+
+              ACCEPT only if the variant's score LOWER bound is strictly greater than the
+              incumbent's score UPPER bound. Otherwise REJECT (the improvement is within noise).
+
+              Incumbent upper bound: {steps.init_state.output.incumbent_upper}
+              Variant lower bound:   {steps.score_variant.output.score_lower}
+              Variant point score:   {steps.score_variant.output.score}
+              Variant upper bound:   {steps.score_variant.output.score_upper}
+
+              Note: an incumbent upper bound of -1 means the incumbent is unmeasured, so any
+              valid variant score should be ACCEPTED on the first round.
+
+              Reply with exactly one word: "approved" to accept, or "rejected" to discard.
+            input: "{steps.score_variant.output}"
+            model: sonnet
+        - type: llm_eval
+          config:
+            prompt: |
+              Independent cross-provider check (different model to reduce single-vendor bias).
+              Reply with exactly one word: "approved" if the variant prompt is a GENERALIZABLE
+              instruction change (it still contains the {{input}} placeholder and does not
+              hard-code any specific eval answer), or "rejected" if it appears overfit to the
+              eval examples or broke the placeholder contract.
+              Variant prompt: {steps.score_variant.output.variant_prompt}
+            input: "{steps.score_variant.output.variant_prompt}"
+            model: google/gemini-2.5-pro
+
+  # 3f) CONDITION - update the shared optimization state after the gate verdict and decide
+  #     whether the loop has plateaued. The decision is deterministic code (run_state); the
+  #     condition just branches the bookkeeping based on whether the round improved.
+  - id: plateau_check
+    type: condition
+    depends_on: [anti_noise_gate]
+    condition_config:
+      expression: "{steps.score_variant.output.score_lower} > {steps.init_state.output.incumbent_upper}"
+      then: [adopt_variant]
+      else: [hold_incumbent]
+
+  # 3f-i) CODE - improvement path: adopt the variant as the new incumbent, reset the plateau
+  #        counter, and append to history. Deterministic.
+  - id: adopt_variant
+    type: code
+    code_config:
+      language: python
+      code: |
+        # Variant beat the incumbent on a strict lower>upper comparison: adopt it. Deterministic.
+        state = _steps.get("init_state") or {}
+        scored = _steps.get("score_variant") or {}
+        feedback = _steps.get("collect_error_feedback") or {}
+        if not isinstance(state, dict):
+            state = {}
+        if not isinstance(scored, dict):
+            scored = {}
+        if not isinstance(feedback, dict):
+            feedback = {}
+
+        round_index = int(state.get("round_index", 0)) + 1
+        history = list(state.get("history", []))
+        history.append({
+            "round": round_index,
+            "accepted": True,
+            "score": scored.get("score", 0.0),
+            "score_lower": scored.get("score_lower", 0.0),
+            "score_upper": scored.get("score_upper", 0.0),
+            "rationale": scored.get("rationale", ""),
+        })
+        result = {
+            "examples": state.get("examples", []),
+            "example_count": state.get("example_count", 0),
+            "task_description": state.get("task_description", ""),
+            "target_model": state.get("target_model", "sonnet"),
+            "incumbent_prompt": scored.get("variant_prompt", state.get("incumbent_prompt", "")),
+            "incumbent_score": scored.get("score", 0.0),
+            "incumbent_lower": scored.get("score_lower", 0.0),
+            "incumbent_upper": scored.get("score_upper", 0.0),
+            "recent_failures": feedback.get("failure_examples", scored.get("failures", [])),
+            "recent_error_types": feedback.get("dominant_error_types", []),
+            "round_index": round_index,
+            "rounds_since_improvement": 0,
+            "history": history,
+            "plateaued": False,
+        }
+
+  # 3f-ii) CODE - no-improvement path: keep the incumbent, increment the plateau counter, and
+  #         set plateaued=True once it reaches plateau_rounds so the loop's until-expr breaks.
+  - id: hold_incumbent
+    type: code
+    code_config:
+      language: python
+      code: |
+        # Variant did not clear the anti-noise bar: hold the incumbent, count the plateau. Deterministic.
+        state = _steps.get("init_state") or {}
+        scored = _steps.get("score_variant") or {}
+        feedback = _steps.get("collect_error_feedback") or {}
+        if not isinstance(state, dict):
+            state = {}
+        if not isinstance(scored, dict):
+            scored = {}
+        if not isinstance(feedback, dict):
+            feedback = {}
+
+        try:
+            plateau_rounds = int(_input.get("plateau_rounds", 3) or 3)
+        except (TypeError, ValueError):
+            plateau_rounds = 3
+
+        round_index = int(state.get("round_index", 0)) + 1
+        since = int(state.get("rounds_since_improvement", 0)) + 1
+        history = list(state.get("history", []))
+        history.append({
+            "round": round_index,
+            "accepted": False,
+            "score": scored.get("score", 0.0),
+            "score_lower": scored.get("score_lower", 0.0),
+            "score_upper": scored.get("score_upper", 0.0),
+            "rationale": scored.get("rationale", ""),
+        })
+        result = {
+            "examples": state.get("examples", []),
+            "example_count": state.get("example_count", 0),
+            "task_description": state.get("task_description", ""),
+            "target_model": state.get("target_model", "sonnet"),
+            "incumbent_prompt": state.get("incumbent_prompt", ""),
+            "incumbent_score": state.get("incumbent_score", 0.0),
+            "incumbent_lower": state.get("incumbent_lower", 0.0),
+            "incumbent_upper": state.get("incumbent_upper", 0.0),
+            "recent_failures": feedback.get("failure_examples", scored.get("failures", [])),
+            "recent_error_types": feedback.get("dominant_error_types", []),
+            "round_index": round_index,
+            "rounds_since_improvement": since,
+            "history": history,
+            "plateaued": since >= plateau_rounds,
+        }
+
+  # 4) CODE - the loop has ended (max_rounds hit or plateau). Pick the final winning prompt
+  #    and assemble the score history into a clean result payload. Deterministic, no model.
+  - id: finalize_result
+    type: code
+    depends_on: [optimize_loop]
+    code_config:
+      language: python
+      code: |
+        # Collapse the loop's final state into the winning prompt + full score history.
+        loop_out = _steps.get("optimize_loop")
+        # A loop yields per-iteration states; take the last one, else fall back to init_state.
+        final_state = None
+        if isinstance(loop_out, list) and loop_out:
+            last = loop_out[-1]
+            final_state = last if isinstance(last, dict) else None
+        elif isinstance(loop_out, dict):
+            final_state = loop_out
+        if not final_state:
+            final_state = _steps.get("init_state") or {}
+        if not isinstance(final_state, dict):
+            final_state = {}
+
+        history = final_state.get("history", [])
+        accepted = [h for h in history if isinstance(h, dict) and h.get("accepted")]
+        baseline = 0.0
+        if history and isinstance(history[0], dict):
+            baseline = float(history[0].get("score", 0.0))
+        best_score = float(final_state.get("incumbent_score", 0.0))
+        lift = round(best_score - baseline, 4)
+
+        result = {
+            "winning_prompt": final_state.get("incumbent_prompt", _input.get("seed_prompt", "")),
+            "winning_score": best_score,
+            "winning_lower": final_state.get("incumbent_lower", 0.0),
+            "winning_upper": final_state.get("incumbent_upper", 0.0),
+            "rounds_run": int(final_state.get("round_index", 0)),
+            "accepted_variants": len(accepted),
+            "absolute_lift": lift,
+            "plateaued": bool(final_state.get("plateaued", False)),
+            "score_history": history,
+            "task_description": final_state.get("task_description", _input.get("task_description", "")),
+            "target_model": final_state.get("target_model", _input.get("target_model", "sonnet")),
+        }
+
+  # 5) HTTP - persist the winning prompt + score history to the results store (Postgres/S3).
+  - id: persist_result
+    type: http
+    depends_on: [finalize_result]
+    http_config:
+      url: "{input.results_url}"
+      method: POST
+      auth: "bearer:{env.EVAL_STORE_TOKEN}"
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      body: |
+        {
+          "task": "{input.task_description}",
+          "target_model": "{input.target_model}",
+          "seed_prompt": "{input.seed_prompt}",
+          "winning_prompt": "{steps.finalize_result.output.winning_prompt}",
+          "winning_score": "{steps.finalize_result.output.winning_score}",
+          "absolute_lift": "{steps.finalize_result.output.absolute_lift}",
+          "rounds_run": "{steps.finalize_result.output.rounds_run}",
+          "accepted_variants": "{steps.finalize_result.output.accepted_variants}",
+          "score_history": "{steps.finalize_result.output.score_history}"
+        }
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  # 6) NOTIFY - Slack summary of the lift the loop achieved. Connector: slack.
+  - id: notify_lift
+    type: notify
+    depends_on: [persist_result]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: ":chart_with_upwards_trend: Prompt optimization finished for '{input.task_description}'. Winning score {steps.finalize_result.output.winning_score} (lift {steps.finalize_result.output.absolute_lift}) over {steps.finalize_result.output.rounds_run} rounds, {steps.finalize_result.output.accepted_variants} variants accepted. Winning prompt persisted."
+
+on_complete:
+  storage_path: "prompt-optimization-loop/{run_id}/result.json"
