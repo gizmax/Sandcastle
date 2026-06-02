@@ -1,7 +1,7 @@
 # name: Synthetic Checkout Revenue Canary
 # description: A synthetic shopper drives your live cart -> checkout -> payment iframe -> 3DS -> order-confirmation flow with a SANDBOX test card on a schedule, asserts the money path end to end in deterministic code (total == subtotal+tax+shipping), replays against a golden test purchase to catch silent flow drift, and pages revenue-ops the moment the Buy button stops converting - catching breakage no /health endpoint ever sees.
 # tags: [ecommerce, revenue, synthetic-monitoring, checkout, stripe, adyen, 3ds, playwright, golden-run, pagerduty, on-call]
-# category: engineering
+# category: automation_rpa
 
 name: synthetic-checkout-revenue-canary
 description: >-

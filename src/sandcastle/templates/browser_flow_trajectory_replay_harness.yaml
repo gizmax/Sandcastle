@@ -1,7 +1,7 @@
 # name: Browser Flow Trajectory Replay Harness
 # description: Drop-in regression harness that re-drives a recorded browser RPA flow against a golden trajectory and fails the run on UI drift or cost blowup - the reliability layer that makes fragile RPA testable in CI.
 # tags: [rpa, browser, trajectory-replay, regression, ci, reliability, playwright, drift-detection]
-# category: engineering
+# category: automation_rpa
 
 name: browser-flow-trajectory-replay-harness
 description: >-

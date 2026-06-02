@@ -1,7 +1,7 @@
 # name: KYC Onboarding Portal Filer
 # description: Drives a bank/broker/exchange KYC onboarding portal that exposes no batch write API to the onboarding party - a login-gated SPA with live document upload, OTP/2FA, and conditional PEP / beneficial-owner / source-of-funds sections that only render after earlier answers. It deterministically validates the entity record and document set, reads the onboarding wizard structure read-only (dom mode), builds a deterministic field+document mapping plan with a provider-agnostic conditional-section classify, gates data entry behind a compliance llm_eval plus a human analyst, fills every section and uploads each document via a provider-neutral playwright script that STOPS at the attestation/review screen, holds for a compliance officer's legally-binding approval, then checks the attestation box and Submits, asserts the case-reference pattern deterministically, regression-guards the fragile portal flow with a trajectory-replay against a golden run, and archives an immutable audit packet (screenshots, doc hashes, confirmation) for the AML file. Read is split from write and the flow fails closed - raw PII is redacted from logs, document hashes are logged, and the irreversible submit can never fire on a model's opinion alone.
 # tags: [KYC, AML, Onboarding, Compliance, BankPortal, BrokerPortal, CryptoExchange, RPA, Playwright, DOM, HumanInTheLoop, TrajectoryReplay, ProviderNeutral, NoAPI]
-# category: hr_legal
+# category: automation_rpa
 
 name: kyc-onboarding-portal-filer
 description: >-

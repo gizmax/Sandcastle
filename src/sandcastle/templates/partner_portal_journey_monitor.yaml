@@ -1,7 +1,7 @@
 # name: Partner Portal Journey Monitor
 # description: Logs into a critical login-walled partner portal (insurer, freight/EDI carrier, bank, government filing, supplier) as a synthetic user on a daily pre-batch schedule, walks the exact multi-step task your team relies on, structurally asserts every screen, replays against a golden run, and alerts ops the moment the partner silently redesigns the portal and breaks your operational flow - all read-only, stopping short of the submit button.
 # tags: [rpa, browser, partner-portal, synthetic-monitoring, dom, lightpanda, playwright, trajectory-replay, ops, b2b-integrations, change-detection]
-# category: engineering
+# category: automation_rpa
 
 name: partner-portal-journey-monitor
 description: >-

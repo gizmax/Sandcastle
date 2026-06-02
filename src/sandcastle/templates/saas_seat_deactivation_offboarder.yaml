@@ -1,7 +1,7 @@
 # name: SaaS Seat Deactivation Offboarder
 # description: Deactivate or downgrade a CSV/HR-feed list of departed users across SaaS admin consoles that expose no bulk-deactivation API, by driving the logged-in console. Before/after seat reconciliation per user, gated behind a single batch human approval.
 # tags: [Offboarding, SecOps, IT, SaaS, SCIM, Deprovision, Browser, Playwright, Reconciliation, Audit]
-# category: devops
+# category: automation_rpa
 
 name: saas-seat-deactivation-offboarder
 description: >-

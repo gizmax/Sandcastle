@@ -1,7 +1,7 @@
 # name: Golden Journey Regression Gate
 # description: A pre-release CI gate that, on every staging deploy, re-drives the recorded critical user journeys (signup, paid checkout, onboarding) against the new build in a real browser, scores each against its golden trajectory, and BLOCKS promotion to production unless every journey still passes - making fragile funnel flows a hard release-blocking test instead of a Datadog alert after rollout.
 # tags: [ci, release-gate, browser, playwright, trajectory-replay, regression, golden-run, devops, staging, funnel]
-# category: engineering
+# category: automation_rpa
 
 name: golden-journey-regression-gate
 description: >-

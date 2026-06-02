@@ -1,7 +1,7 @@
 # name: Insurance Claim FNOL Portal Filer
 # description: Files a structured First-Notice-of-Loss packet onto a carrier or TPA web claims portal - a per-carrier, login-gated SPA with no agency-accessible claims-write API. Each portal has a different multi-step loss wizard, peril-specific dynamic fields, and photo/estimate upload widgets, so agencies re-key the same loss into dozens of portals by hand. This template reads the wizard structure read-only (dom mode), maps the loss with a deterministic validator plus a provider-agnostic peril classify, fills and uploads via a provider-neutral playwright script that STOPS at review, then holds for a human adjuster approval before the binding submit, and asserts the carrier's claim-number pattern deterministically so a false success can never be recorded.
 # tags: [Insurance, FNOL, ClaimsIntake, CarrierPortal, TPA, RPA, Playwright, DOM, HumanInTheLoop, ProviderNeutral]
-# category: general_ai
+# category: automation_rpa
 
 name: insurance-claim-fnol-portal-filer
 description: >-

@@ -1,7 +1,7 @@
 # name: State Sales Tax Efile Filer
 # description: Logs into a US state Department of Revenue e-file portal (CDTFA / NY DTF / TX Comptroller-style login-gated JS wizard with NO public filing API), fills the multi-page monthly/quarterly sales-and-use tax return from your ledger figures, deterministically re-checks the portal's review-page total against the figure computed from the ledger, gates the irreversible Submit behind an llm_eval anomaly check and a human approval that shows the exact figures plus the review screenshot, submits, then archives the confirmation number and receipt screenshot. Triggered on a monthly/quarterly cron OR by a sensor that fires when the upstream ledger period closes. Provider-neutral: both browser steps run Playwright mode (the reasoning model AUTHORS a Playwright script from the prompt + DOM, so any of the 7 providers can drive it), and the load-bearing correctness is deterministic Python + a portal-confirmation sensor, never one model's opinion. Login secrets only via credentials_env=DOR_<STATE>_CREDS, captcha_strategy=pause for the login CAPTCHA, the Submit split into its own approval-gated browser step, max_actions caps the wizard.
 # tags: [SalesTax, Efile, DOR, CDTFA, Compliance, Playwright, RPA, HumanApproval, Sensor, ProviderNeutral, EcommerceTax, Filing]
-# category: general_ai
+# category: automation_rpa
 
 name: state-sales-tax-efile-filer
 description: >-

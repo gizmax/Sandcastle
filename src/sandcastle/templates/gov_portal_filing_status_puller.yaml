@@ -1,7 +1,7 @@
 # name: Gov Portal Filing Status Puller
 # description: Logs into government / utility / insurance portals that publish case and filing status ONLY behind a per-account login web UI (no API), reads the live status and any newly issued documents for a tracked list of cases, validates every extraction deterministically, replay-tests the fragile portal read against a golden trajectory so a redesign fails loudly, classifies what changed, and ships a daily status digest. Strictly READ-ONLY against external portals - no submit / pay / delete anywhere.
 # tags: [compliance, paralegal, government, permits, insurance, browser, dom, lightpanda, trajectory-replay, rpa, read-only]
-# category: general_ai
+# category: automation_rpa
 
 name: gov-portal-filing-status-puller
 description: >-

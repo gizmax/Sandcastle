@@ -1,7 +1,7 @@
 # name: Vendor Invoice Portal Harvester
 # description: Sweeps a registry of supplier/SaaS billing portals that ONLY post invoices to a web account (no email, no API), logs into each with per-vendor credentials_env, downloads every invoice newer than that portal's last_invoice_seen watermark, parses line items, deterministically validates + dedupes the extraction against AP, classifies each invoice for GL hinting, files a clean invoice packet into the AP inbox folder, and pages a human BEFORE any 'mark as paid' / enable-autopay / acknowledge action ever fires. Download-only by design; the dangerous verbs are excluded from the browser prompt and forced behind an approval gate. dom/lightpanda for cheap text portals, playwright for JS-heavy ones - both keep the reasoning model swappable. A trajectory-replay per vendor hard-fails the run on portal-redesign UI drift so the agent can never grab the wrong document.
 # tags: [AccountsPayable, Procurement, Browser, Playwright, Lightpanda, DOM, RPA, Invoices, Dedupe, HumanApproval, TrajectoryReplay, ProviderNeutral, NoAPI]
-# category: general_ai
+# category: automation_rpa
 
 name: vendor-invoice-portal-harvester
 description: >-

@@ -1,0 +1,689 @@
+# name: Vision-vs-DOM Strategy Race Extractor
+# description: Extracts a screen that defeats one whole strategy class - a <canvas>/WebGL dashboard, an iframe-locked legacy widget, or a pixel-only PDF-in-browser - by RACING a DOM-selector branch against a vision/computer-use coordinate branch and taking whichever returns schema-valid output FIRST. A race step fans out two STRUCTURALLY DIFFERENT strategies over the same target (not two models on one strategy); a deterministic code gate validates the winner and cross-checks both strategies AGREE within tolerance; a trajectory-replay locks the winning path against drift; a condition routes both-fail to a human notify with both screenshots. Load-bearing step types: race, computer-use, trajectory-replay, code.
+# tags: [rpa, browser, computer-use, vision, dom, race, strategy-diversity, canvas, iframe, pdf, trajectory-replay, cross-check, provider-neutral]
+# category: automation_rpa
+# connectors: slack
+
+name: vision-vs-dom-strategy-race-extractor
+description: >-
+  Read-only extractor for the screens that defeat one WHOLE strategy class: a
+  <canvas>/WebGL analytics dashboard (numbers painted to pixels, no addressable
+  DOM nodes), an iframe-locked legacy widget on a foreign origin (selectors can
+  not cross the frame boundary), or a pixel-only PDF rendered inside the browser
+  viewer. For these targets it is not which MODEL you use that decides success -
+  it is which STRATEGY: a DOM-selector reader silently returns nothing on a
+  canvas, while a vision/coordinate reader silently misses lazy-rendered or
+  off-viewport content. So resilience here comes from strategy DIVERSITY, not
+  provider diversity (unlike the shipped race-two-models skeleton, which pins two
+  models to the SAME Playwright/DOM strategy).
+
+  A single race step fans out TWO STRUCTURALLY DIFFERENT branches over the same
+  {target_url} against the SAME caller-supplied {expected_schema_json}: branch A
+  is a browser step in mode=dom that reads the live DOM with selectors (it wins on
+  ordinary HTML tables/grids and fails to nothing on canvas/iframe where there is
+  no addressable node); branch B is a computer-use step that screenshots the
+  rendered pixels and reads values by COORDINATE (it wins on canvas/iframe/PDF and
+  can miss content that never scrolled into view). The race resolves to the FIRST
+  branch returning a SCHEMA-VALID object. Then a deterministic code gate
+  (no model) validates that winner against the supplied schema - every required
+  field present and the right type, the row/record count inside the expected band,
+  no nulls in required fields - and, WHEN BOTH branches completed, cross-checks
+  that the two strategies AGREE within agreement_tolerance_pct (vision confirms
+  DOM). A field-level mismatch beyond tolerance is flagged UNTRUSTED even if one
+  branch parsed cleanly, because two independent strategies disagreeing means one
+  of them silently latched onto the wrong thing. A trajectory-replay then locks
+  the WINNING strategy's path against drift so a console/iframe/viewer redesign
+  fails the run instead of scraping garbage. A condition routes the both-strategies
+  -fail case to a human notify carrying BOTH branches' screenshots.
+
+  PROVIDER NEUTRAL + ENGINE FIRST: the DOM branch authors selectors and the
+  computer-use branch reads coordinates - both are swappable across providers and
+  neither decides correctness. The load-bearing decisions (schema validity, the
+  count band, the cross-strategy agreement check, the trusted/untrusted verdict)
+  are PURE Python in code steps. The race arbitrates on the deterministic schema
+  gate, never on a model's opinion. This is READ-ONLY (extract only, no submit /
+  pay / delete), so there is no approval gate - the deterministic schema-and-
+  agreement gate carries the safety.
+
+default_model: sonnet
+default_max_turns: 10
+default_timeout: 1200
+
+input_schema:
+  required: ["target_url", "expected_schema_json"]
+  properties:
+    target_url:
+      type: string
+      description: >-
+        Entry URL of the screen to extract. Both race branches open this SAME URL
+        with two different strategies. Built for targets that defeat one strategy
+        class: a <canvas>/WebGL dashboard, an iframe-locked legacy widget, or a
+        pixel-only PDF-in-browser. Provider-neutral - any such screen works.
+      example: "https://analytics.example.com/embedded/canvas-dashboard?token=ro"
+    expected_schema_json:
+      type: string
+      description: >-
+        JSON Schema (or a simplified {field: type} map) describing the records the
+        screen should yield - the SAME contract both strategies must satisfy and
+        the contract the deterministic gate validates the winner against. Use
+        "records" as the array key and give each field a type so the gate can check
+        presence, type, nulls, and the count band.
+      example: '{"records": [{"metric": "string", "value": "number", "period": "string"}], "min_records": 3, "max_records": 200}'
+    agreement_tolerance_pct:
+      type: string
+      description: >-
+        Max percentage difference between the DOM strategy's value and the vision
+        strategy's value for a matched record before the cross-check flags them as
+        DISAGREEING. Only applied when BOTH branches complete (vision confirms DOM).
+        Numeric fields compared by relative delta; string fields must match after
+        normalization.
+      default: "2.0"
+      example: "2.0"
+    credentials_env_var:
+      type: string
+      description: >-
+        Name of the environment variable holding login credentials IF the screen is
+        behind auth (NEVER inline secrets). Passed verbatim to the DOM branch's
+        credentials_env and named to the computer-use branch's prompt. Ignored for a
+        public page.
+      default: "TARGET_CREDS"
+      example: "ANALYTICS_RO_CREDS"
+    expected_min_records:
+      type: integer
+      description: >-
+        Lower bound on healthy record count. Below this the gate treats the read as
+        partial/blocked (a changed selector, an un-rendered canvas, or an off-viewport
+        miss) rather than a real empty screen.
+      default: 1
+      example: "3"
+    expected_max_records:
+      type: integer
+      description: >-
+        Upper bound on healthy record count. Far above this usually means a strategy
+        latched onto the wrong repeating container/region, so the gate flags it.
+      default: 500
+      example: "200"
+    golden_run_id:
+      type: string
+      description: >-
+        ID of the known-good recorded run for the WINNING strategy's path.
+        trajectory-replay diffs the live extraction trajectory against this golden
+        run and fails on drift (a canvas/iframe/viewer redesign) or cost blowup.
+      default: "golden-vision-vs-dom-extract-2026-05-01"
+    oncall_channel:
+      type: string
+      description: >-
+        Slack channel paged when BOTH strategies fail the schema gate - a human
+        re-authors the extraction with both branches' screenshots attached, and the
+        flow is quarantined rather than emitting silent garbage.
+      default: "#extraction-oncall"
+      example: "#extraction-oncall"
+
+steps:
+  # ---------------------------------------------------------------------------
+  # 1) RACE - the strategy-diversity thesis made executable. ONE race step fans
+  #    out TWO STRUCTURALLY DIFFERENT branches over the SAME target: branch A is a
+  #    DOM-SELECTOR read (browser mode=dom), branch B is a VISION/COORDINATE read
+  #    (computer-use). They are NOT two models on one strategy - they are two
+  #    strategy CLASSES, exactly one of which survives a canvas/iframe/PDF screen.
+  #    The race resolves to the FIRST branch returning a SCHEMA-VALID object; the
+  #    validator below is a quick non-empty filter because the LOAD-BEARING
+  #    correctness is the deterministic schema-and-agreement gate in step 4, not
+  #    the race's own filter.
+  # ---------------------------------------------------------------------------
+  - id: elect-strategy
+    type: race
+    race_config:
+      branches: [["dom-selector-extract"], ["vision-coordinate-extract"]]
+      validator: "isinstance(output, dict) and len(output.get('records') or []) > 0"
+
+  # --- BRANCH A: DOM-SELECTOR strategy (browser, mode=dom) --------------------
+  #     NO depends_on - the race executor drives both branches as a fan-out.
+  #     mode=dom: the model authors a DOM extraction (selectors), swappable across
+  #     providers. This branch WINS on ordinary HTML tables/grids and silently
+  #     returns nothing on a <canvas>/WebGL surface or a cross-origin iframe, where
+  #     there is no addressable DOM node to select - that failure mode is the whole
+  #     point of racing it against vision. Read-only; credentials via credentials_env
+  #     (never inline); captcha_strategy pauses for a human; max_actions caps a stuck
+  #     branch; capture_screenshots on so a both-fail gives a human an audit artifact.
+  - id: dom-selector-extract
+    type: browser
+    prompt: >-
+      STRATEGY A = DOM SELECTORS. Open {input.target_url} and extract the records
+      described by this schema by reading the live DOM with content-based selectors:
+      {input.expected_schema_json}. If the screen is behind a login, authenticate
+      using the credentials in the environment variable named by
+      {input.credentials_env_var}. Wait for client-side rendering to finish, then for
+      every record locate its fields as real DOM text nodes and read their values.
+      Do NOT screenshot-and-guess - if a value lives only inside a <canvas>, a WebGL
+      surface, a cross-origin iframe, or a rendered PDF (i.e. there is no selectable
+      DOM node), leave that record out rather than fabricating it; returning fewer or
+      zero records is the correct DOM-strategy answer for such a screen. This is a
+      READ-ONLY extraction: do NOT click submit, save, pay, delete, or any mutating
+      control. If a CAPTCHA appears, PAUSE for a human. Return ONLY the object in
+      output_schema: a "records" array plus a "strategy" tag set to "dom".
+    browser_config:
+      mode: dom
+      start_url: "{input.target_url}"
+      viewport_width: 1280
+      viewport_height: 800
+      timeout_seconds: 180
+      max_actions: 60
+      headless: true
+      credentials_env: "{input.credentials_env_var}"
+      captcha_strategy: pause
+      capture_screenshots: true
+      output_schema:
+        type: object
+        properties:
+          strategy:
+            type: string
+            description: "Strategy tag - always 'dom' for this branch."
+          records:
+            type: array
+            description: "Records read from real DOM text nodes (empty on a canvas/iframe/PDF screen)."
+            items:
+              type: object
+          record_count:
+            type: integer
+            description: "Number of records this strategy read (sanity counter)."
+        required: ["records"]
+
+  # --- BRANCH B: VISION/COORDINATE strategy (computer-use) --------------------
+  #     IDENTICAL contract to branch A (same expected_schema_json), but a totally
+  #     DIFFERENT strategy CLASS: the computer-use agent SCREENSHOTS the rendered
+  #     pixels and reads values by COORDINATE, so it WINS exactly where DOM fails -
+  #     a <canvas> dashboard, a cross-origin iframe, a pixel-only PDF - because it
+  #     never needs an addressable node. Its own failure mode is the inverse: it can
+  #     miss content that never scrolled into view, which is why the cross-check in
+  #     step 4 confirms it against DOM whenever both complete. require_human_approval_for
+  #     is empty: this is a READ-ONLY pass (screenshot + read), no consequential action,
+  #     so the deterministic schema gate carries safety instead of an approval gate.
+  #     max_turns + timeout cap a runaway session. The model is swappable.
+  - id: vision-coordinate-extract
+    type: computer-use
+    prompt: >-
+      STRATEGY B = VISION / COORDINATES. Open {input.target_url} in the sandboxed
+      browser and extract the records described by this schema by READING THE RENDERED
+      PIXELS, not the DOM: {input.expected_schema_json}. This target is expected to
+      defeat selector-based reading - the values may be painted into a <canvas>/WebGL
+      surface, locked inside a cross-origin iframe, or shown in a PDF rendered in the
+      browser viewer. Take a screenshot, visually locate each record and its fields by
+      position, and transcribe the values you can SEE. Scroll to bring off-screen
+      content into view before reading it, so you do not miss lazily-rendered rows. If
+      the screen needs a login, the credentials are in the environment variable named
+      {input.credentials_env_var}. This is READ-ONLY: take screenshots and read values
+      ONLY - do NOT click any submit, save, pay, send, or delete control, do not fill
+      forms, do not run shell commands that mutate state. Return ONLY the object in the
+      requested shape: a "records" array matching the schema plus a "strategy" tag set
+      to "vision".
+    computer_use_config:
+      display_width_px: 1280
+      display_height_px: 800
+      tools: ["computer"]
+      model: "claude-sonnet-4-6"
+      require_human_approval_for: []
+      max_turns: 24
+      timeout: 600
+      message: >-
+        Read-only vision extraction of {input.target_url} into records matching
+        {input.expected_schema_json}. Screenshot, locate by coordinate, transcribe.
+        No mutating actions.
+
+  # ---------------------------------------------------------------------------
+  # 2) NORMALIZE DOM branch (deterministic) - coerce the DOM strategy's raw output
+  #    into a flat {records:[...], strategy:'dom'} regardless of how the browser
+  #    step nested it. No model. Splitting normalization out keeps the gate in
+  #    step 4 readable and lets the gate compare two pre-cleaned record lists.
+  # ---------------------------------------------------------------------------
+  - id: normalize-dom
+    type: code
+    depends_on: [elect-strategy]
+    code_config:
+      language: python
+      code: |
+        # Deterministic unwrap of the DOM-selector branch. No model decides anything.
+        def unwrap(raw):
+            if not isinstance(raw, dict):
+                return {}
+            for key in ("output", "data", "result"):
+                inner = raw.get(key)
+                if isinstance(inner, dict) and "records" in inner:
+                    return inner
+            return raw
+
+        dom_raw = unwrap(_steps.get("dom-selector-extract") or {})
+        recs = dom_raw.get("records")
+        if not isinstance(recs, list):
+            recs = []
+        clean = [r for r in recs if isinstance(r, dict)]
+        result = {
+            "strategy": "dom",
+            "completed": isinstance(_steps.get("dom-selector-extract"), dict),
+            "records": clean,
+            "record_count": len(clean),
+        }
+
+  # ---------------------------------------------------------------------------
+  # 3) NORMALIZE VISION branch (deterministic) - same coercion for the computer-use
+  #    strategy's output into {records:[...], strategy:'vision'}. No model. Mirror of
+  #    step 2 so the gate compares apples to apples.
+  # ---------------------------------------------------------------------------
+  - id: normalize-vision
+    type: code
+    depends_on: [elect-strategy]
+    code_config:
+      language: python
+      code: |
+        # Deterministic unwrap of the vision/coordinate branch. No model here.
+        def unwrap(raw):
+            if not isinstance(raw, dict):
+                return {}
+            for key in ("output", "data", "result", "final_output", "answer"):
+                inner = raw.get(key)
+                if isinstance(inner, dict) and "records" in inner:
+                    return inner
+            return raw
+
+        vis_raw = unwrap(_steps.get("vision-coordinate-extract") or {})
+        recs = vis_raw.get("records")
+        if not isinstance(recs, list):
+            recs = []
+        clean = [r for r in recs if isinstance(r, dict)]
+        result = {
+            "strategy": "vision",
+            "completed": isinstance(_steps.get("vision-coordinate-extract"), dict),
+            "records": clean,
+            "record_count": len(clean),
+        }
+
+  # ---------------------------------------------------------------------------
+  # 4) SCHEMA-AND-AGREEMENT GATE (DETERMINISTIC, no model) - the load-bearing
+  #    correctness. (a) Parse the caller's expected_schema_json into required fields
+  #    + types + count band. (b) Validate EACH strategy's records against it: every
+  #    required field present and the right type, no null/blank required fields,
+  #    count inside [min,max]. (c) Pick the winner = the FIRST schema-valid strategy
+  #    (race order preserved: DOM first, then vision). (d) CROSS-CHECK: when BOTH
+  #    strategies are schema-valid, compare their records field-by-field; any matched
+  #    record whose numeric field differs by more than agreement_tolerance_pct (or
+  #    whose string field differs after normalization) is a DISAGREEMENT, and the
+  #    overall read is marked UNTRUSTED - two independent strategies disagreeing means
+  #    one silently latched onto the wrong thing. Pure Python.
+  # ---------------------------------------------------------------------------
+  - id: schema-agreement-gate
+    type: code
+    depends_on: [normalize-dom, normalize-vision]
+    code_config:
+      language: python
+      code: |
+        import json
+
+        # --- Parse the caller's expected schema --------------------------------------
+        raw_schema = _input.get("expected_schema_json", "")
+        if isinstance(raw_schema, dict):
+            schema = raw_schema
+        else:
+            try:
+                schema = json.loads(raw_schema) if str(raw_schema).strip() else {}
+            except (ValueError, TypeError):
+                schema = {}
+        if not isinstance(schema, dict):
+            schema = {}
+
+        # Field -> type map. Support both a JSON-Schema-ish "records:[{f:type}]" and a
+        # flat {f: type} map. Types collapse to: number | string | any.
+        field_types = {}
+        rec_spec = schema.get("records")
+        if isinstance(rec_spec, list) and rec_spec and isinstance(rec_spec[0], dict):
+            sample = rec_spec[0]
+        elif isinstance(rec_spec, dict) and isinstance(rec_spec.get("items"), dict):
+            sample = rec_spec.get("items", {}).get("properties", {})
+        else:
+            sample = {k: v for k, v in schema.items() if k not in ("records", "min_records", "max_records")}
+        if isinstance(sample, dict):
+            for fname, ftype in sample.items():
+                t = ftype
+                if isinstance(ftype, dict):
+                    t = ftype.get("type", "any")
+                t = str(t or "any").strip().lower()
+                if t in ("number", "integer", "float", "int"):
+                    field_types[str(fname)] = "number"
+                elif t in ("string", "str", "text"):
+                    field_types[str(fname)] = "string"
+                else:
+                    field_types[str(fname)] = "any"
+        required_fields = list(field_types.keys())
+
+        # Count band: schema overrides input defaults if present.
+        def as_int(val, fallback):
+            try:
+                return int(val)
+            except (TypeError, ValueError):
+                return fallback
+        min_records = as_int(schema.get("min_records", _input.get("expected_min_records", 1)), 1)
+        max_records = as_int(schema.get("max_records", _input.get("expected_max_records", 500)), 500)
+
+        try:
+            tol = float(_input.get("agreement_tolerance_pct", 2.0))
+        except (TypeError, ValueError):
+            tol = 2.0
+
+        def to_number(value):
+            if value is None:
+                return None
+            if isinstance(value, bool):
+                return None
+            if isinstance(value, (int, float)):
+                return float(value)
+            text = str(value).strip()
+            if text == "":
+                return None
+            norm = re.sub(r"[^0-9.,-]", "", text)
+            if norm.count(",") == 1 and norm.count(".") == 0:
+                norm = norm.replace(",", ".")
+            else:
+                norm = norm.replace(",", "")
+            match = re.search(r"-?[0-9]+(?:\.[0-9]+)?", norm)
+            if not match:
+                return None
+            try:
+                return float(match.group(0))
+            except (TypeError, ValueError):
+                return None
+
+        def norm_str(value):
+            return re.sub(r"\s+", " ", str(value if value is not None else "")).strip().lower()
+
+        def validate(records):
+            reasons = []
+            count = len(records)
+            if count == 0:
+                reasons.append("zero records (strategy read nothing)")
+            elif count < min_records:
+                reasons.append("only " + str(count) + " records (< min " + str(min_records) + ")")
+            elif count > max_records:
+                reasons.append(str(count) + " records (> max " + str(max_records) + "; wrong container?)")
+            bad_rows = 0
+            for rec in records:
+                if not isinstance(rec, dict):
+                    bad_rows += 1
+                    continue
+                for fname in required_fields:
+                    if fname not in rec:
+                        bad_rows += 1
+                        break
+                    val = rec.get(fname)
+                    if val is None or str(val).strip() == "":
+                        bad_rows += 1
+                        break
+                    if field_types.get(fname) == "number" and to_number(val) is None:
+                        bad_rows += 1
+                        break
+            if bad_rows > 0:
+                reasons.append(str(bad_rows) + " rows missing/null/mistyped a required field")
+            in_band = (min_records <= count <= max_records)
+            valid = (count > 0) and in_band and (bad_rows == 0)
+            return {"valid": valid, "count": count, "bad_rows": bad_rows, "reasons": reasons}
+
+        dom = _steps.get("normalize-dom") or {}
+        vis = _steps.get("normalize-vision") or {}
+        dom_records = dom.get("records") if isinstance(dom, dict) else []
+        vis_records = vis.get("records") if isinstance(vis, dict) else []
+        if not isinstance(dom_records, list):
+            dom_records = []
+        if not isinstance(vis_records, list):
+            vis_records = []
+
+        dom_check = validate(dom_records)
+        vis_check = validate(vis_records)
+
+        # Winner = first schema-valid strategy in race order (DOM, then vision).
+        winner_strategy = "none"
+        winner_records = []
+        if dom_check["valid"]:
+            winner_strategy = "dom"
+            winner_records = dom_records
+        elif vis_check["valid"]:
+            winner_strategy = "vision"
+            winner_records = vis_records
+        both_failed = winner_strategy == "none"
+
+        # --- CROSS-CHECK: vision confirms DOM when BOTH are schema-valid --------------
+        # Match records by their first string field (or first field) and compare each
+        # shared field. Numeric fields by relative delta vs tolerance; strings exact
+        # after normalization. Any mismatch -> disagreement -> the read is UNTRUSTED.
+        cross_checked = dom_check["valid"] and vis_check["valid"]
+        disagreements = []
+        compared_records = 0
+        key_field = None
+        for fname in required_fields:
+            if field_types.get(fname) == "string":
+                key_field = fname
+                break
+        if key_field is None and required_fields:
+            key_field = required_fields[0]
+
+        if cross_checked and key_field is not None:
+            vis_by_key = {}
+            for rec in vis_records:
+                if isinstance(rec, dict):
+                    vis_by_key[norm_str(rec.get(key_field))] = rec
+            for drec in dom_records:
+                if not isinstance(drec, dict):
+                    continue
+                k = norm_str(drec.get(key_field))
+                vrec = vis_by_key.get(k)
+                if vrec is None:
+                    continue
+                compared_records += 1
+                for fname in required_fields:
+                    dv = drec.get(fname)
+                    vv = vrec.get(fname)
+                    if field_types.get(fname) == "number":
+                        dn = to_number(dv)
+                        vn = to_number(vv)
+                        if dn is None or vn is None:
+                            continue
+                        denom = abs(dn) if abs(dn) > 1e-9 else 1.0
+                        delta_pct = abs(dn - vn) / denom * 100.0
+                        if delta_pct > tol:
+                            disagreements.append({
+                                "key": k, "field": fname,
+                                "dom": dn, "vision": vn,
+                                "delta_pct": round(delta_pct, 3),
+                            })
+                    else:
+                        if norm_str(dv) != norm_str(vv):
+                            disagreements.append({
+                                "key": k, "field": fname,
+                                "dom": str(dv), "vision": str(vv), "delta_pct": None,
+                            })
+
+        agree = (not cross_checked) or (len(disagreements) == 0)
+        # TRUSTED only if a strategy passed the schema AND (no cross-check was possible
+        # OR the two strategies agreed). A schema-valid winner that DISAGREES with the
+        # other strategy is explicitly UNTRUSTED.
+        trusted = (not both_failed) and agree
+        result = {
+            "both_failed": both_failed,
+            "trusted": trusted,
+            "winner_strategy": winner_strategy,
+            "winner_record_count": len(winner_records),
+            "winner_records": winner_records,
+            "dom_valid": dom_check["valid"],
+            "vision_valid": vis_check["valid"],
+            "dom_reasons": dom_check["reasons"],
+            "vision_reasons": vis_check["reasons"],
+            "cross_checked": cross_checked,
+            "compared_records": compared_records,
+            "agree": agree,
+            "disagreement_count": len(disagreements),
+            "disagreements": disagreements[:50],
+            "required_fields": required_fields,
+            "key_field": key_field,
+            "tolerance_pct": tol,
+            "min_records": min_records,
+            "max_records": max_records,
+            "verdict": (
+                "BOTH_STRATEGIES_FAILED" if both_failed
+                else ("TRUSTED" if trusted else "UNTRUSTED_STRATEGY_DISAGREEMENT")
+            ),
+        }
+
+  # ---------------------------------------------------------------------------
+  # 5) TRAJECTORY-REPLAY - lock the WINNING strategy's path against drift. Diffs
+  #    the live extraction trajectory against the golden run and FAILS on drift (a
+  #    canvas/iframe/PDF-viewer redesign that moves the data) or cost blowup.
+  #    Deterministic scorer, provider-neutral - it compares observable actions and
+  #    extracted outputs, never a model's internals.
+  # ---------------------------------------------------------------------------
+  - id: replay-winning-path
+    type: trajectory-replay
+    depends_on: [schema-agreement-gate]
+    trajectory_replay_config:
+      golden_run_id: "{input.golden_run_id}"
+      fail_below_score: 0.85
+      allow_cost_delta_pct: 15.0
+      cost_budget_usd: 0.50
+
+  # ---------------------------------------------------------------------------
+  # 6) BUILD VERDICT (deterministic) - fold the gate result + replay result into a
+  #    single CI-facing verdict and a human-readable report. No model. This is the
+  #    text the condition routes on and the notify carries.
+  # ---------------------------------------------------------------------------
+  - id: build-verdict
+    type: code
+    depends_on: [replay-winning-path]
+    code_config:
+      language: python
+      code: |
+        gate = _steps.get("schema-agreement-gate") or {}
+        if not isinstance(gate, dict):
+            gate = {}
+        replay = _steps.get("replay-winning-path") or {}
+        if not isinstance(replay, dict):
+            replay = {}
+
+        score = replay.get("score")
+        if score is None:
+            score = replay.get("replay_score", 0.0)
+        try:
+            score = float(score)
+        except (TypeError, ValueError):
+            score = 0.0
+        replay_passed = bool(replay.get("passed", False))
+
+        both_failed = bool(gate.get("both_failed", True))
+        trusted = bool(gate.get("trusted", False))
+        winner = str(gate.get("winner_strategy", "none"))
+        disagreement_count = int(gate.get("disagreement_count", 0) or 0)
+
+        # Final state: a clean emit requires a trusted read AND a passing replay.
+        if both_failed:
+            verdict = "BOTH_STRATEGIES_FAILED"
+        elif not trusted:
+            verdict = "UNTRUSTED_STRATEGY_DISAGREEMENT"
+        elif not replay_passed:
+            verdict = "DRIFTED"
+        else:
+            verdict = "TRUSTED_EXTRACT"
+        clean = verdict == "TRUSTED_EXTRACT"
+        needs_human = both_failed or (not trusted)
+
+        lines = []
+        lines.append("Verdict: " + verdict)
+        lines.append("Winning strategy: " + winner)
+        lines.append("DOM valid: " + str(gate.get("dom_valid", False))
+                     + " | Vision valid: " + str(gate.get("vision_valid", False)))
+        lines.append("Cross-checked: " + str(gate.get("cross_checked", False))
+                     + " | Compared records: " + str(gate.get("compared_records", 0))
+                     + " | Disagreements: " + str(disagreement_count))
+        lines.append("Replay score: " + str(round(score, 4)) + " | Replay passed: " + str(replay_passed))
+        if both_failed:
+            lines.append("DOM reasons: " + "; ".join(gate.get("dom_reasons", [])))
+            lines.append("Vision reasons: " + "; ".join(gate.get("vision_reasons", [])))
+        if disagreement_count > 0:
+            for d in (gate.get("disagreements", []) or [])[:10]:
+                lines.append("  disagree[" + str(d.get("field")) + "] dom="
+                             + str(d.get("dom")) + " vision=" + str(d.get("vision"))
+                             + " (" + str(d.get("delta_pct")) + "%)")
+
+        result = {
+            "verdict": verdict,
+            "clean": clean,
+            "needs_human": needs_human,
+            "winner_strategy": winner,
+            "winner_record_count": int(gate.get("winner_record_count", 0) or 0),
+            "trusted": trusted,
+            "both_failed": both_failed,
+            "replay_passed": replay_passed,
+            "replay_score": round(score, 4),
+            "disagreement_count": disagreement_count,
+            "report": verdict + "\n" + "\n".join(lines),
+        }
+
+  # ---------------------------------------------------------------------------
+  # 7) CONDITION - deterministic route on the verdict. If BOTH strategies failed OR
+  #    the two strategies DISAGREED (untrusted), page a human with both branches'
+  #    screenshots so they can re-author / arbitrate; otherwise emit the trusted,
+  #    schema-valid records. Read-only flow, so there is NO irreversible action and
+  #    therefore no approval gate - the schema-and-agreement gate carries safety; the
+  #    notify keeps humans in the loop on a hard failure or a strategy conflict.
+  # ---------------------------------------------------------------------------
+  - id: route-verdict
+    type: condition
+    depends_on: [build-verdict]
+    condition_config:
+      expression: "{steps.build-verdict.output.needs_human} == True"
+      then: [notify-needs-human]
+      else: [emit-trusted-records]
+
+  # 7a) NEEDS-HUMAN PATH - both strategies failed, or they disagreed beyond tolerance.
+  #     Page on-call with the report; the DOM branch's and vision branch's screenshots
+  #     are attached to this run so a human can see WHICH strategy latched onto what.
+  #     Nothing garbage is emitted. This also signals quarantine of the flow.
+  - id: notify-needs-human
+    type: notify
+    depends_on: [route-verdict]
+    notify_config:
+      service: slack
+      channel: "{input.oncall_channel}"
+      message: >-
+        EXTRACTION HELD on {input.target_url}: {steps.build-verdict.output.verdict}.
+        Winning strategy: {steps.build-verdict.output.winner_strategy}. Disagreements:
+        {steps.build-verdict.output.disagreement_count}. Both-strategies-failed:
+        {steps.build-verdict.output.both_failed}. Replay passed:
+        {steps.build-verdict.output.replay_passed}. The DOM-selector and
+        vision/coordinate branches' screenshots are attached to this run - review which
+        strategy read what before this flow emits. {steps.build-verdict.output.report}
+
+  # 7b) SUCCESS PATH - emit the trusted, schema-valid records together with which
+  #     strategy won, whether the other strategy confirmed it, and the replay score so
+  #     a downstream consumer knows the read survived strategy diversity AND drift.
+  - id: emit-trusted-records
+    type: code
+    depends_on: [route-verdict]
+    code_config:
+      language: python
+      code: |
+        gate = _steps.get("schema-agreement-gate") or {}
+        if not isinstance(gate, dict):
+            gate = {}
+        verdict_step = _steps.get("build-verdict") or {}
+        if not isinstance(verdict_step, dict):
+            verdict_step = {}
+        result = {
+            "ok": True,
+            "target_url": _input.get("target_url", ""),
+            "winner_strategy": gate.get("winner_strategy", "none"),
+            "record_count": gate.get("winner_record_count", 0),
+            "records": gate.get("winner_records", []),
+            "confirmed_by_other_strategy": bool(gate.get("cross_checked", False)),
+            "compared_records": gate.get("compared_records", 0),
+            "replay_score": verdict_step.get("replay_score", 0.0),
+            "verdict": verdict_step.get("verdict", "TRUSTED_EXTRACT"),
+            "note": "First schema-valid strategy won the race; deterministic gate validated the schema and, when both strategies completed, confirmed they agree within tolerance; winning path locked by trajectory-replay.",
+        }
+
+on_complete:
+  storage_path: "vision-vs-dom-strategy-race-extractor/{run_id}/result.json"

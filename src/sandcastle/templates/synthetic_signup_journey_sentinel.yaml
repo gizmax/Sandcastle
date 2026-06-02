@@ -1,7 +1,7 @@
 # name: Synthetic Signup Journey Sentinel
 # description: Every 15 minutes a synthetic user drives your real production signup -> verify-email -> first-login -> onboarding journey in a headless browser, asserts each step structurally in deterministic code, replays against a recorded golden run to catch silent UI regressions, and pages on-call when account creation breaks.
 # tags: [SRE, Synthetic-Monitoring, Browser, Playwright, Signup, Activation, Golden-Run, On-Call]
-# category: engineering
+# category: automation_rpa
 
 name: synthetic-signup-journey-sentinel
 description: >-

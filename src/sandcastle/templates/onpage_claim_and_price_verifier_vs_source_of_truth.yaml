@@ -1,7 +1,7 @@
 # name: Onpage Claim And Price Verifier Vs Source Of Truth
 # description: Logs into the live storefront as a real (often member-priced, geo-set) customer, reads what the shopper ACTUALLY sees - the JS-assembled rendered price, '50% off' / '#1 rated' / regulatory claim badges, and the displayed legal disclaimer - then DETERMINISTICALLY diffs each against an authoritative source of truth (price DB + approved-claims register) with screenshot proof of every mismatch for the legal / advertising-standards file. The browser runs in provider-neutral playwright mode (the model only authors the load/extract/screenshot script); the price-tolerance check and claim-vs-register matching are pure Python (re.search on an approved-phrasing whitelist), so the FTC/ASA/EU UCPD verdict never depends on one provider. The browser only READS - never adds to cart or checks out; the sole write is an append-only object-lock WORM evidence PUT, sensor-confirmed before success is declared; filing any takedown/correction ticket is gated behind a human approval.
 # tags: [PriceVerification, ClaimSubstantiation, FTC, ASA, UCPD, PriceParity, MSRP, Browser, Playwright, ObjectLock, WORM, SourceOfTruth, TrajectoryReplay, AdvertisingCompliance, RegulatoryAffairs]
-# category: general_ai
+# category: automation_rpa
 
 name: onpage-claim-and-price-verifier-vs-source-of-truth
 description: >-

@@ -72,6 +72,7 @@
       --cat-personal: #F59E0B;
       --cat-research_intel: #A855F7;
       --cat-finance_ops: #84CC16;
+      --cat-automation_rpa: #0EA5E9;
     }
 
     html {
@@ -559,6 +560,7 @@
     .pill[data-cat="personal"].active { background: var(--cat-personal); color: #000; }
     .pill[data-cat="research_intel"].active { background: var(--cat-research_intel); }
     .pill[data-cat="finance_ops"].active { background: var(--cat-finance_ops); color: #000; }
+    .pill[data-cat="automation_rpa"].active { background: var(--cat-automation_rpa); color: #000; }
 
     /* Sort */
     .sort-select {
@@ -643,6 +645,7 @@
     .card[data-cat="personal"]::before { background: var(--cat-personal); }
     .card[data-cat="research_intel"]::before { background: var(--cat-research_intel); }
     .card[data-cat="finance_ops"]::before { background: var(--cat-finance_ops); }
+    .card[data-cat="automation_rpa"]::before { background: var(--cat-automation_rpa); }
 
     .card-header-row {
       display: flex;
@@ -2511,6 +2514,9 @@
           </button>
           <button class="pill" data-cat="finance_ops">
             <span class="dot" style="background:var(--cat-finance_ops)"></span>Finance Ops
+          </button>
+          <button class="pill" data-cat="automation_rpa">
+            <span class="dot" style="background:var(--cat-automation_rpa)"></span>Automation &amp; RPA
           </button>
         </div>
         <div class="filter-right">

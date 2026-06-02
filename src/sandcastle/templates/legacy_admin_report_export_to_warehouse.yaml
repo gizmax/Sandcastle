@@ -1,7 +1,7 @@
 # name: Legacy Admin Report Export To Warehouse
 # description: Scheduled RPA bridge that logs into an internal/legacy admin tool with NO export API, runs the canonical report for yesterday, scrapes the rendered result grid (or the JS 'Download CSV'), deterministically validates row count / column arity / numeric parse / a daily-total anomaly band, then UPSERTs clean structured rows into the data warehouse - escalating an anomalous total to a human approval before the load so a layout change or a wrong filter can never silently poison the warehouse. The browser drive is provider-neutral playwright mode (the reasoning model authors the filter-set/run/extract script, fully swappable); trajectory-replay against a golden run, the row/total validation, and the warehouse upsert are deterministic and model-independent, so swapping the reasoning model never changes the data contract.
 # tags: [rpa, browser, playwright, legacy-admin, no-api, data-warehouse, etl, trajectory-replay, anomaly-guard, scheduled, provider-neutral]
-# category: data
+# category: automation_rpa
 
 name: legacy-admin-report-export-to-warehouse
 description: >-

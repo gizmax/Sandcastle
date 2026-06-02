@@ -1,7 +1,7 @@
 # name: Act Then Sensor Verify Submission Skeleton
 # description: The act-then-verify RPA skeleton for submitting into a third-party web portal that has no write API - drive the UI to FILL a form (stopping before submit), deterministically validate the filled preview, gate the irreversible submit behind a human approval, click submit only after sign-off, then poll the portal's own status page with a sensor until the action provably took effect (status accepted / reference number rendered) before declaring success. The fill and verify-poll steps are provider-neutral playwright/dom mode where the model authors the script; the irreversible click is gated by a human, not by trust in any one model, so reasoning providers swap freely without weakening safety. The load-bearing correctness is deterministic code + an engine-native sensor, never a single model's opinion; a silently-failed submit can never be mistaken for a win.
 # tags: [RPA, BrowserAutomation, Playwright, FormSubmission, HumanApproval, Sensor, ActThenVerify, PortalSubmission, NoAPI, ProviderNeutral]
-# category: general_ai
+# category: automation_rpa
 
 name: act-then-sensor-verify-submission-skeleton
 description: >-

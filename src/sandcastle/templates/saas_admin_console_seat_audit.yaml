@@ -1,7 +1,7 @@
 # name: SaaS Admin Console Seat Audit
 # description: Logs into a SaaS admin console that exposes no user-list export API, drives the authenticated SPA to extract the full per-seat user/role/last-login roster as structured JSON, deterministically validates the extraction, flags dormant and over-privileged seats, and revokes them ONLY behind a single human approval gate - with a trajectory-replay reliability check so a console redesign that breaks pagination is caught before bad data flows.
 # tags: [SaaS, SeatAudit, AccessReview, SOC2, IT-Ops, SpendManagement, Browser, Playwright, TrajectoryReplay, NoExportAPI, DormantSeats, LeastPrivilege]
-# category: devops
+# category: automation_rpa
 
 name: saas-admin-console-seat-audit
 description: >-

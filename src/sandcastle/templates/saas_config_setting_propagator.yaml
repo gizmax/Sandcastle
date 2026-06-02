@@ -1,7 +1,7 @@
 # name: SaaS Config Setting Propagator
 # description: Apply ONE configuration change (toggle MFA-required, set session timeout, flip a data-region/retention setting) across dozens-to-hundreds of separate workspaces/tenants of the same SaaS whose admin UI changes settings one workspace at a time and exposes no org-wide policy API - with idempotent verify-after-write. A census loop reads each workspace's current setting in provider-neutral dom mode; deterministic code computes a per-workspace diff and refuses any target_value outside an allowed enum; ONE human batch approval gates the whole mutation; a write loop drives each settings form in provider-neutral playwright mode under a max_actions cap with screenshots; a verify loop re-reads in dom mode and deterministic code asserts the saved value stuck (catching silent reverts); trajectory-replay guards the canonical write path against a vendor UI redesign; a notify + audit record logs who changed which workspaces from what to what. The load-bearing correctness is deterministic code + verify-loop + trajectory-replay, never a single model's opinion.
 # tags: [rpa, browser, devops, saas-admin, config-propagation, policy-enforcement, drift-correction, playwright, dom, idempotent, human-approval, trajectory-replay, provider-neutral]
-# category: devops
+# category: automation_rpa
 
 name: saas-config-setting-propagator
 description: >-

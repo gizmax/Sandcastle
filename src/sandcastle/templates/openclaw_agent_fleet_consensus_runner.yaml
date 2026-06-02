@@ -1,0 +1,647 @@
+# name: OpenClaw Agent-Fleet Consensus Runner
+# description: Dispatches the SAME recorded RPA task to a fleet of heterogeneous remote OpenClaw agent gateways (different OS, browser build, locale, network egress/geo) via openclaw steps fanned out by a loop, plus a delegate to the canonical local flow as the reference runner. A PURE-PYTHON quorum reconcile normalizes every runner's extraction, computes per-field agreement, and emits a verdict ONLY when >= quorum_pct of independent runners AGREE - surfacing geo-fenced / A-B-tested / fraud-cloaked divergence no single local runner can see. A swappable classify labels the divergence cause; the majority vote is deterministic, never the model.
+# tags: [rpa, openclaw, consensus, quorum, fleet, geo-fence, ab-test, bot-cloak, distribution, audit, divergence]
+# category: automation_rpa
+# connectors: [slack]
+
+name: openclaw-agent-fleet-consensus-runner
+description: >-
+  Run ONE recorded RPA task across a FLEET of independent remote runners and keep
+  the result only when a configurable majority of them AGREE. Every other
+  automation_rpa template drives a single local browser context, so it is blind to
+  any page that is served differently by geography, by A-B bucket, or by a
+  bot-cloaking fraud layer. This template fixes that.
+
+  Flow: a parse step ingests fleet_manifest_json into runner rows. A DETERMINISTIC
+  code step expands that manifest into N concrete runner specs (each with its own
+  gateway_url, OS, browser build, locale, and network egress/geo) and validates the
+  quorum math up front. A loop then fans the IDENTICAL recorded task
+  (recorded_task_ref) out to N openclaw steps - the load-bearing primitive here -
+  each one a remote OpenClaw agent gateway with its own skills/region/egress, its
+  bearer token pulled from the env var named by gateway_token_env, and cost_per_call
+  tracked. In parallel a delegate re-drives the canonical LOCAL flow as the trusted
+  reference runner, and a race draws a redundant structured normalization draft from
+  whichever swappable judge answers first. The PURE-PYTHON consensus reconcile then
+  normalizes every runner's extraction to one shape, computes per-field agreement,
+  and emits a verdict ONLY when >= quorum_pct of runners match - tagging the
+  dissenters by geo/OS so divergence reads as "price differs in EU vs US" or "this
+  runner was served a cloaked page", never as random noise. A classify labels the
+  divergence cause (geo-fence / A-B test / bot-cloak / transient); a condition routes
+  any no-quorum result to a human notify; a SHA-256 chain records every runner's raw
+  result plus the quorum math.
+
+  PROVIDER NEUTRAL: the openclaw gateways and the delegate reference runner are
+  swappable endpoints, the race judge that drafts a normalization hint is swappable
+  across providers, and the classify that labels divergence cause is a swappable
+  judge that only ANNOTATES. The quorum decision - per-field agreement and the
+  majority vote - is PURE Python, so the verdict does not depend on which model or
+  which runner produced any single result.
+
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 1800
+
+input_schema:
+  required: ["recorded_task_ref", "fleet_manifest_json", "gateway_token_env"]
+  properties:
+    recorded_task_ref:
+      type: string
+      description: >-
+        Reference to the recorded RPA task every fleet runner must replay
+        identically (a recorded browser trajectory / flow name). This single task is
+        dispatched verbatim to all runners so their extractions are directly
+        comparable.
+      default: "recorded-checkout-price-extract-2026-06-01"
+      example: "recorded-product-pdp-price-and-stock-2026-06-01"
+    fleet_manifest_json:
+      type: string
+      description: >-
+        JSON array of fleet runner descriptors. Each entry:
+        {id, gateway_url, os, browser, locale, geo, egress, skills[], cost_per_call}.
+        The code step expands this into concrete openclaw runner specs. NEVER put
+        tokens here - the bearer token comes from the env var named by
+        gateway_token_env.
+      default: >-
+        [{"id":"eu-fr-chromium","gateway_url":"https://gw-eu-fr.openclaw.example.com","os":"linux","browser":"chromium-126","locale":"fr-FR","geo":"EU","egress":"fr-paris","skills":["browser","extract"],"cost_per_call":0.012},
+         {"id":"us-east-firefox","gateway_url":"https://gw-us-east.openclaw.example.com","os":"windows","browser":"firefox-128","locale":"en-US","geo":"US","egress":"us-virginia","skills":["browser","extract"],"cost_per_call":0.011},
+         {"id":"us-west-webkit","gateway_url":"https://gw-us-west.openclaw.example.com","os":"macos","browser":"webkit-18","locale":"en-US","geo":"US","egress":"us-oregon","skills":["browser","extract"],"cost_per_call":0.013},
+         {"id":"apac-sg-chromium","gateway_url":"https://gw-apac-sg.openclaw.example.com","os":"linux","browser":"chromium-126","locale":"en-SG","geo":"APAC","egress":"sg-singapore","skills":["browser","extract"],"cost_per_call":0.012}]
+      example: '[{"id":"eu-de-chromium","gateway_url":"https://gw.example.com","os":"linux","browser":"chromium-126","locale":"de-DE","geo":"EU","egress":"de-frankfurt","skills":["browser","extract"],"cost_per_call":0.01}]'
+    quorum_pct:
+      type: string
+      description: >-
+        Minimum percentage (0..100) of independent runners that must AGREE on a field
+        before the consensus value is accepted for that field. A field with fewer
+        agreeing runners than this is flagged as divergent and never silently
+        trusted.
+      default: "60"
+      example: "75"
+    gateway_token_env:
+      type: string
+      description: >-
+        Name of the environment variable holding the bearer token used to
+        authenticate to every OpenClaw gateway in the fleet. The token VALUE is never
+        inlined into the workflow or the manifest.
+      default: "OPENCLAW_FLEET_TOKEN"
+      example: "OPENCLAW_FLEET_TOKEN"
+    fields_of_interest:
+      type: string
+      description: >-
+        Comma-separated extraction field names the consensus is computed over
+        (e.g. price,currency,in_stock). Only these fields are compared across runners
+        so the quorum math is well-defined and noise fields are ignored.
+      default: "price,currency,in_stock,shipping_estimate"
+      example: "price,currency,availability"
+    reference_workflow:
+      type: string
+      description: >-
+        Name of the canonical LOCAL RPA flow that the delegate re-drives as the
+        trusted reference runner, counted as one independent voter alongside the
+        remote fleet.
+      default: "recorded_checkout_price_extract_skeleton"
+      example: "product_pdp_price_extract_skeleton"
+    slack_channel:
+      type: string
+      description: "Slack channel that receives the consensus verdict and, on no-quorum, the divergence escalation."
+      default: "#rpa-consensus"
+      example: "#rpa-consensus"
+
+steps:
+  # ---------------------------------------------------------------------------
+  # 1) PARSE the fleet manifest into structured runner rows. Deterministic
+  #    ingest; no gateway contact yet.
+  # ---------------------------------------------------------------------------
+  - id: parse_fleet_manifest
+    type: parse
+    prompt: "{input.fleet_manifest_json}"
+    parse_config:
+      output: json
+
+  # ---------------------------------------------------------------------------
+  # 2) EXPAND the manifest into concrete runner specs + validate quorum math.
+  #    PURE Python: normalize every descriptor, drop malformed/duplicate rows,
+  #    compute the integer vote count needed to reach quorum_pct, and surface the
+  #    canonical fields_of_interest list. The remote fanout loops over these specs.
+  # ---------------------------------------------------------------------------
+  - id: expand_fleet
+    type: code
+    depends_on: [parse_fleet_manifest]
+    code_config:
+      language: python
+      code: |
+        import json
+
+        raw = _steps['parse_fleet_manifest']
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw) if raw.strip() else []
+            except (ValueError, TypeError):
+                raw = []
+        if isinstance(raw, dict):
+            raw = raw.get('runners') or raw.get('fleet') or raw.get('rows') or raw.get('data') or []
+        if not isinstance(raw, list):
+            raw = []
+
+        # Canonical comparison fields the consensus is computed over.
+        foi_raw = str(_input.get('fields_of_interest') or 'price,currency,in_stock')
+        fields_of_interest = []
+        for part in foi_raw.split(','):
+            f = part.strip()
+            if f and f not in fields_of_interest:
+                fields_of_interest.append(f)
+
+        runners = []
+        seen_ids = set()
+        rejected = []
+        for row in raw:
+            if not isinstance(row, dict):
+                rejected.append({'row': str(row)[:80], 'reason': 'not_an_object'})
+                continue
+            rid = str(row.get('id') or '').strip()
+            gw = str(row.get('gateway_url') or '').strip()
+            if not rid:
+                rejected.append({'row': str(row)[:80], 'reason': 'missing_id'})
+                continue
+            if not gw.startswith('http'):
+                rejected.append({'id': rid, 'reason': 'gateway_url_not_http'})
+                continue
+            if rid in seen_ids:
+                rejected.append({'id': rid, 'reason': 'duplicate_runner_id'})
+                continue
+            seen_ids.add(rid)
+            skills = row.get('skills')
+            if not isinstance(skills, list):
+                skills = ['browser', 'extract']
+            try:
+                cost = float(row.get('cost_per_call', 0.0))
+            except (ValueError, TypeError):
+                cost = 0.0
+            runners.append({
+                'id': rid,
+                'gateway_url': gw,
+                'os': str(row.get('os') or 'unknown').strip().lower(),
+                'browser': str(row.get('browser') or 'unknown').strip().lower(),
+                'locale': str(row.get('locale') or 'unknown').strip(),
+                'geo': str(row.get('geo') or 'unknown').strip().upper(),
+                'egress': str(row.get('egress') or 'unknown').strip().lower(),
+                'skills': [str(s).strip() for s in skills if str(s).strip()],
+                'cost_per_call': cost,
+            })
+
+        # quorum_pct -> integer votes required. The local delegate reference runner
+        # counts as one additional independent voter (+1).
+        try:
+            quorum_pct = float(str(_input.get('quorum_pct', '60')))
+        except (ValueError, TypeError):
+            quorum_pct = 60.0
+        quorum_pct = max(0.0, min(100.0, quorum_pct))
+
+        remote_count = len(runners)
+        total_voters = remote_count + 1  # + the local delegate reference runner
+        import math
+        votes_required = int(math.ceil(total_voters * (quorum_pct / 100.0)))
+        if votes_required < 1:
+            votes_required = 1
+
+        result = {
+            'runners': runners,
+            'remote_count': remote_count,
+            'total_voters': total_voters,
+            'votes_required': votes_required,
+            'quorum_pct': quorum_pct,
+            'fields_of_interest': fields_of_interest,
+            'rejected_runners': rejected,
+            'rejected_count': len(rejected),
+        }
+
+  # ---------------------------------------------------------------------------
+  # 3) DELEGATE the canonical LOCAL flow as the trusted REFERENCE runner. This is
+  #    one independent voter, re-driving the same recorded task locally so the
+  #    fleet always has a baseline to disagree with.
+  # ---------------------------------------------------------------------------
+  - id: reference_runner
+    type: delegate
+    depends_on: [expand_fleet]
+    delegate_config:
+      workflow: "{input.reference_workflow}"
+      task_description: >-
+        Re-drive the recorded RPA task {input.recorded_task_ref} on the canonical
+        LOCAL browser context and extract exactly the fields
+        {input.fields_of_interest}. This is the trusted reference runner in a fleet
+        consensus: run the recorded task verbatim, read-only (extract only - perform
+        NO submit / pay / send action), and return the extracted fields so they can
+        be compared against the remote fleet's results.
+      timeout: 600
+
+  # ---------------------------------------------------------------------------
+  # 4) LOOP - fan the IDENTICAL recorded task out to every remote OpenClaw gateway.
+  #    Each iteration binds one runner spec to _item and runs the openclaw child
+  #    step against that runner's own gateway/region/egress. This is the
+  #    distribution primitive no single-context template has.
+  # ---------------------------------------------------------------------------
+  - id: fleet_fanout
+    type: loop
+    depends_on: [expand_fleet]
+    loop_config:
+      over: "steps.expand_fleet.output.runners"
+      step_ids: [dispatch_one_runner]
+      max_iterations: 64
+
+  # 4a) PER-RUNNER OpenClaw dispatch. The load-bearing primitive: a remote agent
+  #     gateway with its OWN OS / browser build / locale / geo / network egress.
+  #     gateway_url + skills come from the runner spec via _item; the bearer token
+  #     is pulled from the env var named by gateway_token_env (never inlined);
+  #     cost_per_call is tracked. Every runner replays the SAME recorded task so
+  #     their extractions are directly comparable.
+  - id: dispatch_one_runner
+    type: openclaw
+    openclaw_config:
+      gateway_url: "{{ _item.gateway_url }}"
+      api_token: "${{ env.{input.gateway_token_env} }}"
+      skills: ["browser", "extract"]
+      timeout_seconds: 300
+      cost_per_call: 0.012
+      message: >-
+        You are one runner in a heterogeneous consensus fleet. Replay the recorded
+        RPA task {input.recorded_task_ref} EXACTLY as recorded from this runner's
+        own environment - OS {{ _item.os }}, browser {{ _item.browser }}, locale
+        {{ _item.locale }}, geo {{ _item.geo }}, network egress {{ _item.egress }}.
+        Do NOT submit, pay, send, or mutate anything; this is a read-only extraction.
+        Extract these fields and return them as a strict JSON object with one key per
+        field: {input.fields_of_interest}. Report exactly what THIS environment is
+        served - do not normalize away regional or A-B differences; the fleet
+        reconcile compares runners precisely to catch them. Return only the JSON
+        object.
+
+  # ---------------------------------------------------------------------------
+  # 5) RACE - redundant structured-normalization DRAFT from whichever swappable
+  #    judge answers first. This only produces a NORMALIZATION HINT (field aliases /
+  #    unit guesses) to help the deterministic reconcile coalesce shapes; it never
+  #    decides the verdict. First valid (non-empty) draft wins.
+  # ---------------------------------------------------------------------------
+  - id: normalization_draft_race
+    type: race
+    depends_on: [fleet_fanout, reference_runner]
+    race_config:
+      branches:
+        - [draft_normalization_a]
+        - [draft_normalization_b]
+      validator: "len(str(output).strip()) > 0"
+
+  - id: draft_normalization_a
+    type: llm
+    prompt: >-
+      You are a swappable normalization assistant (provider A). Given these raw
+      per-runner extractions for fields {input.fields_of_interest}, propose a JSON
+      object of field-alias hints mapping any observed key variants to the canonical
+      field names, plus a guess of each field's type (number/string/boolean). This is
+      only a HINT for a deterministic reconciler - do not pick a winning value.
+      Remote runners: {steps.fleet_fanout.output}. Reference runner:
+      {steps.reference_runner.output}. Return only the JSON hint object.
+
+  - id: draft_normalization_b
+    type: llm
+    prompt: >-
+      You are a swappable normalization assistant (provider B). Read these raw
+      per-runner extractions for fields {input.fields_of_interest} and emit a JSON
+      object of field-alias hints (observed key variant -> canonical field name) and
+      a per-field type guess (number/string/boolean). Output a HINT only; never
+      select a consensus value - a deterministic reconciler does that. Remote runners:
+      {steps.fleet_fanout.output}. Reference runner:
+      {steps.reference_runner.output}. Return only the JSON hint object.
+
+  # ---------------------------------------------------------------------------
+  # 6) CONSENSUS RECONCILE - the load-bearing decision. PURE Python: normalize
+  #    every runner's extraction (remote fleet + local reference) to one shape,
+  #    compute per-field agreement, and accept a consensus value for a field ONLY
+  #    when >= votes_required runners agree. Dissenters are tagged by geo/OS so the
+  #    divergence reads as a real story (EU vs US price, cloaked page), not noise.
+  #    The model NEVER decides here - the majority vote is deterministic.
+  # ---------------------------------------------------------------------------
+  - id: consensus_reconcile
+    type: code
+    depends_on: [expand_fleet, fleet_fanout, reference_runner]
+    code_config:
+      language: python
+      code: |
+        import json
+        import re
+
+        expand = _steps['expand_fleet'] or {}
+        if not isinstance(expand, dict):
+            expand = {}
+        runner_specs = expand.get('runners', []) or []
+        votes_required = int(expand.get('votes_required', 1) or 1)
+        total_voters = int(expand.get('total_voters', 1) or 1)
+        fields_of_interest = expand.get('fields_of_interest', []) or []
+
+        # Index runner metadata (geo / os / browser / egress) by id for dissenter tagging.
+        meta_by_id = {}
+        for spec in runner_specs:
+            if isinstance(spec, dict) and spec.get('id'):
+                meta_by_id[str(spec['id'])] = spec
+
+        def coerce_json(value):
+            # OpenClaw / delegate outputs may be a dict already or a JSON string,
+            # sometimes wrapped under a 'response' or 'output' key. Coalesce to a dict.
+            if isinstance(value, dict):
+                inner = value.get('response')
+                if inner is None:
+                    inner = value.get('output')
+                if isinstance(inner, dict):
+                    return inner
+                if isinstance(inner, str):
+                    s = inner.strip()
+                    match = re.search(r'\{.*\}', s, re.DOTALL)
+                    if match:
+                        try:
+                            parsed = json.loads(match.group(0))
+                            if isinstance(parsed, dict):
+                                return parsed
+                        except (ValueError, TypeError):
+                            pass
+                    return value
+                return value
+            if isinstance(value, str):
+                s = value.strip()
+                match = re.search(r'\{.*\}', s, re.DOTALL)
+                if match:
+                    try:
+                        parsed = json.loads(match.group(0))
+                        if isinstance(parsed, dict):
+                            return parsed
+                    except (ValueError, TypeError):
+                        return {}
+                return {}
+            return {}
+
+        def norm_value(v):
+            # Canonical string form so "9.99", 9.99 and " 9.99 " all agree.
+            if v is None:
+                return ''
+            if isinstance(v, bool):
+                return 'true' if v else 'false'
+            if isinstance(v, (int, float)):
+                f = float(v)
+                if f == int(f):
+                    return str(int(f))
+                return ('%.6f' % f).rstrip('0').rstrip('.')
+            return str(v).strip().lower()
+
+        # --- Collect votes: one entry per independent runner -----------------------------
+        loop_out = _steps['fleet_fanout']
+        if isinstance(loop_out, dict):
+            loop_items = loop_out.get('results') or loop_out.get('items') or []
+        elif isinstance(loop_out, list):
+            loop_items = loop_out
+        else:
+            loop_items = []
+
+        voters = []  # each: {id, geo, os, browser, extraction{field:value}}
+        for idx, raw_item in enumerate(loop_items):
+            extraction = coerce_json(raw_item)
+            # Best-effort align this loop result to its runner spec by position.
+            spec = runner_specs[idx] if idx < len(runner_specs) else {}
+            rid = str(spec.get('id') or ('runner-' + str(idx)))
+            voters.append({
+                'id': rid,
+                'geo': str(spec.get('geo') or 'unknown'),
+                'os': str(spec.get('os') or 'unknown'),
+                'browser': str(spec.get('browser') or 'unknown'),
+                'egress': str(spec.get('egress') or 'unknown'),
+                'kind': 'remote',
+                'extraction': extraction if isinstance(extraction, dict) else {},
+            })
+
+        # The local delegate reference runner is one additional independent voter.
+        ref_extraction = coerce_json(_steps['reference_runner'])
+        voters.append({
+            'id': 'local-reference',
+            'geo': 'LOCAL',
+            'os': 'reference',
+            'browser': 'reference',
+            'egress': 'local',
+            'kind': 'reference',
+            'extraction': ref_extraction if isinstance(ref_extraction, dict) else {},
+        })
+
+        # --- Per-field quorum vote --------------------------------------------------------
+        consensus = {}
+        field_reports = []
+        for field in fields_of_interest:
+            buckets = {}          # canonical value -> list of voter ids
+            raw_by_value = {}     # canonical value -> a representative raw value
+            for voter in voters:
+                ext = voter['extraction']
+                if field not in ext:
+                    continue
+                raw_v = ext.get(field)
+                key = norm_value(raw_v)
+                if key == '':
+                    continue
+                buckets.setdefault(key, []).append(voter['id'])
+                raw_by_value.setdefault(key, raw_v)
+
+            # Winning value = the bucket with the most agreeing voters.
+            winner_key = ''
+            winner_voters = []
+            for key, ids in buckets.items():
+                if len(ids) > len(winner_voters):
+                    winner_key = key
+                    winner_voters = ids
+            agree_count = len(winner_voters)
+            has_quorum = agree_count >= votes_required
+
+            # Dissenters = voters whose value differs from the winning value, tagged
+            # by geo/os so the disagreement reads as a real story.
+            dissenters = []
+            for voter in voters:
+                ext = voter['extraction']
+                if field not in ext:
+                    dissenters.append({
+                        'id': voter['id'], 'geo': voter['geo'], 'os': voter['os'],
+                        'browser': voter['browser'], 'egress': voter['egress'],
+                        'value': None, 'note': 'field_absent',
+                    })
+                    continue
+                key = norm_value(ext.get(field))
+                if key != winner_key:
+                    dissenters.append({
+                        'id': voter['id'], 'geo': voter['geo'], 'os': voter['os'],
+                        'browser': voter['browser'], 'egress': voter['egress'],
+                        'value': ext.get(field), 'note': 'differs_from_majority',
+                    })
+
+            if has_quorum:
+                consensus[field] = raw_by_value.get(winner_key)
+
+            field_reports.append({
+                'field': field,
+                'consensus_value': raw_by_value.get(winner_key) if has_quorum else None,
+                'agree_count': agree_count,
+                'votes_required': votes_required,
+                'total_voters': len(voters),
+                'has_quorum': has_quorum,
+                'distinct_values': len(buckets),
+                'dissenters': dissenters,
+                'dissenter_geos': sorted({d['geo'] for d in dissenters if d['note'] == 'differs_from_majority'}),
+            })
+
+        divergent_fields = [r['field'] for r in field_reports if not r['has_quorum']]
+        quorum_reached = len(divergent_fields) == 0 and len(field_reports) > 0
+
+        result = {
+            'quorum_reached': quorum_reached,
+            'votes_required': votes_required,
+            'total_voters': len(voters),
+            'consensus': consensus,
+            'divergent_fields': divergent_fields,
+            'divergent_count': len(divergent_fields),
+            'field_reports': field_reports,
+            'voter_ids': [v['id'] for v in voters],
+        }
+
+  # ---------------------------------------------------------------------------
+  # 7) CLASSIFY the divergence cause. The ONLY model in the path here, and it only
+  #    ANNOTATES a story onto an already-decided deterministic result. It never
+  #    changes whether quorum was reached. Swappable across providers.
+  # ---------------------------------------------------------------------------
+  - id: classify_divergence
+    type: classify
+    depends_on: [consensus_reconcile]
+    classify_config:
+      model: haiku
+      input: >-
+        A fleet of heterogeneous remote runners replayed the same recorded RPA task.
+        Given these per-field divergence reports (each lists the dissenting runners
+        tagged by geo/OS/browser/egress), label the SINGLE most likely cause of the
+        disagreement. geo_fence = values split cleanly along geography (EU vs US vs
+        APAC). ab_test = values split across runners in the SAME geo (bucketing).
+        bot_cloak = one or few runners see a structurally different page (likely an
+        anti-bot cloaked variant). transient = sparse/random one-off differences with
+        no geo or bucket pattern. Reports: {steps.consensus_reconcile.output.field_reports}
+      categories:
+        - geo_fence
+        - ab_test
+        - bot_cloak
+        - transient
+      branches:
+        geo_fence: [audit_chain]
+        ab_test: [audit_chain]
+        bot_cloak: [audit_chain]
+        transient: [audit_chain]
+
+  # ---------------------------------------------------------------------------
+  # 8) ROUTE on the deterministic quorum verdict. No quorum -> escalate the
+  #    divergence to a human via notify (and still archive). Quorum -> just archive
+  #    the consensus. The branch reads the PURE-PYTHON quorum_reached flag, not the
+  #    classifier.
+  # ---------------------------------------------------------------------------
+  - id: route_on_quorum
+    type: condition
+    depends_on: [classify_divergence]
+    condition_config:
+      expression: "{steps.consensus_reconcile.output.quorum_reached} == False"
+      then: [escalate_divergence, audit_chain]
+      else: [audit_chain]
+
+  # 8a) NO-QUORUM escalation to a human. The divergence cause label and the
+  #     dissenting geos make this an actionable alert, not a noise page.
+  - id: escalate_divergence
+    type: notify
+    depends_on: [route_on_quorum]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: >-
+        FLEET NO-QUORUM on recorded task {input.recorded_task_ref}. Divergent fields:
+        {steps.consensus_reconcile.output.divergent_fields}. Likely cause:
+        {steps.classify_divergence.output}. Votes required:
+        {steps.consensus_reconcile.output.votes_required} of
+        {steps.consensus_reconcile.output.total_voters}. The runners disagree along
+        the geo/OS lines in the field reports - review before trusting any single
+        runner's value. Audit hash {steps.audit_chain.output.sha256}.
+
+  # ---------------------------------------------------------------------------
+  # 9) AUDIT CHAIN - deterministic, tamper-evident SHA-256 over the canonical
+  #    record: every runner's raw result, the per-field quorum math, the verdict,
+  #    and the divergence-cause label. No model. Reproducible byte-for-byte.
+  # ---------------------------------------------------------------------------
+  - id: audit_chain
+    type: code
+    depends_on: [route_on_quorum, consensus_reconcile, classify_divergence, expand_fleet, fleet_fanout, reference_runner]
+    code_config:
+      language: python
+      code: |
+        import json
+        import hashlib
+        from datetime import datetime, timezone
+
+        expand = _steps['expand_fleet'] or {}
+        reconcile = _steps['consensus_reconcile'] or {}
+        cause = _steps['classify_divergence']
+        if isinstance(cause, dict):
+            cause = cause.get('category') or cause.get('label') or cause.get('output')
+        cause = str(cause) if cause is not None else 'unknown'
+
+        # Capture every runner's RAW result so the audit record is independently
+        # re-checkable - the quorum math can be recomputed from these by an auditor.
+        loop_out = _steps['fleet_fanout']
+        if isinstance(loop_out, dict):
+            raw_runner_results = loop_out.get('results') or loop_out.get('items') or []
+        elif isinstance(loop_out, list):
+            raw_runner_results = loop_out
+        else:
+            raw_runner_results = []
+
+        record = {
+            'generated_at': datetime.now(timezone.utc).isoformat(),
+            'recorded_task_ref': str(_input.get('recorded_task_ref') or ''),
+            'quorum_pct': expand.get('quorum_pct'),
+            'votes_required': expand.get('votes_required'),
+            'total_voters': reconcile.get('total_voters'),
+            'remote_runner_count': expand.get('remote_count'),
+            'rejected_runners': expand.get('rejected_runners', []),
+            'quorum_reached': reconcile.get('quorum_reached'),
+            'consensus': reconcile.get('consensus', {}),
+            'divergent_fields': reconcile.get('divergent_fields', []),
+            'field_reports': reconcile.get('field_reports', []),
+            'divergence_cause': cause,
+            'raw_runner_results': raw_runner_results,
+            'reference_runner_result': _steps['reference_runner'],
+            'voter_ids': reconcile.get('voter_ids', []),
+        }
+
+        # Canonical (sorted-key) serialization so the audit hash is reproducible.
+        canonical = json.dumps(record, sort_keys=True, separators=(',', ':'), default=str)
+        digest = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+
+        result = {
+            'sha256': digest,
+            'byte_length': len(canonical),
+            'audit_record': record,
+            'canonical_json': canonical,
+        }
+
+  # ---------------------------------------------------------------------------
+  # 10) NOTIFY the consensus channel with the verdict + cause + audit hash. Always
+  #     runs after the audit chain so every fleet run leaves a posted summary.
+  # ---------------------------------------------------------------------------
+  - id: notify_summary
+    type: notify
+    depends_on: [audit_chain]
+    notify_config:
+      service: slack
+      channel: "{input.slack_channel}"
+      message: >-
+        Fleet consensus on {input.recorded_task_ref} complete. Quorum reached:
+        {steps.consensus_reconcile.output.quorum_reached} | Votes required:
+        {steps.consensus_reconcile.output.votes_required} of
+        {steps.consensus_reconcile.output.total_voters} | Divergent fields:
+        {steps.consensus_reconcile.output.divergent_count} | Cause:
+        {steps.classify_divergence.output} | Consensus:
+        {steps.consensus_reconcile.output.consensus} | Audit sha256
+        {steps.audit_chain.output.sha256}.
+
+on_complete:
+  storage_path: "openclaw-agent-fleet-consensus-runner/{run_id}/result.json"

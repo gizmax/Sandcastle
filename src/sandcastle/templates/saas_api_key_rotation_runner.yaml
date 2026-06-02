@@ -1,7 +1,7 @@
 # name: SaaS API Key Rotation Runner
 # description: Rotates or revokes credentials/API keys/webhook secrets across many service accounts in a SaaS admin console that only regenerates keys one-by-one in the UI and exposes no rotation API. A dom-mode browser census lists each account's current key id + last-rotated date; deterministic code builds a rotation_plan (age-over-policy or explicitly listed) and refuses any missing account or open-dependency flag; an llm_eval gate reviews blast radius; ONE human approval authorizes the irreversible batch; a per-account loop drives an authored Playwright regenerate, reads the one-time new secret from the modal via output_schema, and writes it to the vault by the very NEXT http step before continuing so no secret is ever lost on crash; a dom re-census plus deterministic reconcile asserts every old key id is gone and a new key id is present, flagging any survivor. Secrets NEVER enter notify payloads or the audit chain - only key_id transitions are logged.
 # tags: [DevOps, SecretsRotation, ApiKeyRotation, CredentialRotation, RPA, Playwright, DOM, HumanApproval, Vault, ProviderNeutral]
-# category: devops
+# category: automation_rpa
 
 name: saas-api-key-rotation-runner
 description: >-
