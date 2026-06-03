@@ -9,6 +9,7 @@ OpenAI-compatible runner (runner-openai.mjs).
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -122,6 +123,19 @@ PROVIDER_REGISTRY: dict[str, ModelInfo] = {
 # All known model names (for validation)
 KNOWN_MODELS = frozenset(PROVIDER_REGISTRY.keys())
 
+# A dynamic NIM model id ("nim/<id>") must be a sane OpenAI/NGC-style model name -
+# no whitespace, control chars, or path-traversal - so a crafted model string can't
+# inject anything into the request or be mistaken for a path.
+_NIM_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/:-]*$")
+
+
+def _valid_nim_id(model_str: str) -> bool:
+    """True if *model_str* is a well-formed dynamic ``nim/<id>`` model string."""
+    if not (isinstance(model_str, str) and model_str.startswith("nim/")):
+        return False
+    rest = model_str[len("nim/"):]
+    return bool(rest) and ".." not in rest and _NIM_ID_RE.match(rest) is not None
+
 
 def resolve_model(model_str: str) -> ModelInfo:
     """Resolve a model string to its full configuration.
@@ -134,7 +148,7 @@ def resolve_model(model_str: str) -> ModelInfo:
     """
     if model_str in PROVIDER_REGISTRY:
         return PROVIDER_REGISTRY[model_str]
-    if isinstance(model_str, str) and model_str.startswith("nim/") and len(model_str) > len("nim/"):
+    if _valid_nim_id(model_str):
         return ModelInfo(
             "nim", model_str[len("nim/"):], "runner-openai.mjs",
             "NIM_API_KEY", "http://localhost:8000/v1", 0.0, 0.0, region="local",
@@ -147,11 +161,7 @@ def resolve_model(model_str: str) -> ModelInfo:
 
 def is_known_model(model_str: str) -> bool:
     """True if *model_str* is registered or a valid dynamic ``nim/<model-id>``."""
-    return model_str in KNOWN_MODELS or (
-        isinstance(model_str, str)
-        and model_str.startswith("nim/")
-        and len(model_str) > len("nim/")
-    )
+    return model_str in KNOWN_MODELS or _valid_nim_id(model_str)
 
 
 def get_api_key(model_info: ModelInfo) -> str:
@@ -191,10 +201,12 @@ def resolve_base_url(model_info: ModelInfo) -> str:
     """
     if model_info.provider == "omlx":
         from sandcastle.config import settings
-        return settings.omlx_base_url.rstrip("/") + "/v1"
+        base = settings.omlx_base_url or "http://localhost:8080"
+        return base.rstrip("/") + "/v1"
     if model_info.provider == "nim":
         from sandcastle.config import settings
-        return settings.nim_base_url.rstrip("/") + "/v1"
+        base = settings.nim_base_url or "http://localhost:8000"
+        return base.rstrip("/") + "/v1"
     return model_info.api_base_url or "https://api.openai.com/v1"
 
 

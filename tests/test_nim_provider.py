@@ -93,3 +93,32 @@ def test_dag_validate_accepts_dynamic_nim_model():
     )
     errors = validate(wf)
     assert not any("Unknown model" in e for e in errors), errors
+
+
+# ---- bug fixes (from adversarial bug review) --------------------------------
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "nim/model\ninjected",  # newline
+        "nim/has space",  # whitespace
+        "nim/a\tb",  # tab
+        "nim/../../etc/passwd",  # path traversal
+        "nim/",  # empty id
+        "nim/   ",  # whitespace-only id
+    ],
+)
+def test_malformed_nim_ids_rejected(bad):
+    # A crafted nim/<id> with whitespace/control/traversal must not be accepted.
+    assert is_known_model(bad) is False
+    with pytest.raises(KeyError):
+        resolve_model(bad)
+
+
+def test_empty_base_url_falls_back_to_default(monkeypatch):
+    # An empty NIM_BASE_URL must not produce a relative "/v1" URL.
+    monkeypatch.setattr(settings, "nim_base_url", "")
+    assert resolve_base_url(resolve_model("nim/llama-3.1-70b")) == "http://localhost:8000/v1"
+    monkeypatch.setattr(settings, "omlx_base_url", "")
+    assert resolve_base_url(resolve_model("omlx/qwen-3")) == "http://localhost:8080/v1"
