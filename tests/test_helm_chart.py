@@ -31,7 +31,11 @@ def test_chart_yaml_has_mandatory_fields() -> None:
     assert chart["apiVersion"] == "v2"
     assert chart["name"] == "memory-mcp"
     assert re.match(r"^\d+\.\d+\.\d+$", str(chart["version"]))
-    assert str(chart["appVersion"]) == "0.32.2"
+    # appVersion tracks the Sandcastle package version, not a pinned literal,
+    # so a release bump never silently breaks this lint test.
+    from sandcastle import __version__
+
+    assert str(chart["appVersion"]) == __version__
 
 
 # ---------------------------------------------------------------------------

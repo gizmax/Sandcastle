@@ -6506,7 +6506,7 @@ const routes: MockRoute[] = [
   },
   {
     match: /^\/runtime$/,
-    handler: () => ({ mode: "local", database: "sqlite", queue: "in-process", storage: "local", data_dir: "./data", version: "0.30.0", sandbox_backend: "e2b", license: { status: "valid", tier: "pro", licensee: "Demo User", max_seats: 10, expires: "2027-02-26" } }),
+    handler: () => ({ mode: "local", database: "sqlite", queue: "in-process", storage: "local", data_dir: "./data", version: "0.33.0", sandbox_backend: "e2b", license: { status: "valid", tier: "pro", licensee: "Demo User", max_seats: 10, expires: "2027-02-26" } }),
   },
   {
     match: /^\/stats$/,
@@ -7354,13 +7354,13 @@ const routes: MockRoute[] = [
     match: /^\/check-update$/,
     method: "GET",
     handler: () => ({
-      current_version: "0.30.0",
-      latest_version: "0.30.0",
+      current_version: "0.33.0",
+      latest_version: "0.33.0",
       update_available: false,
-      release_url: "https://github.com/gizmax/Sandcastle/releases/v0.30.0",
+      release_url: "https://github.com/gizmax/Sandcastle/releases/v0.33.0",
       install_command: "pip install --upgrade sandcastle-ai",
       changelog_url: "https://sandcastle-ai.eu/whatsnew/",
-      highlights: ["Auto-update with rollback", "AI structured output", "Quality scoring"],
+      highlights: ["Spark Mode on NVIDIA DGX Spark", "Local nim/* inference ($0/run)", "Overnight Self-Tune (LoRA)"],
     }),
   },
   // POST /admin/update - trigger software update
@@ -7369,8 +7369,8 @@ const routes: MockRoute[] = [
     method: "POST",
     handler: () => ({
       status: "success",
-      new_version: "0.30.0",
-      previous_version: "0.28.1",
+      new_version: "0.33.0",
+      previous_version: "0.32.2",
       restart_required: true,
     }),
   },

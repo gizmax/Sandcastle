@@ -4,20 +4,20 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>What's New - Sandcastle</title>
-  <meta name="description" content="Sandcastle release history. v0.32.2 - Your Sandbox, Your Silicon: self-hosted sandboxes on Cloudflare/Daytona/Modal/Vercel/Docker, Memory MCP server, MCP tunnels with WIF, live work-queue dashboard, webhook workers, 3 production case studies, 150 new tests.">
+  <meta name="description" content="Sandcastle release history. v0.33.0 - Your Box, Your Brains: Spark Mode auto-detects an NVIDIA DGX Spark and flips to local-first defaults, a first-class nim/* local provider ($0/run, data-stays-on-box), and Overnight Self-Tune that trains a task-specific LoRA adapter on your own eval data. Designed for DGX Spark - compatibility, not endorsement.">
   <meta name="author" content="Tomas Pflanzer @gizmax">
 
   <!-- Open Graph -->
-  <meta property="og:title" content="What's New - Sandcastle v0.32.2">
-  <meta property="og:description" content="Your Sandbox, Your Silicon. Self-hosted sandboxes on Cloudflare/Daytona/Modal/Vercel/Docker, Memory MCP server (the gap Anthropic left), MCP tunnels with WIF, live work-queue dashboard. 150 new tests, zero regressions.">
+  <meta property="og:title" content="What's New - Sandcastle v0.33.0">
+  <meta property="og:description" content="Your Box, Your Brains. Auto-detected Spark Mode, first-class local nim/* inference at $0/run, and Overnight Self-Tune (LoRA) on your own data. Designed for NVIDIA DGX Spark - compatibility, not endorsement.">
   <meta property="og:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
   <meta property="og:url" content="https://sandcastle-ai.eu/whatsnew/">
   <meta property="og:type" content="website">
 
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="What's New - Sandcastle v0.32.2">
-  <meta name="twitter:description" content="Your Sandbox, Your Silicon. Self-hosted sandboxes, Memory MCP server, MCP tunnels with WIF, live work-queue dashboard. 150 new tests, zero regressions.">
+  <meta name="twitter:title" content="What's New - Sandcastle v0.33.0">
+  <meta name="twitter:description" content="Your Box, Your Brains. Auto-detected Spark Mode, first-class local nim/* inference at $0/run, and Overnight Self-Tune (LoRA) on your own data. Compatibility, not endorsement.">
   <meta name="twitter:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
 
   <link rel="canonical" href="https://sandcastle-ai.eu/whatsnew/">
@@ -185,7 +185,7 @@
   <!-- Hero -->
   <header class="hero fade-in">
     <div class="container">
-      <div class="hero-badge">v0.30 - Agents Unleashed</div>
+      <div class="hero-badge">v0.33 - Your Box, Your Brains</div>
       <h1>What's New in <span class="accent">Sandcastle</span></h1>
       <p>Every version ships something you'll actually use. No roadmap fluff. No "coming soon." Shipped code or nothing.</p>
     </div>
@@ -194,11 +194,87 @@
   <main>
     <div class="container releases">
 
+      <!-- v0.33.0 -->
+      <div class="release fade-in">
+        <div class="release-header">
+          <span class="release-version">v0.33.0</span>
+          <span class="release-name">Your Box, Your Brains <span class="badge-latest">Latest</span></span>
+          <span class="release-date">June 4, 2026</span>
+        </div>
+
+        <p style="max-width: 720px; color: var(--text-muted); font-size: 15px; line-height: 1.7; margin-bottom: 28px;">
+          Every agent you've ever run phoned home. Sent your data somewhere. Billed you by the token. You accepted it, because that was the deal. The deal just changed. NVIDIA put a Grace-Blackwell supercomputer and 128GB of unified memory on a desk; most teams will run a demo and screenshot the tokens-per-second. We made Sandcastle treat it like home. Plug in a DGX Spark and it knows - no flag, no config: Spark Mode lights up, defaults flip to local-first, and inference goes first-class local through a new <code>nim/*</code> provider at <code>$0.00/run</code>, data that never leaves the box. Then it learns: Overnight Self-Tune trains a task-specific LoRA on your <em>own</em> eval data while you sleep. You wanted to stop renting. Here's the deed.
+        </p>
+
+        <div class="feature-grid">
+
+          <div class="feature-card wide">
+            <span class="feature-tag amber">Headline</span>
+            <h4>Spark Mode - your box, zero flags</h4>
+            <p>Sandcastle auto-detects an NVIDIA DGX Spark (GB10 Grace-Blackwell, 128GB unified memory) and flips to local-first defaults on its own - no flag, no config. A startup banner, a dashboard badge, and <code>GET /api/runtime</code> all say the same thing: you're running on your own silicon. <em>Designed for / runs local on</em> the DGX Spark - hardware detection is not yet validated on real silicon, so this is compatibility language only, not an NVIDIA certification or endorsement.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag green">New</span>
+            <h4>Local inference, first-class</h4>
+            <p>A new <code>nim/*</code> provider (NVIDIA NIM, OpenAI-compatible) joins <code>ollama</code> and <code>oMLX</code> - every one at <code>region=local</code>, <code>$0.00/run</code>, data-stays-on-box. On a detected Spark the bare default model auto-routes to the local NIM. No token meter. No egress.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag blue">New</span>
+            <h4>Overnight Self-Tune</h4>
+            <p>The evolution loop can train a task-specific LoRA adapter on a workflow's <em>own</em> eval data and route to it - the box gets better at <em>your</em> task, on <em>your</em> data, for $0. The full loop ships and is tested end-to-end against a deterministic mock trainer; the real GPU training kernel is hardware-gated, a documented follow-up. Capability, not a benchmark.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag green">New</span>
+            <h4>Run it anywhere, replay it free</h4>
+            <p><code>sandcastle run --local</code> executes in-process with zero external dependencies. Deterministic cassettes record a run once and replay it offline at $0, identically, with a tamper-evident signature - new <strong>strict mode</strong> hard-fails on a modified cassette. Shareable run permalinks are secrets-scrubbed with a 30-day TTL.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag purple">Hardening</span>
+            <h4>Quieter, safer surfaces</h4>
+            <p>A browser-step SSRF guard blocks requests to internal/disallowed hosts. Share tokens now carry a TTL. Dynamic <code>nim/*</code> model ids are validated. The sync run endpoint no longer reports <code>completed</code> when persistence fails - it retries and returns <code>verification_pending</code>. Browser dom / computer-use / lightpanda modes stop crashing on a never-defined <code>sandbox_exec</code>.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag amber">Honest footnote</span>
+            <h4>What we are not claiming</h4>
+            <p>No "Certified for NVIDIA", no "benchmarked on Spark". Spark detection is unconfirmed on real GB10 silicon; the Self-Tune GPU kernel is not yet implemented. The capability is here; the benchmarks are not, so we're not claiming any. "NVIDIA", "DGX", and "DGX Spark" are trademarks of NVIDIA Corporation. Compatibility, not endorsement.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag purple">Milestone</span>
+            <h4>By the numbers</h4>
+            <div class="stat-row">
+              <div class="stat-item">
+                <div class="stat-num">$0</div>
+                <div class="stat-label">Local inference / run</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-num">128GB</div>
+                <div class="stat-label">Unified memory used as home</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-num">3</div>
+                <div class="stat-label">Local providers (nim/ollama/oMLX)</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-num">0</div>
+                <div class="stat-label">Tokens leaving the box</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
       <!-- v0.32.2 -->
       <div class="release fade-in">
         <div class="release-header">
           <span class="release-version">v0.32.2</span>
-          <span class="release-name">Your Sandbox, Your Silicon <span class="badge-latest">Latest</span></span>
+          <span class="release-name">Your Sandbox, Your Silicon</span>
           <span class="release-date">May 19, 2026</span>
         </div>
 
