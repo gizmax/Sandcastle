@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-06-04 - "Your Box, Your Brains"
+
+Every agent you've ever run phoned home. Sent your data somewhere. Billed you by the token. You accepted it, because that was the deal. The deal just changed.
+
+Plug Sandcastle into an NVIDIA DGX Spark - Grace-Blackwell, 128GB of unified memory - and it knows. No flag, no config. **Spark Mode** lights up, defaults flip to local-first, and a startup banner, a dashboard badge, and `GET /api/runtime` all say the same thing out loud: you're running on your own silicon now. Inference goes first-class local through a `nim/*` provider (NVIDIA NIM, OpenAI-compatible), alongside ollama and oMLX - every one at `region=local`, `$0.00/run`, data that never leaves the box. Then it learns: **Overnight Self-Tune** trains a task-specific LoRA adapter on your workflow's *own* eval data and routes to it. Your box getting better at *your* work, on *your* data, while you sleep - for nothing. $0. Private. It learns overnight.
+
+So we'll say it plainly, because the honest version is the better story: the full Self-Tune loop ships and is tested end-to-end today against a deterministic mock trainer; the real GPU training kernel is hardware-gated, a documented follow-up. The capability is real - your box *can* learn locally. We won't pretend we've benchmarked a 70B on hardware we haven't held, and Spark detection isn't yet validated on real silicon. Designed for, and runs local on, the DGX Spark - compatibility language, not a certification.
+
+You wanted to stop renting. Here's the deed. Your agents. Your silicon. Learning your work, costing nothing, never leaving the room.
+
+### Added
+- **Spark Mode**: auto-detection of NVIDIA DGX Spark (Grace-Blackwell, 128GB unified memory) that enables local-first defaults with no flags. Exposed via startup banner, dashboard badge, and `GET /api/runtime`. (Designed for / runs local on DGX Spark; hardware detection not yet validated on real silicon - compatibility language only, no endorsement.)
+- **`nim/*` provider**: first-class local inference via NVIDIA NIM (OpenAI-compatible), joining `ollama` and `oMLX`. All run at `region=local`, `$0.00/run`, data-stays-on-box. On a detected Spark, the default model auto-routes to the local NIM.
+- **Overnight Self-Tune**: the evolution loop can train a task-specific LoRA adapter on a workflow's own eval data and route to it. Full loop ships and is tested end-to-end against a deterministic mock trainer; the real GPU training kernel is hardware-gated (documented follow-up). Capability only - no benchmarked training numbers claimed.
+- **Deterministic cassettes**: record a run once and replay it offline at $0, identically, with a tamper-evident signature. New **strict mode** hard-fails on a modified cassette.
+- **Shareable run permalinks**: public, secrets-scrubbed links with a 30-day TTL.
+- **`sandcastle run --local`**: in-process run mode - no server, zero external dependencies.
+- **Template Hub** expansion with new categories and a living community gallery.
+- `sandbox_exec` implementation for browser dom / computer-use / lightpanda modes (previously referenced but never defined).
+
+### Changed
+- Local-first defaults activate automatically under Spark Mode (no configuration required).
+- Provider-neutral dashboard refresh.
+- 2026-06 model refresh: GPT Image 2, Gemini 3.5, GPT-5.2.
+- Share tokens now carry a TTL (30-day default).
+
+### Fixed
+- **Sync run endpoint** no longer reports `"completed"` when persistence fails (returns `verification_pending` after retries).
+- Browser dom / computer-use / lightpanda modes no longer crash on a never-defined `sandbox_exec` (now implemented; E2B/Docker raise a clear error pending a persistent-sandbox exec path).
+
+### Security
+- Browser-step SSRF guard (blocks requests to internal/disallowed hosts), share-token TTLs, and NIM model-id validation harden the request and sharing surfaces.
+
 ## [0.32.2] - 2026-05-19 - "Your Sandbox, Your Silicon"
 
 Anthropic shipped a managed-agents update on May 19. Most teams will read the blog post and move on. We extracted everything. Self-hosted sandboxes that keep your org key inside your boundary. A Memory MCP server that fills the gap Anthropic left when they declared memory_stores incompatible with self-hosted runs. MCP tunnels with WIF token exchange so your private Jira can be reached by a managed agent without static secrets. Live work-queue telemetry in the dashboard. Three production case-study blueprints. Five sandbox cookbooks. 150 new tests, validated across six iterations. Zero regressions.

@@ -2,7 +2,7 @@
 
 **Describe what you want. Go home. Sandcastle ships it.** Production-ready workflow orchestrator for AI agents. 7 AI providers with auto-failover, 22 step types including Claude Managed Agents, 15 agent templates, 4 OCR engines, EU AI Act compliance, and a full-featured dashboard. Define workflows in YAML or let AI design them for you.
 
-[![PyPI](https://img.shields.io/badge/PyPI-v0.32.2-blue?style=flat-square)](https://pypi.org/project/sandcastle-ai/0.32.2/)
+[![PyPI](https://img.shields.io/badge/PyPI-v0.33.0-blue?style=flat-square)](https://pypi.org/project/sandcastle-ai/0.33.0/)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-15000%2B%20passing-brightgreen?style=flat-square)](https://github.com/gizmax/Sandcastle/actions)
@@ -10,17 +10,18 @@
 [![Website](https://img.shields.io/badge/Website-sandcastle--ai.eu-blue?style=flat-square)](https://sandcastle-ai.eu)
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Dashboard-F59E0B?style=flat-square)](https://gizmax.github.io/Sandcastle/)
 
-> **v0.32.2 - "Your Sandbox, Your Silicon"** Shipped May 19, 2026. Anthropic gave you a model. We gave you a place to put it.
+> **v0.33.0 — "Your Box, Your Brains"** The cloud was always someone else's computer. This release is yours.
 >
-> - **Self-hosted sandboxes** on the four blog partners + Docker reference (`cloudflare`, `daytona`, `modal`, `vercel`, `docker`). Five cookbooks under `deploy/cookbooks/`. Your org key never leaves your boundary - the worker refuses to start if `ANTHROPIC_API_KEY` is present in the sandbox env, only `sk-ant-oat01-` environment-scoped keys get past the gate.
-> - **Memory MCP server.** Anthropic declared `memory_stores` incompatible with self-hosted sandboxes. We filled the gap: `sandcastle.engine.memory_mcp_server` wraps mem0 + persistent Qdrant + Haiku decisions. Four tools (`add`, `search`, `forget`, `list_memories`), two resources, one prompt. Helm chart + docker-compose included.
-> - **MCP tunnels** (gated beta, header `mcp-client-2025-11-20`). WIF token exchange so your private Jira / Snowflake / Confluence is reachable from a managed agent with no static secrets. `cloudflared` sidecar pattern documented end to end.
-> - **Live work-queue dashboard.** `WorkQueuePanel` on the runs page, SSE-driven depth + sparkline + pill (green < 5, amber 5-50, red > 50), aria-live polite. You see the backlog before the pager fires.
-> - **Webhook workers.** New `session.status_run_started` event lets a worker run as a webhook handler instead of long-polling - saves RAM, latency, and your AWS bill.
-> - **Three production case-study workflows** at `workflows/case-studies/` - Amplitude designer, Clay GTM, Rogo analyst on private data. Not tutorials. Blueprints.
-> - **150 new tests** validated across 6 iterations (sequential / isolation / random + pollution / stress-repeat / smoke / consolidation). Zero regressions.
+> NVIDIA put a Grace-Blackwell supercomputer and 128GB of unified memory on a desk. Most teams will run a demo and screenshot the tokens-per-second. We made Sandcastle treat it like home.
 >
-> PyPI: `pip install sandcastle-ai==0.32.2`.
+> - **Spark Mode, zero flags.** Sandcastle auto-detects an NVIDIA DGX Spark and flips to local-first defaults on its own. A startup banner, a dashboard badge, and `GET /api/runtime` all say the same thing: you're running on your own silicon.
+> - **Local inference, first-class.** A new `nim/*` provider (NVIDIA NIM, OpenAI-compatible) joins `ollama` and `oMLX` - every one at `region=local`, `$0.00/run`, data-stays-on-box. On a Spark, the default model auto-routes to the local NIM. No token meter. No egress.
+> - **Overnight Self-Tune.** The evolution loop can train a task-specific LoRA adapter on a workflow's *own* eval data and route to it. The box doesn't just run your task - it gets better at it, on your data, for $0.
+> - **Also:** deterministic cassettes (+ strict mode), shareable run permalinks with a 30-day TTL, `sandcastle run --local`, a growing Template Hub, the 2026-06 model wave (GPT Image 2, Gemini 3.5, GPT-5.2), and a hardening sweep (browser-step SSRF guard, share-token TTL, NIM model-id validation, a sync run endpoint that no longer lies "completed", and a `sandbox_exec` fix for browser dom/computer-use/lightpanda).
+>
+> **Honest footnote.** Spark Mode is *designed for / runs local on* NVIDIA DGX Spark - hardware detection is **not yet validated on real silicon**, and this is compatibility language only, not an NVIDIA certification or endorsement. The Self-Tune loop ships and is tested end-to-end with a deterministic mock trainer; the real GPU training kernel is hardware-gated, a documented follow-up. The capability is here; the benchmarks are not, so we're not claiming any. "NVIDIA", "DGX", and "DGX Spark" are trademarks of NVIDIA Corporation.
+>
+> PyPI: `pip install sandcastle-ai==0.33.0`.
 >
 > Previous: **v0.32.0 - "Claude Agents Deep Integration"** (May 16, 2026): Memory Stores, Multiagent, Outcomes, Webhooks, Skills Publisher, Trajectory Replay, Agent SDK runtime, Computer Use, MCP Elicitation, Live Agent Reasoning panel.
 >
