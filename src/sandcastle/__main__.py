@@ -897,8 +897,7 @@ def _cmd_serve(args: argparse.Namespace) -> None:
         if not sys.stdin.isatty():
             # Non-interactive mode - cannot prompt, exit with clear message
             print(
-                f"  {_color('Cannot prompt in non-interactive mode. '
-                'Free port ' + str(port) + ' or use --port to pick another.', _C.RED)}",
+                f"  {_color('Cannot prompt in non-interactive mode. Free port ' + str(port) + ' or use --port to pick another.', _C.RED)}",
                 file=sys.stderr,
             )
             sys.exit(1)
