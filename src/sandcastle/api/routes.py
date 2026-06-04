@@ -23,6 +23,11 @@ from sqlalchemy.orm import selectinload
 from sandcastle.api.auth import generate_api_key, get_tenant_id, hash_key, is_admin
 from sandcastle.api.rate_limit import execution_limiter
 from sandcastle.api.schemas import (
+    AdvisorConfigureRequest,
+    AdvisorConfigureResponse,
+    AdvisorCostEstimateResponse,
+    AdvisorStatusResponse,
+    AdvisorTestConnectionResponse,
     AnnexIVResponse,
     AnnexIVSections,
     ApiKeyAllowlistRequest,
@@ -37,7 +42,10 @@ from sandcastle.api.schemas import (
     AuditEventResponse,
     AuditVerifyResponse,
     AutoPilotStatsResponse,
+    BatchRunRequest,
+    BatchStartedResponse,
     ComplianceStatusResponse,
+    CostEstimateEntry,
     DeadLetterItemResponse,
     DeadLetterResolveRequest,
     EmergencyStopResponse,
@@ -47,12 +55,20 @@ from sandcastle.api.schemas import (
     EvalRunResponse,
     EvalStatsResponse,
     EvalSuiteRunRequest,
-    ExplainErrorRequest,
+    EvolutionIterationResponse,
+    EvolutionStartRequest,
+    EvolutionStartResponse,
+    EvolutionStatsResponse,
+    EvolutionStatusResponse,
     ExperimentResponse,
-    RunEstimateRequest,
+    ExplainErrorRequest,
     ForkRequest,
     GenerateChatRequest,
+    GenerateWorkflowResponse,
     HealthResponse,
+    HubRateRequest,
+    HubSubmissionResponse,
+    HubSubmitRequest,
     LicenseInfoResponse,
     MemoryAddRequest,
     MemoryEntry,
@@ -62,10 +78,17 @@ from sandcastle.api.schemas import (
     PaginationMeta,
     PolicyViolationResponse,
     PolicyViolationStatsResponse,
+    PrivacyNoticeResponse,
+    ProviderStatusEntry,
     ReplayRequest,
     RoutingDecisionResponse,
     RunCompareResponse,
+    RunEstimateRequest,
+    RunForkResponse,
+    RunIdempotentResponse,
     RunListItem,
+    RunQueuedResponse,
+    RunReplayResponse,
     RunStatusResponse,
     RuntimeInfoResponse,
     ScheduleCreateRequest,
@@ -90,44 +113,22 @@ from sandcastle.api.schemas import (
     UpdateCheckResponse,
     UpdateRequest,
     UpdateResponse,
+    WorkflowApiSpecResponse,
+    WorkflowApiUsageResponse,
     WorkflowGenerateRequest,
     WorkflowInfoResponse,
     WorkflowPromoteRequest,
+    WorkflowPublishResponse,
     WorkflowRollbackRequest,
     WorkflowRunRequest,
     WorkflowSaveRequest,
     WorkflowStepInfo,
-    WorkflowApiSpecResponse,
-    WorkflowApiUsageResponse,
-    WorkflowPublishResponse,
     WorkflowVersionDiffResponse,
     WorkflowVersionListResponse,
     WorkflowVersionResponse,
-    HubSubmitRequest,
-    HubSubmissionResponse,
-    HubRateRequest,
-    EvolutionStartRequest,
-    EvolutionIterationResponse,
-    EvolutionStatusResponse,
-    EvolutionStatsResponse,
-    AdvisorStatusResponse,
-    AdvisorConfigureRequest,
-    AdvisorCostEstimateResponse,
-    AdvisorConfigureResponse,
-    AdvisorTestConnectionResponse,
-    CostEstimateEntry,
-    EvolutionStartResponse,
-    GenerateWorkflowResponse,
-    PrivacyNoticeResponse,
-    ProviderStatusEntry,
-    RunForkResponse,
-    RunIdempotentResponse,
-    RunQueuedResponse,
-    RunReplayResponse,
-    BatchRunRequest,
-    BatchStartedResponse,
 )
 from sandcastle.config import Settings, settings
+from sandcastle.engine.audit import verify_audit_chain
 from sandcastle.engine.dag import build_plan, parse_yaml_string, validate
 from sandcastle.engine.executor import execute_workflow
 from sandcastle.engine.sandshore import SandshoreRuntime, get_sandshore_runtime  # noqa: F401
@@ -142,10 +143,10 @@ from sandcastle.models.db import (
     DeadLetterItem,
     EvalRun,
     EvalRunStatus,
-    GoldenCase,
-    GoldenDataset,
     EvolutionIteration,
     ExperimentStatus,
+    GoldenCase,
+    GoldenDataset,
     HubSubmission,
     PolicyViolation,
     RoutingDecision,
@@ -160,7 +161,6 @@ from sandcastle.models.db import (
     WorkflowVersionStatus,
     async_session,
 )
-from sandcastle.engine.audit import verify_audit_chain
 from sandcastle.queue.scheduler import add_schedule, remove_schedule
 from sandcastle.queue.worker import enqueue_workflow
 
@@ -12480,8 +12480,9 @@ async def accept_evolution(workflow_name: str, req: Request) -> ApiResponse:
         best_quality = ev.best_quality
 
     try:
-        from sandcastle.engine.dag import parse_yaml_string
         import hashlib
+
+        from sandcastle.engine.dag import parse_yaml_string
 
         parsed_wf = parse_yaml_string(best_yaml)
         checksum = hashlib.sha256(best_yaml.encode()).hexdigest()

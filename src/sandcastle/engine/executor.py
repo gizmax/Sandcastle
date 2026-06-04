@@ -21,6 +21,7 @@ from simpleeval import simple_eval
 
 from sandcastle.engine.dag import (
     ExecutionPlan,
+    ManagedAgentConfig,
     StepDefinition,
     WorkflowDefinition,
 )
@@ -4001,9 +4002,10 @@ async def _execute_managed_agent_step(
     # Fallback chain retry: accept either a single template name or an ordered
     # list of names; walk them left-to-right with a hard safety stop.
     if config.fallback_template:
+        from copy import copy as _copy
+
         from sandcastle.engine.agent_templates import VALID_AGENT_TEMPLATES
         from sandcastle.engine.dag import ManagedAgentConfig
-        from copy import copy as _copy
 
         if isinstance(config.fallback_template, str):
             chain: list[str] = [config.fallback_template]
@@ -4247,8 +4249,8 @@ async def _execute_computer_use_step(
     cfg_raw = step.computer_use_config or {}
 
     from sandcastle.engine.computer_use import (
-        ComputerUseConfig,
         SAFETY_CHECKLIST,
+        ComputerUseConfig,
         build_beta_header,
         build_tool_definitions,
         should_pause_for_approval,
@@ -6635,7 +6637,7 @@ async def _browser_computer_use_mode(
 
     import httpx
 
-    from sandcastle.engine.providers import get_api_key, resolve_base_url, resolve_model
+    from sandcastle.engine.providers import get_api_key, resolve_model
 
     if replay_screenshots is None:
         replay_screenshots = []

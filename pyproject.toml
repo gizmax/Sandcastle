@@ -127,6 +127,10 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
+# E501 (line-too-long) is owned by the formatter, not enforced as a gate:
+# the codebase carries long log/format strings and URLs that don't benefit
+# from hard wrapping. All other E checks stay on.
+ignore = ["E501"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

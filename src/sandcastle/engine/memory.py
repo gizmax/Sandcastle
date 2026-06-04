@@ -194,8 +194,9 @@ def _get_client(backend: str = "local") -> Any:
         if backend in _clients:
             return _clients[backend]
         try:
-            from mem0 import Memory
             from pathlib import Path
+
+            from mem0 import Memory
 
             # Use a persistent path for Qdrant so the collection survives
             # server restarts. Without this, Qdrant defaults to /tmp/qdrant

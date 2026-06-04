@@ -17,7 +17,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from sandcastle.models.db import GoldenCase, GoldenDataset, async_session
+from sandcastle.models.db import GoldenDataset, async_session
 
 logger = logging.getLogger(__name__)
 
@@ -106,12 +106,11 @@ async def _execute_workflow_for_gate(
     Isolated as a thin wrapper so tests can patch it without touching the
     real executor stack.
     """
+    # Lazy import to avoid circular dependency with api.routes helpers.
+    from sandcastle.api.routes import _load_versioned_workflow_yaml
     from sandcastle.engine.dag import build_plan, parse_yaml_string
     from sandcastle.engine.executor import execute_workflow
     from sandcastle.engine.storage import create_storage
-
-    # Lazy import to avoid circular dependency with api.routes helpers.
-    from sandcastle.api.routes import _load_versioned_workflow_yaml
 
     yaml_content = await _load_versioned_workflow_yaml(workflow_name, version)
     workflow = parse_yaml_string(yaml_content)

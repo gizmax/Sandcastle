@@ -4022,8 +4022,8 @@ def _ensure_sandcastle_dir() -> str:
 
 def _fetch_pypi_versions(timeout: int = 10) -> dict:
     """Fetch package metadata from PyPI. Returns the full JSON response."""
-    import urllib.request
     import urllib.error
+    import urllib.request
 
     req = urllib.request.Request(
         _PYPI_JSON_URL,
@@ -4048,7 +4048,7 @@ def _latest_version_for_channel(pypi_data: dict, channel: str) -> str:
     - "stable": skip pre-release versions (alpha/beta/rc/dev)
     - "beta": include everything
     """
-    from packaging.version import Version, InvalidVersion
+    from packaging.version import InvalidVersion, Version
 
     all_versions: list[str] = list(pypi_data.get("releases", {}).keys())
     parsed: list[tuple[Version, str]] = []

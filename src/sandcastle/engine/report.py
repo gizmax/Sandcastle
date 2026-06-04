@@ -1151,7 +1151,7 @@ def _inject_charts(html: str, metadata: dict[str, Any]) -> str:
             else:
                 # Default bar chart
                 colors = _generate_palette(accent, len(values))
-                bars = ax.bar(labels or list(range(len(values))), values, color=colors)
+                ax.bar(labels or list(range(len(values))), values, color=colors)
                 ax.grid(True, axis="y", alpha=0.3)
 
             if title:

@@ -14,12 +14,10 @@ from typing import Any
 from sandcastle.config import settings
 from sandcastle.engine.dag import (
     NON_LLM_TYPES,
-    VALID_STEP_TYPES,
     WorkflowDefinition,
     validate,
 )
 from sandcastle.engine.providers import PROVIDER_REGISTRY
-
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -346,7 +344,7 @@ def _check_data_residency(wf: WorkflowDefinition, report: DoctorReport) -> None:
                 severity="blocking",
                 step_id=step.id,
                 message=f"Model '{model}' (region: {info.region}) violates data_residency=eu setting.",
-                suggested_fix=f"Use an EU model (e.g. mistral/large, mistral/small) or local model.",
+                suggested_fix="Use an EU model (e.g. mistral/large, mistral/small) or local model.",
             ))
         elif residency == "local" and info.region != "local":
             report.findings.append(Finding(

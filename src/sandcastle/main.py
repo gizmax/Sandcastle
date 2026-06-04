@@ -17,9 +17,9 @@ from starlette.middleware.gzip import GZipMiddleware
 from sandcastle import __version__
 from sandcastle.api.a2a import a2a_router
 from sandcastle.api.agent_webhooks import router as agent_webhooks_router
-from sandcastle.api.environments_admin import router as environments_admin_router
 from sandcastle.api.agui import agui_router
 from sandcastle.api.auth import auth_middleware
+from sandcastle.api.environments_admin import router as environments_admin_router
 from sandcastle.api.routes import router
 from sandcastle.api.security_headers import security_headers_middleware
 from sandcastle.config import Settings, settings

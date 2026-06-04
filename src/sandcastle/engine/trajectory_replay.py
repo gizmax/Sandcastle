@@ -41,7 +41,6 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any, Literal
 
-
 ToolCallDiffKind = Literal[
     "added",
     "removed",

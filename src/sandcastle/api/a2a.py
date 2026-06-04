@@ -98,7 +98,8 @@ async def _resolve_tenant_budget(tenant_id: str | None) -> float | None:
     if not tenant_id or not settings.auth_required:
         return None
     try:
-        from sandcastle.models.db import ApiKey, async_session as _async_session
+        from sandcastle.models.db import ApiKey
+        from sandcastle.models.db import async_session as _async_session
 
         async with _async_session() as session:
             # Note: the ApiKey model uses ``is_active`` and the per-run

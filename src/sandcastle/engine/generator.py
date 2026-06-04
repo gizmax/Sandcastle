@@ -1156,9 +1156,9 @@ async def _call_advisor_llm(
 
     # Emit provider audit event (best-effort - never block generation)
     try:
-        from sandcastle.models.db import async_session
         from sandcastle.engine.audit import append_audit_event
         from sandcastle.engine.providers import PROVIDER_REGISTRY
+        from sandcastle.models.db import async_session
 
         # Rough cost estimate based on token counts (approximation)
         input_tokens_approx = len(user) // 4 + len(system) // 4

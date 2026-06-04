@@ -23,7 +23,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-
 ToolName = Literal["bash", "text_editor", "computer"]
 
 
