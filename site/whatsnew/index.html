@@ -89,6 +89,14 @@
     .hero h1 { font-size: clamp(32px, 5vw, 56px); font-weight: 700; letter-spacing: -0.03em; line-height: 1.15; margin-bottom: 20px; }
     .hero h1 .accent { color: var(--accent); }
     .hero p { font-size: clamp(16px, 2vw, 19px); color: var(--text-muted); max-width: 640px; margin: 0 auto; line-height: 1.7; }
+    .hero .container { position: relative; }
+    .spark-chip { position: absolute; top: 0; right: 0; display: inline-flex; align-items: center; gap: 10px; padding: 8px 14px; background: rgba(118, 185, 0, 0.08); border: 1px solid rgba(118, 185, 0, 0.35); border-radius: 12px; text-decoration: none; transition: background .2s, border-color .2s, transform .2s; }
+    .spark-chip:hover { background: rgba(118, 185, 0, 0.16); border-color: rgba(118, 185, 0, 0.65); transform: translateY(-1px); }
+    .spark-chip svg { width: 22px; height: 22px; flex-shrink: 0; }
+    .spark-chip .sc-txt { display: flex; flex-direction: column; line-height: 1.12; text-align: left; }
+    .spark-chip .sc-txt small { font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted); }
+    .spark-chip .sc-txt strong { font-size: 13px; font-weight: 700; color: #76B900; }
+    @media (max-width: 820px) { .spark-chip { position: static; margin: 0 auto 24px; } }
 
     /* Nav CTA button */
     .btn-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); }
@@ -185,6 +193,10 @@
   <!-- Hero -->
   <header class="hero fade-in">
     <div class="container">
+      <a class="spark-chip" href="https://www.nvidia.com/en-us/products/workstations/dgx-spark/" target="_blank" rel="noopener" title="Sandcastle runs local on NVIDIA DGX Spark">
+        <svg viewBox="0 0 24 24" fill="#76B900" aria-hidden="true"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z"/></svg>
+        <span class="sc-txt"><small>Runs on</small><strong>NVIDIA DGX Spark</strong></span>
+      </a>
       <div class="hero-badge">v0.33 - Your Box, Your Brains</div>
       <h1>What's New in <span class="accent">Sandcastle</span></h1>
       <p>Every version ships something you'll actually use. No roadmap fluff. No "coming soon." Shipped code or nothing.</p>
