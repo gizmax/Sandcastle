@@ -50,7 +50,7 @@ dependencies = [
 [project.optional-dependencies]
 memory = [
     "mem0ai>=0.1.0",
-    "fastembed>=0.3.6,<0.4",
+    "fastembed>=0.3.6",
     "anthropic>=0.95",
 ]
 parse = [
