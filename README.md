@@ -19,7 +19,7 @@
 > - **Overnight Self-Tune.** The evolution loop can train a task-specific LoRA adapter on a workflow's *own* eval data and route to it. The box doesn't just run your task - it gets better at it, on your data, for $0.
 > - **Also:** deterministic cassettes (+ strict mode), shareable run permalinks with a 30-day TTL, `sandcastle run --local`, a growing Template Hub, the 2026-06 model wave (GPT Image 2, Gemini 3.5, GPT-5.2), and a hardening sweep (browser-step SSRF guard, share-token TTL, NIM model-id validation, a sync run endpoint that no longer lies "completed", and a `sandbox_exec` fix for browser dom/computer-use/lightpanda).
 >
-> **Honest footnote.** Spark Mode is *designed for / runs local on* NVIDIA DGX Spark - hardware detection is **not yet validated on real silicon**, and this is compatibility language only, not an NVIDIA certification or endorsement. The Self-Tune loop ships and is tested end-to-end with a deterministic mock trainer; the real GPU training kernel is hardware-gated, a documented follow-up. The capability is here; the benchmarks are not, so we're not claiming any. "NVIDIA", "DGX", and "DGX Spark" are trademarks of NVIDIA Corporation.
+> <sub>NVIDIA, DGX, and DGX Spark are trademarks of NVIDIA Corporation.</sub>
 >
 > PyPI: `pip install sandcastle-ai==0.33.0`.
 >

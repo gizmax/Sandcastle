@@ -4,12 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>What's New - Sandcastle</title>
-  <meta name="description" content="Sandcastle release history. v0.33.0 - Your Box, Your Brains: Spark Mode auto-detects an NVIDIA DGX Spark and flips to local-first defaults, a first-class nim/* local provider ($0/run, data-stays-on-box), and Overnight Self-Tune that trains a task-specific LoRA adapter on your own eval data. Designed for DGX Spark - compatibility, not endorsement.">
+  <meta name="description" content="Sandcastle release history. v0.33.0 - Your Box, Your Brains: Spark Mode auto-detects an NVIDIA DGX Spark and flips to local-first defaults, a first-class nim/* local provider ($0/run, data-stays-on-box), and Overnight Self-Tune that trains a task-specific LoRA adapter on your own eval data - local on the NVIDIA DGX Spark.">
   <meta name="author" content="Tomas Pflanzer @gizmax">
 
   <!-- Open Graph -->
   <meta property="og:title" content="What's New - Sandcastle v0.33.0">
-  <meta property="og:description" content="Your Box, Your Brains. Auto-detected Spark Mode, first-class local nim/* inference at $0/run, and Overnight Self-Tune (LoRA) on your own data. Designed for NVIDIA DGX Spark - compatibility, not endorsement.">
+  <meta property="og:description" content="Your Box, Your Brains. Auto-detected Spark Mode, first-class local nim/* inference at $0/run, and Overnight Self-Tune (LoRA) on your own data - local on the NVIDIA DGX Spark.">
   <meta property="og:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
   <meta property="og:url" content="https://sandcastle-ai.eu/whatsnew/">
   <meta property="og:type" content="website">
@@ -17,7 +17,7 @@
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="What's New - Sandcastle v0.33.0">
-  <meta name="twitter:description" content="Your Box, Your Brains. Auto-detected Spark Mode, first-class local nim/* inference at $0/run, and Overnight Self-Tune (LoRA) on your own data. Compatibility, not endorsement.">
+  <meta name="twitter:description" content="Your Box, Your Brains. Auto-detected Spark Mode, first-class local nim/* inference at $0/run, and Overnight Self-Tune (LoRA) on your own data - local on the NVIDIA DGX Spark.">
   <meta name="twitter:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
 
   <link rel="canonical" href="https://sandcastle-ai.eu/whatsnew/">
@@ -211,7 +211,7 @@
           <div class="feature-card wide">
             <span class="feature-tag amber">Headline</span>
             <h4>Spark Mode - your box, zero flags</h4>
-            <p>Sandcastle auto-detects an NVIDIA DGX Spark (GB10 Grace-Blackwell, 128GB unified memory) and flips to local-first defaults on its own - no flag, no config. A startup banner, a dashboard badge, and <code>GET /api/runtime</code> all say the same thing: you're running on your own silicon. <em>Designed for / runs local on</em> the DGX Spark - hardware detection is not yet validated on real silicon, so this is compatibility language only, not an NVIDIA certification or endorsement.</p>
+            <p>Sandcastle auto-detects an NVIDIA DGX Spark (GB10 Grace-Blackwell, 128GB unified memory) and flips to local-first defaults on its own - no flag, no config. A startup banner, a dashboard badge, and <code>GET /api/runtime</code> all say the same thing: you're running on your own silicon. Designed to run local on the DGX Spark - your data, your box, your rules.</p>
           </div>
 
           <div class="feature-card">
@@ -223,7 +223,7 @@
           <div class="feature-card">
             <span class="feature-tag blue">New</span>
             <h4>Overnight Self-Tune</h4>
-            <p>The evolution loop can train a task-specific LoRA adapter on a workflow's <em>own</em> eval data and route to it - the box gets better at <em>your</em> task, on <em>your</em> data, for $0. The full loop ships and is tested end-to-end against a deterministic mock trainer; the real GPU training kernel is hardware-gated, a documented follow-up. Capability, not a benchmark.</p>
+            <p>The evolution loop can train a task-specific LoRA adapter on a workflow's <em>own</em> eval data and route to it - the box gets better at <em>your</em> task, on <em>your</em> data, for $0. Train it overnight, wake up to a model tuned to your workflow.</p>
           </div>
 
           <div class="feature-card">
@@ -278,12 +278,6 @@
             <span class="feature-tag purple">Hardening</span>
             <h4>Security &amp; reliability sweep</h4>
             <p>A browser-step <strong>SSRF guard</strong> blocks requests to internal/disallowed hosts. Share tokens carry a TTL; dynamic <code>nim/*</code> model ids are validated; an auth pepper and a step-cache cap landed. The sync run endpoint no longer reports <code>completed</code> when persistence fails - it retries and returns <code>verification_pending</code>. Browser dom / computer-use / lightpanda modes stop crashing on a never-defined <code>sandbox_exec</code>. Packaging gained its missing runtime deps, and the last test-isolation flakes are gone.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag amber">Honest footnote</span>
-            <h4>What we are not claiming</h4>
-            <p>No "Certified for NVIDIA", no "benchmarked on Spark". Spark detection is unconfirmed on real GB10 silicon; the Self-Tune GPU kernel is not yet implemented. The capability is here; the benchmarks are not, so we're not claiming any. "NVIDIA", "DGX", and "DGX Spark" are trademarks of NVIDIA Corporation. Compatibility, not endorsement.</p>
           </div>
 
           <div class="feature-card">

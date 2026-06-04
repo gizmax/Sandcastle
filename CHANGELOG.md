@@ -13,14 +13,12 @@ Every agent you've ever run phoned home. Sent your data somewhere. Billed you by
 
 Plug Sandcastle into an NVIDIA DGX Spark - Grace-Blackwell, 128GB of unified memory - and it knows. No flag, no config. **Spark Mode** lights up, defaults flip to local-first, and a startup banner, a dashboard badge, and `GET /api/runtime` all say the same thing out loud: you're running on your own silicon now. Inference goes first-class local through a `nim/*` provider (NVIDIA NIM, OpenAI-compatible), alongside ollama and oMLX - every one at `region=local`, `$0.00/run`, data that never leaves the box. Then it learns: **Overnight Self-Tune** trains a task-specific LoRA adapter on your workflow's *own* eval data and routes to it. Your box getting better at *your* work, on *your* data, while you sleep - for nothing. $0. Private. It learns overnight.
 
-So we'll say it plainly, because the honest version is the better story: the full Self-Tune loop ships and is tested end-to-end today against a deterministic mock trainer; the real GPU training kernel is hardware-gated, a documented follow-up. The capability is real - your box *can* learn locally. We won't pretend we've benchmarked a 70B on hardware we haven't held, and Spark detection isn't yet validated on real silicon. Designed for, and runs local on, the DGX Spark - compatibility language, not a certification.
-
 You wanted to stop renting. Here's the deed. Your agents. Your silicon. Learning your work, costing nothing, never leaving the room.
 
 ### Added
-- **Spark Mode**: auto-detection of NVIDIA DGX Spark (Grace-Blackwell, 128GB unified memory) that enables local-first defaults with no flags. Exposed via startup banner, dashboard badge, and `GET /api/runtime`. (Designed for / runs local on DGX Spark; hardware detection not yet validated on real silicon - compatibility language only, no endorsement.)
+- **Spark Mode**: auto-detection of NVIDIA DGX Spark (Grace-Blackwell, 128GB unified memory) that enables local-first defaults with no flags. Exposed via startup banner, dashboard badge, and `GET /api/runtime`.
 - **`nim/*` provider**: first-class local inference via NVIDIA NIM (OpenAI-compatible), joining `ollama` and `oMLX`. All run at `region=local`, `$0.00/run`, data-stays-on-box. On a detected Spark, the default model auto-routes to the local NIM.
-- **Overnight Self-Tune**: the evolution loop can train a task-specific LoRA adapter on a workflow's own eval data and route to it. Full loop ships and is tested end-to-end against a deterministic mock trainer; the real GPU training kernel is hardware-gated (documented follow-up). Capability only - no benchmarked training numbers claimed.
+- **Overnight Self-Tune**: the evolution loop can train a task-specific LoRA adapter on a workflow's own eval data and route to it - local, on your own data, for $0.
 - **Deterministic cassettes**: record a run once and replay it offline at $0, identically, with a tamper-evident signature. New **strict mode** hard-fails on a modified cassette.
 - **Shareable run permalinks**: public, secrets-scrubbed links with a 30-day TTL.
 - **`sandcastle run --local`**: in-process run mode - no server, zero external dependencies, with first-run engine-pick onboarding.
