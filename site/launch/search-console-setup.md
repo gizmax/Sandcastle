@@ -8,7 +8,7 @@
 4. Verification method: "HTML tag" (easiest)
    - Copy the meta tag Google gives you
    - Add it to `site/index.html` in the `<head>` section
-   - Upload via FTP: `curl -T site/index.html --user "claude.sandcastle-ai.eu:ClaudeInsightStock7379.a" "ftp://ftp.sandcastle-ai.eu/public_html/index.html"`
+   - Upload via FTP (credentials from env, never commit them): `curl -T site/index.html --user "$SANDCASTLE_FTP_USER:$SANDCASTLE_FTP_PASS" "ftp://ftp.sandcastle-ai.eu/public_html/index.html"`
    - Click "Verify" in Google
 5. After verification:
    - Go to "Sitemaps" in left menu
