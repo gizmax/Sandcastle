@@ -89,12 +89,14 @@
     .hero h1 { font-size: clamp(32px, 5vw, 56px); font-weight: 700; letter-spacing: -0.03em; line-height: 1.15; margin-bottom: 20px; }
     .hero h1 .accent { color: var(--accent); }
     .hero p { font-size: clamp(16px, 2vw, 19px); color: var(--text-muted); max-width: 640px; margin: 0 auto; line-height: 1.7; }
-    .release-meta { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 12px; }
-    .release-nv { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 6px; padding: 12px 16px; background: rgba(118, 185, 0, 0.06); border: 1px solid rgba(118, 185, 0, 0.30); border-radius: 12px; text-decoration: none; transition: background .2s, border-color .2s; }
-    .release-nv:hover { background: rgba(118, 185, 0, 0.12); border-color: rgba(118, 185, 0, 0.55); }
-    .release-nv small { font-size: 8px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-dim); }
-    .release-nv img { width: 58px; height: auto; display: block; }
-    .release-nv strong { font-size: 11px; font-weight: 700; color: #76B900; letter-spacing: 0.02em; }
+    .intro-row { display: flex; gap: 32px; align-items: center; margin-bottom: 28px; }
+    .intro-row > p { margin-bottom: 0 !important; }
+    .release-nv { flex-shrink: 0; display: inline-flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 20px; background: rgba(118, 185, 0, 0.06); border: 1px solid rgba(118, 185, 0, 0.30); border-radius: 14px; text-decoration: none; transition: background .2s, border-color .2s, transform .2s; }
+    .release-nv:hover { background: rgba(118, 185, 0, 0.12); border-color: rgba(118, 185, 0, 0.55); transform: translateY(-1px); }
+    .release-nv small { font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-dim); }
+    .release-nv img { width: 72px; height: auto; display: block; }
+    .release-nv strong { font-size: 12px; font-weight: 700; color: #76B900; letter-spacing: 0.02em; }
+    @media (max-width: 820px) { .intro-row { flex-direction: column; align-items: flex-start; gap: 20px; } }
 
     /* Nav CTA button */
     .btn-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); }
@@ -205,19 +207,19 @@
         <div class="release-header">
           <span class="release-version">v0.33.0</span>
           <span class="release-name">Your Box, Your Brains <span class="badge-latest">Latest</span></span>
-          <div class="release-meta">
-            <span class="release-date">June 4, 2026</span>
-            <a class="release-nv" href="https://www.nvidia.com/en-us/products/workstations/dgx-spark/" target="_blank" rel="noopener" title="Sandcastle runs local on NVIDIA DGX Spark">
-              <small>Runs local on</small>
-              <img src="../img/nvidia-logo.png" alt="NVIDIA" width="58">
-              <strong>DGX Spark</strong>
-            </a>
-          </div>
+          <span class="release-date">June 4, 2026</span>
         </div>
 
+        <div class="intro-row">
         <p style="max-width: 720px; color: var(--text-muted); font-size: 15px; line-height: 1.7; margin-bottom: 28px;">
           Every agent you've ever run phoned home. Sent your data somewhere. Billed you by the token. You accepted it, because that was the deal. The deal just changed. NVIDIA put a Grace-Blackwell supercomputer and 128GB of unified memory on a desk; most teams will run a demo and screenshot the tokens-per-second. We made Sandcastle treat it like home. Plug in a DGX Spark and it knows - no flag, no config: Spark Mode lights up, defaults flip to local-first, and inference goes first-class local through a new <code>nim/*</code> provider at <code>$0.00/run</code>, data that never leaves the box. Then it learns: Overnight Self-Tune trains a task-specific LoRA on your <em>own</em> eval data while you sleep. You wanted to stop renting. Here's the deed. And Spark is only the headline - this release also bundles offline deterministic cassettes, shareable run permalinks, a one-command local runner, a Template Hub explosion (new categories + a community gallery), a provider-neutral dashboard refresh, the 2026-06 model wave, and a security &amp; reliability sweep. Roughly three weeks of work in one drop.
         </p>
+        <a class="release-nv" href="https://www.nvidia.com/en-us/products/workstations/dgx-spark/" target="_blank" rel="noopener" title="Sandcastle runs local on NVIDIA DGX Spark">
+          <small>Runs local on</small>
+          <img src="../img/nvidia-logo.png" alt="NVIDIA" width="72">
+          <strong>DGX Spark</strong>
+        </a>
+        </div>
 
         <div class="feature-grid">
 
