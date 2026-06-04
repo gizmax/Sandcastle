@@ -4899,26 +4899,41 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
         "awaiting_approval": RunStatus.AWAITING_APPROVAL,
     }
 
-    # Update DB record with results
-    try:
-        async with async_session() as session:
-            db_run = await session.get(Run, uuid.UUID(run_id))
-            if db_run:
-                db_run.status = status_map.get(result.status, RunStatus.FAILED)
-                output_with_report = dict(result.outputs) if result.outputs else {}
-                if result.token_report:
-                    output_with_report["_token_report"] = result.token_report
-                db_run.output_data = output_with_report
-                db_run.total_cost_usd = result.total_cost_usd
-                if result.status != "awaiting_approval":
-                    db_run.completed_at = result.completed_at
-                db_run.error = result.error
-                await session.commit()
-    except Exception:
-        logger.error(
-            "Failed to update run %s result in database",
+    # Update DB record with results. Retry transient failures so a finished run is
+    # not silently reported as durable while its DB row stays RUNNING; if every
+    # attempt fails we surface verification_pending below instead of lying about it.
+    output_with_report = dict(result.outputs) if result.outputs else {}
+    if result.token_report:
+        output_with_report["_token_report"] = result.token_report
+    db_persist_ok = False
+    for _attempt in range(3):
+        try:
+            async with async_session() as session:
+                db_run = await session.get(Run, uuid.UUID(run_id))
+                if db_run:
+                    db_run.status = status_map.get(result.status, RunStatus.FAILED)
+                    db_run.output_data = output_with_report
+                    db_run.total_cost_usd = result.total_cost_usd
+                    if result.status != "awaiting_approval":
+                        db_run.completed_at = result.completed_at
+                    db_run.error = result.error
+                    await session.commit()
+            db_persist_ok = True
+            break
+        except Exception:
+            logger.error(
+                "Failed to update run %s result in database (attempt %d/3)",
+                run_id,
+                _attempt + 1,
+                exc_info=True,
+            )
+            if _attempt < 2:
+                await asyncio.sleep(0.2 * (2**_attempt))
+    if not db_persist_ok:
+        logger.critical(
+            "Run %s finished but its result could NOT be persisted after 3 attempts; "
+            "the DB row is stale and the returned result is not durable.",
             run_id,
-            exc_info=True,
         )
 
     # Dispatch webhooks (same as async path in worker)
@@ -4990,7 +5005,10 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
         data=RunStatusResponse(
             run_id=result.run_id,
             workflow_name=workflow.name,
-            status=result.status,
+            # Don't claim a terminal status the DB never recorded: when persistence
+            # failed, report verification_pending so the caller knows the result is
+            # not durable rather than trusting a "completed" that was lost.
+            status=result.status if db_persist_ok else "verification_pending",
             input_data=request.input,
             outputs=result.outputs,
             total_cost_usd=result.total_cost_usd,
