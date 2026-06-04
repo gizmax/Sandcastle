@@ -23,19 +23,24 @@ You wanted to stop renting. Here's the deed. Your agents. Your silicon. Learning
 - **Overnight Self-Tune**: the evolution loop can train a task-specific LoRA adapter on a workflow's own eval data and route to it. Full loop ships and is tested end-to-end against a deterministic mock trainer; the real GPU training kernel is hardware-gated (documented follow-up). Capability only - no benchmarked training numbers claimed.
 - **Deterministic cassettes**: record a run once and replay it offline at $0, identically, with a tamper-evident signature. New **strict mode** hard-fails on a modified cassette.
 - **Shareable run permalinks**: public, secrets-scrubbed links with a 30-day TTL.
-- **`sandcastle run --local`**: in-process run mode - no server, zero external dependencies.
-- **Template Hub** expansion with new categories and a living community gallery.
+- **`sandcastle run --local`**: in-process run mode - no server, zero external dependencies, with first-run engine-pick onboarding.
+- **Template Hub explosion**: new categories (Automation & RPA and several more), dozens of provider-neutral browser / computer-use RPA workflows across multiple waves, a living **community gallery** (31 workflows from 19 authors, synced to the web hub), and 3 viral creative use-cases (Action Figure Me, Glow-Up Restore, Ad Creative Factory).
+- **`tool` step type + UGC Studio**: first-class tool step and a self-healing UGC Studio flow with a vision judge (reference-image creative that checks its own output and retries).
+- **`llms.txt` + `llms-full.txt`**: machine-readable surface (repo + site) so code-generating assistants can scaffold a correct workflow first try.
 - `sandbox_exec` implementation for browser dom / computer-use / lightpanda modes (previously referenced but never defined).
 
 ### Changed
 - Local-first defaults activate automatically under Spark Mode (no configuration required).
-- Provider-neutral dashboard refresh.
-- 2026-06 model refresh: GPT Image 2, Gemini 3.5, GPT-5.2.
+- Provider-neutral, dark-first dashboard refresh; demo runs seeded with real provider models.
+- 2026-06 model refresh: GPT Image 2, Gemini 3.5, GPT-5.2 (retired models removed).
 - Share tokens now carry a TTL (30-day default).
 
 ### Fixed
 - **Sync run endpoint** no longer reports `"completed"` when persistence fails (returns `verification_pending` after retries).
 - Browser dom / computer-use / lightpanda modes no longer crash on a never-defined `sandbox_exec` (now implemented; E2B/Docker raise a clear error pending a persistent-sandbox exec path).
+- Dashboard recovers from stale-deploy chunk misses instead of a dead-end "Connection error".
+- Packaging: restored missing runtime dependencies and editable-install support.
+- Test isolation: eliminated the last file-backed-DB flakes.
 
 ### Security
 - Browser-step SSRF guard (blocks requests to internal/disallowed hosts), share-token TTLs, and NIM model-id validation harden the request and sharing surfaces.

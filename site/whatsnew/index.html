@@ -203,7 +203,7 @@
         </div>
 
         <p style="max-width: 720px; color: var(--text-muted); font-size: 15px; line-height: 1.7; margin-bottom: 28px;">
-          Every agent you've ever run phoned home. Sent your data somewhere. Billed you by the token. You accepted it, because that was the deal. The deal just changed. NVIDIA put a Grace-Blackwell supercomputer and 128GB of unified memory on a desk; most teams will run a demo and screenshot the tokens-per-second. We made Sandcastle treat it like home. Plug in a DGX Spark and it knows - no flag, no config: Spark Mode lights up, defaults flip to local-first, and inference goes first-class local through a new <code>nim/*</code> provider at <code>$0.00/run</code>, data that never leaves the box. Then it learns: Overnight Self-Tune trains a task-specific LoRA on your <em>own</em> eval data while you sleep. You wanted to stop renting. Here's the deed.
+          Every agent you've ever run phoned home. Sent your data somewhere. Billed you by the token. You accepted it, because that was the deal. The deal just changed. NVIDIA put a Grace-Blackwell supercomputer and 128GB of unified memory on a desk; most teams will run a demo and screenshot the tokens-per-second. We made Sandcastle treat it like home. Plug in a DGX Spark and it knows - no flag, no config: Spark Mode lights up, defaults flip to local-first, and inference goes first-class local through a new <code>nim/*</code> provider at <code>$0.00/run</code>, data that never leaves the box. Then it learns: Overnight Self-Tune trains a task-specific LoRA on your <em>own</em> eval data while you sleep. You wanted to stop renting. Here's the deed. And Spark is only the headline - this release also bundles offline deterministic cassettes, shareable run permalinks, a one-command local runner, a Template Hub explosion (new categories + a community gallery), a provider-neutral dashboard refresh, the 2026-06 model wave, and a security &amp; reliability sweep. Roughly three weeks of work in one drop.
         </p>
 
         <div class="feature-grid">
@@ -228,14 +228,56 @@
 
           <div class="feature-card">
             <span class="feature-tag green">New</span>
-            <h4>Run it anywhere, replay it free</h4>
-            <p><code>sandcastle run --local</code> executes in-process with zero external dependencies. Deterministic cassettes record a run once and replay it offline at $0, identically, with a tamper-evident signature - new <strong>strict mode</strong> hard-fails on a modified cassette. Shareable run permalinks are secrets-scrubbed with a 30-day TTL.</p>
+            <h4>Deterministic cassettes</h4>
+            <p>Record a run once, replay it offline at $0 - identically, provider-free, with a tamper-evident signature. A new <strong>strict mode</strong> hard-fails on a modified cassette. Demos that never call an API; tests that never flake on the network.</p>
           </div>
 
           <div class="feature-card">
+            <span class="feature-tag green">New</span>
+            <h4>Shareable run permalinks</h4>
+            <p>Loom-for-workflows: a public, secrets-scrubbed link to any run, with a 30-day TTL. Send the result, not a screenshot - no login, no replay cost, nothing private leaks.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag blue">New</span>
+            <h4><code>sandcastle run --local</code></h4>
+            <p>One command, in-process, zero external dependencies - no server, no queue, no Redis. First-run onboarding now picks your engine for you. The fastest path from <code>pip install</code> to a finished workflow.</p>
+          </div>
+
+          <div class="feature-card wide">
+            <span class="feature-tag purple">Templates</span>
+            <h4>Template Hub explosion</h4>
+            <p>The biggest content drop yet. New categories - <strong>Automation &amp; RPA</strong>, plus several more - and dozens of provider-neutral browser / computer-use RPA workflows that run on whatever model you point them at. A living <strong>community gallery</strong> seeded with 31 workflows from 19 authors, synced to the web hub. Three viral creative use-cases too: Action Figure Me, Glow-Up Restore, Ad Creative Factory.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag blue">New</span>
+            <h4>Tool step + UGC Studio</h4>
+            <p>A first-class <code>tool</code> step type and a self-healing UGC Studio flow with a vision judge - reference-image creative that checks its own output and retries until it passes.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag green">Models</span>
+            <h4>2026-06 model refresh</h4>
+            <p>The June wave wired in: <strong>GPT Image 2</strong>, <strong>Gemini 3.5</strong>, and <strong>GPT-5.2</strong> - with retired models cleaned out so nothing routes to a dead endpoint.</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag green">Dashboard</span>
+            <h4>Provider-neutral, dark-first</h4>
+            <p>A refresh that tells the real story: Sandcastle runs on any provider, not one. Dark-first design, demo runs seeded with real provider models, and recovery from stale-deploy chunk misses instead of a dead-end "Connection error".</p>
+          </div>
+
+          <div class="feature-card">
+            <span class="feature-tag blue">New</span>
+            <h4>Built for code assistants</h4>
+            <p><code>llms.txt</code> + <code>llms-full.txt</code> ship in the repo and on the site, so a code-generating assistant can read Sandcastle's surface and scaffold a correct workflow on the first try.</p>
+          </div>
+
+          <div class="feature-card wide">
             <span class="feature-tag purple">Hardening</span>
-            <h4>Quieter, safer surfaces</h4>
-            <p>A browser-step SSRF guard blocks requests to internal/disallowed hosts. Share tokens now carry a TTL. Dynamic <code>nim/*</code> model ids are validated. The sync run endpoint no longer reports <code>completed</code> when persistence fails - it retries and returns <code>verification_pending</code>. Browser dom / computer-use / lightpanda modes stop crashing on a never-defined <code>sandbox_exec</code>.</p>
+            <h4>Security &amp; reliability sweep</h4>
+            <p>A browser-step <strong>SSRF guard</strong> blocks requests to internal/disallowed hosts. Share tokens carry a TTL; dynamic <code>nim/*</code> model ids are validated; an auth pepper and a step-cache cap landed. The sync run endpoint no longer reports <code>completed</code> when persistence fails - it retries and returns <code>verification_pending</code>. Browser dom / computer-use / lightpanda modes stop crashing on a never-defined <code>sandbox_exec</code>. Packaging gained its missing runtime deps, and the last test-isolation flakes are gone.</p>
           </div>
 
           <div class="feature-card">
@@ -249,12 +291,12 @@
             <h4>By the numbers</h4>
             <div class="stat-row">
               <div class="stat-item">
-                <div class="stat-num">$0</div>
-                <div class="stat-label">Local inference / run</div>
+                <div class="stat-num">20+</div>
+                <div class="stat-label">PRs shipped since v0.32.2</div>
               </div>
               <div class="stat-item">
-                <div class="stat-num">128GB</div>
-                <div class="stat-label">Unified memory used as home</div>
+                <div class="stat-num">$0</div>
+                <div class="stat-label">Local inference / run</div>
               </div>
               <div class="stat-item">
                 <div class="stat-num">3</div>
