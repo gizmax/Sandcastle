@@ -1,9 +1,10 @@
-import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
-import { Suspense } from "react";
+import { BrowserRouter, Routes, Route, Link, Navigate, useLocation, useNavigate } from "react-router-dom";
+import { Suspense, useEffect } from "react";
 import { Layout } from "@/components/layout/Layout";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { EventStreamProvider } from "@/components/providers/EventStreamProvider";
+import { UiModeProvider, useUiMode } from "@/contexts/UiModeContext";
 import { useAuth } from "@/hooks/useAuth";
 import { AuthGate } from "@/components/auth/AuthGate";
 import { usePageTracking } from "@/hooks/usePageTracking";
@@ -49,6 +50,31 @@ function PageTracker() {
   return null;
 }
 
+/** Redirect brand-new installs (onboarding not completed) to the guided wizard. */
+function FirstRunGuard() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  useEffect(() => {
+    let done = true;
+    try {
+      done = localStorage.getItem("sandcastle-onboarding-done") === "true";
+    } catch {
+      done = true; // storage unavailable - don't trap the user in a redirect loop
+    }
+    if (!done && location.pathname !== "/onboarding") {
+      navigate("/onboarding", { replace: true });
+    }
+  }, [location.pathname, navigate]);
+  return null;
+}
+
+/** In Lite mode, advanced pages are hidden - redirect their routes to Overview. */
+function LiteGuard({ children }: { children: React.ReactNode }) {
+  const { isLite } = useUiMode();
+  if (isLite) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
+
 function NotFound() {
   return (
     <div className="flex flex-col items-center justify-center py-24 gap-4">
@@ -80,8 +106,10 @@ export default function App() {
   }
 
   return (
+    <UiModeProvider>
     <BrowserRouter basename={import.meta.env.BASE_URL}>
       <PageTracker />
+      <FirstRunGuard />
       {state === "offline" && (
         <div className="bg-yellow-500/90 text-yellow-950 text-center text-sm py-1.5 px-4 font-medium">
           Backend unreachable - running in offline/demo mode. Data shown may be stale.
@@ -111,19 +139,19 @@ export default function App() {
               <Route path="/templates" element={<PageBoundary name="templates"><TemplatesPage /></PageBoundary>} />
               <Route path="/integrations" element={<PageBoundary name="integrations"><IntegrationsPage /></PageBoundary>} />
               <Route path="/approvals" element={<PageBoundary name="approvals"><ApprovalsPage /></PageBoundary>} />
-              <Route path="/evaluations" element={<PageBoundary name="evaluations"><EvaluationsPage /></PageBoundary>} />
-              <Route path="/autopilot" element={<PageBoundary name="autopilot"><AutoPilotPage /></PageBoundary>} />
-              <Route path="/evolution" element={<PageBoundary name="evolution"><EvolutionPage /></PageBoundary>} />
-              <Route path="/violations" element={<PageBoundary name="violations"><ViolationsPage /></PageBoundary>} />
-              <Route path="/optimizer" element={<PageBoundary name="optimizer"><OptimizerPage /></PageBoundary>} />
+              <Route path="/evaluations" element={<LiteGuard><PageBoundary name="evaluations"><EvaluationsPage /></PageBoundary></LiteGuard>} />
+              <Route path="/autopilot" element={<LiteGuard><PageBoundary name="autopilot"><AutoPilotPage /></PageBoundary></LiteGuard>} />
+              <Route path="/evolution" element={<LiteGuard><PageBoundary name="evolution"><EvolutionPage /></PageBoundary></LiteGuard>} />
+              <Route path="/violations" element={<LiteGuard><PageBoundary name="violations"><ViolationsPage /></PageBoundary></LiteGuard>} />
+              <Route path="/optimizer" element={<LiteGuard><PageBoundary name="optimizer"><OptimizerPage /></PageBoundary></LiteGuard>} />
               <Route path="/schedules" element={<PageBoundary name="schedules"><Schedules /></PageBoundary>} />
-              <Route path="/schedule-monitor" element={<PageBoundary name="schedule-monitor"><ScheduleMonitorPage /></PageBoundary>} />
-              <Route path="/dead-letter" element={<PageBoundary name="dead-letter"><DeadLetterPage /></PageBoundary>} />
-              <Route path="/api-keys" element={<PageBoundary name="api-keys"><ApiKeysPage /></PageBoundary>} />
+              <Route path="/schedule-monitor" element={<LiteGuard><PageBoundary name="schedule-monitor"><ScheduleMonitorPage /></PageBoundary></LiteGuard>} />
+              <Route path="/dead-letter" element={<LiteGuard><PageBoundary name="dead-letter"><DeadLetterPage /></PageBoundary></LiteGuard>} />
+              <Route path="/api-keys" element={<LiteGuard><PageBoundary name="api-keys"><ApiKeysPage /></PageBoundary></LiteGuard>} />
               <Route path="/settings" element={<PageBoundary name="settings"><SettingsPage /></PageBoundary>} />
               <Route path="/system-health" element={<PageBoundary name="system-health"><SystemHealthPage /></PageBoundary>} />
-              <Route path="/compliance" element={<PageBoundary name="compliance"><CompliancePage /></PageBoundary>} />
-              <Route path="/memory" element={<PageBoundary name="memory"><MemoryPage /></PageBoundary>} />
+              <Route path="/compliance" element={<LiteGuard><PageBoundary name="compliance"><CompliancePage /></PageBoundary></LiteGuard>} />
+              <Route path="/memory" element={<LiteGuard><PageBoundary name="memory"><MemoryPage /></PageBoundary></LiteGuard>} />
               <Route path="*" element={<NotFound />} />
             </Route>
           </Routes>
@@ -131,5 +159,6 @@ export default function App() {
       </EventStreamProvider>
       </ErrorBoundary>
     </BrowserRouter>
+    </UiModeProvider>
   );
 }

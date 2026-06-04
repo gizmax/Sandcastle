@@ -548,8 +548,18 @@ describe("One-click demo workflow card", () => {
 // ============================================================================
 
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard";
+import { UiModeProvider } from "@/contexts/UiModeContext";
 
-describe("OnboardingWizard (simplified 2-step)", () => {
+/** The guided wizard reads/writes UI mode, so renders are wrapped in its provider. */
+function renderWizard(onFinish: () => void) {
+  return render(
+    <UiModeProvider>
+      <OnboardingWizard onFinish={onFinish} />
+    </UiModeProvider>
+  );
+}
+
+describe("OnboardingWizard (guided beginner flow)", () => {
   const mockOnFinish = vi.fn();
 
   beforeEach(() => {
@@ -563,116 +573,86 @@ describe("OnboardingWizard (simplified 2-step)", () => {
     vi.useRealTimers();
   });
 
-  it("has only 2 steps (not 5)", async () => {
-    // Mock the /health/providers call made by StepConnect
+  it("has 5 guided steps", async () => {
     mockApi.get.mockResolvedValue(okResponse({}));
 
     await act(async () => {
-      render(<OnboardingWizard onFinish={mockOnFinish} />);
+      renderWizard(mockOnFinish);
     });
 
-    // Progress bar should show exactly "Connect" and "Try it" labels
-    expect(screen.getByText("Connect")).toBeInTheDocument();
-    expect(screen.getByText("Try it")).toBeInTheDocument();
-
-    // There should be exactly 2 step indicators in the progress bar
     const progressNav = screen.getByRole("navigation", { name: /progress/i });
     const stepItems = progressNav.querySelectorAll("li");
-    expect(stepItems.length).toBe(2);
+    expect(stepItems.length).toBe(5);
   });
 
-  it("Step 1 shows provider detection heading", async () => {
-    mockApi.get.mockResolvedValue(okResponse({
-      ollama: { status: "ok", latency_ms: 10, region: "local" },
-    }));
-
-    await act(async () => {
-      render(<OnboardingWizard onFinish={mockOnFinish} />);
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText("Connect a provider")).toBeInTheDocument();
-    });
-
-    expect(screen.getByText(/at least one AI provider/)).toBeInTheDocument();
-  });
-
-  it("Step 1 shows API key input when no providers detected", async () => {
-    // Return empty providers (none running or ok)
+  it("starts on the Welcome step", async () => {
     mockApi.get.mockResolvedValue(okResponse({}));
 
     await act(async () => {
-      render(<OnboardingWizard onFinish={mockOnFinish} />);
+      renderWizard(mockOnFinish);
+    });
+
+    expect(screen.getByText("Welcome to Sandcastle")).toBeInTheDocument();
+    expect(screen.getByText("Get Started")).toBeInTheDocument();
+  });
+
+  it("Welcome -> Connect asks local or cloud", async () => {
+    mockApi.get.mockResolvedValue(okResponse({}));
+
+    await act(async () => {
+      renderWizard(mockOnFinish);
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("Get Started"));
     });
 
     await waitFor(() => {
-      expect(screen.getByText(/No providers detected/)).toBeInTheDocument();
+      expect(screen.getByText("Local or cloud?")).toBeInTheDocument();
+    });
+  });
+
+  it("Connect shows the local hint when no providers are detected", async () => {
+    mockApi.get.mockResolvedValue(okResponse({}));
+
+    await act(async () => {
+      renderWizard(mockOnFinish);
     });
 
-    // Should have a password input for API key
+    await act(async () => {
+      fireEvent.click(screen.getByText("Get Started"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("ollama run llama3")).toBeInTheDocument();
+    });
     expect(screen.getByPlaceholderText("sk-...")).toBeInTheDocument();
-
-    // Save button should be present
-    expect(screen.getByText("Save")).toBeInTheDocument();
   });
 
-  it("Step 1 shows auto-detected providers when available", async () => {
-    mockApi.get.mockResolvedValue(okResponse({
-      ollama: { status: "running", latency_ms: 8, region: "local" },
-      anthropic: { status: "ok", latency_ms: 120, region: "us" },
-    }));
-
-    await act(async () => {
-      render(<OnboardingWizard onFinish={mockOnFinish} />);
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText("Auto-detected providers:")).toBeInTheDocument();
-    });
-
-    expect(screen.getByText("ollama")).toBeInTheDocument();
-    expect(screen.getByText("anthropic")).toBeInTheDocument();
-  });
-
-  it("Step 2 shows 'Run Demo Workflow' button", async () => {
-    // Set up providers so Next button is enabled
+  it("Connect shows auto-detected local provider", async () => {
     mockApi.get.mockResolvedValue(okResponse({
       ollama: { status: "running", latency_ms: 8, region: "local" },
     }));
 
     await act(async () => {
-      render(<OnboardingWizard onFinish={mockOnFinish} />);
+      renderWizard(mockOnFinish);
     });
 
-    // Wait for providers to load
-    await waitFor(() => {
-      expect(screen.getByText("Auto-detected providers:")).toBeInTheDocument();
-    });
-
-    // Click Next to go to step 2
     await act(async () => {
-      fireEvent.click(screen.getByText("Next"));
+      fireEvent.click(screen.getByText("Get Started"));
     });
-
-    // Mock the advisor/status call made by StepTryIt
-    mockApi.get.mockResolvedValue(okResponse({
-      current_provider: "ollama",
-      available_providers: [{ id: "ollama", configured: true, status: "running", region: "local" }],
-    }));
 
     await waitFor(() => {
-      expect(screen.getByText("Run Demo Workflow")).toBeInTheDocument();
+      expect(screen.getByText("ollama")).toBeInTheDocument();
     });
-
-    // "Try it out" heading should be visible
-    expect(screen.getByText("Try it out")).toBeInTheDocument();
+    expect(screen.getByText("Ready!")).toBeInTheDocument();
   });
 
-  it("Skip button navigates to dashboard", async () => {
+  it("Skip keeps Full mode and marks onboarding done", async () => {
     mockApi.get.mockResolvedValue(okResponse({}));
 
     await act(async () => {
-      render(<OnboardingWizard onFinish={mockOnFinish} />);
+      renderWizard(mockOnFinish);
     });
 
     await waitFor(() => {
@@ -683,104 +663,82 @@ describe("OnboardingWizard (simplified 2-step)", () => {
       fireEvent.click(screen.getByText("Skip to dashboard"));
     });
 
-    // Should navigate to root
     expect(mockNavigate).toHaveBeenCalledWith("/");
-
-    // Should mark onboarding as done in localStorage
     expect(localStorage.getItem("sandcastle-onboarding-done")).toBe("true");
+    expect(localStorage.getItem("sandcastle-ui-mode")).toBe("full");
   });
 
-  it("completion stored in localStorage on finish", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-
-    // Step 1: providers detected
-    mockApi.get.mockResolvedValue(okResponse({
-      ollama: { status: "running", latency_ms: 5, region: "local" },
-    }));
-
-    await act(async () => {
-      render(<OnboardingWizard onFinish={mockOnFinish} />);
+  it("completing the guided flow opts into Lite mode", async () => {
+    mockApi.get.mockImplementation((url: string) => {
+      if (url === "/health/providers") {
+        return Promise.resolve(okResponse({
+          ollama: { status: "running", latency_ms: 5, region: "local" },
+        }));
+      }
+      if (url === "/templates") {
+        return Promise.resolve(okResponse([
+          {
+            name: "text-summarizer",
+            description: "Summarize text.",
+            input_schema: {
+              required: ["text"],
+              properties: { text: { type: "string", description: "Text to summarize" } },
+            },
+          },
+        ]));
+      }
+      return Promise.resolve({ data: null, error: null });
     });
-
-    await waitFor(() => {
-      expect(screen.getByText("Auto-detected providers:")).toBeInTheDocument();
-    });
-
-    // Go to step 2
-    await act(async () => {
-      fireEvent.click(screen.getByText("Next"));
-    });
-
-    // Mock advisor/status for StepTryIt cost hint
-    mockApi.get.mockResolvedValue(okResponse({
-      current_provider: "ollama",
-      available_providers: [{ id: "ollama", configured: true, status: "running", region: "local" }],
-    }));
-
-    await waitFor(() => {
-      expect(screen.getByText("Run Demo Workflow")).toBeInTheDocument();
-    });
-
-    // Run the demo
     mockApi.post.mockResolvedValue(okResponse({
-      run_id: "demo-456",
+      run_id: "run-1",
       status: "completed",
-      outputs: { generate: "Facts.", summarize: "Summary." },
-      total_cost_usd: 0,
+      outputs: { summary: "A concise summary." },
     }));
 
     await act(async () => {
-      fireEvent.click(screen.getByText("Run Demo Workflow"));
+      renderWizard(mockOnFinish);
     });
 
-    // Advance past internal setTimeout(1000)
+    // Welcome -> Connect
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(1100);
+      fireEvent.click(screen.getByText("Get Started"));
     });
+    await waitFor(() => expect(screen.getByText("Ready!")).toBeInTheDocument());
 
-    await waitFor(() => {
-      expect(screen.getByText("Done!")).toBeInTheDocument();
-    });
-
-    // Click "Go to Dashboard"
-    await act(async () => {
-      fireEvent.click(screen.getByText("Go to Dashboard"));
-    });
-
-    // onFinish callback should be called
-    expect(mockOnFinish).toHaveBeenCalledTimes(1);
-
-    // localStorage should mark onboarding as done
-    expect(localStorage.getItem("sandcastle-onboarding-done")).toBe("true");
-
-    // Step progress key should be removed
-    expect(localStorage.getItem("sandcastle-onboarding-step")).toBeNull();
-  });
-
-  it("saves step progress to localStorage on step change", async () => {
-    mockApi.get.mockResolvedValue(okResponse({
-      ollama: { status: "running", latency_ms: 5, region: "local" },
-    }));
-
-    await act(async () => {
-      render(<OnboardingWizard onFinish={mockOnFinish} />);
-    });
-
-    // Initially at step 0
-    await waitFor(() => {
-      expect(localStorage.getItem("sandcastle-onboarding-step")).toBe("0");
-    });
-
-    // Navigate to step 2
-    await waitFor(() => {
-      expect(screen.getByText("Auto-detected providers:")).toBeInTheDocument();
-    });
-
+    // Connect -> Pick
     await act(async () => {
       fireEvent.click(screen.getByText("Next"));
     });
+    await waitFor(() => expect(screen.getByText("Pick your first flow")).toBeInTheDocument());
 
-    // Step progress should be saved as "1"
-    expect(localStorage.getItem("sandcastle-onboarding-step")).toBe("1");
+    // Pick the Text Summarizer card -> Configure
+    await act(async () => {
+      fireEvent.click(screen.getByText("Text Summarizer"));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText("Continue"));
+    });
+    await waitFor(() => expect(screen.getByText("Configure Inputs")).toBeInTheDocument());
+
+    // Configure -> Run
+    await act(async () => {
+      fireEvent.click(screen.getByText("Continue"));
+    });
+    await waitFor(() => expect(screen.getByText("Run your first flow")).toBeInTheDocument());
+
+    // Run it
+    await act(async () => {
+      fireEvent.click(screen.getByText("Run workflow"));
+    });
+    await waitFor(() => expect(screen.getByText("Done!")).toBeInTheDocument());
+
+    // Finish into the dashboard
+    await act(async () => {
+      fireEvent.click(screen.getByText("Go to my dashboard"));
+    });
+
+    expect(mockOnFinish).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem("sandcastle-onboarding-done")).toBe("true");
+    expect(localStorage.getItem("sandcastle-ui-mode")).toBe("lite");
   });
 });

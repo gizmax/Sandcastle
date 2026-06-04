@@ -29,6 +29,7 @@ import { cn } from "@/lib/utils";
 import { useRuntimeInfo } from "@/hooks/useRuntimeInfo";
 import { useUpdateCheck } from "@/hooks/useUpdateCheck";
 import { usePinnedWorkflows } from "@/hooks/usePinnedWorkflows";
+import { useUiMode } from "@/contexts/UiModeContext";
 
 interface SidebarProps {
   open: boolean;
@@ -101,7 +102,20 @@ export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: Sid
   const { info } = useRuntimeInfo();
   const { updateAvailable } = useUpdateCheck();
   const { pinnedWorkflows } = usePinnedWorkflows();
+  const { isLite, setMode } = useUiMode();
   const version = info?.version ?? "-";
+
+  // In Lite mode, show only the beginner-relevant navigation: drop the whole
+  // OPERATIONS section and API Keys; advanced pages are route-guarded too.
+  const sections = isLite
+    ? navSections
+        .filter((s) => s.label !== "OPERATIONS")
+        .map((s) =>
+          s.label === "SYSTEM"
+            ? { ...s, items: s.items.filter((i) => i.to !== "/api-keys") }
+            : s
+        )
+    : navSections;
 
   const [opsExpanded, setOpsExpanded] = useState(() => {
     try {
@@ -183,7 +197,7 @@ export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: Sid
         </div>
 
         <nav className="flex-1 overflow-y-auto px-3 py-3" aria-label="Sidebar">
-          {navSections.map((section, sectionIdx) => {
+          {sections.map((section, sectionIdx) => {
             const renderItems = (items: NavItem[]) => (
               <div className="space-y-0.5">
                 {items.map((item) => (
@@ -274,8 +288,8 @@ export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: Sid
                   )}
                 </div>
 
-                {/* Pinned workflows section - rendered after MAIN */}
-                {section.label === "MAIN" && pinnedWorkflows.length > 0 && (
+                {/* Pinned workflows section - rendered after MAIN (full mode only) */}
+                {section.label === "MAIN" && !isLite && pinnedWorkflows.length > 0 && (
                   <div className="mt-5">
                     <p className="mb-1.5 px-3 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
                       Pinned
@@ -308,7 +322,16 @@ export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: Sid
           })}
         </nav>
 
-        <div className="border-t border-border px-5 py-4">
+        <div className="border-t border-border px-5 py-4 space-y-3">
+          <button
+            type="button"
+            onClick={() => setMode(isLite ? "full" : "lite")}
+            title={isLite ? "Show all advanced features" : "Switch to the simplified beginner view"}
+            className="flex w-full items-center justify-between rounded-lg border border-border px-3 py-2 text-xs font-medium text-muted hover:text-foreground hover:border-accent/40 transition-colors"
+          >
+            <span>{isLite ? "Lite mode" : "Full mode"}</span>
+            <span className="text-accent">{isLite ? "Switch to Full" : "Switch to Lite"}</span>
+          </button>
           <NavLink
             to="/settings"
             onClick={onClose}

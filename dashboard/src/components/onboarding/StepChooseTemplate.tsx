@@ -2,11 +2,9 @@ import { useEffect, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
-  Camera,
   FileText,
-  Search,
-  Database,
-  Network,
+  MessageSquareText,
+  Globe,
   Loader2,
 } from "lucide-react";
 import { api } from "@/api/client";
@@ -31,47 +29,32 @@ interface FeaturedTemplate {
   color: string;
 }
 
-// The 4 popular built-in templates to feature
+// 3 beginner-friendly templates: pure LLM, no external API keys or sandbox,
+// so they run on a local model (Ollama) OR any cloud key.
 const FEATURED_TEMPLATES: FeaturedTemplate[] = [
   {
-    name: "ugc-studio",
-    displayName: "UGC Studio",
-    description: "Drop a product photo, pick a mode - get faithful, social-ready UGC shots, scored and auto-fixed by a vision judge.",
-    category: "Creative",
-    icon: Camera,
-    color: "text-[#F472B6] bg-[#F472B6]/10",
-  },
-  {
-    name: "ai-content-pipeline",
-    displayName: "AI Content Pipeline",
-    description: "Research, draft, and publish content with automated SEO optimization.",
-    category: "Marketing",
+    name: "text-summarizer",
+    displayName: "Text Summarizer",
+    description: "Paste any text and get a clean, concise summary. The simplest possible first flow.",
+    category: "Easy",
     icon: FileText,
     color: "text-[#60A5FA] bg-[#60A5FA]/10",
   },
   {
-    name: "market-opportunity-scout",
-    displayName: "Market Opportunity Scout",
-    description: "Analyze markets, competitors, and trends to identify growth opportunities.",
-    category: "Research",
-    icon: Search,
+    name: "review-sentiment",
+    displayName: "Review Sentiment",
+    description: "Drop a batch of customer reviews and get sentiment trends plus actionable insights.",
+    category: "Easy",
+    icon: MessageSquareText,
     color: "text-[#34D399] bg-[#34D399]/10",
   },
   {
-    name: "ai-rag-pipeline",
-    displayName: "AI RAG Pipeline",
-    description: "Build retrieval-augmented generation pipelines over your own documents.",
-    category: "Data",
-    icon: Database,
+    name: "eu-presidents",
+    displayName: "EU Heads of State",
+    description: "A zero-input demo - research, enrich and summarize EU heads of state. Great no-config first run.",
+    category: "Demo",
+    icon: Globe,
     color: "text-[#A78BFA] bg-[#A78BFA]/10",
-  },
-  {
-    name: "provider-consensus-decision-engine",
-    displayName: "Provider Consensus",
-    description: "Ask three AI providers the same question and act on their agreement. Provider-neutral by design: swap or lose a provider and the decision holds.",
-    category: "Engine",
-    icon: Network,
-    color: "text-[#2DD4BF] bg-[#2DD4BF]/10",
   },
 ];
 
@@ -131,9 +114,9 @@ export function StepChooseTemplate({
   return (
     <div className="space-y-6">
       <div className="text-center">
-        <h2 className="text-lg font-semibold text-foreground">Choose a Template</h2>
+        <h2 className="text-lg font-semibold text-foreground">Pick your first flow</h2>
         <p className="mt-1 text-sm text-muted">
-          Pick a popular workflow template to get started quickly.
+          Start with a simple, ready-to-run workflow. Each one works on local or cloud models.
         </p>
       </div>
 
