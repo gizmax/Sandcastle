@@ -818,7 +818,7 @@ class TestBrowserPlaywrightMode:
             with patch("sandcastle.engine.executor._get_cached_actions", new_callable=AsyncMock, return_value=None):
                 with patch("sandcastle.engine.executor.execute_step_with_retry", new_callable=AsyncMock, return_value=mock_result):
                     result = await _browser_playwright_mode(
-                        step, cfg, "go", None, context, MagicMock(), storage, time.monotonic()
+                        step, cfg, "go", None, context, runtime, storage, time.monotonic()
                     )
 
         assert result.status == "completed"
@@ -839,7 +839,7 @@ class TestBrowserPlaywrightMode:
             with patch("sandcastle.engine.executor._get_cached_actions", new_callable=AsyncMock, return_value=None):
                 with patch("sandcastle.engine.executor.execute_step_with_retry", new_callable=AsyncMock, return_value=mock_result) as mock_exec:
                     result = await _browser_playwright_mode(
-                        step, cfg, "go", None, context, MagicMock(), storage, time.monotonic()
+                        step, cfg, "go", None, context, runtime, storage, time.monotonic()
                     )
 
         assert result.status == "completed"
@@ -864,7 +864,7 @@ class TestBrowserPlaywrightMode:
             with patch("sandcastle.engine.executor._get_cached_actions", new_callable=AsyncMock, return_value=None):
                 with patch("sandcastle.engine.executor.execute_step_with_retry", new_callable=AsyncMock, return_value=mock_result) as mock_exec:
                     result = await _browser_playwright_mode(
-                        step, cfg, "go", "MYUSER,MYPASS", context, MagicMock(), storage, time.monotonic()
+                        step, cfg, "go", "MYUSER,MYPASS", context, runtime, storage, time.monotonic()
                     )
 
         augmented_step = mock_exec.call_args[0][0]
@@ -888,7 +888,7 @@ class TestBrowserPlaywrightMode:
             with patch("sandcastle.engine.executor._get_cached_actions", new_callable=AsyncMock, return_value=None):
                 with patch("sandcastle.engine.executor.execute_step_with_retry", new_callable=AsyncMock, return_value=mock_result) as mock_exec:
                     result = await _browser_playwright_mode(
-                        step, cfg, "go", None, context, MagicMock(), storage, time.monotonic()
+                        step, cfg, "go", None, context, runtime, storage, time.monotonic()
                     )
 
         augmented_step = mock_exec.call_args[0][0]
@@ -916,7 +916,7 @@ class TestBrowserPlaywrightMode:
             with patch("sandcastle.engine.executor._get_cached_actions", new_callable=AsyncMock, return_value=cached):
                 with patch("sandcastle.engine.executor.execute_step_with_retry", new_callable=AsyncMock, return_value=mock_result) as mock_exec:
                     result = await _browser_playwright_mode(
-                        step, cfg, "login", None, context, MagicMock(), storage, time.monotonic()
+                        step, cfg, "login", None, context, runtime, storage, time.monotonic()
                     )
 
         augmented_step = mock_exec.call_args[0][0]
@@ -942,7 +942,7 @@ class TestBrowserPlaywrightMode:
             with patch("sandcastle.engine.executor._get_cached_actions", new_callable=AsyncMock, return_value=None):
                 with patch("sandcastle.engine.executor.execute_step_with_retry", new_callable=AsyncMock, return_value=mock_result):
                     result = await _browser_playwright_mode(
-                        step, cfg, "go", None, context, MagicMock(), storage, time.monotonic()
+                        step, cfg, "go", None, context, runtime, storage, time.monotonic()
                     )
 
         # Should still complete despite install failure
@@ -965,7 +965,7 @@ class TestBrowserPlaywrightMode:
             with patch("sandcastle.engine.executor._get_cached_actions", new_callable=AsyncMock, return_value=None):
                 with patch("sandcastle.engine.executor.execute_step_with_retry", new_callable=AsyncMock, return_value=mock_result) as mock_exec:
                     result = await _browser_playwright_mode(
-                        step, cfg, "go", None, context, MagicMock(), storage, time.monotonic()
+                        step, cfg, "go", None, context, runtime, storage, time.monotonic()
                     )
 
         augmented_step = mock_exec.call_args[0][0]
@@ -1193,7 +1193,7 @@ class TestBrowserComputerUseMode:
                             with patch("httpx.AsyncClient", _make_httpx_mock(api_response)):
                                 result = await _browser_computer_use_mode(
                                     step, cfg, "do task", None, context,
-                                    MagicMock(), storage, time.monotonic()
+                                    runtime, storage, time.monotonic()
                                 )
 
         assert result.status == "completed"
@@ -1218,7 +1218,7 @@ class TestBrowserComputerUseMode:
                             started = time.monotonic() - 1
                             result = await _browser_computer_use_mode(
                                 step, cfg, "do task", None, context,
-                                MagicMock(), storage, started
+                                runtime, storage, started
                             )
 
         assert result.status == "failed"
@@ -1250,7 +1250,7 @@ class TestBrowserComputerUseMode:
                             with patch("httpx.AsyncClient", mock_client_cls):
                                 result = await _browser_computer_use_mode(
                                     step, cfg, "do task", None, context,
-                                    MagicMock(), storage, time.monotonic()
+                                    runtime, storage, time.monotonic()
                                 )
 
         assert result.status == "failed"
@@ -1285,7 +1285,7 @@ class TestBrowserComputerUseMode:
                             with patch("httpx.AsyncClient", _make_httpx_mock(api_response)):
                                 result = await _browser_computer_use_mode(
                                     step, cfg, "do task", None, context,
-                                    MagicMock(), storage, time.monotonic()
+                                    runtime, storage, time.monotonic()
                                 )
 
         assert result.status == "completed"
@@ -1322,7 +1322,7 @@ class TestBrowserComputerUseMode:
                             with patch("httpx.AsyncClient", _make_httpx_mock(api_response)):
                                 result = await _browser_computer_use_mode(
                                     step, cfg, "do task", None, context,
-                                    MagicMock(), storage, time.monotonic()
+                                    runtime, storage, time.monotonic()
                                 )
 
         assert result.status == "failed"
@@ -1354,7 +1354,7 @@ class TestBrowserComputerUseMode:
                             with patch("httpx.AsyncClient", _make_httpx_mock(api_response)):
                                 result = await _browser_computer_use_mode(
                                     step, cfg, "get price", None, context,
-                                    MagicMock(), storage, time.monotonic()
+                                    runtime, storage, time.monotonic()
                                 )
 
         assert result.status == "completed"
@@ -1386,7 +1386,7 @@ class TestBrowserComputerUseMode:
                             with patch("httpx.AsyncClient", _make_httpx_mock(api_response)):
                                 result = await _browser_computer_use_mode(
                                     step, cfg, "do task", None, context,
-                                    MagicMock(), storage, time.monotonic()
+                                    runtime, storage, time.monotonic()
                                 )
 
         # cost = (1000 * 3.0 / 1M) + (500 * 15.0 / 1M) = 0.003 + 0.0075 = 0.0105
@@ -1417,7 +1417,7 @@ class TestBrowserComputerUseMode:
                             with patch("httpx.AsyncClient", _make_httpx_mock(api_response)):
                                 result = await _browser_computer_use_mode(
                                     step, cfg, "task", None, context,
-                                    MagicMock(), storage, time.monotonic()
+                                    runtime, storage, time.monotonic()
                                 )
 
         assert result.status == "completed"
@@ -1612,7 +1612,7 @@ class TestBrowserEdgeCases:
                             with patch("httpx.AsyncClient", _make_httpx_mock_multi(responses)):
                                 result = await _browser_computer_use_mode(
                                     step, cfg, "click button", None, context,
-                                    MagicMock(), storage, time.monotonic()
+                                    runtime, storage, time.monotonic()
                                 )
 
         assert result.status == "completed"
@@ -1665,7 +1665,7 @@ class TestBrowserEdgeCases:
                             with patch("httpx.AsyncClient", _make_httpx_mock_multi(responses)):
                                 result = await _browser_computer_use_mode(
                                     step, cfg, "do it", None, context,
-                                    MagicMock(), storage, time.monotonic()
+                                    runtime, storage, time.monotonic()
                                 )
 
         assert result.status == "completed"

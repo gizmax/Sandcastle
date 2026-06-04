@@ -13,7 +13,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 from sandcastle.engine.backends import SandboxBackend, SSEEvent, create_backend
 from sandcastle.engine.providers import get_failover
@@ -401,6 +401,34 @@ class SandshoreRuntime:
                 f"Sandbox backend '{self._sandbox_backend_type}' is not "
                 f"available."
             )
+
+    async def sandbox_exec(
+        self,
+        sandbox: Any,
+        cmd: str,
+        args: list[str],
+        timeout: float = 30.0,
+    ) -> dict[str, Any]:
+        """Run ``cmd args`` inside the sandbox backend; return its output dict.
+
+        Used by browser dom/computer_use/lightpanda modes to install/run setup
+        scripts (e.g. ``npx playwright install`` then a ``node`` script). Returns
+        ``{"stdout", "stderr", "exit_code"}``.
+
+        ``sandbox`` is the runtime the caller already holds; it is accepted for
+        call-site compatibility and execution always routes through this runtime's
+        backend. Only backends that expose ``exec_command`` (currently ``local``)
+        support this; others raise a clear error instead of failing obscurely. A
+        persistent-sandbox exec path for E2B/Docker is a follow-up.
+        """
+        exec_command = getattr(self._backend, "exec_command", None)
+        if exec_command is None:
+            raise SandshoreError(
+                f"sandbox_exec is not supported on the '{self._backend.name}' "
+                "backend (it needs a persistent sandbox exec primitive). Use "
+                "SANDCASTLE_BACKEND=local for browser dom/computer_use/lightpanda."
+            )
+        return await exec_command(cmd, args, timeout=timeout)
 
     # ------------------------------------------------------------------
     # Backend delegation

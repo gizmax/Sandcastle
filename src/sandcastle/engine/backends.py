@@ -576,6 +576,34 @@ class LocalBackend:
     async def close(self) -> None:
         """No-op - local backend holds no persistent resources."""
 
+    async def exec_command(
+        self, cmd: str, args: list[str], timeout: float = 30.0
+    ) -> dict[str, Any]:
+        """Run ``cmd args`` as a host subprocess and return its output.
+
+        Returns ``{"stdout", "stderr", "exit_code"}``. State persists across calls
+        via the host filesystem (e.g. a global ``npm install`` that a later ``node``
+        run can see), which is what the browser dom/computer_use/lightpanda modes
+        need. LOCAL backend only - no isolation, host-level execution, dev use only.
+        """
+        proc = await asyncio.create_subprocess_exec(
+            cmd,
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except (TimeoutError, asyncio.TimeoutError):
+            proc.kill()
+            await proc.wait()
+            raise RuntimeError(f"sandbox_exec timed out after {timeout}s: {cmd}") from None
+        return {
+            "stdout": out.decode("utf-8", "replace"),
+            "stderr": err.decode("utf-8", "replace"),
+            "exit_code": proc.returncode,
+        }
+
     async def start(
         self,
         runner_file: str,

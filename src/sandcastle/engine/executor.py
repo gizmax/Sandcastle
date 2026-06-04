@@ -6397,7 +6397,7 @@ async def _browser_playwright_mode(
 
     # Install playwright in sandbox (idempotent)
     try:
-        runtime = get_sandshore_runtime()
+        runtime = sandbox  # the step's sandbox runtime (a SandshoreRuntime)
         await runtime.sandbox_exec(
             sandbox,
             "bash",
@@ -6475,7 +6475,7 @@ async def _browser_dom_mode(
             error=f"Invalid browser URL: {e}",
         )
 
-    runtime = get_sandshore_runtime()
+    runtime = sandbox  # the step's sandbox runtime (a SandshoreRuntime)
 
     # Install playwright in sandbox
     try:
@@ -6637,7 +6637,7 @@ async def _browser_computer_use_mode(
     _enforce_data_residency(model_info)
     api_key = get_api_key(model_info)
 
-    runtime = get_sandshore_runtime()
+    runtime = sandbox  # the step's sandbox runtime (a SandshoreRuntime)
     deadline = time.monotonic() + cfg.timeout_seconds
     total_cost = 0.0
     action_count = 0
