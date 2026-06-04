@@ -2688,10 +2688,17 @@ async def _execute_llm_step(
 
     import httpx
 
-    from sandcastle.engine.providers import get_api_key, resolve_base_url, resolve_model
+    from sandcastle.engine.providers import (
+        get_api_key,
+        maybe_spark_nim_route,
+        resolve_base_url,
+        resolve_model,
+    )
 
     started_at = time.monotonic()
-    model_info = resolve_model(step.model)
+    # Spark Mode: route the bare default model to a reachable local NIM ($0, on-box).
+    # No-op off-Spark / when disabled / when NIM is down (see maybe_spark_nim_route).
+    model_info = resolve_model(maybe_spark_nim_route(step.model))
     _enforce_data_residency(model_info)
     api_key = get_api_key(model_info)
 

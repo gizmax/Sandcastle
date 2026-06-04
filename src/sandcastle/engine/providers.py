@@ -183,6 +183,68 @@ def is_known_model(model_str: str) -> bool:
     return model_str in KNOWN_MODELS or _valid_nim_id(model_str) or _valid_adapter_id(model_str)
 
 
+# --- Spark Mode: auto-route the default model to a local NIM ------------------
+
+# The local model the Spark auto-route targets (a static nim/* registry entry).
+_SPARK_NIM_DEFAULT = "nim/llama-3.1-70b"
+# Cache the reachability probe per base_url with a short TTL so the hot path is
+# cheap but a NIM that starts after Sandcastle is still picked up.
+_NIM_REACHABLE_CACHE: dict[str, tuple[bool, float]] = {}
+_NIM_REACHABLE_TTL = 60.0
+
+
+def is_nim_reachable(base_url: str | None = None, timeout_seconds: float | None = None) -> bool:
+    """Fast, cached probe: does the NIM ``/v1/models`` endpoint answer? False on any error.
+
+    A 2xx or 4xx (e.g. 401/403 - endpoint exists, auth required) counts as reachable;
+    a 5xx, timeout, or connection error counts as not reachable. Result is cached per
+    base_url for ~60s. Never raises.
+    """
+    from sandcastle.config import settings
+
+    if base_url is None:
+        base_url = settings.nim_base_url or "http://localhost:8000"
+    base_url = base_url.rstrip("/")
+    now = time.monotonic()
+    cached = _NIM_REACHABLE_CACHE.get(base_url)
+    if cached is not None and cached[1] > now:
+        return cached[0]
+    if timeout_seconds is None:
+        timeout_seconds = max(0.1, settings.nim_probe_timeout_ms / 1000.0)
+    ok = False
+    try:
+        import httpx
+
+        resp = httpx.get(f"{base_url}/v1/models", timeout=timeout_seconds)
+        ok = resp.status_code < 500
+    except Exception:  # noqa: BLE001 - any probe failure means "not reachable"
+        ok = False
+    _NIM_REACHABLE_CACHE[base_url] = (ok, now + _NIM_REACHABLE_TTL)
+    return ok
+
+
+def maybe_spark_nim_route(model_str: str) -> str:
+    """On a Spark with a reachable NIM, route the bare default model to the local NIM.
+
+    Returns *model_str* unchanged unless ALL hold: spark_mode on, spark_nim_autoroute
+    enabled, the step uses the bare default ``"sonnet"`` (explicit non-default models
+    are always respected), data residency permits a local model, and the NIM answers.
+    A NO-OP off-Spark, when disabled, or when NIM is unreachable - so it can never
+    silently break a run.
+    """
+    if model_str != "sonnet":
+        return model_str
+    from sandcastle.config import settings
+
+    if not (settings.spark_mode and settings.spark_nim_autoroute):
+        return model_str
+    if settings.data_residency == "eu":  # local NIM is region "local", not "eu"
+        return model_str
+    if not is_nim_reachable():
+        return model_str
+    return _SPARK_NIM_DEFAULT
+
+
 def get_api_key(model_info: ModelInfo) -> str:
     """Read the API key for *model_info* from env / config.
 
