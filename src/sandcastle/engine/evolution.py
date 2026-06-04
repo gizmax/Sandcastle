@@ -525,6 +525,70 @@ def _workflow_to_yaml(workflow: Any, original_yaml: str) -> str:
         return original_yaml
 
 
+async def mutate_finetune(
+    workflow_yaml: str,
+    eval_results: list[dict],
+    base_model: str = "sonnet",
+    min_samples: int | None = None,
+) -> tuple[str, str]:
+    """Overnight Self-Tune mutation: train a local LoRA adapter and route to it.
+
+    Builds training pairs from the workflow's own eval results, trains a task-specific
+    adapter via the configured Trainer (a deterministic mock unless trainer_backend=
+    "gpu"), registers it, and rewrites every step's model to ``adapter/<id>``. Returns
+    the workflow unchanged with a reason when it cannot/should not run (too few
+    samples, training error) - run_evolution then records it as a discard, exactly
+    like the other mutations. Same ``(yaml, description)`` shape as mutate_prompt/etc.
+    """
+    from sandcastle.config import settings
+    from sandcastle.engine.adapter_registry import AdapterRegistry
+    from sandcastle.engine.training.trainer import get_trainer
+
+    if min_samples is None:
+        min_samples = settings.evolution_finetune_min_samples
+
+    pairs = [
+        {"input": inp, "output": out}
+        for r in (eval_results or [])
+        if isinstance(r, dict)
+        and (inp := r.get("input") or r.get("prompt"))
+        and (out := r.get("expected") or r.get("output"))
+    ]
+    if len(pairs) < min_samples:
+        return workflow_yaml, f"finetune skipped: {len(pairs)} usable samples < min {min_samples}"
+
+    try:
+        result = await get_trainer().train(base_model, pairs, settings)
+    except Exception as exc:  # noqa: BLE001 - any trainer failure -> graceful discard
+        return workflow_yaml, f"finetune training failed: {exc}"
+
+    AdapterRegistry().register(
+        adapter_id=result.adapter_id,
+        base_model=result.base_model,
+        metrics=result.metrics,
+        samples=result.samples,
+        lora_config=result.lora_config,
+        created_at=time.time(),
+    )
+
+    adapter_model = f"adapter/{result.adapter_id}"
+    try:
+        data = yaml.safe_load(workflow_yaml) or {}
+        if isinstance(data.get("default_model"), str):
+            data["default_model"] = adapter_model
+        for st in data.get("steps", []):
+            if isinstance(st, dict) and st.get("model"):
+                st["model"] = adapter_model
+        new_yaml = yaml.dump(data, default_flow_style=False, allow_unicode=True)
+    except Exception as exc:  # noqa: BLE001
+        return workflow_yaml, f"finetune yaml rewrite failed: {exc}"
+
+    return new_yaml, (
+        f"trained LoRA adapter {result.adapter_id} on {result.samples} samples "
+        f"(eval_score={result.metrics.get('eval_score')}); routed steps to it"
+    )
+
+
 def _pick_mutation_type(
     iteration: int,
     eval_results: list[dict],
@@ -532,6 +596,13 @@ def _pick_mutation_type(
     optimize_for: str,
 ) -> str:
     """Pick mutation strategy based on iteration number and context."""
+    from sandcastle.config import settings
+
+    # Overnight Self-Tune: periodically attempt a LoRA fine-tune (opt-in). Gated so it
+    # runs at most once per 5 iterations and never on the first iteration.
+    if settings.evolution_auto_finetune and iteration > 0 and iteration % 5 == 4:
+        return "finetune"
+
     # Round-robin with context awareness
     if optimize_for == "cost":
         # Prefer model downgrade and simplify for cost optimization
@@ -758,6 +829,19 @@ async def run_evolution(
                     current_cost=best_cost,
                 )
                 mutation_diff = [{"step_id": target_step_id, "field": "model", "type": "model"}]
+            elif mutation_type == "finetune":
+                _base = "sonnet"
+                try:
+                    _data = parse_yaml_string(best_yaml)
+                    _base = _data.default_model or "sonnet"
+                except Exception:
+                    pass
+                new_yaml, description = await mutate_finetune(
+                    workflow_yaml=best_yaml,
+                    eval_results=eval_case_dicts,
+                    base_model=_base,
+                )
+                mutation_diff = [{"type": "finetune"}]
             else:  # simplify
                 new_yaml, description = await mutate_simplify(
                     workflow_yaml=best_yaml,

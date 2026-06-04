@@ -46,6 +46,24 @@ class Settings(BaseSettings):
     nim_base_url: str = "http://localhost:8000"
     nim_api_key: str = ""
 
+    # Spark Mode: on a detected DGX Spark, auto-route default-model LLM steps to the
+    # local NIM when it is reachable ($0, on-box). Opt out with SANDCASTLE_SPARK_NIM_-
+    # AUTOROUTE=false. nim_probe_timeout_ms bounds the reachability probe.
+    spark_nim_autoroute: bool = True
+    nim_probe_timeout_ms: int = 2000
+
+    # Overnight Self-Tune: the evolution loop may add a LoRA fine-tune mutation that
+    # trains a local adapter on a workflow's own eval data and A/B-promotes it. Off by
+    # default; the trainer is a deterministic mock unless trainer_backend="gpu" (which
+    # needs torch/peft + a GPU and is a stub today). See engine/training/.
+    evolution_auto_finetune: bool = False
+    evolution_finetune_min_samples: int = 10
+    trainer_backend: str = "mock"  # "mock" | "gpu"
+    lora_r: int = 8
+    lora_alpha: int = 16
+    lora_lr: float = 1e-4
+    lora_epochs: int = 3
+
     # E2B custom template (pre-built sandbox with SDK installed)
     e2b_template: str = ""  # e.g. "sandcastle-runner"
 
@@ -523,6 +541,7 @@ class Settings(BaseSettings):
         "tool_google_service_account", "tool_teams_webhook_url",
         "tool_postgresql_url",
         "browserbase_api_key",
+        "nim_api_key",
     })
 
     def safe_dump(self) -> dict:

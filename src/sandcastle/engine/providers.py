@@ -137,6 +137,15 @@ def _valid_nim_id(model_str: str) -> bool:
     return bool(rest) and ".." not in rest and _NIM_ID_RE.match(rest) is not None
 
 
+def _valid_adapter_id(model_str: str) -> bool:
+    """True if *model_str* is a well-formed ``adapter/<id>`` (Self-Tune adapter)."""
+    return (
+        isinstance(model_str, str)
+        and model_str.startswith("adapter/")
+        and len(model_str) > len("adapter/")
+    )
+
+
 def resolve_model(model_str: str) -> ModelInfo:
     """Resolve a model string to its full configuration.
 
@@ -153,6 +162,16 @@ def resolve_model(model_str: str) -> ModelInfo:
             "nim", model_str[len("nim/"):], "runner-openai.mjs",
             "NIM_API_KEY", "http://localhost:8000/v1", 0.0, 0.0, region="local",
         )
+    if _valid_adapter_id(model_str):
+        # A locally-trained LoRA adapter (Overnight Self-Tune), served by the local
+        # NIM/ollama. Authoritative existence check is the on-disk adapter registry.
+        from sandcastle.engine.adapter_registry import AdapterRegistry
+
+        if AdapterRegistry().get(model_str[len("adapter/"):]) is not None:
+            return ModelInfo(
+                "adapter", model_str[len("adapter/"):], "runner-openai.mjs",
+                "", None, 0.0, 0.0, region="local",
+            )
     raise KeyError(
         f"Unknown model '{model_str}'. "
         f"Available: {', '.join(sorted(PROVIDER_REGISTRY))}"
@@ -160,8 +179,8 @@ def resolve_model(model_str: str) -> ModelInfo:
 
 
 def is_known_model(model_str: str) -> bool:
-    """True if *model_str* is registered or a valid dynamic ``nim/<model-id>``."""
-    return model_str in KNOWN_MODELS or _valid_nim_id(model_str)
+    """True if registered, a valid ``nim/<id>``, or an ``adapter/<id>`` string."""
+    return model_str in KNOWN_MODELS or _valid_nim_id(model_str) or _valid_adapter_id(model_str)
 
 
 def get_api_key(model_info: ModelInfo) -> str:
@@ -206,6 +225,11 @@ def resolve_base_url(model_info: ModelInfo) -> str:
     if model_info.provider == "nim":
         from sandcastle.config import settings
         base = settings.nim_base_url or "http://localhost:8000"
+        return base.rstrip("/") + "/v1"
+    if model_info.provider == "adapter":
+        # Trained LoRA adapters are served by the local NIM (preferred) or Ollama.
+        from sandcastle.config import settings
+        base = settings.nim_base_url or settings.ollama_host or "http://localhost:8000"
         return base.rstrip("/") + "/v1"
     return model_info.api_base_url or "https://api.openai.com/v1"
 
