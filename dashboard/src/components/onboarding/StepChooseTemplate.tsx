@@ -28,6 +28,9 @@ interface FeaturedTemplate {
   category: string;
   icon: LucideIcon;
   color: string;
+  /** Fallback input schema so the Configure step shows fields even when the
+   *  backend /templates list doesn't carry one (e.g. offline / mock mode). */
+  inputSchema: InputSchema;
 }
 
 // 4 bold, pure-text starter templates (run local on Ollama OR any cloud key) for
@@ -41,6 +44,13 @@ const FEATURED_TEMPLATES: FeaturedTemplate[] = [
     category: "Marketing",
     icon: ScanSearch,
     color: "text-[#60A5FA] bg-[#60A5FA]/10",
+    inputSchema: {
+      required: ["brand"],
+      properties: {
+        brand: { type: "string", description: "Brand, product, or person to audit (e.g. 'Sandcastle')" },
+        category: { type: "string", description: "Optional one-line category, e.g. 'AI workflow orchestrator'" },
+      },
+    },
   },
   {
     name: "Campaign-in-a-Box",
@@ -49,6 +59,13 @@ const FEATURED_TEMPLATES: FeaturedTemplate[] = [
     category: "Marketing",
     icon: Megaphone,
     color: "text-[#F472B6] bg-[#F472B6]/10",
+    inputSchema: {
+      required: ["product_or_offer"],
+      properties: {
+        product_or_offer: { type: "string", description: "The product, feature, or offer to build a campaign around" },
+        campaign_goal: { type: "string", description: "Optional goal, e.g. 'drive signups', 'launch announcement'" },
+      },
+    },
   },
   {
     name: "Brand Voice Kit Forge",
@@ -57,6 +74,13 @@ const FEATURED_TEMPLATES: FeaturedTemplate[] = [
     category: "Creative",
     icon: Palette,
     color: "text-[#A78BFA] bg-[#A78BFA]/10",
+    inputSchema: {
+      required: ["what_youre_building"],
+      properties: {
+        what_youre_building: { type: "string", description: "One line about what you're building" },
+        vibe: { type: "string", description: "Optional vibe words, e.g. 'bold, warm, irreverent'" },
+      },
+    },
   },
   {
     name: "Competitor Analysis",
@@ -65,6 +89,14 @@ const FEATURED_TEMPLATES: FeaturedTemplate[] = [
     category: "Power",
     icon: Swords,
     color: "text-[#34D399] bg-[#34D399]/10",
+    inputSchema: {
+      required: ["competitor"],
+      properties: {
+        competitor: { type: "string", description: "Name of the competitor to analyze" },
+        our_company: { type: "string", description: "Your company name + a brief description for comparison" },
+        industry: { type: "string", description: "Industry / vertical for context, e.g. 'B2B SaaS'" },
+      },
+    },
   },
 ];
 
@@ -117,7 +149,8 @@ export function StepChooseTemplate({
       name: featured.name,
       description: featured.description,
       category: featured.category,
-      inputSchema: schemaMap[featured.name] ?? null,
+      // Prefer the live schema from the backend, fall back to the bundled one.
+      inputSchema: schemaMap[featured.name] ?? featured.inputSchema,
     });
   }
 

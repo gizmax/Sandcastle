@@ -724,6 +724,13 @@ describe("OnboardingWizard (guided beginner flow)", () => {
     });
     await waitFor(() => expect(screen.getByText("Configure Inputs")).toBeInTheDocument());
 
+    // Required field gates Continue - fill the brand, then proceed
+    await act(async () => {
+      fireEvent.change(screen.getByPlaceholderText("brand"), {
+        target: { value: "Sandcastle" },
+      });
+    });
+
     // Configure -> Run
     await act(async () => {
       fireEvent.click(screen.getByText("Continue"));

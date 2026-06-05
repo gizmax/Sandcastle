@@ -40,6 +40,11 @@ export function StepConfigureInputs({
 
   const hasSchema = fields.length > 0;
 
+  const missingRequired = useMemo(
+    () => [...requiredFields].some((k) => !(fieldValues[k] && fieldValues[k].trim())),
+    [requiredFields, fieldValues]
+  );
+
   function handleChange(key: string, value: string) {
     onFieldValuesChange({ ...fieldValues, [key]: value });
   }
@@ -204,9 +209,12 @@ export function StepConfigureInputs({
         </button>
         <button
           onClick={onNext}
+          disabled={missingRequired}
+          title={missingRequired ? "Fill the required fields first" : undefined}
           className={cn(
             "inline-flex items-center gap-2 rounded-lg bg-accent px-5 py-2 text-sm font-medium text-accent-foreground",
-            "hover:bg-accent-hover transition-all duration-200 shadow-sm"
+            "hover:bg-accent-hover transition-all duration-200 shadow-sm",
+            "disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-accent"
           )}
         >
           Continue
