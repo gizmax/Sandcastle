@@ -226,10 +226,18 @@ function StepRun({
       for (const [k, v] of Object.entries(inputs)) {
         if (v !== undefined && v !== null && String(v).trim() !== "") cleanInputs[k] = v;
       }
-      const res = await api.post<RunResult>("/workflows/run", {
-        workflow_name: template.name,
-        inputs: cleanInputs,
-      });
+      // Built-in templates only resolve by name for user workflows, so fetch the
+      // template's YAML and run it inline; fall back to running by name.
+      let body: Record<string, unknown> = { workflow_name: template.name, inputs: cleanInputs };
+      try {
+        const tpl = await api.get<{ content?: string }>(
+          `/templates/${encodeURIComponent(template.name)}`
+        );
+        if (tpl.data?.content) body = { workflow: tpl.data.content, inputs: cleanInputs };
+      } catch {
+        // Keep the workflow_name fallback.
+      }
+      const res = await api.post<RunResult>("/workflows/run", body);
       setOutput(firstOutput(res.data?.outputs) || "Workflow completed successfully.");
       setStatus("done");
     } catch {

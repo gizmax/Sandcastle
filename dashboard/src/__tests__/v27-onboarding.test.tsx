@@ -678,14 +678,18 @@ describe("OnboardingWizard (guided beginner flow)", () => {
       if (url === "/templates") {
         return Promise.resolve(okResponse([
           {
-            name: "text-summarizer",
-            description: "Summarize text.",
+            name: "What Does AI Say About Your Brand?",
+            description: "Audit AI brand perception.",
             input_schema: {
-              required: ["text"],
-              properties: { text: { type: "string", description: "Text to summarize" } },
+              required: ["brand"],
+              properties: { brand: { type: "string", description: "Brand to audit" } },
             },
           },
         ]));
+      }
+      // StepRun fetches the template YAML to run it inline.
+      if (url.startsWith("/templates/")) {
+        return Promise.resolve(okResponse({ content: "name: x\nsteps: []\n" }));
       }
       return Promise.resolve({ data: null, error: null });
     });
@@ -711,9 +715,9 @@ describe("OnboardingWizard (guided beginner flow)", () => {
     });
     await waitFor(() => expect(screen.getByText("Pick your first flow")).toBeInTheDocument());
 
-    // Pick the Text Summarizer card -> Configure
+    // Pick the AI Brand Audit card -> Configure
     await act(async () => {
-      fireEvent.click(screen.getByText("Text Summarizer"));
+      fireEvent.click(screen.getByText("AI Brand Audit"));
     });
     await act(async () => {
       fireEvent.click(screen.getByText("Continue"));

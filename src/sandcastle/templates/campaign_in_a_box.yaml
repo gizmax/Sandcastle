@@ -1,0 +1,89 @@
+# name: Campaign-in-a-Box
+# description: One product line in, a launch-ready campaign out - big idea, 3 competing angles judged, channel copy, and a 4-week calendar
+# tags: [marketing, campaign, copywriting, launch]
+# category: marketing
+
+name: campaign-in-a-box
+description: One product line in, a launch-ready campaign out - big idea, 3 competing angles judged, channel copy, and a 4-week calendar
+
+default_model: sonnet
+default_max_turns: 6
+default_timeout: 240
+
+input_schema:
+  required: ["product_or_offer"]
+  properties:
+    product_or_offer:
+      type: string
+      description: "The product, feature, or offer to build a campaign around"
+      example: "a local-first AI agent that runs on your own hardware"
+    campaign_goal:
+      type: string
+      description: "Optional goal, e.g. 'drive signups', 'launch announcement', 'reposition'"
+      example: "launch announcement"
+
+steps:
+  - id: brief
+    prompt: >
+      Read this offer and write a tight creative brief. Offer: {input.product_or_offer}.
+      Goal (may be empty): {input.campaign_goal}.
+      Extract: the core promise, the target audience, the pain it removes, and the single most
+      ownable "big idea" (one memorable sentence). Keep it to half a page.
+    model: sonnet
+    max_turns: 4
+
+  - id: angle-rational
+    depends_on: [brief]
+    prompt: >
+      You are a Creative Director who sells with logic and proof. From this brief, pitch ONE
+      campaign angle: the headline idea, the argument, and a sample hero line. Brief: {steps.brief.output}
+    model: sonnet
+    max_turns: 4
+
+  - id: angle-emotional
+    depends_on: [brief]
+    prompt: >
+      You are a Creative Director who sells with emotion and story. From this brief, pitch ONE
+      campaign angle: the headline idea, the feeling it evokes, and a sample hero line.
+      Brief: {steps.brief.output}
+    model: sonnet
+    max_turns: 4
+
+  - id: angle-contrarian
+    depends_on: [brief]
+    prompt: >
+      You are a contrarian Creative Director who wins attention by challenging the category's
+      orthodoxy. From this brief, pitch ONE bold, against-the-grain angle: the provocation, why
+      it's true, and a sample hero line. Brief: {steps.brief.output}
+    model: sonnet
+    max_turns: 4
+
+  - id: pick-winner
+    depends_on: [angle-rational, angle-emotional, angle-contrarian]
+    prompt: >
+      You are the Executive Creative Director. Three angles are on the table:
+      RATIONAL: {steps.angle-rational.output}
+      EMOTIONAL: {steps.angle-emotional.output}
+      CONTRARIAN: {steps.angle-contrarian.output}
+      Pick the single strongest angle for the goal, explain in 2 lines why it wins, and briefly
+      say why each of the other two was rejected. Restate the winning big idea and hero line.
+    model: sonnet
+    max_turns: 5
+
+  - id: channel-copy
+    depends_on: [pick-winner]
+    prompt: >
+      Expand the winning angle into ready-to-ship copy. Winner: {steps.pick-winner.output}.
+      Produce: a 3-email launch sequence (subject + body), 3 LinkedIn posts, a landing-page hero
+      (headline, subhead, CTA), and 5 ad headlines. Keep the voice consistent with the big idea.
+    model: sonnet
+    max_turns: 6
+
+  - id: calendar
+    depends_on: [channel-copy]
+    prompt: >
+      Turn this campaign into a 4-week phased rollout calendar (tease -> launch -> proof -> push),
+      mapping the assets to weeks, with one KPI per phase and a launch-day checklist.
+      Assets: {steps.channel-copy.output}
+    model: haiku
+    max_turns: 4

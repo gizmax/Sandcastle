@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
-  FileText,
-  MessageSquareText,
-  Globe,
+  ScanSearch,
+  Megaphone,
+  Palette,
+  Swords,
   Loader2,
 } from "lucide-react";
 import { api } from "@/api/client";
@@ -29,32 +30,41 @@ interface FeaturedTemplate {
   color: string;
 }
 
-// 3 beginner-friendly templates: pure LLM, no external API keys or sandbox,
-// so they run on a local model (Ollama) OR any cloud key.
+// 4 bold, pure-text starter templates (run local on Ollama OR any cloud key) for
+// power users / marketing / creative. The `name` matches the /templates display
+// title so its input schema resolves and it can be fetched + run inline.
 const FEATURED_TEMPLATES: FeaturedTemplate[] = [
   {
-    name: "text-summarizer",
-    displayName: "Text Summarizer",
-    description: "Paste any text and get a clean, concise summary. The simplest possible first flow.",
-    category: "Easy",
-    icon: FileText,
+    name: "What Does AI Say About Your Brand?",
+    displayName: "AI Brand Audit",
+    description: "Probe the model's own memory of your brand - sentiment + positioning scorecard, the riskiest misperceptions, and 5 fixes.",
+    category: "Marketing",
+    icon: ScanSearch,
     color: "text-[#60A5FA] bg-[#60A5FA]/10",
   },
   {
-    name: "review-sentiment",
-    displayName: "Review Sentiment",
-    description: "Drop a batch of customer reviews and get sentiment trends plus actionable insights.",
-    category: "Easy",
-    icon: MessageSquareText,
-    color: "text-[#34D399] bg-[#34D399]/10",
+    name: "Campaign-in-a-Box",
+    displayName: "Campaign-in-a-Box",
+    description: "One product line in - big idea, 3 competing angles judged, channel copy, and a 4-week launch calendar out.",
+    category: "Marketing",
+    icon: Megaphone,
+    color: "text-[#F472B6] bg-[#F472B6]/10",
   },
   {
-    name: "eu-presidents",
-    displayName: "EU Heads of State",
-    description: "A zero-input demo - research, enrich and summarize EU heads of state. Great no-config first run.",
-    category: "Demo",
-    icon: Globe,
+    name: "Brand Voice Kit Forge",
+    displayName: "Brand Voice Kit",
+    description: "One idea in - 4 voice directions judged into names, taglines, voice pillars, and copy-paste in-voice samples.",
+    category: "Creative",
+    icon: Palette,
     color: "text-[#A78BFA] bg-[#A78BFA]/10",
+  },
+  {
+    name: "Competitor Analysis",
+    displayName: "Competitor Teardown",
+    description: "Name a rival - get a full SWOT, a positioning map, and a ready-to-use sales battlecard.",
+    category: "Power",
+    icon: Swords,
+    color: "text-[#34D399] bg-[#34D399]/10",
   },
 ];
 

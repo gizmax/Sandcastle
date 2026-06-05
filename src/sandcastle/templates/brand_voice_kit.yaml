@@ -1,0 +1,86 @@
+# name: Brand Voice Kit Forge
+# description: One idea in, a complete brand voice out - 4 voice directions judged into names, taglines, voice pillars, a do/don't word list, and in-voice samples
+# tags: [creative, branding, voice, naming, copywriting]
+# category: creative
+
+name: brand-voice-kit
+description: One idea in, a complete brand voice out - 4 voice directions judged into names, taglines, voice pillars, a do/don't word list, and in-voice samples
+
+default_model: sonnet
+default_max_turns: 6
+default_timeout: 200
+
+input_schema:
+  required: ["what_youre_building"]
+  properties:
+    what_youre_building:
+      type: string
+      description: "One line about what you're building"
+      example: "a tool that lets agents run locally on your own hardware"
+    vibe:
+      type: string
+      description: "Optional vibe words, e.g. 'bold, warm, irreverent'"
+      example: "bold, confident, a little rebellious"
+
+steps:
+  - id: essence
+    prompt: >
+      From this one-liner, extract the product essence and audience in a few crisp bullets:
+      what it is, who it's for, the feeling it should leave behind, and (if given) the requested vibe.
+      One-liner: {input.what_youre_building}. Vibe (may be empty): {input.vibe}.
+    model: sonnet
+    max_turns: 4
+
+  - id: voice-insider
+    depends_on: [essence]
+    prompt: >
+      Propose a brand voice called "The Insider" (knowing, peer-to-peer, no fluff) for this essence:
+      {steps.essence.output}. Give 3 voice traits and one sample sentence in that voice.
+    model: sonnet
+    max_turns: 3
+
+  - id: voice-rebel
+    depends_on: [essence]
+    prompt: >
+      Propose a brand voice called "The Rebel" (bold, challenges the status quo) for this essence:
+      {steps.essence.output}. Give 3 voice traits and one sample sentence in that voice.
+    model: sonnet
+    max_turns: 3
+
+  - id: voice-mentor
+    depends_on: [essence]
+    prompt: >
+      Propose a brand voice called "The Mentor" (warm, guiding, reassuring) for this essence:
+      {steps.essence.output}. Give 3 voice traits and one sample sentence in that voice.
+    model: sonnet
+    max_turns: 3
+
+  - id: voice-minimalist
+    depends_on: [essence]
+    prompt: >
+      Propose a brand voice called "The Minimalist" (spare, calm, every word earns its place) for
+      this essence: {steps.essence.output}. Give 3 voice traits and one sample sentence in that voice.
+    model: sonnet
+    max_turns: 3
+
+  - id: judge
+    depends_on: [voice-insider, voice-rebel, voice-mentor, voice-minimalist]
+    prompt: >
+      You are a brand director. Four voice directions are below. Score each on memorability and
+      fit-to-audience, then crown ONE winner with a two-line justification.
+      INSIDER: {steps.voice-insider.output}
+      REBEL: {steps.voice-rebel.output}
+      MENTOR: {steps.voice-mentor.output}
+      MINIMALIST: {steps.voice-minimalist.output}
+    model: sonnet
+    max_turns: 5
+
+  - id: kit
+    depends_on: [judge]
+    prompt: >
+      Build the final Brand Voice Kit around the winning voice. Winner: {steps.judge.output}.
+      Include: 3 candidate brand names each with a tagline, 3 voice pillars, a do/don't word list
+      (8 do, 8 don't), and three in-voice samples (a tweet, a one-line email opener, and a button CTA).
+      Make it copy-paste ready for any writer.
+    model: sonnet
+    max_turns: 6
