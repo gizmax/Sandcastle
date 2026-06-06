@@ -2167,6 +2167,37 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
         connector_file="firecrawl.mjs",
         icon="firecrawl",
     ),
+    "websearch": ToolDefinition(
+        name="websearch",
+        description="Keyless free web search + clean content extraction (DuckDuckGo + Jina Reader; optional TOOL_JINA_API_KEY upgrades quality)",
+        category="ai",
+        functions=[
+            ToolFunction(
+                name="search",
+                description="Keyless web search returning clean, LLM-ready content",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "options": {"type": "object"},
+                    },
+                    "required": ["query"],
+                },
+            ),
+            ToolFunction(
+                name="extract",
+                description="Extract clean content from URLs",
+                parameters={
+                    "type": "object",
+                    "properties": {"urls": {"type": "array"}},
+                    "required": ["urls"],
+                },
+            ),
+        ],
+        credential_env_vars=[],
+        connector_file="websearch.mjs",
+        icon="search",
+    ),
     "tavily": ToolDefinition(
         name="tavily",
         description="Tavily - AI-optimized web search",

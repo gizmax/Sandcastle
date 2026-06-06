@@ -1,14 +1,18 @@
 # name: What Does AI Say About Your Brand?
-# description: Probe the model's own memory of your brand, then get a sentiment + positioning scorecard with the riskiest misperceptions and concrete fixes
-# tags: [marketing, brand, ai-perception, sentiment, geo]
+# description: Search the live web for what's said about your brand, compare it to what AI models believe, and get a sentiment + positioning scorecard with the riskiest gaps and concrete GEO fixes
+# tags: [marketing, brand, ai-perception, sentiment, geo, web]
 # category: marketing
 
 name: ai-brand-perception-audit
-description: Probe the model's own memory of your brand, then get a sentiment + positioning scorecard with the riskiest misperceptions and concrete fixes
+description: Search the live web for what's said about your brand, compare it to what AI models believe, and get a sentiment + positioning scorecard with the riskiest gaps and concrete GEO fixes
 
 default_model: sonnet
-default_max_turns: 6
-default_timeout: 180
+default_max_turns: 8
+default_timeout: 300
+# Live web search. `websearch` is keyless/free (DuckDuckGo + Jina Reader; optional
+# TOOL_JINA_API_KEY upgrades quality); Tavily is an optional paid fallback. Needs a
+# tool-capable (cloud) model - local models without tool use skip search and degrade.
+default_tools: [websearch, tavily]
 
 input_schema:
   required: ["brand"]
@@ -23,65 +27,57 @@ input_schema:
       example: "AI workflow orchestrator"
 
 steps:
-  - id: cold-probe
+  - id: web-listen
     prompt: >
-      You are answering a curious user with NO outside research - rely only on what you
-      already know. The brand is "{input.brand}" (category hint, may be empty: {input.category}).
-      Without hedging, tell them everything you associate with this brand:
-      a one-paragraph description, who it is for, what it is known/respected for,
-      its reputation, the 5 strongest word-associations that come to mind, and
-      who you would name as its main alternatives. If you are genuinely unsure whether
-      you know this brand, say so plainly. Do not invent specifics you are not confident about.
+      Use web search to find what is CURRENTLY being said about "{input.brand}"
+      (category hint, may be empty: {input.category}). Run several distinct searches, e.g.
+      the brand name, "{input.brand} reviews", "{input.brand} vs", "{input.brand} alternatives",
+      and recent news/launches. From the results collect: how the brand is described, who it's for,
+      its reputation, recurring praise and complaints, the competitors/alternatives people name,
+      pricing perception, and any notable recent coverage. Quote specifics and CITE the source URLs
+      you relied on. If results are thin, say so plainly rather than guessing.
+    model: sonnet
+    max_turns: 10
+
+  - id: ai-memory
+    prompt: >
+      Now answer from your OWN training memory only, with NO web search: what do you, as an AI model,
+      already believe about "{input.brand}"? Give a one-paragraph description, who it's for, its
+      reputation, the 5 strongest associations, and the alternatives you'd name. If you're not
+      confident you know this brand, say so plainly - do not invent specifics.
     model: sonnet
     max_turns: 4
 
-  - id: sentiment-positioning
-    depends_on: [cold-probe]
+  - id: gap-analysis
+    depends_on: [web-listen, ai-memory]
     prompt: >
-      Analyze the AI's raw impression below and turn it into a crisp positioning read.
-      Impression: {steps.cold-probe.output}
-
-      Produce: (1) an overall sentiment label (Positive / Neutral / Mixed / Negative) with a
-      one-line justification; (2) the perceived price/quality tier; (3) the single positioning
-      sentence an AI would give a customer who asked "what is {input.brand}?"; (4) the top 3
-      perceived strengths and top 3 perceived weaknesses; (5) the 5 strongest associations,
-      each flagged as on-brand or off-brand.
+      Compare the live web reality against the AI's memory.
+      WEB (current): {steps.web-listen.output}
+      AI MEMORY: {steps.ai-memory.output}
+      Identify: (1) where the AI is STALE or WRONG vs the web; (2) what the web shows that the AI
+      OMITS entirely; (3) any likely hallucinations (claims in AI memory not supported by the web).
+      Be specific - this gap is where the brand is most misrepresented by AI.
     model: sonnet
-    max_turns: 5
-
-  - id: blind-spots
-    depends_on: [cold-probe]
-    prompt: >
-      Act as a skeptical brand auditor. Looking at the AI's impression of "{input.brand}":
-      {steps.cold-probe.output}
-
-      List what the model is clearly UNSURE about, what it OMITS that a real buyer would want,
-      and any claims that look like guesses or possible hallucinations (stale facts, confused
-      with another company, made-up specifics). Be specific and honest - this is where the risk hides.
-    model: sonnet
-    max_turns: 4
+    max_turns: 6
 
   - id: scorecard
-    depends_on: [sentiment-positioning, blind-spots]
+    depends_on: [gap-analysis]
     prompt: >
-      Write a one-page "AI Perception Scorecard" for {input.brand}.
-      Positioning read: {steps.sentiment-positioning.output}
-      Blind spots & risks: {steps.blind-spots.output}
-
-      Format with these sections: a top-line Sentiment Score (one of Positive/Neutral/Mixed/Negative
-      plus a 0-100 confidence the model even knows the brand), "How AI describes you" (the positioning
-      line), "What's working", and "The 3 riskiest misperceptions" (the ones most likely to cost a sale).
-      Keep it skimmable.
+      Write a one-page "Brand Perception Scorecard" for {input.brand}, grounded in both web and AI.
+      Web + AI gap: {steps.gap-analysis.output}
+      Sections: a top-line Sentiment label (Positive/Neutral/Mixed/Negative) + a 0-100 confidence
+      the brand is even well-known; "How AI describes you" vs "How the web describes you" (one line
+      each); "What's working"; and "The 3 riskiest misperceptions" most likely to cost a sale.
     model: sonnet
-    max_turns: 5
+    max_turns: 6
 
   - id: action-plan
     depends_on: [scorecard]
     prompt: >
       Based on this scorecard for {input.brand}, give 5 concrete, prioritized moves to shift how
-      AI models describe the brand (Generative Engine Optimization): each move = what to publish or
-      change, why it works on LLMs, and the misperception it fixes. End with one re-test prompt the
-      user can run later to measure movement.
+      AI models and search describe the brand (Generative Engine Optimization): each move = what to
+      publish or change, why it works on LLMs/AI search, and the misperception it fixes. End with one
+      re-run note so the user can measure movement later.
       Scorecard: {steps.scorecard.output}
     model: haiku
     max_turns: 4

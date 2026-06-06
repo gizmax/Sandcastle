@@ -1,0 +1,66 @@
+# name: Competitor Teardown (Live)
+# description: Name a rival and get a web-researched teardown - live SWOT, positioning map, pricing read, and a ready-to-use sales battlecard
+# tags: [marketing, power, competitive, swot, battlecard, web]
+# category: marketing
+
+name: competitor-teardown-live
+description: Name a rival and get a web-researched teardown - live SWOT, positioning map, pricing read, and a ready-to-use sales battlecard
+
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 300
+# Live web research. `websearch` is keyless/free (DuckDuckGo + Jina Reader); Tavily
+# is an optional paid fallback (TOOL_TAVILY_API_KEY). Needs a tool-capable cloud model.
+default_tools: [websearch, tavily]
+
+input_schema:
+  required: ["competitor"]
+  properties:
+    competitor:
+      type: string
+      description: "Competitor to tear down"
+      example: "Acme CRM"
+    our_company:
+      type: string
+      description: "Optional - your company + one line, for head-to-head positioning"
+      example: "Sandcastle - local-first AI workflow orchestrator"
+
+steps:
+  - id: research
+    prompt: >
+      Use web search to build a current dossier on "{input.competitor}". Run several searches:
+      the product/site, "{input.competitor} pricing", "{input.competitor} reviews",
+      "{input.competitor} vs", and recent news/launches. Collect: what they sell, target customer,
+      pricing/packaging, positioning and messaging, notable customers, recent moves, and the praise
+      and complaints users actually voice. Quote specifics and CITE source URLs. Flag anything you
+      could not verify rather than guessing.
+    model: sonnet
+    max_turns: 12
+
+  - id: strengths
+    depends_on: [research]
+    prompt: >
+      From the live dossier, assess {input.competitor}'s real strengths and moats (product, brand,
+      distribution, pricing power, ecosystem). Dossier: {steps.research.output}
+    model: sonnet
+    max_turns: 5
+
+  - id: weaknesses
+    depends_on: [research]
+    prompt: >
+      From the live dossier, find {input.competitor}'s exploitable weaknesses and gaps (product holes,
+      common complaints, pricing friction, segments they underserve). Dossier: {steps.research.output}
+    model: sonnet
+    max_turns: 5
+
+  - id: battlecard
+    depends_on: [strengths, weaknesses]
+    prompt: >
+      Build the final teardown for {input.competitor}. Our side (may be empty): {input.our_company}.
+      Strengths: {steps.strengths.output}
+      Weaknesses: {steps.weaknesses.output}
+      Produce: a SWOT, a one-paragraph positioning read, a pricing read, and a sales BATTLECARD with
+      5 "when they say X, we say Y" objection handlers and the 3 sharpest ways to win against them.
+      Keep it skimmable and ready to hand a rep.
+    model: sonnet
+    max_turns: 6

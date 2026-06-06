@@ -40,8 +40,8 @@ const FEATURED_TEMPLATES: FeaturedTemplate[] = [
   {
     name: "What Does AI Say About Your Brand?",
     displayName: "AI Brand Audit",
-    description: "Probe the model's own memory of your brand - sentiment + positioning scorecard, the riskiest misperceptions, and 5 fixes.",
-    category: "Marketing",
+    description: "Searches the live web and compares it to what AI believes - sentiment + positioning scorecard, the riskiest gaps, and GEO fixes.",
+    category: "Live web",
     icon: ScanSearch,
     color: "text-[#60A5FA] bg-[#60A5FA]/10",
     inputSchema: {
@@ -55,8 +55,8 @@ const FEATURED_TEMPLATES: FeaturedTemplate[] = [
   {
     name: "Campaign-in-a-Box",
     displayName: "Campaign-in-a-Box",
-    description: "One product line in - big idea, 3 competing angles judged, channel copy, and a 4-week launch calendar out.",
-    category: "Marketing",
+    description: "Live market research, then a big idea, 3 judged angles, channel copy, and a 4-week launch calendar.",
+    category: "Live web",
     icon: Megaphone,
     color: "text-[#F472B6] bg-[#F472B6]/10",
     inputSchema: {
@@ -83,18 +83,17 @@ const FEATURED_TEMPLATES: FeaturedTemplate[] = [
     },
   },
   {
-    name: "Competitor Analysis",
+    name: "Competitor Teardown (Live)",
     displayName: "Competitor Teardown",
-    description: "Name a rival - get a full SWOT, a positioning map, and a ready-to-use sales battlecard.",
-    category: "Power",
+    description: "Name a rival - we web-research it live into a SWOT, a positioning + pricing read, and a sales battlecard.",
+    category: "Live web",
     icon: Swords,
     color: "text-[#34D399] bg-[#34D399]/10",
     inputSchema: {
       required: ["competitor"],
       properties: {
-        competitor: { type: "string", description: "Name of the competitor to analyze" },
-        our_company: { type: "string", description: "Your company name + a brief description for comparison" },
-        industry: { type: "string", description: "Industry / vertical for context, e.g. 'B2B SaaS'" },
+        competitor: { type: "string", description: "Competitor to tear down" },
+        our_company: { type: "string", description: "Optional - your company + one line, for head-to-head positioning" },
       },
     },
   },

@@ -8,7 +8,10 @@ description: One product line in, a launch-ready campaign out - big idea, 3 comp
 
 default_model: sonnet
 default_max_turns: 6
-default_timeout: 240
+default_timeout: 300
+# Live market research. `websearch` is keyless/free (DuckDuckGo + Jina Reader); Tavily
+# is an optional paid fallback (TOOL_TAVILY_API_KEY). Needs a tool-capable cloud model.
+default_tools: [websearch, tavily]
 
 input_schema:
   required: ["product_or_offer"]
@@ -23,10 +26,20 @@ input_schema:
       example: "launch announcement"
 
 steps:
-  - id: brief
+  - id: research
     prompt: >
-      Read this offer and write a tight creative brief. Offer: {input.product_or_offer}.
-      Goal (may be empty): {input.campaign_goal}.
+      Use web search to ground the campaign in reality for: {input.product_or_offer}
+      (goal, may be empty: {input.campaign_goal}). Search the category, the target audience's
+      language and real pains, how competitors currently position and message, and any recent
+      trends or angles worth riding. Summarize the live findings with a few cited source URLs.
+    model: sonnet
+    max_turns: 10
+
+  - id: brief
+    depends_on: [research]
+    prompt: >
+      Using the live research, write a tight creative brief. Offer: {input.product_or_offer}.
+      Goal (may be empty): {input.campaign_goal}. Research: {steps.research.output}
       Extract: the core promise, the target audience, the pain it removes, and the single most
       ownable "big idea" (one memorable sentence). Keep it to half a page.
     model: sonnet

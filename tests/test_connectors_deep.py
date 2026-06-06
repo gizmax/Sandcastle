@@ -475,11 +475,11 @@ class TestDuplicateDetection:
 # ---------------------------------------------------------------------------
 
 class TestTotalConnectorCount:
-    EXPECTED_REGISTRY_COUNT = 63  # 62 + gemini vision connector (tool-step UGC)
-    EXPECTED_MJS_ON_DISK = 64    # 63 + gemini.mjs
+    EXPECTED_REGISTRY_COUNT = 64  # 63 + websearch (keyless free web search)
+    EXPECTED_MJS_ON_DISK = 65    # 64 + websearch.mjs
 
     def test_registry_has_expected_count(self):
-        """TOOL_REGISTRY must have exactly 63 entries."""
+        """TOOL_REGISTRY must have exactly 64 entries."""
         count = len(TOOL_REGISTRY)
         assert count == self.EXPECTED_REGISTRY_COUNT, (
             f"Expected {self.EXPECTED_REGISTRY_COUNT} registry entries, got {count}. "
@@ -487,7 +487,7 @@ class TestTotalConnectorCount:
         )
 
     def test_mjs_files_on_disk_count(self):
-        """There must be exactly 64 .mjs files in connectors/ (63 tools + 1 utility)."""
+        """There must be exactly 65 .mjs files in connectors/ (64 tools + 1 utility)."""
         mjs_files = list(CONNECTORS_DIR.glob("*.mjs"))
         count = len(mjs_files)
         assert count == self.EXPECTED_MJS_ON_DISK, (
