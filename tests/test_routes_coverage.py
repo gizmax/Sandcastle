@@ -231,12 +231,12 @@ class TestStatsSparklines:
 class TestStatsHeatmap:
     """GET /stats/heatmap"""
 
-    def test_heatmap_returns_182_days(self):
-        """Heatmap always returns 182 cells (26 weeks)."""
+    def test_heatmap_returns_364_days(self):
+        """Heatmap always returns 364 cells (52 weeks)."""
         resp = client.get("/api/stats/heatmap")
         assert resp.status_code == 200
         cells = resp.json()["data"]
-        assert len(cells) == 182
+        assert len(cells) == 364
 
     def test_heatmap_cell_structure(self):
         """Each cell has date, count, day_of_week."""

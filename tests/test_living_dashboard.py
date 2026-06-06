@@ -121,11 +121,11 @@ class TestHeatmap:
         body = resp.json()
         assert "data" in body
 
-    def test_returns_182_days(self):
+    def test_returns_364_days(self):
         resp = client.get("/api/stats/heatmap")
         data = resp.json()["data"]
         assert isinstance(data, list)
-        assert len(data) == 182
+        assert len(data) == 364
 
     def test_cell_schema(self):
         resp = client.get("/api/stats/heatmap")
@@ -157,8 +157,8 @@ class TestHeatmap:
         """Days with no runs should appear with count=0, not be omitted."""
         resp = client.get("/api/stats/heatmap")
         data = resp.json()["data"]
-        # All 182 days must be present regardless of whether there are runs
-        assert len(data) == 182
+        # All 364 days must be present regardless of whether there are runs
+        assert len(data) == 364
 
     @pytest.mark.anyio
     async def test_counts_reflect_real_runs(self):

@@ -2647,11 +2647,11 @@ async def get_sparklines(request: Request, response: Response) -> ApiResponse:
 
 @router.get("/stats/heatmap")
 async def get_heatmap(request: Request, response: Response) -> ApiResponse:
-    """Return daily run counts for the last 26 weeks (182 days)."""
+    """Return daily run counts for the last 52 weeks (364 days)."""
     response.headers["Cache-Control"] = "public, max-age=60"
     tenant_id = get_tenant_id(request)
     now = datetime.now(timezone.utc)
-    start_date = now - timedelta(days=181)
+    start_date = now - timedelta(days=363)
 
     async with async_session() as session:
         daily_q = (
@@ -2672,9 +2672,9 @@ async def get_heatmap(request: Request, response: Response) -> ApiResponse:
         day_str = row.day.strftime("%Y-%m-%d") if hasattr(row.day, "strftime") else str(row.day)
         db_counts[day_str] = int(row.count)
 
-    # Zero-fill all 182 days
+    # Zero-fill all 364 days (52 weeks)
     cells = []
-    for i in range(181, -1, -1):
+    for i in range(363, -1, -1):
         d = now - timedelta(days=i)
         day_str = d.strftime("%Y-%m-%d")
         cells.append({

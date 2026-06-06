@@ -443,12 +443,12 @@ class TestStatsHeatmap:
         resp = client.get("/api/stats/heatmap")
         assert resp.status_code == 200
 
-    def test_returns_182_days(self):
-        """Heatmap covers 26 weeks = 182 days."""
+    def test_returns_364_days(self):
+        """Heatmap covers 52 weeks = 364 days."""
         resp = client.get("/api/stats/heatmap")
         data = resp.json()["data"]
         assert isinstance(data, list)
-        assert len(data) == 182
+        assert len(data) == 364
 
     def test_each_cell_has_date_count_day_of_week(self):
         resp = client.get("/api/stats/heatmap")

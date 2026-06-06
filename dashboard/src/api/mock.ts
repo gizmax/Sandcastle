@@ -6589,9 +6589,9 @@ const routes: MockRoute[] = [
         t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
         return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
       };
-      return Array.from({ length: 182 }, (_, idx) => {
+      return Array.from({ length: 364 }, (_, idx) => {
         const d = new Date(today);
-        d.setDate(d.getDate() - (181 - idx));
+        d.setDate(d.getDate() - (363 - idx));
         const dayOfWeek = (d.getDay() + 6) % 7; // 0=Mon ... 6=Sun
         const isWeekend = dayOfWeek >= 5;
         const maxRuns = isWeekend ? 8 : 30;
