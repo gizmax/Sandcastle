@@ -38,7 +38,16 @@ async function readerGet(target) {
       signal,
       headers: { Accept: "application/json", "User-Agent": UA, ...jinaAuth() },
     });
-    if (!resp.ok) throw new Error(`Jina Reader ${resp.status}`);
+    if (!resp.ok) {
+      if (resp.status === 429 || resp.status === 402) {
+        throw new Error(
+          "RATE_LIMIT: the free keyless web search hit its rate limit. " +
+            "Add a free TOOL_JINA_API_KEY (no card required, get one at jina.ai) to raise the limit, " +
+            "or configure the paid tavily fallback (TOOL_TAVILY_API_KEY)."
+        );
+      }
+      throw new Error(`Jina Reader ${resp.status}`);
+    }
     const data = await resp.json();
     return data?.data ?? data;
   } finally {
