@@ -1,23 +1,22 @@
 /**
- * Keyless web search + clean content extraction. FREE, no API key required.
+ * Keyless web search + clean content extraction. FREE, NO API KEY REQUIRED.
  *
- *   search:  DuckDuckGo Lite (keyless) for result links, then Jina Reader
- *            (https://r.jina.ai, keyless) to pull clean Markdown for the top hits.
- *            If TOOL_JINA_API_KEY is set, upgrade to s.jina.ai (one-shot, higher
- *            quality). Output shape mirrors tavily.mjs exactly (drop-in tool swap).
+ *   search:  Jina Reader (https://r.jina.ai, keyless) renders a DuckDuckGo SERP
+ *            server-side - this bypasses the bot-blocks that hit a direct scrape -
+ *            we parse the organic results, then Jina Reader pulls clean Markdown
+ *            for the top hits. If TOOL_JINA_API_KEY is set, upgrade to s.jina.ai
+ *            (one-shot). Output shape mirrors tavily.mjs exactly (drop-in swap).
  *   extract: Jina Reader (keyless).
  *
- * Credentials: NONE required. TOOL_JINA_API_KEY is OPTIONAL (lifts quality + limits).
- * Note: the keyless DuckDuckGo path is best-effort (HTML scrape, rate-limited); add a
- * free Jina key or fall back to the paid `tavily` tool for production reliability.
+ * Credentials: NONE required. TOOL_JINA_API_KEY is OPTIONAL (higher quality + limits).
  */
 
 const JINA_KEY = process.env.TOOL_JINA_API_KEY || "";
-const DDG_LITE = "https://lite.duckduckgo.com/lite/";
-const JINA_SEARCH = "https://s.jina.ai";
 const JINA_READER = "https://r.jina.ai";
+const JINA_SEARCH = "https://s.jina.ai";
+const SERP_URL = "https://html.duckduckgo.com/html/?q="; // read THROUGH the keyless reader
 const UA = "Mozilla/5.0 (compatible; SandcastleBot/1.0)";
-const TIMEOUT = 40_000;
+const TIMEOUT = 45_000;
 const EXTRACT_TOP_N = 5;
 
 function makeSignal() {
@@ -26,57 +25,55 @@ function makeSignal() {
   return { signal: controller.signal, clear: () => clearTimeout(timer) };
 }
 
-async function fetchText(url, init = {}) {
+function jinaAuth() {
+  return JINA_KEY ? { Authorization: `Bearer ${JINA_KEY}` } : {};
+}
+
+/** GET a URL through the keyless Jina Reader and return its { title, url, content }. */
+async function readerGet(target) {
   const { signal, clear } = makeSignal();
   try {
-    const resp = await fetch(url, { signal, headers: { "User-Agent": UA, ...(init.headers || {}) }, ...init });
-    if (!resp.ok) throw new Error(`${url} -> HTTP ${resp.status}`);
-    return resp.text();
+    const resp = await fetch(`${JINA_READER}/${target}`, {
+      method: "GET",
+      signal,
+      headers: { Accept: "application/json", "User-Agent": UA, ...jinaAuth() },
+    });
+    if (!resp.ok) throw new Error(`Jina Reader ${resp.status}`);
+    const data = await resp.json();
+    return data?.data ?? data;
   } finally {
     clear();
   }
 }
 
-async function fetchJson(url, init = {}) {
-  const text = await fetchText(url, { headers: { Accept: "application/json", ...(init.headers || {}) }, ...init });
-  return JSON.parse(text);
-}
-
-function jinaAuth() {
-  return JINA_KEY ? { Authorization: `Bearer ${JINA_KEY}` } : {};
-}
-
-function decodeEntities(s) {
-  return (s || "")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"').replace(/&#x27;|&#39;/g, "'").replace(/&nbsp;/g, " ")
-    .trim();
-}
-
-/** DuckDuckGo Lite keyless search -> [{title, url, snippet}]. Best-effort HTML parse. */
-async function ddgSearch(query, maxResults) {
-  const html = await fetchText(DDG_LITE, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: `q=${encodeURIComponent(query)}`,
-  });
-  const links = [...html.matchAll(/<a[^>]*class=["']result-link["'][^>]*href=["']([^"']+)["'][^>]*>(.*?)<\/a>/gis)];
-  const snippets = [...html.matchAll(/<td[^>]*class=["']result-snippet["'][^>]*>(.*?)<\/td>/gis)].map((m) => decodeEntities(m[1]));
+/** Parse the Reader's Markdown of a DuckDuckGo SERP into organic results. */
+function parseSerp(markdown, max) {
+  const blocks = (markdown || "").split(/\n##\s+/).slice(1); // each: "[title](url)\n snippet..."
   const out = [];
-  for (let i = 0; i < links.length && out.length < (maxResults || 8); i++) {
-    let href = links[i][1];
-    const uddg = href.match(/[?&]uddg=([^&]+)/);
-    if (uddg) href = decodeURIComponent(uddg[1]);
-    if (!/^https?:\/\//.test(href)) continue;
-    out.push({ title: decodeEntities(links[i][2]) || href, url: href, snippet: snippets[i] || "" });
+  for (const b of blocks) {
+    const m = b.match(/^\[([^\]]*)\]\((https?:\/\/[^)]+)\)/);
+    if (!m) continue;
+    let url = m[2];
+    const uddg = url.match(/[?&]uddg=([^&]+)/);
+    if (uddg) {
+      try { url = decodeURIComponent(uddg[1]); } catch { /* keep raw */ }
+    }
+    // Drop ads + DuckDuckGo-internal links; keep organic external results only.
+    if (!/^https?:\/\//.test(url) || url.includes("duckduckgo.com") || url.includes("/y.js")) continue;
+    const snippet = b
+      .slice(m[0].length)
+      .replace(/\[[^\]]*\]\([^)]*\)/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 300);
+    out.push({ title: m[1] || url, url, snippet });
+    if (out.length >= max) break;
   }
   return out;
 }
 
 async function jinaRead(url) {
-  const data = await fetchJson(`${JINA_READER}/${url}`, { headers: jinaAuth() });
-  const doc = data?.data ?? data;
+  const doc = await readerGet(url);
   return doc?.content ?? "";
 }
 
@@ -85,29 +82,44 @@ export async function search(query, options = "{}") {
   const opts = typeof options === "string" ? JSON.parse(options) : options;
   const max = opts.max_results || 5;
 
-  // Best path: keyed Jina returns search + content in one shot.
+  // Optional upgrade: keyed Jina returns search + content in one shot.
   if (JINA_KEY) {
     try {
-      const data = await fetchJson(`${JINA_SEARCH}/?q=${encodeURIComponent(query)}`, { headers: jinaAuth() });
-      const items = (Array.isArray(data?.data) ? data.data : []).slice(0, max);
-      return {
-        answer: null,
-        results: items.map((r) => ({
-          title: r.title ?? r.url ?? "",
-          url: r.url,
-          content: r.content ?? r.description ?? "",
-          score: null,
-          published_date: r.date ?? null,
-        })),
-        query,
-      };
+      const { signal, clear } = makeSignal();
+      try {
+        const resp = await fetch(`${JINA_SEARCH}/?q=${encodeURIComponent(query)}`, {
+          method: "GET",
+          signal,
+          headers: { Accept: "application/json", ...jinaAuth() },
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          const items = (Array.isArray(data?.data) ? data.data : []).slice(0, max);
+          if (items.length) {
+            return {
+              answer: null,
+              results: items.map((r) => ({
+                title: r.title ?? r.url ?? "",
+                url: r.url,
+                content: r.content ?? r.description ?? "",
+                score: null,
+                published_date: r.date ?? null,
+              })),
+              query,
+            };
+          }
+        }
+      } finally {
+        clear();
+      }
     } catch {
-      // fall through to the keyless path
+      /* fall through to keyless */
     }
   }
 
-  // Keyless path: DDG Lite for links, Jina Reader for clean content on the top hits.
-  const hits = await ddgSearch(query, max);
+  // Keyless: read a DuckDuckGo SERP through Jina Reader, then read the top hits.
+  const serp = await readerGet(`${SERP_URL}${encodeURIComponent(query)}`);
+  const hits = parseSerp(serp?.content, max);
   const results = [];
   for (let i = 0; i < hits.length; i++) {
     let content = hits[i].snippet;
@@ -115,19 +127,12 @@ export async function search(query, options = "{}") {
       try {
         const full = await jinaRead(hits[i].url);
         if (full) content = full;
-      } catch {
-        // keep the snippet as content
-      }
+      } catch { /* keep snippet */ }
     }
     results.push({ title: hits[i].title, url: hits[i].url, content, score: null, published_date: null });
   }
-  // Keyless search backends are frequently bot-blocked. If we got nothing, throw so
-  // the agent falls through to the next tool in the list (e.g. paid tavily) instead
-  // of silently returning an empty result set.
   if (results.length === 0) {
-    throw new Error(
-      "websearch: no keyless results (DuckDuckGo blocked). Set TOOL_JINA_API_KEY (free, no card) or configure the tavily fallback."
-    );
+    throw new Error("websearch: no results (search backend unavailable). Try the tavily fallback.");
   }
   return { answer: null, results, query };
 }
