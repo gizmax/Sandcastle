@@ -216,6 +216,9 @@ function StepRun({
 }) {
   const [status, setStatus] = useState<"idle" | "running" | "done" | "error">("idle");
   const [output, setOutput] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState("");
+  const isWeb = template?.category === "Live web";
+  const rateLimited = /rate.?limit|RATE_LIMIT|429/i.test(errorMsg);
 
   const run = async () => {
     if (!template) return;
@@ -240,7 +243,8 @@ function StepRun({
       const res = await api.post<RunResult>("/workflows/run", body);
       setOutput(firstOutput(res.data?.outputs) || "Workflow completed successfully.");
       setStatus("done");
-    } catch {
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : "");
       setStatus("error");
     }
   };
@@ -253,6 +257,12 @@ function StepRun({
           Let's run <span className="font-medium text-foreground">{template?.name ?? "your workflow"}</span> once to see it work.
         </p>
       </div>
+
+      {isWeb && (
+        <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-xs text-muted-foreground">
+          🌐 Uses <strong className="text-foreground">live web search</strong> - free, no key needed. Hitting limits? Add a free Jina key (no card) in Settings &rarr; Integrations.
+        </div>
+      )}
 
       <div className="rounded-xl border border-border p-5 space-y-4">
         {status === "idle" && (
@@ -292,9 +302,16 @@ function StepRun({
 
         {status === "error" && (
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">
-              Couldn't complete the run here - but your setup is ready. You can run flows from the dashboard.
-            </p>
+            {rateLimited ? (
+              <p className="text-sm text-amber-500">
+                Free web-search rate limit reached. Add a free Jina key (no card) in
+                Settings &rarr; Integrations &rarr; Web Search to raise the limit, then retry.
+              </p>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Couldn't complete the run here - but your setup is ready. You can run flows from the dashboard.
+              </p>
+            )}
             <button
               onClick={() => void run()}
               className="inline-flex items-center gap-1.5 text-xs font-medium text-accent hover:text-accent-hover transition-colors"

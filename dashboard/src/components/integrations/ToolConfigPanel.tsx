@@ -23,6 +23,9 @@ interface Tool {
   credential_env_vars: string[];
   functions: { name: string; description: string }[];
   connections?: ToolConnection[];
+  keyless?: boolean;
+  optional_credential_env_vars?: string[];
+  optional_present?: string[];
 }
 
 interface ToolConfigPanelProps {
@@ -48,9 +51,8 @@ export function ToolConfigPanel({ tool, onClose, onSaved }: ToolConfigPanelProps
   useEffect(() => {
     if (tool) {
       const init: Record<string, string> = {};
-      for (const v of tool.credential_env_vars) {
-        init[v] = "";
-      }
+      for (const v of tool.credential_env_vars) init[v] = "";
+      for (const v of tool.optional_credential_env_vars ?? []) init[v] = "";
       setValues(init);
       setVisible({});
     }
@@ -97,6 +99,9 @@ export function ToolConfigPanel({ tool, onClose, onSaved }: ToolConfigPanelProps
   const colors = CATEGORY_COLORS[tool.category] ?? CATEGORY_COLORS.general;
   const catLabel = CATEGORY_LABELS[tool.category] ?? tool.category;
   const hasVars = tool.credential_env_vars.length > 0;
+  const optionalVars = tool.optional_credential_env_vars ?? [];
+  const hasOptional = optionalVars.length > 0;
+  const optionalSet = (tool.optional_present ?? []).length > 0;
 
   return (
     <>
@@ -156,7 +161,14 @@ export function ToolConfigPanel({ tool, onClose, onSaved }: ToolConfigPanelProps
 
           {/* Status */}
           <div className="flex items-center gap-2">
-            {tool.configured ? (
+            {tool.keyless ? (
+              <>
+                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                <span className="text-sm text-emerald-500 font-medium">
+                  Free - works with no key{optionalSet ? " - key added" : ""}
+                </span>
+              </>
+            ) : tool.configured ? (
               <>
                 <CheckCircle2 className="h-4 w-4 text-emerald-500" />
                 <span className="text-sm text-emerald-500 font-medium">All credentials configured</span>
@@ -227,6 +239,60 @@ export function ToolConfigPanel({ tool, onClose, onSaved }: ToolConfigPanelProps
             </div>
           )}
 
+          {/* Optional upgrade key (keyless tools) */}
+          {hasOptional && (
+            <div className="space-y-3 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-4">
+              <h3 className="text-sm font-medium text-foreground">Optional - raise the rate limit</h3>
+              <p className="text-xs text-muted">
+                This tool is free and works with no key. Add an optional key to lift the rate limit.
+                {tool.name === "websearch" && (
+                  <>
+                    {" "}
+                    <a href="https://jina.ai" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
+                      Get a free Jina key (no card)
+                    </a>.
+                  </>
+                )}
+              </p>
+              {optionalVars.map((envVar) => {
+                const isVisible = visible[envVar] ?? false;
+                const credInfo = CREDENTIAL_LABELS[envVar];
+                const displayLabel = credInfo?.label ?? autoLabel(envVar, tool.name);
+                const isSet = (tool.optional_present ?? []).includes(envVar);
+                return (
+                  <div key={envVar}>
+                    <label className="mb-0.5 flex items-center gap-2 text-sm font-medium text-foreground">
+                      {displayLabel}
+                      <span className={cn(
+                        "rounded px-1.5 py-0.5 text-[10px] font-semibold",
+                        isSet ? "bg-emerald-500/15 text-emerald-500" : "bg-border/60 text-muted"
+                      )}>
+                        {isSet ? "SET" : "OPTIONAL"}
+                      </span>
+                    </label>
+                    <p className="text-[11px] text-muted-foreground mt-0.5 mb-1.5 font-mono">{envVar}</p>
+                    <div className="relative">
+                      <input
+                        type={isVisible ? "text" : "password"}
+                        value={values[envVar] ?? ""}
+                        onChange={(e) => setValues((prev) => ({ ...prev, [envVar]: e.target.value }))}
+                        placeholder={credInfo?.hint ?? "Optional - enter a key to raise limits..."}
+                        className="w-full rounded-lg border border-border bg-background px-3 py-2 pr-10 text-sm text-foreground placeholder:text-muted-foreground/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:border-accent transition-colors"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setVisible((prev) => ({ ...prev, [envVar]: !isVisible }))}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted hover:text-foreground transition-colors"
+                      >
+                        {isVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           {/* Named Connections */}
           {hasVars && (
             <ConnectionsSection tool={tool} onSaved={onSaved} />
@@ -254,7 +320,7 @@ export function ToolConfigPanel({ tool, onClose, onSaved }: ToolConfigPanelProps
         </div>
 
         {/* Footer */}
-        {hasVars && (
+        {(hasVars || hasOptional) && (
           <div className="flex items-center justify-end gap-3 border-t border-border px-6 py-4">
             <button
               onClick={onClose}

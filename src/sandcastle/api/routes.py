@@ -9117,6 +9117,7 @@ _SENSITIVE_KEYS = frozenset({
     "tool_cloudflare_api_token",
     "tool_firecrawl_api_key",
     "tool_tavily_api_key",
+    "tool_jina_api_key",
     "tool_elevenlabs_api_key",
     "tool_nano_banana_api_key",
     "tool_zapier_webhook_url",
@@ -10815,6 +10816,9 @@ async def _build_tool_response(
         configured=status.get("configured", False),
         missing_credentials=status.get("missing", []),
         connections=connections or [],
+        keyless=status.get("keyless", False),
+        optional_credential_env_vars=getattr(tool, "optional_credential_env_vars", []),
+        optional_present=status.get("optional_present", []),
     )
 
 
@@ -10908,8 +10912,11 @@ async def update_tool_credentials(
             ).model_dump(),
         )
 
-    # Only allow setting env vars that belong to this tool
-    allowed = set(tool.credential_env_vars)
+    # Only allow setting env vars that belong to this tool (required + optional
+    # upgrade keys, e.g. a free key that lifts a keyless tool's rate limit).
+    allowed = set(tool.credential_env_vars) | set(
+        getattr(tool, "optional_credential_env_vars", [])
+    )
     rejected = set(body.credentials.keys()) - allowed
     if rejected:
         raise HTTPException(

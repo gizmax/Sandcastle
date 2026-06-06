@@ -165,10 +165,18 @@ def validate_tool_credentials(tool_names: list[str]) -> dict[str, dict]:
             else:
                 missing.append(env_var)
 
+        optional = list(getattr(tool, "optional_credential_env_vars", []) or [])
+        optional_present = [v for v in optional if os.environ.get(v)]
+
         result[name] = {
             "configured": len(missing) == 0 and len(tool.credential_env_vars) > 0,
             "missing": missing,
             "present": present,
+            # Keyless tools (no required creds) report whether an optional upgrade
+            # key is set - drives the "free / keyed" status in the dashboard.
+            "keyless": len(tool.credential_env_vars) == 0,
+            "optional": optional,
+            "optional_present": optional_present,
         }
     return result
 

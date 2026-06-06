@@ -39,6 +39,9 @@ interface Tool {
   credential_env_vars: string[];
   functions: { name: string; description: string }[];
   connections: ToolConnection[];
+  keyless?: boolean;
+  optional_credential_env_vars?: string[];
+  optional_present?: string[];
 }
 
 const CATEGORIES = [
@@ -102,7 +105,8 @@ export default function IntegrationsPage() {
   const configuredTools = useMemo(
     () =>
       tools
-        .filter((t) => t.configured)
+        // Keyless tools (e.g. free web search) are ready to use with no setup.
+        .filter((t) => t.configured || t.keyless)
         .sort((a, b) => {
           const aNeedsAttention = a.missing_credentials.length > 0 ? 0 : 1;
           const bNeedsAttention = b.missing_credentials.length > 0 ? 0 : 1;
@@ -114,7 +118,7 @@ export default function IntegrationsPage() {
   );
 
   const unconfiguredTools = useMemo(
-    () => tools.filter((t) => !t.configured),
+    () => tools.filter((t) => !t.configured && !t.keyless),
     [tools],
   );
 

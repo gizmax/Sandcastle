@@ -8,7 +8,7 @@ loader, and dashboard UI.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -31,6 +31,9 @@ class ToolDefinition:
     credential_env_vars: list[str]  # Required env vars (e.g. ["TOOL_SLACK_BOT_TOKEN"])
     connector_file: str  # Filename in connectors/ (e.g. "slack.mjs")
     icon: str = ""  # Optional icon identifier for dashboard
+    # Env vars that are NOT required (the tool works without them) but, if set,
+    # upgrade it - e.g. a free key that lifts a keyless tool's rate limit.
+    optional_credential_env_vars: list[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -2195,6 +2198,7 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
             ),
         ],
         credential_env_vars=[],
+        optional_credential_env_vars=["TOOL_JINA_API_KEY"],
         connector_file="websearch.mjs",
         icon="search",
     ),

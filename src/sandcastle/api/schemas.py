@@ -915,6 +915,10 @@ class ToolResponse(BaseModel):
     configured: bool = False
     missing_credentials: list[str] = []
     connections: list[ToolConnectionResponse] = []
+    # Keyless tools work with no required creds; an optional key may upgrade them.
+    keyless: bool = False
+    optional_credential_env_vars: list[str] = []
+    optional_present: list[str] = []
 
 
 class ToolListResponse(BaseModel):
