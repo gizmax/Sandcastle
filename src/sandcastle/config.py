@@ -200,6 +200,12 @@ class Settings(BaseSettings):
     otel_endpoint: str = ""  # OTLP HTTP endpoint, e.g. "http://localhost:4318"
     otel_service_name: str = "sandcastle"  # Service name reported in traces
 
+    # Verified template marketplace - static index of .sctpl bundles used by
+    # `sandcastle template search`. Point this at any static index.json you host.
+    template_index_url: str = (
+        "https://raw.githubusercontent.com/gizmax/Sandcastle/main/hub/template-index.json"
+    )
+
     # Auto-update settings
     update_channel: str = "stable"  # "stable" | "beta" | "pin"
     pinned_version: str = ""  # only used with "pin" channel
