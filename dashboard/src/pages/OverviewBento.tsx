@@ -51,7 +51,7 @@ export default function OverviewBento() {
 
   if (isEmpty) {
     return (
-      <div className="space-y-4 sm:space-y-5">
+      <div className="space-y-4 sm:space-y-5 settle-stagger">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-accent">
@@ -85,7 +85,7 @@ export default function OverviewBento() {
   }
 
   return (
-    <div className="space-y-4 sm:space-y-5">
+    <div className="space-y-4 sm:space-y-5 settle-stagger">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-accent">

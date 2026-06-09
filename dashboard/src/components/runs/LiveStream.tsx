@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSSE } from "@/hooks/useSSE";
 import { cn } from "@/lib/utils";
 
@@ -10,6 +10,15 @@ export function LiveStream({ runId }: LiveStreamProps) {
   const { events, connected } = useSSE(`/runs/${runId}/stream`);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // "Data flowing" indicator: true while events arrived in the last ~2s.
+  const [flowing, setFlowing] = useState(false);
+  useEffect(() => {
+    if (events.length === 0) return;
+    setFlowing(true);
+    const timer = setTimeout(() => setFlowing(false), 2000);
+    return () => clearTimeout(timer);
+  }, [events]);
+
   useEffect(() => {
     if (containerRef.current) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight;
@@ -17,7 +26,12 @@ export function LiveStream({ runId }: LiveStreamProps) {
   }, [events]);
 
   return (
-    <div className="rounded-xl border border-border bg-background shadow-sm overflow-hidden">
+    <div
+      className={cn(
+        "relative rounded-xl border border-border bg-background shadow-sm overflow-hidden",
+        flowing && "surface-flowing"
+      )}
+    >
       <div className="flex items-center gap-2 border-b border-border px-4 py-2">
         <div
           className={cn(
@@ -31,7 +45,7 @@ export function LiveStream({ runId }: LiveStreamProps) {
       </div>
       <div
         ref={containerRef}
-        className="max-h-96 overflow-y-auto p-4 font-mono text-xs leading-relaxed"
+        className="surface-live max-h-96 overflow-y-auto p-4 font-mono text-xs leading-relaxed"
       >
         {events.length === 0 ? (
           <p className="text-muted">Waiting for events...</p>
@@ -44,6 +58,11 @@ export function LiveStream({ runId }: LiveStreamProps) {
               </span>
             </div>
           ))
+        )}
+        {connected && (
+          <span className="surface-live-cursor" aria-hidden="true">
+            ▊
+          </span>
         )}
       </div>
     </div>
