@@ -348,3 +348,29 @@ class TestAuditVerifyCli:
             _cmd_audit_verify(self._args(str(path), key="wrong-key"))
         assert exc_info.value.code == 1
         assert "INVALID" in capsys.readouterr().out
+
+
+class TestLegacyCassettes:
+    def test_v1_cassette_without_chain_verifies_via_legacy_signature(self, tmp_path):
+        """Cassettes recorded before the hash chain existed still verify (and still
+        flag tampering) via their original whole-file signature."""
+        import hashlib
+
+        path = tmp_path / "v1.cassette.json"
+        records = {"k": {"output": "old", "cost_usd": 0.01, "model": "m", "step_id": "s"}}
+        signature = hashlib.sha256(
+            json.dumps(records, sort_keys=True, default=str).encode()
+        ).hexdigest()
+        path.write_text(json.dumps({
+            "meta": {"version": 1, "step_count": 1, "signature": signature},
+            "records": records,
+        }))
+        v = verify_cassette(path)
+        assert v.valid and v.chain_length == 0 and v.signature_ok is None
+
+        data = json.loads(path.read_text())
+        data["records"]["k"]["output"] = "tampered"
+        path.write_text(json.dumps(data))
+        v2 = verify_cassette(path)
+        assert not v2.valid
+        assert "legacy" in v2.reason

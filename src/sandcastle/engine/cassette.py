@@ -319,6 +319,20 @@ def verify_cassette(path: str | Path, key: str | None = None) -> CassetteVerific
     store.chain = data.get("chain", [])
     store.meta = data.get("meta", {})
 
+    # Legacy v1 cassette (recorded before the hash chain existed): no chain to
+    # walk, so fall back to the whole-file signature it was recorded with.
+    if not store.chain and store.records and "chain" not in data:
+        chain_ok = store.verify()
+        return CassetteVerification(
+            valid=chain_ok,
+            chain_ok=chain_ok,
+            signature_ok=None,
+            chain_length=0,
+            chain_head=CHAIN_GENESIS,
+            first_broken_index=None,
+            reason=None if chain_ok else "legacy cassette signature mismatch (v1, no chain)",
+        )
+
     chain_ok, broken_idx, reason = store.verify_chain()
     stored_head = store.meta.get("chain_head")
     if chain_ok and stored_head is not None and stored_head != store.chain_head():
