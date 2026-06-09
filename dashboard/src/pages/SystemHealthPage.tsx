@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { api } from "@/api/client";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { Odometer } from "@/components/ui/Odometer";
 import { cn } from "@/lib/utils";
 
 // -- Types ------------------------------------------------------------------
@@ -437,25 +438,25 @@ export default function SystemHealthPage() {
           <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
             <p className="text-xs font-medium text-muted-foreground">Total Runs (today)</p>
             <p className="mt-1 text-xl sm:text-2xl font-semibold text-foreground font-mono">
-              {quickStats.runs}
+              <Odometer value={quickStats.runs} />
             </p>
           </div>
           <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
             <p className="text-xs font-medium text-muted-foreground">Workflows</p>
             <p className="mt-1 text-xl sm:text-2xl font-semibold text-foreground font-mono">
-              {quickStats.workflows}
+              <Odometer value={quickStats.workflows} />
             </p>
           </div>
           <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
             <p className="text-xs font-medium text-muted-foreground">Templates</p>
             <p className="mt-1 text-xl sm:text-2xl font-semibold text-foreground font-mono">
-              {quickStats.templates}
+              <Odometer value={quickStats.templates} />
             </p>
           </div>
           <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
             <p className="text-xs font-medium text-muted-foreground">API Keys</p>
             <p className="mt-1 text-xl sm:text-2xl font-semibold text-foreground font-mono">
-              {quickStats.apiKeys}
+              <Odometer value={quickStats.apiKeys} />
             </p>
           </div>
         </div>

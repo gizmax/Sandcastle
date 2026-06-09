@@ -1,4 +1,5 @@
 import { Activity, CheckCircle, DollarSign, Timer } from "lucide-react";
+import { Odometer } from "@/components/ui/Odometer";
 import { cn, formatCost } from "@/lib/utils";
 import type { SparklineData } from "./bentoTypes";
 
@@ -45,7 +46,7 @@ export function TrendBadge({ percent, positiveIsGood }: { percent: number; posit
 
 interface StatCardProps {
   label: string;
-  value: string;
+  value: React.ReactNode;
   icon: React.ElementType;
   iconBg: string;
   iconColor: string;
@@ -61,7 +62,7 @@ export function BentoStatCard({
     <div className={cn(
       "bg-surface rounded-2xl shadow-sm border border-border",
       "p-6",
-      "hover:border-accent/30 transition-all duration-300",
+      "hover:border-accent/30 transition-settle",
       "flex flex-col gap-3",
     )}>
       <div className="flex items-start justify-between">
@@ -101,7 +102,7 @@ export function BentoStatsRow({
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
       <BentoStatCard
         label="Runs Today"
-        value={String(totalRuns)}
+        value={<Odometer value={totalRuns} />}
         icon={Activity}
         iconColor="text-accent"
         iconBg="bg-accent/10"
@@ -110,7 +111,7 @@ export function BentoStatsRow({
       />
       <BentoStatCard
         label="Success Rate"
-        value={`${successRate}%`}
+        value={<Odometer value={successRate} format={(v) => `${Math.round(v)}%`} />}
         icon={CheckCircle}
         iconColor="text-success"
         iconBg="bg-success/10"
@@ -119,7 +120,7 @@ export function BentoStatsRow({
       />
       <BentoStatCard
         label="Cost Today"
-        value={formatCost(totalCost)}
+        value={<Odometer value={totalCost} format={formatCost} />}
         icon={DollarSign}
         iconColor="text-running"
         iconBg="bg-running/10"
@@ -128,7 +129,7 @@ export function BentoStatsRow({
       />
       <BentoStatCard
         label="Avg Duration"
-        value={avgDuration > 0 ? `${Math.round(avgDuration)}s` : "n/a"}
+        value={avgDuration > 0 ? <Odometer value={avgDuration} format={(v) => `${Math.round(v)}s`} /> : "n/a"}
         icon={Timer}
         iconColor="text-muted-foreground"
         iconBg="bg-border"

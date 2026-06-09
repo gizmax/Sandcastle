@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { ArrowRight, CheckCircle2, DollarSign } from "lucide-react";
+import { Odometer } from "@/components/ui/Odometer";
 import { cn, formatCost } from "@/lib/utils";
 import type { Insight, Severity } from "@/lib/insights";
 
@@ -29,7 +30,7 @@ export function BentoHealthHero({
   return (
     <div className={cn(
       "bg-surface rounded-2xl shadow-sm border border-border",
-      "hover:border-accent/30 transition-all duration-300",
+      "hover:border-accent/30 transition-settle",
       "p-6 flex flex-col gap-4 h-full relative",
     )}>
       <div className="absolute top-5 right-5">
@@ -55,7 +56,7 @@ export function BentoHealthHero({
           Workflow Command Center
         </p>
         <p className="font-display text-5xl font-bold text-foreground tracking-tight leading-none">
-          {totalRuns}
+          <Odometer value={totalRuns} />
         </p>
         <p className="mt-1 text-sm text-muted-foreground">workflows ran today</p>
       </div>
@@ -67,7 +68,7 @@ export function BentoHealthHero({
         </span>
         <span className="inline-flex items-center gap-1.5 rounded-full bg-accent/10 border border-accent/20 px-3 py-1.5 text-xs font-semibold text-accent">
           <DollarSign className="h-3 w-3" />
-          {formatCost(totalCost)} cost
+          <Odometer value={totalCost} format={formatCost} /> cost
         </span>
         <span className="inline-flex items-center gap-1.5 rounded-full bg-running/10 border border-running/20 px-3 py-1.5 text-xs font-semibold text-running">
           <span className="h-1.5 w-1.5 rounded-full bg-running" />

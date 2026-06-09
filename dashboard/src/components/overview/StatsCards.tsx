@@ -1,4 +1,5 @@
 import { Activity, CheckCircle, DollarSign, Timer, TrendingUp, TrendingDown } from "lucide-react";
+import { Odometer } from "@/components/ui/Odometer";
 import { cn } from "@/lib/utils";
 import { formatCost, formatDuration } from "@/lib/utils";
 
@@ -148,7 +149,7 @@ export function StatsCards({
             key={card.key}
             className={cn(
               "rounded-xl border border-border bg-surface p-5",
-              "shadow-sm transition-all duration-200 hover:shadow-md"
+              "shadow-sm transition-settle hover:shadow-md"
             )}
           >
             <div className="flex items-center gap-3">
@@ -167,7 +168,7 @@ export function StatsCards({
                 </div>
                 <div className="flex items-center justify-between gap-2">
                   <p className="font-data text-xl font-semibold tracking-tight text-foreground">
-                    {card.format(values[card.key])}
+                    <Odometer value={values[card.key]} format={card.format} />
                   </p>
                   {spark && spark.values.length >= 2 && (
                     <Sparkline values={spark.values} color={card.sparkColor} />
