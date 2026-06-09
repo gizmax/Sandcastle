@@ -1,0 +1,147 @@
+/* ──── Status lights: control-room indicator language ────
+   Statuses render as physical indicator LEDs instead of pill badges.
+   Color comes in via --led-color (set inline by StatusLed / StepNode);
+   glow strength is theme-scoped: phosphor glow in dark, subtle halo in light. */
+
+:root {
+  /* glow opacity (0-100, used as a percentage inside color-mix) */
+  --led-glow: 45;
+}
+
+.dark {
+  --led-glow: 80;
+}
+
+.led {
+  --led-color: var(--color-muted);
+  display: inline-block;
+  border-radius: 9999px;
+  background-color: var(--led-color);
+}
+
+/* steady on: solid dot with a quiet halo (completed / healthy / production) */
+.led--on,
+.led--flicker {
+  box-shadow:
+    0 0 4px color-mix(in srgb, var(--led-color) calc(var(--led-glow) * 0.7%), transparent),
+    0 0 10px color-mix(in srgb, var(--led-color) calc(var(--led-glow) * 0.35%), transparent);
+}
+
+/* breathing: slow 2s pulse with a soft outer glow (running / awaiting input) */
+.led--breathing {
+  animation: led-breathe 2s ease-in-out infinite;
+}
+
+@keyframes led-breathe {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow:
+      0 0 5px color-mix(in srgb, var(--led-color) calc(var(--led-glow) * 0.8%), transparent),
+      0 0 14px color-mix(in srgb, var(--led-color) calc(var(--led-glow) * 0.45%), transparent);
+  }
+  50% {
+    opacity: 0.45;
+    box-shadow:
+      0 0 2px color-mix(in srgb, var(--led-color) calc(var(--led-glow) * 0.4%), transparent),
+      0 0 6px color-mix(in srgb, var(--led-color) calc(var(--led-glow) * 0.15%), transparent);
+  }
+}
+
+/* flicker: a single brief stutter on mount, then steady (failed). No infinite blink. */
+.led--flicker {
+  animation: led-flicker 0.65s linear 1;
+}
+
+@keyframes led-flicker {
+  0% { opacity: 1; }
+  12% { opacity: 0.15; }
+  24% { opacity: 1; }
+  38% { opacity: 0.3; }
+  52% { opacity: 1; }
+  68% { opacity: 0.2; }
+  82% { opacity: 0.9; }
+  100% { opacity: 1; }
+}
+
+/* dim: light is wired but barely lit (queued / pending / draft) */
+.led--dim {
+  opacity: 0.4;
+  box-shadow: none;
+}
+
+/* hollow: empty socket ring (cancelled / skipped / paused / archived) */
+.led--hollow {
+  background-color: transparent;
+  border: 1.5px solid color-mix(in srgb, var(--led-color) 70%, transparent);
+  box-shadow: none;
+}
+
+/* mono micro label next to the light (lowercase, consistent app-wide) */
+.led-label {
+  font-family: var(--font-mono);
+  text-transform: lowercase;
+  letter-spacing: 0.05em;
+  line-height: 1;
+}
+
+/* ──── DAG light trails (xyflow edges) ──── */
+
+/* trail out of a completed step: steady success glow */
+.react-flow__edge.dag-edge-trail .react-flow__edge-path {
+  stroke: var(--color-success);
+  stroke-width: 2;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--color-success) calc(var(--led-glow) * 1%), transparent));
+}
+
+/* edge feeding the currently running step: flowing light */
+.react-flow__edge.dag-edge-active .react-flow__edge-path {
+  stroke: var(--color-running);
+  stroke-width: 2.5;
+  stroke-dasharray: 7 7;
+  animation: dag-flow 0.8s linear infinite;
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--color-running) calc(var(--led-glow) * 1%), transparent));
+}
+
+@keyframes dag-flow {
+  to {
+    stroke-dashoffset: -14;
+  }
+}
+
+/* edge into a failed step: red-tinted, no flow */
+.react-flow__edge.dag-edge-failed .react-flow__edge-path {
+  stroke: color-mix(in srgb, var(--color-error) 75%, transparent);
+  stroke-width: 2;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--color-error) calc(var(--led-glow) * 0.8%), transparent));
+}
+
+/* unlit wiring between idle steps */
+.react-flow__edge.dag-edge-idle .react-flow__edge-path {
+  stroke: var(--color-border);
+  stroke-width: 2;
+}
+
+/* ──── Indicator board (System Health) ──── */
+
+.indicator-board-row {
+  transition: background-color 150ms ease;
+}
+
+.indicator-board-row:hover {
+  background-color: color-mix(in srgb, var(--color-border) 12%, transparent);
+}
+
+/* Accessibility: stop indicator animations for users who prefer reduced motion
+   (mirrors the exclusion-list pattern in index.css) */
+@media (prefers-reduced-motion: reduce) {
+  .led--breathing,
+  .led--flicker {
+    animation: none !important;
+    opacity: 1;
+  }
+  .react-flow__edge.dag-edge-active .react-flow__edge-path {
+    animation: none !important;
+    stroke-dasharray: none;
+  }
+}

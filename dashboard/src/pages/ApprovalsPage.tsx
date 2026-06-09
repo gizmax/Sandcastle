@@ -3,6 +3,7 @@ import { ShieldCheck, Clock, CheckCircle2, XCircle, SkipForward, RefreshCw, Mess
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { StatusLed } from "@/components/ui/StatusLed";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { formatRelativeTime, cn, isSafeUrl } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
@@ -296,17 +297,12 @@ export default function ApprovalsPage() {
                     </div>
                   </div>
 
-                  {/* Status badge */}
-                  <span
-                    className={cn(
-                      "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium",
-                      style.bg,
-                      style.text
-                    )}
-                  >
-                    <span className={cn("h-1.5 w-1.5 rounded-full", style.dot)} />
-                    {style.label}
-                  </span>
+                  {/* Status light: pending approval breathes amber, like awaiting_approval runs */}
+                  <StatusLed
+                    status={item.status === "pending" ? "awaiting_approval" : item.status}
+                    label={style.label}
+                    className="shrink-0"
+                  />
 
                   {/* Action buttons (only for pending) */}
                   {isPending && (

@@ -1,8 +1,9 @@
 import { memo } from "react";
 import { Handle, Position, type NodeProps, type Node } from "@xyflow/react";
 import { Bell, Brain, Code, Cpu, ExternalLink, FileSpreadsheet, FileText, FlaskConical, Gauge, GitBranch, Globe, MessageSquare, Monitor, Radio, RefreshCw, Repeat, ShieldCheck, Shuffle, Tag, Wrench, Zap } from "lucide-react";
+import type { CSSProperties } from "react";
 import { cn } from "@/lib/utils";
-import { STATUS_DOT_COLORS } from "@/lib/constants";
+import { getLedConfig } from "@/lib/statusLed";
 import type { StepType } from "@/components/workflows/StepConfigPanel";
 
 type StepNodeData = {
@@ -84,7 +85,7 @@ const STEP_TYPE_RAW_COLORS: Record<string, string> = {
 
 function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
   const status = data.status || "pending";
-  const dotColor = STATUS_DOT_COLORS[status] || "bg-muted";
+  const led = getLedConfig(status);
   const showBadges = data.hasRetry || data.hasApproval || data.hasAutoPilot || data.hasCsvOutput || data.hasPdfReport || data.hasSlo || data.hasTools;
   const stepType = data.stepType || "standard";
   const TypeIcon = STEP_TYPE_ICONS[stepType] || Cpu;
@@ -115,7 +116,10 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
       />
 
       <div className="flex items-center gap-2">
-        <div className={cn("h-2 w-2 rounded-full", dotColor)} />
+        <div
+          className={cn("led h-2 w-2 rounded-full shrink-0", `led--${led.state}`)}
+          style={{ "--led-color": led.color } as CSSProperties}
+        />
         <TypeIcon className={cn("h-3.5 w-3.5", iconColor)} />
         <span className="font-mono text-xs font-medium text-foreground">{data.label}</span>
       </div>

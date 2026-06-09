@@ -26,23 +26,24 @@ describe("RunStatusBadge", () => {
     expect(screen.getByText("unknown_status")).toBeInTheDocument();
   });
 
-  it("renders with small size by default", () => {
+  it("renders with small size by default (small LED)", () => {
     const { container } = render(<RunStatusBadge status="completed" />);
-    const badge = container.querySelector("span");
-    expect(badge?.className).toContain("text-xs");
+    const led = container.querySelector(".led");
+    expect(led?.classList.contains("h-2")).toBe(true);
   });
 
-  it("renders with medium size when specified", () => {
+  it("renders with medium size when specified (larger LED)", () => {
     const { container } = render(<RunStatusBadge status="completed" size="md" />);
-    const badge = container.querySelector("span");
-    expect(badge?.className).toContain("text-sm");
+    const led = container.querySelector(".led");
+    expect(led?.classList.contains("h-2.5")).toBe(true);
   });
 
-  it("renders the status dot", () => {
+  it("renders the indicator light", () => {
     const { container } = render(<RunStatusBadge status="running" />);
     const dot = container.querySelector("span > span");
     expect(dot).not.toBeNull();
     expect(dot?.className).toContain("rounded-full");
+    expect(dot?.className).toContain("led--breathing");
   });
 
   it("applies custom className", () => {

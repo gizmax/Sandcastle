@@ -12,6 +12,8 @@ import {
 } from "lucide-react";
 import { api } from "@/api/client";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { StatusLed } from "@/components/ui/StatusLed";
+import { getLedConfig } from "@/lib/statusLed";
 import { cn } from "@/lib/utils";
 
 // -- Types ------------------------------------------------------------------
@@ -58,29 +60,16 @@ interface ServiceCheck {
 
 // -- Helpers ----------------------------------------------------------------
 
-function statusDot(status: ServiceStatus) {
+function statusLabel(status: ServiceStatus): string {
   switch (status) {
     case "healthy":
-      return "bg-success";
+      return "Healthy";
     case "unhealthy":
-      return "bg-error animate-pulse";
+      return "Unhealthy";
     case "degraded":
-      return "bg-warning animate-pulse";
+      return "Degraded";
     case "unconfigured":
-      return "bg-muted";
-  }
-}
-
-function statusLabel(status: ServiceStatus) {
-  switch (status) {
-    case "healthy":
-      return { text: "Healthy", className: "text-success" };
-    case "unhealthy":
-      return { text: "Unhealthy", className: "text-error" };
-    case "degraded":
-      return { text: "Degraded", className: "text-warning" };
-    case "unconfigured":
-      return { text: "Not Configured", className: "text-muted" };
+      return "Not Configured";
   }
 }
 
@@ -264,18 +253,12 @@ export default function SystemHealthPage() {
           <h1 className="text-xl sm:text-2xl font-semibold font-display tracking-tight text-foreground">
             System Health
           </h1>
-          {/* Overall status badge */}
-          <span
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium",
-              overallStatus === "healthy" && "bg-success/15 border-success/30 text-success",
-              overallStatus === "degraded" && "bg-warning/15 border-warning/30 text-warning",
-              overallStatus === "unhealthy" && "bg-error/15 border-error/30 text-error"
-            )}
-          >
-            <span className={cn("h-1.5 w-1.5 rounded-full", statusDot(overallStatus))} />
-            {overallStatus === "healthy" ? "All Systems Operational" : overallStatus === "degraded" ? "Degraded" : "Issues Detected"}
-          </span>
+          {/* Overall status light */}
+          <StatusLed
+            status={overallStatus}
+            size="md"
+            label={overallStatus === "healthy" ? "All Systems Operational" : overallStatus === "degraded" ? "Degraded" : "Issues Detected"}
+          />
         </div>
         <button
           onClick={() => void fetchData(true)}
@@ -351,16 +334,10 @@ export default function SystemHealthPage() {
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">Mode</span>
-              <span
-                className={cn(
-                  "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium",
-                  runtime?.mode === "local"
-                    ? "bg-accent/15 border border-accent/30 text-accent"
-                    : "bg-success/15 border border-success/30 text-success"
-                )}
-              >
-                {runtime?.mode === "local" ? "Local" : "Production"}
-              </span>
+              <StatusLed
+                status={runtime?.mode === "local" ? "local" : "production"}
+                label={runtime?.mode === "local" ? "Local" : "Production"}
+              />
             </div>
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">Sandbox Backend</span>
@@ -390,44 +367,47 @@ export default function SystemHealthPage() {
         </div>
       </div>
 
-      {/* Service Checks */}
+      {/* Service Checks: indicator board */}
       <div className="rounded-xl border border-border bg-surface shadow-sm overflow-hidden">
-        <div className="px-5 py-4 border-b border-border">
+        <div className="px-5 py-4 border-b border-border flex items-center justify-between">
           <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">
             Service Checks
           </h2>
+          <span className="font-mono text-[10px] tracking-widest text-muted uppercase">
+            {serviceChecks.filter((c) => c.status === "healthy").length}/{serviceChecks.length} nominal
+          </span>
         </div>
         <div className="divide-y divide-border">
-          {serviceChecks.map((check) => {
-            const label = statusLabel(check.status);
-            return (
-              <div
-                key={check.name}
-                className="flex items-center gap-4 px-5 py-3.5 hover:bg-border/10 transition-colors"
+          {serviceChecks.map((check) => (
+            <div
+              key={check.name}
+              className="indicator-board-row flex items-center gap-4 px-5 py-3.5"
+            >
+              {/* Indicator light */}
+              <StatusLed status={check.status} showLabel={false} size="md" />
+
+              {/* Icon */}
+              <check.icon className="h-4 w-4 text-muted shrink-0" />
+
+              {/* Name */}
+              <span className="font-mono text-xs tracking-wide text-foreground min-w-[140px]">
+                {check.name}
+              </span>
+
+              {/* Detail */}
+              <span className="text-sm font-mono text-muted flex-1 truncate">
+                {check.detail}
+              </span>
+
+              {/* Status readout */}
+              <span
+                className="led-label text-[10px] shrink-0"
+                style={{ color: getLedConfig(check.status).color }}
               >
-                {/* Status dot */}
-                <span className={cn("h-2.5 w-2.5 rounded-full shrink-0", statusDot(check.status))} />
-
-                {/* Icon */}
-                <check.icon className="h-4 w-4 text-muted shrink-0" />
-
-                {/* Name */}
-                <span className="text-sm font-medium text-foreground min-w-[140px]">
-                  {check.name}
-                </span>
-
-                {/* Detail */}
-                <span className="text-sm font-mono text-muted flex-1 truncate">
-                  {check.detail}
-                </span>
-
-                {/* Status label */}
-                <span className={cn("text-xs font-medium shrink-0", label.className)}>
-                  {label.text}
-                </span>
-              </div>
-            );
-          })}
+                {statusLabel(check.status)}
+              </span>
+            </div>
+          ))}
         </div>
       </div>
 

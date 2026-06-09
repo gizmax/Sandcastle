@@ -88,15 +88,40 @@ export function DagGraph({ steps, className }: DagGraphProps) {
       };
     });
 
+    // Light-trail edges: without statuses (planning view) keep neutral accent
+    // wiring; with statuses, edges read as light traces between indicators.
+    const hasStatuses = steps.some((s) => s.status);
+
     const edges: Edge[] = [];
     steps.forEach((s) => {
       (s.depends_on || []).forEach((dep) => {
+        if (!hasStatuses) {
+          edges.push({
+            id: `${dep}-${s.id}`,
+            source: dep,
+            target: s.id,
+            style: { stroke: "var(--color-accent)", strokeWidth: 2 },
+          });
+          return;
+        }
+
+        const sourceStatus = stepMap.get(dep)?.status;
+        let className = "dag-edge-idle";
+        if (s.status === "running") {
+          // flowing light into the step that is executing right now
+          className = "dag-edge-active";
+        } else if (s.status === "failed") {
+          className = "dag-edge-failed";
+        } else if (sourceStatus === "completed") {
+          // trail left behind by a finished step
+          className = "dag-edge-trail";
+        }
+
         edges.push({
           id: `${dep}-${s.id}`,
           source: dep,
           target: s.id,
-          animated: s.status === "running",
-          style: { stroke: "var(--color-accent)", strokeWidth: 2 },
+          className,
         });
       });
     });
