@@ -38,6 +38,7 @@ import { TemplateCard } from "@/components/templates/TemplateCard";
 import { TemplateDetail } from "@/components/templates/TemplateDetail";
 import { RunModal } from "@/components/templates/RunModal";
 import { InstallModal } from "@/components/templates/InstallModal";
+import { ProvenModal } from "@/components/templates/ProvenModal";
 import { CommunityCard } from "@/components/templates/CommunityCard";
 import type { CommunityTemplate } from "@/components/templates/CommunityCard";
 import { TOOL_ICON_MAP } from "@/components/integrations/toolIcons";
@@ -56,6 +57,8 @@ interface Template {
   source?: "community";
   author?: string;
   relevance_score?: number | null;
+  /** Installed from a verified .sctpl bundle with replayable proof cassettes */
+  proven?: boolean;
 }
 
 // Fuzzy matching helper: score a template against query words by word overlap
@@ -167,6 +170,9 @@ export default function TemplatesPage() {
   // Install modal state
   const [installPack, setInstallPack] = useState<TemplatePack | null>(null);
   const [installTemplates, setInstallTemplates] = useState<string[]>([]);
+
+  // Proven badge modal - template whose bundle proof is being inspected
+  const [provenTarget, setProvenTarget] = useState<string | null>(null);
 
   // Pack detail - selected templates for selective install
   const [packSelected, setPackSelected] = useState<Record<string, boolean>>({});
@@ -870,6 +876,7 @@ export default function TemplatesPage() {
             setSelectedTag(null);
           }}
           onOpenDetail={openDetail}
+          onProvenClick={setProvenTarget}
           detailName={detailName}
           installedSlugs={installedSlugs}
           communityTemplates={communityTemplates}
@@ -1233,6 +1240,14 @@ export default function TemplatesPage() {
           selectedTemplates={installTemplates}
           onClose={handleInstallClose}
           onComplete={handleInstallComplete}
+        />
+      )}
+
+      {/* Proven badge - bundle proof modal */}
+      {provenTarget && (
+        <ProvenModal
+          templateName={provenTarget}
+          onClose={() => setProvenTarget(null)}
         />
       )}
 
@@ -1853,6 +1868,7 @@ function AllTemplatesView({
   onTagSelect,
   onReset,
   onOpenDetail,
+  onProvenClick,
   detailName,
   installedSlugs,
   communityTemplates,
@@ -1864,6 +1880,7 @@ function AllTemplatesView({
   onTagSelect: (tag: string | null) => void;
   onReset: () => void;
   onOpenDetail: (name: string) => void;
+  onProvenClick: (name: string) => void;
   detailName: string | null;
   installedSlugs: Set<string>;
   communityTemplates: CommunityTemplate[];
@@ -1970,6 +1987,7 @@ function AllTemplatesView({
               template={t}
               isSelected={detailName === t.name}
               onClick={() => onOpenDetail(t.name)}
+              onProvenClick={() => onProvenClick(t.name)}
             />
           ))}
         </div>

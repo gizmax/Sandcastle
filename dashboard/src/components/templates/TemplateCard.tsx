@@ -1,6 +1,7 @@
 import { ArrowRight, Globe } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getPackById } from "@/lib/templatePacks";
+import { ProvenBadge } from "@/components/templates/ProvenBadge";
 
 interface Template {
   name: string;
@@ -10,6 +11,7 @@ interface Template {
   category?: string | null;
   source?: "community";
   author?: string;
+  proven?: boolean;
 }
 
 const TAG_COLORS = [
@@ -33,9 +35,11 @@ interface TemplateCardProps {
   template: Template;
   isSelected: boolean;
   onClick: () => void;
+  /** Opens the proof modal for bundle-verified templates */
+  onProvenClick?: () => void;
 }
 
-export function TemplateCard({ template, isSelected, onClick }: TemplateCardProps) {
+export function TemplateCard({ template, isSelected, onClick, onProvenClick }: TemplateCardProps) {
   const pack = template.category ? getPackById(template.category) : null;
   const accentBorder = pack ? pack.color.border : "border-border";
 
@@ -63,6 +67,9 @@ export function TemplateCard({ template, isSelected, onClick }: TemplateCardProp
               <Globe className="h-2.5 w-2.5" />
               Community
             </span>
+          )}
+          {template.proven && (
+            <ProvenBadge onClick={onProvenClick ? () => onProvenClick() : undefined} />
           )}
         </div>
         <ArrowRight className="h-4 w-4 text-muted opacity-0 group-hover:opacity-100 transition-opacity" />
