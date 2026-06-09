@@ -57,7 +57,7 @@ export default function OverviewBento() {
             <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-accent">
               <Castle className="h-4 w-4 text-accent-foreground" />
             </div>
-            <h1 className="text-xl font-bold tracking-tight text-foreground">Overview</h1>
+            <h1 className="text-xl font-bold font-display tracking-tight text-foreground">Overview</h1>
           </div>
         </div>
 
@@ -91,7 +91,7 @@ export default function OverviewBento() {
           <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-accent">
             <Castle className="h-4 w-4 text-accent-foreground" />
           </div>
-          <h1 className="text-xl font-bold tracking-tight text-foreground">Overview</h1>
+          <h1 className="text-xl font-bold font-display tracking-tight text-foreground">Overview</h1>
         </div>
       </div>
 

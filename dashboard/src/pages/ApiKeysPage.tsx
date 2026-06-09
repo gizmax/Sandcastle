@@ -193,7 +193,7 @@ export default function ApiKeysPage() {
   if (error) {
     return (
       <div>
-        <h1 className="mb-4 sm:mb-6 text-xl sm:text-2xl font-semibold tracking-tight text-foreground">API Keys</h1>
+        <h1 className="mb-4 sm:mb-6 text-xl sm:text-2xl font-semibold font-display tracking-tight text-foreground">API Keys</h1>
         <div className="rounded-xl border border-error/30 bg-error/5 p-4">
           <p className="text-sm text-error">{error}</p>
           <button
@@ -210,7 +210,7 @@ export default function ApiKeysPage() {
   return (
     <div className="space-y-4 sm:space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">API Keys</h1>
+        <h1 className="text-xl sm:text-2xl font-semibold font-display tracking-tight text-foreground">API Keys</h1>
         <button
           onClick={() => setCreateModalOpen(true)}
           aria-label="New API key"

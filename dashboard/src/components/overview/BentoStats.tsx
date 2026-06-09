@@ -73,7 +73,7 @@ export function BentoStatCard({
       <div className="flex items-end justify-between gap-2">
         <div>
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-0.5">{label}</p>
-          <p className="text-3xl font-bold text-foreground tracking-tight leading-none">{value}</p>
+          <p className="font-display text-3xl font-bold text-foreground tracking-tight leading-none">{value}</p>
         </div>
         {spark && spark.values.length >= 2 && <Sparkline values={spark.values} />}
       </div>

@@ -731,7 +731,7 @@ export default function TemplatesPage() {
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent/15">
               <Layers className="h-5 w-5 text-accent" />
             </div>
-            <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">
+            <h1 className="text-xl sm:text-2xl font-semibold font-display tracking-tight text-foreground">
               Template Hub
             </h1>
           </div>

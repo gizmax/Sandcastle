@@ -105,7 +105,7 @@ export default function ViolationsPage() {
   return (
     <div className="space-y-4 sm:space-y-6">
       <div className="flex items-center gap-3">
-        <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Policy Violations</h1>
+        <h1 className="text-xl sm:text-2xl font-semibold font-display tracking-tight text-foreground">Policy Violations</h1>
       </div>
 
       {/* Critical violations banner */}

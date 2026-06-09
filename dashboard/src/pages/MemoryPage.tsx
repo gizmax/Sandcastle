@@ -157,7 +157,7 @@ export default function MemoryPage() {
   if (error) {
     return (
       <div>
-        <h1 className="mb-4 sm:mb-6 text-xl sm:text-2xl font-semibold tracking-tight text-foreground">
+        <h1 className="mb-4 sm:mb-6 text-xl sm:text-2xl font-semibold font-display tracking-tight text-foreground">
           Agent Memory
         </h1>
         <div className="rounded-xl border border-error/30 bg-error/5 p-4">
@@ -181,7 +181,7 @@ export default function MemoryPage() {
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">
+          <h1 className="text-xl sm:text-2xl font-semibold font-display tracking-tight text-foreground">
             Agent Memory
           </h1>
           <p className="mt-1 text-sm text-muted">

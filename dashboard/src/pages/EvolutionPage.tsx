@@ -909,7 +909,7 @@ export default function EvolutionPage() {
   if (error) {
     return (
       <div>
-        <h1 className="mb-4 sm:mb-6 text-xl sm:text-2xl font-semibold tracking-tight text-foreground">
+        <h1 className="mb-4 sm:mb-6 text-xl sm:text-2xl font-semibold font-display tracking-tight text-foreground">
           Workflow Evolution
         </h1>
         <div className="rounded-xl border border-error/30 bg-error/5 p-4">
@@ -935,7 +935,7 @@ export default function EvolutionPage() {
     <div className="space-y-4 sm:space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">
+        <h1 className="text-xl sm:text-2xl font-semibold font-display tracking-tight text-foreground">
           Workflow Evolution
         </h1>
         <button

@@ -155,7 +155,7 @@ export default function WorkflowDetailPage() {
       <div className="rounded-xl border border-border bg-surface p-4 sm:p-5 shadow-sm">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="flex items-center gap-1 text-xl font-semibold tracking-tight text-foreground">
+            <h1 className="flex items-center gap-1 text-xl font-semibold font-display tracking-tight text-foreground">
               {data.workflow_name}
               <CopyButton value={data.workflow_name} label="workflow name" />
             </h1>

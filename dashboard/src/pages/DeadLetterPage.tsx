@@ -140,7 +140,7 @@ export default function DeadLetterPage() {
   if (error) {
     return (
       <div>
-        <h1 className="mb-4 sm:mb-6 text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Dead Letter Queue</h1>
+        <h1 className="mb-4 sm:mb-6 text-xl sm:text-2xl font-semibold font-display tracking-tight text-foreground">Dead Letter Queue</h1>
         <div className="rounded-xl border border-error/30 bg-error/5 p-4">
           <p className="text-sm text-error">{error}</p>
           <button
@@ -158,7 +158,7 @@ export default function DeadLetterPage() {
     <div className="space-y-4 sm:space-y-6">
       {/* Header row */}
       <div className="flex items-center justify-between">
-        <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">
+        <h1 className="text-xl sm:text-2xl font-semibold font-display tracking-tight text-foreground">
           Dead Letter Queue
         </h1>
 

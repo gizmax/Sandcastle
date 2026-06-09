@@ -1,24 +1,29 @@
 @import "tailwindcss";
 
+/* ──── Sand & Ink brand tokens ────
+   Light = "paper & sand": warm paper ground, ink-black text, amber accent.
+   Dark = "midnight control room": warm near-black, phosphor-amber accent. */
+
 @theme {
   --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --font-display: "Bricolage Grotesque", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
 
-  --color-background: #FAFAFA;
-  --color-surface: #FFFFFF;
-  --color-border: #E5E5E5;
-  --color-foreground: #171717;
-  --color-muted: #737373;
-  --color-muted-foreground: #A3A3A3;
+  --color-background: #F7F3EC;
+  --color-surface: #FDFBF7;
+  --color-border: #E8E0D2;
+  --color-foreground: #1C1814;
+  --color-muted: #6E6356;
+  --color-muted-foreground: #857A6A;
   --color-accent: #F59E0B;
   --color-accent-hover: #D97706;
-  --color-accent-foreground: #FFFFFF;
-  --color-success: #22C55E;
-  --color-error: #EF4444;
+  --color-accent-foreground: #1C1814;
+  --color-success: #3FB950;
+  --color-error: #E8543F;
   --color-warning: #F59E0B;
   --color-running: #3B82F6;
   --color-queued: #A78BFA;
-  --color-input: #E5E5E5;
+  --color-input: #E8E0D2;
   --color-ring: #F59E0B;
 
   --radius-sm: 0.25rem;
@@ -28,16 +33,16 @@
 }
 
 .dark {
-  --color-background: #0A0A0A;
-  --color-surface: #171717;
-  --color-border: #262626;
-  --color-foreground: #FAFAFA;
-  --color-muted: #A3A3A3;
-  --color-muted-foreground: #737373;
+  --color-background: #0E0C09;
+  --color-surface: #181410;
+  --color-border: #2A241C;
+  --color-foreground: #F4EFE6;
+  --color-muted: #B0A595;
+  --color-muted-foreground: #867B6B;
   --color-accent: #FBBF24;
   --color-accent-hover: #F59E0B;
-  --color-accent-foreground: #171717;
-  --color-input: #262626;
+  --color-accent-foreground: #1C1814;
+  --color-input: #2A241C;
   --color-ring: #FBBF24;
 }
 
@@ -46,10 +51,20 @@
     outline: none;
   }
   :focus-visible {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--color-ring);
     outline-offset: 2px;
     border-radius: inherit;
   }
+}
+
+/* Text selection: amber on ink */
+::selection {
+  background: #F59E0B;
+  color: #1C1814;
+}
+.dark ::selection {
+  background: #FBBF24;
+  color: #0E0C09;
 }
 
 body {
@@ -64,17 +79,26 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Utility: amber glow for featured elements */
-.glow-accent {
-  box-shadow: 0 0 20px rgba(245, 158, 11, 0.15), 0 0 40px rgba(245, 158, 11, 0.05);
-}
-.dark .glow-accent {
-  box-shadow: 0 0 20px rgba(251, 191, 36, 0.2), 0 0 40px rgba(251, 191, 36, 0.08);
+/* Utility: display face for hero numbers and page-title headlines only */
+.font-display {
+  font-family: var(--font-display);
 }
 
-/* Utility: grid dot pattern background */
+/* Utility: amber glow for featured elements */
+.glow-accent {
+  box-shadow: 0 0 20px rgba(217, 119, 6, 0.16), 0 0 40px rgba(217, 119, 6, 0.06);
+}
+.dark .glow-accent {
+  box-shadow: 0 0 20px rgba(251, 191, 36, 0.22), 0 0 40px rgba(251, 191, 36, 0.09);
+}
+
+/* Utility: grid dot pattern background (sand-tinted dots) */
 .bg-grid {
-  background-image: radial-gradient(circle, var(--color-border) 1px, transparent 1px);
+  background-image: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--color-border) 80%, var(--color-accent) 20%) 1px,
+    transparent 1px
+  );
   background-size: 24px 24px;
 }
 
@@ -88,7 +112,7 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--color-border);
+  background: color-mix(in srgb, var(--color-border) 85%, var(--color-accent) 15%);
   border-radius: 3px;
 }
 
@@ -260,13 +284,13 @@ button:active:not(:disabled), [role="button"]:active:not(:disabled), .btn:active
 }
 
 @keyframes terminal-success-flash {
-  0%   { box-shadow: inset 0 0 30px rgba(34, 197, 94, 0.08); }
-  100% { box-shadow: inset 0 0 0px rgba(34, 197, 94, 0); }
+  0%   { box-shadow: inset 0 0 30px rgba(63, 185, 80, 0.08); }
+  100% { box-shadow: inset 0 0 0px rgba(63, 185, 80, 0); }
 }
 
 @keyframes terminal-error-flash {
-  0%   { box-shadow: inset 0 0 30px rgba(239, 68, 68, 0.08); }
-  100% { box-shadow: inset 0 0 0px rgba(239, 68, 68, 0); }
+  0%   { box-shadow: inset 0 0 30px rgba(232, 84, 63, 0.08); }
+  100% { box-shadow: inset 0 0 0px rgba(232, 84, 63, 0); }
 }
 
 @keyframes log-line-enter {
@@ -338,11 +362,11 @@ button:active:not(:disabled), [role="button"]:active:not(:disabled), .btn:active
 }
 .terminal-success {
   animation: terminal-success-flash 0.8s ease-out both;
-  border-color: rgba(34, 197, 94, 0.3);
+  border-color: rgba(63, 185, 80, 0.3);
 }
 .terminal-error {
   animation: terminal-error-flash 0.8s ease-out both;
-  border-color: rgba(239, 68, 68, 0.3);
+  border-color: rgba(232, 84, 63, 0.3);
 }
 
 /* SVG checkmark stroke draw */
@@ -403,8 +427,8 @@ button:active:not(:disabled), [role="button"]:active:not(:disabled), .btn:active
 /* ──── Bell pulse animation (critical insights) ──── */
 
 @keyframes bell-pulse-critical {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
-  50%      { box-shadow: 0 0 6px 2px rgba(239, 68, 68, 0.25); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(232, 84, 63, 0); }
+  50%      { box-shadow: 0 0 6px 2px rgba(232, 84, 63, 0.25); }
 }
 
 .bell-pulse-critical {

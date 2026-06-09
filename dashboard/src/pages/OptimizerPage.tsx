@@ -130,7 +130,7 @@ export default function OptimizerPage() {
   if (error) {
     return (
       <div>
-        <h1 className="mb-4 sm:mb-6 text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Cost-Latency Optimizer</h1>
+        <h1 className="mb-4 sm:mb-6 text-xl sm:text-2xl font-semibold font-display tracking-tight text-foreground">Cost-Latency Optimizer</h1>
         <div className="rounded-xl border border-error/30 bg-error/5 p-4">
           <p className="text-sm text-error">{error}</p>
           <button
@@ -150,7 +150,7 @@ export default function OptimizerPage() {
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Cost-Latency Optimizer</h1>
+      <h1 className="text-xl sm:text-2xl font-semibold font-display tracking-tight text-foreground">Cost-Latency Optimizer</h1>
 
       {stats && stats.estimated_savings_30d_usd > 1 && (
         <ContextBanner variant="info" icon={Coins}>

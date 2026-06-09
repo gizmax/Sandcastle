@@ -480,7 +480,7 @@ export default function SettingsPage() {
     <div className="space-y-4 sm:space-y-6">
       <div className="flex items-center gap-3">
         <Settings className="h-6 w-6 text-muted" />
-        <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">
+        <h1 className="text-xl sm:text-2xl font-semibold font-display tracking-tight text-foreground">
           Settings
         </h1>
       </div>

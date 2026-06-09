@@ -208,7 +208,7 @@ export default function Runs() {
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Runs</h1>
+      <h1 className="text-xl sm:text-2xl font-semibold font-display tracking-tight text-foreground">Runs</h1>
 
       {/* Failure rate banner */}
       {successRate != null && successRate < 0.9 && (

@@ -54,7 +54,7 @@ export function BentoHealthHero({
         <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">
           Workflow Command Center
         </p>
-        <p className="text-5xl font-bold text-foreground tracking-tight leading-none">
+        <p className="font-display text-5xl font-bold text-foreground tracking-tight leading-none">
           {totalRuns}
         </p>
         <p className="mt-1 text-sm text-muted-foreground">workflows ran today</p>

@@ -1,6 +1,9 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { Toaster } from "sonner";
+// Self-hosted display face (local-first; no CDN). Used only via .font-display.
+import "@fontsource/bricolage-grotesque/600.css";
+import "@fontsource/bricolage-grotesque/700.css";
 import "./index.css";
 import App from "./App.tsx";
 

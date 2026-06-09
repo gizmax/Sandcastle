@@ -153,7 +153,7 @@ export default function CompliancePage() {
   if (error) {
     return (
       <div>
-        <h1 className="mb-4 sm:mb-6 text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Compliance</h1>
+        <h1 className="mb-4 sm:mb-6 text-xl sm:text-2xl font-semibold font-display tracking-tight text-foreground">Compliance</h1>
         <div className="rounded-xl border border-error/30 bg-error/5 p-4">
           <p className="text-sm text-error">{error}</p>
           <button
@@ -175,7 +175,7 @@ export default function CompliancePage() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Shield className="h-6 w-6 text-muted" />
-          <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">
+          <h1 className="text-xl sm:text-2xl font-semibold font-display tracking-tight text-foreground">
             Compliance
           </h1>
           <span

@@ -504,7 +504,7 @@ export default function RunComparePage() {
 
       {/* Header + Run Selectors */}
       <div className="rounded-xl border border-border bg-surface p-4 sm:p-5 shadow-sm">
-        <h1 className="text-xl font-semibold tracking-tight text-foreground mb-4">
+        <h1 className="text-xl font-semibold font-display tracking-tight text-foreground mb-4">
           Replay Studio
         </h1>
 

@@ -176,7 +176,7 @@ export default function ApprovalsPage() {
   if (error) {
     return (
       <div>
-        <h1 className="mb-4 sm:mb-6 text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Approval Gates</h1>
+        <h1 className="mb-4 sm:mb-6 text-xl sm:text-2xl font-semibold font-display tracking-tight text-foreground">Approval Gates</h1>
         <div className="rounded-xl border border-error/30 bg-error/5 p-4">
           <p className="text-sm text-error">{error}</p>
           <button
@@ -194,7 +194,7 @@ export default function ApprovalsPage() {
     <div className="space-y-4 sm:space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Approval Gates</h1>
+          <h1 className="text-xl sm:text-2xl font-semibold font-display tracking-tight text-foreground">Approval Gates</h1>
           {pendingCount > 0 && (
             <span className="flex h-6 min-w-6 items-center justify-center rounded-full bg-warning px-2 text-xs font-semibold text-white">
               {pendingCount}
