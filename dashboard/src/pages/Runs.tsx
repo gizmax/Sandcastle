@@ -9,6 +9,7 @@ import { RunsTable } from "@/components/runs/RunsTable";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ContextBanner } from "@/components/shared/ContextBanner";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { cn, formatCost, formatDuration, parseUTC } from "@/lib/utils";
 import { exportToCsv } from "@/lib/exportCsv";
@@ -207,8 +208,18 @@ export default function Runs() {
   }, [filteredRuns]);
 
   return (
-    <div className="space-y-4 sm:space-y-6">
-      <h1 className="text-xl sm:text-2xl font-semibold font-display tracking-tight text-foreground">Runs</h1>
+    <div className="space-y-4 sm:space-y-5">
+      <PageHeader
+        eyebrow="Operations · Run History"
+        title="Runs"
+        actions={
+          successRate != null && (
+            <span className="panel-label text-muted-foreground">
+              {Math.round(successRate * 100)}% success · today
+            </span>
+          )
+        }
+      />
 
       {/* Failure rate banner */}
       {successRate != null && successRate < 0.9 && (

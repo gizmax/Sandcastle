@@ -28,9 +28,9 @@ export function BentoHealthHero({
 
   return (
     <div className={cn(
-      "bg-surface rounded-2xl shadow-sm border border-border",
-      "hover:border-accent/30 transition-all duration-300",
-      "p-6 flex flex-col gap-4 h-full relative",
+      "bg-surface rounded-md border border-border",
+      "hover:border-accent/30 transition-colors duration-200",
+      "p-5 flex flex-col gap-3.5 h-full relative",
     )}>
       <div className="absolute top-5 right-5">
         {loading ? (
@@ -51,8 +51,8 @@ export function BentoHealthHero({
       </div>
 
       <div>
-        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">
-          Workflow Command Center
+        <p className="panel-label text-muted-foreground mb-1.5">
+          Command Center · Today
         </p>
         <p className="font-display text-5xl font-bold text-foreground tracking-tight leading-none">
           {totalRuns}
@@ -96,7 +96,7 @@ export function BentoHealthHero({
               key={insight.id}
               to={insight.link}
               className={cn(
-                "flex items-center gap-2.5 rounded-xl px-3 py-2",
+                "flex items-center gap-2.5 rounded-md px-3 py-1.5",
                 "bg-background border border-border",
                 "hover:border-accent/30 hover:bg-surface",
                 "transition-colors duration-150 text-sm",

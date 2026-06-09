@@ -51,7 +51,7 @@ export function RunsTable({ runs, allRuns, total, limit, offset, onPageChange, s
   }, [runs, pool]);
 
   return (
-    <div className="rounded-xl border border-border bg-surface shadow-sm overflow-hidden">
+    <div className="rounded-md border border-border bg-surface overflow-hidden">
       <div
         className="overflow-x-auto"
         style={{
@@ -67,7 +67,7 @@ export function RunsTable({ runs, allRuns, total, limit, offset, onPageChange, s
           <thead>
             <tr className="border-b border-border bg-background/50">
               {selectable && (
-                <th className="w-10 px-3 py-3" scope="col">
+                <th className="w-10 px-3 py-2" scope="col">
                   <input
                     type="checkbox"
                     checked={allSelected}
@@ -83,11 +83,11 @@ export function RunsTable({ runs, allRuns, total, limit, offset, onPageChange, s
                   />
                 </th>
               )}
-              <th scope="col" className="hidden sm:table-cell px-3 sm:px-5 py-3 text-left font-medium text-muted">Workflow</th>
-              <th scope="col" className="px-3 sm:px-5 py-3 text-left font-medium text-muted">Status</th>
-              <th scope="col" className="px-3 sm:px-5 py-3 text-left font-medium text-muted">Started</th>
-              <th scope="col" className="hidden md:table-cell px-3 sm:px-5 py-3 text-left font-medium text-muted">Duration</th>
-              <th scope="col" className="px-3 sm:px-5 py-3 text-right font-medium text-muted">Cost</th>
+              <th scope="col" className="hidden sm:table-cell px-3 sm:px-4 py-2 text-left panel-label text-muted-foreground">Workflow</th>
+              <th scope="col" className="px-3 sm:px-4 py-2 text-left panel-label text-muted-foreground">Status</th>
+              <th scope="col" className="px-3 sm:px-4 py-2 text-left panel-label text-muted-foreground">Started</th>
+              <th scope="col" className="hidden md:table-cell px-3 sm:px-4 py-2 text-right panel-label text-muted-foreground">Duration</th>
+              <th scope="col" className="px-3 sm:px-4 py-2 text-right panel-label text-muted-foreground">Cost</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
@@ -110,7 +110,7 @@ export function RunsTable({ runs, allRuns, total, limit, offset, onPageChange, s
                 )}
               >
                 {selectable && (
-                  <td className="w-10 px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                  <td className="w-10 px-3 py-2" onClick={(e) => e.stopPropagation()}>
                     <input
                       type="checkbox"
                       checked={selectedIds?.has(run.run_id) ?? false}
@@ -128,12 +128,12 @@ export function RunsTable({ runs, allRuns, total, limit, offset, onPageChange, s
                     />
                   </td>
                 )}
-                <td className="hidden sm:table-cell px-3 sm:px-5 py-3 font-medium text-foreground">
+                <td className="hidden sm:table-cell px-3 sm:px-4 py-2 font-medium text-foreground">
                   <span title={run.workflow_name}>{run.workflow_name}</span>
                   <span className="ml-2 font-data text-[11px] text-muted-foreground" title={run.run_id}>{run.run_id.slice(0, 8)}</span>
                   <CopyButton value={run.run_id} label="run ID" />
                 </td>
-                <td className="px-3 sm:px-5 py-3">
+                <td className="px-3 sm:px-4 py-2">
                   <span className="inline-flex items-center gap-1.5 flex-wrap">
                     <RunStatusBadge status={run.status} />
                     {run.risk_level && run.risk_level !== "minimal" && (
@@ -142,11 +142,11 @@ export function RunsTable({ runs, allRuns, total, limit, offset, onPageChange, s
                     <AnomalyBadge anomalies={anomalyMap.get(run.run_id) ?? []} />
                   </span>
                 </td>
-                <td className="px-3 sm:px-5 py-3 text-muted">
+                <td className="px-3 sm:px-4 py-2 text-muted">
                   {run.started_at ? formatRelativeTime(run.started_at) : "queued"}
                 </td>
-                <td className="hidden md:table-cell px-3 sm:px-5 py-3 text-muted">{getDuration(run)}</td>
-                <td className="px-3 sm:px-5 py-3 text-right font-data text-muted">
+                <td className="hidden md:table-cell px-3 sm:px-4 py-2 text-right font-data text-muted">{getDuration(run)}</td>
+                <td className="px-3 sm:px-4 py-2 text-right font-data text-muted">
                   {formatCost(run.total_cost_usd)}
                 </td>
               </tr>
@@ -157,7 +157,7 @@ export function RunsTable({ runs, allRuns, total, limit, offset, onPageChange, s
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between border-t border-border px-3 sm:px-5 py-3">
+        <div className="flex items-center justify-between border-t border-border px-3 sm:px-4 py-2.5">
           <p className="text-xs text-muted">
             Showing {total > 0 ? offset + 1 : 0}-{Math.min(offset + limit, total)} of {total}
           </p>

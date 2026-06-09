@@ -100,7 +100,7 @@ export function BentoHeatmap({ cells }: { cells: HeatmapCell[] }) {
     >
       <div className="mb-4 flex items-end justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold text-foreground">Run activity</h3>
+          <h3 className="panel-label text-muted-foreground">Run activity</h3>
           <p className="mt-0.5 text-[11px] text-muted-foreground">
             {total.toLocaleString()} runs · last 52 weeks
             {busiest && busiest.count > 0 && (

@@ -1,6 +1,6 @@
 import { useCallback } from "react";
-import { Castle } from "lucide-react";
 import { SectionErrorBoundary } from "@/components/shared/ErrorBoundary";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { BentoActivityFeed } from "@/components/overview/BentoActivityFeed";
 import { BentoAnomalies } from "@/components/overview/BentoAnomalies";
@@ -52,14 +52,7 @@ export default function OverviewBento() {
   if (isEmpty) {
     return (
       <div className="space-y-4 sm:space-y-5">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-accent">
-              <Castle className="h-4 w-4 text-accent-foreground" />
-            </div>
-            <h1 className="text-xl font-bold font-display tracking-tight text-foreground">Overview</h1>
-          </div>
-        </div>
+        <PageHeader eyebrow="Sandcastle · Command Deck" title="Overview" />
 
         <SectionErrorBoundary section="health">
           <BentoHealthHero
@@ -86,14 +79,7 @@ export default function OverviewBento() {
 
   return (
     <div className="space-y-4 sm:space-y-5">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-accent">
-            <Castle className="h-4 w-4 text-accent-foreground" />
-          </div>
-          <h1 className="text-xl font-bold font-display tracking-tight text-foreground">Overview</h1>
-        </div>
-      </div>
+      <PageHeader eyebrow="Sandcastle · Command Deck" title="Overview" />
 
       {!d.recDismissed && (d.advisorRecs.length > 0 || (d.topRecommendation && d.showProviderCosts)) && (
         <SectionErrorBoundary section="recommendations">

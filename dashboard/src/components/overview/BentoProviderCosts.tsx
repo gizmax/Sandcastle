@@ -39,7 +39,7 @@ export function BentoProviderCosts({
       "p-5 flex flex-col gap-3",
     )}>
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-foreground">Cost by Provider</h3>
+        <h3 className="panel-label text-muted-foreground">Cost by Provider</h3>
         <span className="text-xs text-muted-foreground">Last {period_days} days</span>
       </div>
 
@@ -102,7 +102,7 @@ export function BentoSavingsOpportunities({ savings }: { savings: ProviderSaving
       "hover:border-accent/30 transition-all duration-300",
       "p-5 flex flex-col gap-3",
     )}>
-      <h3 className="text-sm font-semibold text-foreground">Savings Opportunities</h3>
+      <h3 className="panel-label text-muted-foreground">Savings Opportunities</h3>
       <div className="space-y-3">
         {savings.alternatives.slice(0, 3).map((alt) => (
           <div key={alt.provider} className="flex items-start justify-between gap-2">

@@ -21,25 +21,25 @@ interface ScheduleTableProps {
 
 export function ScheduleTable({ schedules, togglingId, onToggle, onDelete, onEdit }: ScheduleTableProps) {
   return (
-    <div className="rounded-xl border border-border bg-surface shadow-sm overflow-hidden">
+    <div className="rounded-md border border-border bg-surface overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-sm" aria-label="Schedules">
           <thead>
             <tr className="border-b border-border bg-background/50">
-              <th scope="col" className="px-3 sm:px-5 py-3 text-left font-medium text-muted">Workflow</th>
-              <th scope="col" className="px-3 sm:px-5 py-3 text-left font-medium text-muted">Schedule</th>
-              <th scope="col" className="hidden md:table-cell px-3 sm:px-5 py-3 text-left font-medium text-muted">Created</th>
-              <th scope="col" className="px-3 sm:px-5 py-3 text-center font-medium text-muted">Enabled</th>
-              <th scope="col" className="px-3 sm:px-5 py-3 text-right font-medium text-muted">Actions</th>
+              <th scope="col" className="px-3 sm:px-4 py-2 text-left panel-label text-muted-foreground">Workflow</th>
+              <th scope="col" className="px-3 sm:px-4 py-2 text-left panel-label text-muted-foreground">Schedule</th>
+              <th scope="col" className="hidden md:table-cell px-3 sm:px-4 py-2 text-left panel-label text-muted-foreground">Created</th>
+              <th scope="col" className="px-3 sm:px-4 py-2 text-center panel-label text-muted-foreground">Enabled</th>
+              <th scope="col" className="px-3 sm:px-4 py-2 text-right panel-label text-muted-foreground">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
             {schedules.map((schedule) => (
               <tr key={schedule.id}>
-                <td className="px-3 sm:px-5 py-3 font-medium text-foreground">
+                <td className="px-3 sm:px-4 py-2 font-medium text-foreground">
                   {schedule.workflow_name}
                 </td>
-                <td className="px-3 sm:px-5 py-3">
+                <td className="px-3 sm:px-4 py-2">
                   <span className="text-foreground text-xs">
                     {cronToHuman(schedule.cron_expression)}
                   </span>
@@ -47,10 +47,10 @@ export function ScheduleTable({ schedules, togglingId, onToggle, onDelete, onEdi
                     {schedule.cron_expression}
                   </span>
                 </td>
-                <td className="hidden md:table-cell px-3 sm:px-5 py-3 text-muted">
+                <td className="hidden md:table-cell px-3 sm:px-4 py-2 font-data text-muted">
                   {schedule.created_at ? formatRelativeTime(schedule.created_at) : "-"}
                 </td>
-                <td className="px-3 sm:px-5 py-3 text-center">
+                <td className="px-3 sm:px-4 py-2 text-center">
                   {togglingId === schedule.id ? (
                     <Loader2 className="inline h-4 w-4 animate-spin text-muted" />
                   ) : (
@@ -75,7 +75,7 @@ export function ScheduleTable({ schedules, togglingId, onToggle, onDelete, onEdi
                     </button>
                   )}
                 </td>
-                <td className="px-3 sm:px-5 py-3 text-right">
+                <td className="px-3 sm:px-4 py-2 text-right">
                   <div className="flex items-center justify-end gap-3">
                     <button
                       onClick={() => onEdit(schedule)}

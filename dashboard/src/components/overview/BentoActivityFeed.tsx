@@ -23,8 +23,8 @@ export function BentoActivityFeed({ events, loading }: { events: AuditEvent[]; l
         "hover:border-accent/30 transition-all duration-300",
         "overflow-hidden",
       )}>
-        <div className="px-5 py-4 border-b border-border">
-          <h3 className="text-sm font-semibold text-foreground">Activity Feed</h3>
+        <div className="px-4 py-2.5 border-b border-border">
+          <h3 className="panel-label text-muted-foreground">Activity Feed</h3>
         </div>
         <div className="flex items-center justify-center h-40">
           <Skeleton className="h-4 w-32 rounded-lg" />
@@ -40,8 +40,8 @@ export function BentoActivityFeed({ events, loading }: { events: AuditEvent[]; l
         "hover:border-accent/30 transition-all duration-300",
         "overflow-hidden",
       )}>
-        <div className="px-5 py-4 border-b border-border">
-          <h3 className="text-sm font-semibold text-foreground">Activity Feed</h3>
+        <div className="px-4 py-2.5 border-b border-border">
+          <h3 className="panel-label text-muted-foreground">Activity Feed</h3>
         </div>
         <div className="flex items-center justify-center h-24">
           <p className="text-xs text-muted-foreground">No recent events</p>
@@ -56,9 +56,9 @@ export function BentoActivityFeed({ events, loading }: { events: AuditEvent[]; l
       "hover:border-accent/30 transition-all duration-300",
       "overflow-hidden",
     )}>
-      <div className="px-5 py-4 border-b border-border flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-foreground">Activity Feed</h3>
-        <span className="text-[10px] text-muted-foreground">{events.length} events</span>
+      <div className="px-4 py-2.5 border-b border-border flex items-center justify-between">
+        <h3 className="panel-label text-muted-foreground">Activity Feed</h3>
+        <span className="font-data text-[10px] text-muted-foreground">{events.length} events</span>
       </div>
       <div className="max-h-80 overflow-y-auto divide-y divide-border">
         {events.map((event) => {
@@ -72,7 +72,7 @@ export function BentoActivityFeed({ events, loading }: { events: AuditEvent[]; l
               key={event.id}
               onClick={() => event.run_id ? navigate(`/runs/${event.run_id}`) : undefined}
               className={cn(
-                "flex w-full items-center gap-3 px-5 py-3 text-left",
+                "flex w-full items-center gap-3 px-4 py-2 text-left",
                 "hover:bg-background transition-colors duration-150",
                 event.run_id ? "cursor-pointer" : "cursor-default",
               )}
@@ -88,7 +88,7 @@ export function BentoActivityFeed({ events, loading }: { events: AuditEvent[]; l
                 </p>
               </div>
               {costUsd != null && costUsd > 0 && (
-                <span className="text-[10px] font-mono text-muted-foreground shrink-0">
+                <span className="font-data text-[10px] text-muted-foreground shrink-0 text-right">
                   {formatCost(costUsd)}
                 </span>
               )}

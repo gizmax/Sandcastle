@@ -47,34 +47,31 @@ interface StatCardProps {
   label: string;
   value: string;
   icon: React.ElementType;
-  iconBg: string;
   iconColor: string;
   spark?: SparklineData;
   positiveIsGood?: boolean;
 }
 
 export function BentoStatCard({
-  label, value, icon: Icon, iconBg, iconColor,
+  label, value, icon: Icon, iconColor,
   spark, positiveIsGood = true,
 }: StatCardProps) {
   return (
     <div className={cn(
-      "bg-surface rounded-2xl shadow-sm border border-border",
-      "p-6",
-      "hover:border-accent/30 transition-all duration-300",
-      "flex flex-col gap-3",
+      "bg-surface rounded-md border border-border",
+      "p-4",
+      "hover:border-accent/30 transition-colors duration-200",
+      "flex flex-col gap-2.5",
     )}>
-      <div className="flex items-start justify-between">
-        <div className={cn("h-9 w-9 rounded-xl flex items-center justify-center", iconBg)}>
-          <Icon className={cn("shrink-0", iconColor)} style={{ height: "18px", width: "18px" }} />
-        </div>
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex min-w-0 items-center gap-1.5">
+          <Icon className={cn("shrink-0", iconColor)} style={{ height: "13px", width: "13px" }} />
+          <span className="panel-label text-muted-foreground truncate">{label}</span>
+        </span>
         {spark && <TrendBadge percent={spark.trendPercent} positiveIsGood={positiveIsGood} />}
       </div>
       <div className="flex items-end justify-between gap-2">
-        <div>
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-0.5">{label}</p>
-          <p className="font-display text-3xl font-bold text-foreground tracking-tight leading-none">{value}</p>
-        </div>
+        <p className="font-display text-3xl font-bold text-foreground tracking-tight leading-none">{value}</p>
         {spark && spark.values.length >= 2 && <Sparkline values={spark.values} />}
       </div>
     </div>
@@ -104,7 +101,6 @@ export function BentoStatsRow({
         value={String(totalRuns)}
         icon={Activity}
         iconColor="text-accent"
-        iconBg="bg-accent/10"
         spark={sparklines?.runs}
         positiveIsGood={true}
       />
@@ -113,7 +109,6 @@ export function BentoStatsRow({
         value={`${successRate}%`}
         icon={CheckCircle}
         iconColor="text-success"
-        iconBg="bg-success/10"
         spark={sparklines?.rate}
         positiveIsGood={true}
       />
@@ -122,7 +117,6 @@ export function BentoStatsRow({
         value={formatCost(totalCost)}
         icon={DollarSign}
         iconColor="text-running"
-        iconBg="bg-running/10"
         spark={sparklines?.cost}
         positiveIsGood={false}
       />
@@ -131,7 +125,6 @@ export function BentoStatsRow({
         value={avgDuration > 0 ? `${Math.round(avgDuration)}s` : "n/a"}
         icon={Timer}
         iconColor="text-muted-foreground"
-        iconBg="bg-border"
         spark={sparklines?.duration}
         positiveIsGood={false}
       />

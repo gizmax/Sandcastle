@@ -5,6 +5,7 @@ import { Toaster } from "sonner";
 import "@fontsource/bricolage-grotesque/600.css";
 import "@fontsource/bricolage-grotesque/700.css";
 import "./index.css";
+import "./styles/panels.css";
 import App from "./App.tsx";
 
 // Apply the theme immediately to prevent a flash. Dark-first: a stored preference

@@ -32,7 +32,7 @@ export function RunsChart({ data }: RunsChartProps) {
 
   return (
     <div className={cn("rounded-xl border border-border bg-surface p-5 shadow-sm")}>
-      <h3 className="mb-4 text-sm font-semibold text-foreground">Runs (Last 30 Days)</h3>
+      <h3 className="mb-3 panel-label text-muted-foreground">Runs · Last 30 Days</h3>
       <ResponsiveContainer width="100%" height={240}>
         <LineChart data={data}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />

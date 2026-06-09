@@ -769,7 +769,7 @@ describe("SystemHealthPage", () => {
     setupHealthyApi();
     render(<SystemHealthPage />);
     await waitFor(() => {
-      expect(screen.getByText("Total Runs (today)")).toBeInTheDocument();
+      expect(screen.getByText("Total Runs · Today")).toBeInTheDocument();
     });
     // Quick stats values - some numbers may appear in multiple places
     expect(screen.getAllByText("42").length).toBeGreaterThanOrEqual(1);

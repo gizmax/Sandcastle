@@ -1,0 +1,43 @@
+/* ──── Instrument-panel language (visual revamp PR 2) ────
+   Panels, not bento cards: flat surfaces, 1px hairline borders, sharp radii,
+   mono uppercase micro-labels, dense tabular readouts.
+   Imported after index.css from main.tsx. Rules here are intentionally
+   unlayered so they win over Tailwind's @layer utilities. */
+
+/* Sharper radii: xl/2xl data surfaces collapse to the md step.
+   Buttons and chips keep their own smaller radii from the theme scale. */
+:root {
+  --radius-xl: 0.375rem;
+  --radius-2xl: 0.375rem;
+}
+
+/* Panels are flat — hairline borders carry the structure, not drop shadows.
+   Larger shadows (lg/xl) stay for true floating layers: popovers, modals. */
+.shadow-xs,
+.shadow-sm,
+.hover\:shadow-md:hover {
+  box-shadow: none;
+}
+
+/* Mono uppercase micro-label for section headers, page eyebrows and table
+   heads — `RUNS · LAST 24H` style. Color is left to the caller (pair with
+   text-muted-foreground or text-foreground) so Tailwind color utilities
+   keep working next to it. */
+.panel-label {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem; /* 11px */
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* Hairline divider between panel sections — use instead of gaps between
+   floating cards. */
+.panel-divider {
+  border-top: 1px solid var(--color-border);
+}
+
+/* Numbers line up like instrument readouts in every table. */
+table {
+  font-variant-numeric: tabular-nums;
+}

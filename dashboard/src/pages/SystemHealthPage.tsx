@@ -8,10 +8,10 @@ import {
   Container,
   HardDrive,
   RefreshCw,
-  HeartPulse,
 } from "lucide-react";
 import { api } from "@/api/client";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { cn } from "@/lib/utils";
 
 // -- Types ------------------------------------------------------------------
@@ -256,55 +256,50 @@ export default function SystemHealthPage() {
   }
 
   return (
-    <div className="space-y-4 sm:space-y-6">
+    <div className="space-y-4 sm:space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <HeartPulse className="h-6 w-6 text-muted" />
-          <h1 className="text-xl sm:text-2xl font-semibold font-display tracking-tight text-foreground">
-            System Health
-          </h1>
-          {/* Overall status badge */}
-          <span
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium",
-              overallStatus === "healthy" && "bg-success/15 border-success/30 text-success",
-              overallStatus === "degraded" && "bg-warning/15 border-warning/30 text-warning",
-              overallStatus === "unhealthy" && "bg-error/15 border-error/30 text-error"
-            )}
-          >
-            <span className={cn("h-1.5 w-1.5 rounded-full", statusDot(overallStatus))} />
-            {overallStatus === "healthy" ? "All Systems Operational" : overallStatus === "degraded" ? "Degraded" : "Issues Detected"}
-          </span>
-        </div>
-        <button
-          onClick={() => void fetchData(true)}
-          disabled={refreshing}
-          className={cn(
-            "flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-sm font-medium",
-            "text-foreground hover:bg-border/40 transition-colors",
-            refreshing && "opacity-50 cursor-not-allowed"
-          )}
-        >
-          <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
-          Refresh
-        </button>
-      </div>
+      <PageHeader
+        eyebrow="Diagnostics · Live"
+        title="System Health"
+        actions={
+          <>
+            <span
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium",
+                overallStatus === "healthy" && "bg-success/15 border-success/30 text-success",
+                overallStatus === "degraded" && "bg-warning/15 border-warning/30 text-warning",
+                overallStatus === "unhealthy" && "bg-error/15 border-error/30 text-error"
+              )}
+            >
+              <span className={cn("h-1.5 w-1.5 rounded-full", statusDot(overallStatus))} />
+              {overallStatus === "healthy" ? "All Systems Operational" : overallStatus === "degraded" ? "Degraded" : "Issues Detected"}
+            </span>
+            <button
+              onClick={() => void fetchData(true)}
+              disabled={refreshing}
+              className={cn(
+                "flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm font-medium",
+                "text-foreground hover:bg-border/40 transition-colors",
+                refreshing && "opacity-50 cursor-not-allowed"
+              )}
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
+              Refresh
+            </button>
+          </>
+        }
+      />
 
       {/* Top row: Server Status + Runtime Info */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Server Status card */}
-        <div className="rounded-xl border border-border bg-surface p-5 sm:p-6 shadow-sm">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent/10">
-              <Activity className="h-[18px] w-[18px] text-accent" />
-            </div>
-            <div>
-              <h2 className="text-lg font-semibold text-foreground">Server Status</h2>
-              <p className="text-sm text-muted-foreground mt-0.5">API health check</p>
-            </div>
+        <div className="rounded-md border border-border bg-surface overflow-hidden">
+          <div className="flex items-center gap-2 border-b border-border px-4 py-2.5 sm:px-5">
+            <Activity className="h-3.5 w-3.5 text-accent shrink-0" />
+            <h2 className="panel-label text-foreground">Server Status</h2>
+            <span className="panel-label text-muted-foreground/70 ml-auto">API health check</span>
           </div>
-          <div className="space-y-3">
+          <div className="space-y-2.5 p-4 sm:p-5">
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">Status</span>
               <span
@@ -338,17 +333,13 @@ export default function SystemHealthPage() {
         </div>
 
         {/* Runtime Info card */}
-        <div className="rounded-xl border border-border bg-surface p-5 sm:p-6 shadow-sm">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent/10">
-              <Server className="h-[18px] w-[18px] text-accent" />
-            </div>
-            <div>
-              <h2 className="text-lg font-semibold text-foreground">Runtime Info</h2>
-              <p className="text-sm text-muted-foreground mt-0.5">Sandbox and infrastructure</p>
-            </div>
+        <div className="rounded-md border border-border bg-surface overflow-hidden">
+          <div className="flex items-center gap-2 border-b border-border px-4 py-2.5 sm:px-5">
+            <Server className="h-3.5 w-3.5 text-accent shrink-0" />
+            <h2 className="panel-label text-foreground">Runtime Info</h2>
+            <span className="panel-label text-muted-foreground/70 ml-auto">Sandbox and infrastructure</span>
           </div>
-          <div className="space-y-3">
+          <div className="space-y-2.5 p-4 sm:p-5">
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">Mode</span>
               <span
@@ -391,9 +382,9 @@ export default function SystemHealthPage() {
       </div>
 
       {/* Service Checks */}
-      <div className="rounded-xl border border-border bg-surface shadow-sm overflow-hidden">
-        <div className="px-5 py-4 border-b border-border">
-          <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">
+      <div className="rounded-md border border-border bg-surface overflow-hidden">
+        <div className="px-4 py-2.5 border-b border-border">
+          <h2 className="panel-label text-muted-foreground">
             Service Checks
           </h2>
         </div>
@@ -403,7 +394,7 @@ export default function SystemHealthPage() {
             return (
               <div
                 key={check.name}
-                className="flex items-center gap-4 px-5 py-3.5 hover:bg-border/10 transition-colors"
+                className="flex items-center gap-4 px-4 py-2.5 hover:bg-border/10 transition-colors"
               >
                 {/* Status dot */}
                 <span className={cn("h-2.5 w-2.5 rounded-full shrink-0", statusDot(check.status))} />
@@ -434,27 +425,27 @@ export default function SystemHealthPage() {
       {/* Quick Stats */}
       {quickStats && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
-            <p className="text-xs font-medium text-muted-foreground">Total Runs (today)</p>
-            <p className="mt-1 text-xl sm:text-2xl font-semibold text-foreground font-mono">
+          <div className="rounded-md border border-border bg-surface p-4">
+            <p className="panel-label text-muted-foreground">Total Runs · Today</p>
+            <p className="mt-1.5 font-display text-2xl sm:text-3xl font-bold tracking-tight leading-none text-foreground">
               {quickStats.runs}
             </p>
           </div>
-          <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
-            <p className="text-xs font-medium text-muted-foreground">Workflows</p>
-            <p className="mt-1 text-xl sm:text-2xl font-semibold text-foreground font-mono">
+          <div className="rounded-md border border-border bg-surface p-4">
+            <p className="panel-label text-muted-foreground">Workflows</p>
+            <p className="mt-1.5 font-display text-2xl sm:text-3xl font-bold tracking-tight leading-none text-foreground">
               {quickStats.workflows}
             </p>
           </div>
-          <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
-            <p className="text-xs font-medium text-muted-foreground">Templates</p>
-            <p className="mt-1 text-xl sm:text-2xl font-semibold text-foreground font-mono">
+          <div className="rounded-md border border-border bg-surface p-4">
+            <p className="panel-label text-muted-foreground">Templates</p>
+            <p className="mt-1.5 font-display text-2xl sm:text-3xl font-bold tracking-tight leading-none text-foreground">
               {quickStats.templates}
             </p>
           </div>
-          <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
-            <p className="text-xs font-medium text-muted-foreground">API Keys</p>
-            <p className="mt-1 text-xl sm:text-2xl font-semibold text-foreground font-mono">
+          <div className="rounded-md border border-border bg-surface p-4">
+            <p className="panel-label text-muted-foreground">API Keys</p>
+            <p className="mt-1.5 font-display text-2xl sm:text-3xl font-bold tracking-tight leading-none text-foreground">
               {quickStats.apiKeys}
             </p>
           </div>
@@ -462,19 +453,13 @@ export default function SystemHealthPage() {
       )}
 
       {/* Environment card */}
-      <div className="rounded-xl border border-border bg-surface p-5 sm:p-6 shadow-sm">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent/10">
-            <CheckCircle2 className="h-[18px] w-[18px] text-accent" />
-          </div>
-          <div>
-            <h2 className="text-lg font-semibold text-foreground">Environment</h2>
-            <p className="text-sm text-muted-foreground mt-0.5">
-              System configuration overview
-            </p>
-          </div>
+      <div className="rounded-md border border-border bg-surface overflow-hidden">
+        <div className="flex items-center gap-2 border-b border-border px-4 py-2.5 sm:px-5">
+          <CheckCircle2 className="h-3.5 w-3.5 text-accent shrink-0" />
+          <h2 className="panel-label text-foreground">Environment</h2>
+          <span className="panel-label text-muted-foreground/70 ml-auto">System configuration</span>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-4 p-4 sm:p-5">
           <div>
             <p className="text-xs font-medium text-muted-foreground mb-1">Sandcastle Version</p>
             <p className="text-sm font-mono text-foreground">

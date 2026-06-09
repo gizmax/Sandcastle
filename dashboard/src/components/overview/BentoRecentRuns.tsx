@@ -22,23 +22,23 @@ export function BentoRecentRuns({ runs }: { runs: RunItem[] }) {
       "hover:border-accent/30 transition-all duration-300",
       "overflow-hidden",
     )}>
-      <div className="px-5 py-4 border-b border-border">
-        <h3 className="text-sm font-semibold text-foreground">Recent Runs</h3>
+      <div className="px-4 py-2.5 border-b border-border">
+        <h3 className="panel-label text-muted-foreground">Recent Runs</h3>
       </div>
       <div className="divide-y divide-border">
         {runs.slice(0, 5).map((run) => (
           <button
             key={run.run_id}
             onClick={() => navigate(`/runs/${run.run_id}`)}
-            className="flex w-full items-center gap-3 px-5 py-3.5 text-left hover:bg-background transition-colors duration-150"
+            className="flex w-full items-center gap-3 px-4 py-2 text-left hover:bg-background transition-colors duration-150"
           >
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium text-foreground">{run.workflow_name}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">
+              <p className="text-xs text-muted-foreground">
                 {run.started_at ? formatRelativeTime(run.started_at) : "queued"}
               </p>
             </div>
-            <span className="text-xs font-mono text-muted-foreground shrink-0">
+            <span className="font-data text-xs text-muted-foreground shrink-0 text-right">
               {formatCost(run.total_cost_usd)}
             </span>
             <span className={cn(
