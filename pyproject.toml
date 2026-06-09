@@ -76,6 +76,16 @@ mcp = [
 security = [
     "cryptography>=43.0",
 ]
+# Real GPU LoRA training (Overnight Self-Tune, trainer_backend="gpu"). Needs a CUDA
+# GPU; on a DGX Spark (aarch64) install torch from NVIDIA's index. bitsandbytes is
+# intentionally NOT pinned here - 4/8-bit quantization is opt-in (lora_quantize).
+training = [
+    "torch>=2.4",
+    "transformers>=4.45",
+    "peft>=0.13",
+    "datasets>=3.0",
+    "accelerate>=1.0",
+]
 telemetry = [
     "sentry-sdk[fastapi]>=2.0",
 ]

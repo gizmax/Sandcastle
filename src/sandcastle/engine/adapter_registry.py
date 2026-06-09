@@ -32,7 +32,7 @@ class AdapterRegistry:
         lora_config: dict[str, Any],
         created_at: float = 0.0,
     ) -> Path:
-        """Persist an adapter's metadata + a stub weights file; return its directory."""
+        """Persist an adapter's metadata (+ a stub weights file when none exist)."""
         d = self.root / adapter_id
         d.mkdir(parents=True, exist_ok=True)
         meta = {
@@ -44,7 +44,10 @@ class AdapterRegistry:
             "created_at": created_at,
         }
         (d / "metadata.json").write_text(json.dumps(meta, indent=2, sort_keys=True))
-        (d / "adapter_model.safetensors.stub").write_text(adapter_id)
+        # Real weights (GPUTrainer writes adapter_model.safetensors before registering)
+        # win; the stub only marks mock-trained adapters so the layout stays uniform.
+        if not (d / "adapter_model.safetensors").exists():
+            (d / "adapter_model.safetensors.stub").write_text(adapter_id)
         return d
 
     def get(self, adapter_id: str) -> dict | None:

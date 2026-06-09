@@ -235,6 +235,12 @@ OLLAMA_HOST=http://localhost:11434 sandcastle serve   # Spark Mode auto-detects 
 Override detection anytime with `SANDCASTLE_SPARK_MODE=on|off`. On any non-Spark machine nothing
 changes — detection is fail-closed.
 
+**Overnight Self-Tune** goes one step further: with `pip install 'sandcastle-ai[training]'`,
+`TRAINER_BACKEND=gpu`, and `EVOLUTION_AUTO_FINETUNE=true`, the evolution loop fine-tunes a real
+LoRA adapter (transformers + peft) on the workflow's own eval data and routes the workflow to it —
+served by your local vLLM/Ollama/NIM at $0/run. See
+[docs/overnight-self-tune-spark.md](docs/overnight-self-tune-spark.md).
+
 > Spark Mode auto-configures Sandcastle for NVIDIA DGX Spark and local NVIDIA GPU inference. It is
 > **not** an official NVIDIA certification or endorsement. "NVIDIA", "DGX", and "DGX Spark" are
 > trademarks of NVIDIA Corporation, used here only to describe compatibility.

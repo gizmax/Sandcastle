@@ -26,11 +26,13 @@ def test_get_trainer_unknown_raises():
 
 
 @pytest.mark.asyncio
-async def test_gpu_trainer_is_a_stub():
+async def test_gpu_trainer_is_gated():
     from sandcastle.engine.training.gpu_trainer import GPUTrainer
 
-    # Without torch/peft this raises RuntimeError; with them, NotImplementedError.
-    with pytest.raises((RuntimeError, NotImplementedError)):
+    # Without the [training] extras this raises (deps); with them but no GPU (CUDA).
+    # Either way GPUTrainer never silently no-ops on a dev box. Full coverage of the
+    # real path (with mocked deps) lives in tests/test_gpu_trainer.py.
+    with pytest.raises(RuntimeError):
         await GPUTrainer().train("sonnet", PAIRS, settings)
 
 
