@@ -31,8 +31,16 @@ class AdapterRegistry:
         samples: int,
         lora_config: dict[str, Any],
         created_at: float = 0.0,
+        dataset_hash: str | None = None,
+        parent_adapter_id: str | None = None,
     ) -> Path:
-        """Persist an adapter's metadata + a stub weights file; return its directory."""
+        """Persist an adapter's metadata + a stub weights file; return its directory.
+
+        ``dataset_hash`` fingerprints the training pairs and ``parent_adapter_id``
+        records lineage (the adapter the workflow was routed to when this one was
+        trained). Both are optional, so pre-existing callers and metadata files
+        without them keep working unchanged.
+        """
         d = self.root / adapter_id
         d.mkdir(parents=True, exist_ok=True)
         meta = {
@@ -42,6 +50,8 @@ class AdapterRegistry:
             "samples": samples,
             "lora_config": lora_config,
             "created_at": created_at,
+            "dataset_hash": dataset_hash,
+            "parent_adapter_id": parent_adapter_id,
         }
         (d / "metadata.json").write_text(json.dumps(meta, indent=2, sort_keys=True))
         (d / "adapter_model.safetensors.stub").write_text(adapter_id)

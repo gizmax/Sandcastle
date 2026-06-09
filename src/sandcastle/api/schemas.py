@@ -1388,6 +1388,43 @@ class EvolutionStatsResponse(BaseModel):
     top_workflows: list[dict[str, Any]] = Field(default_factory=list)
 
 
+# --- Night Shift (Overnight Self-Tune) schemas ---
+
+
+class AdapterInfoResponse(BaseModel):
+    """A trained LoRA adapter from the filesystem registry, with lineage."""
+
+    adapter_id: str
+    base_model: str = ""
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    samples: int = 0
+    lora_config: dict[str, Any] = Field(default_factory=dict)
+    dataset_hash: str | None = None
+    parent_adapter_id: str | None = None
+    created_at: float = 0.0
+    served: bool = False
+
+
+class SelfTuneNightResponse(BaseModel):
+    """One night of Overnight Self-Tune activity."""
+
+    night: str  # ISO date (UTC)
+    mutations_tried: int = 0
+    mutations_kept: int = 0
+    adapters_produced: int = 0
+    best_eval_score: float | None = None
+    best_delta: float | None = None  # vs the previous night's best eval score
+    adapter_ids: list[str] = Field(default_factory=list)
+
+
+class SelfTuneNightsResponse(BaseModel):
+    """Self-Tune history aggregated by night, oldest first."""
+
+    nights: list[SelfTuneNightResponse] = Field(default_factory=list)
+    enabled: bool = False  # settings.evolution_auto_finetune
+    total_adapters: int = 0
+
+
 # --- Advisor / Provider ---
 
 
