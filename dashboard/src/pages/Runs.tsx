@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { PlayCircle, Trash2, XCircle, Search, AlertTriangle, BookmarkPlus, X, Bookmark, Zap, Download, GitCompareArrows } from "lucide-react";
+import { Trash2, XCircle, Search, AlertTriangle, BookmarkPlus, X, Bookmark, Zap, Download, GitCompareArrows } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { useRuns } from "@/hooks/useRuns";
@@ -521,12 +521,12 @@ export default function Runs() {
         </div>
       ) : filteredRuns.length === 0 ? (
         <EmptyState
-          icon={PlayCircle}
+          variant={statusFilter !== "all" || workflowFilter || searchTerm ? "tide" : "castle"}
           title={statusFilter !== "all" || workflowFilter || searchTerm ? "No runs match your filters" : "No runs yet"}
           description={
             statusFilter !== "all" || workflowFilter || searchTerm
-              ? "Try adjusting your filters."
-              : "Run a workflow to see execution history here."
+              ? "The tide turned up nothing. Try loosening your filters."
+              : "Run a workflow and its history lands here. Build something."
           }
           action={
             statusFilter !== "all" || workflowFilter || searchTerm

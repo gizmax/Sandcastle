@@ -214,9 +214,9 @@ export default function AutoPilotPage() {
       {/* Experiments */}
       {experiments.length === 0 ? (
         <EmptyState
-          icon={FlaskConical}
+          variant="building"
           title="No experiments yet"
-          description="Add autopilot config to any workflow step to start optimizing automatically."
+          description="Add autopilot config to any workflow step and Sandcastle starts optimizing on its own."
         />
       ) : (
         <div className="space-y-4">

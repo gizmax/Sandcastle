@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard";
+import { DuneContours } from "@/components/brand";
 
 /**
  * Full-screen onboarding page - renders outside the Layout wrapper.
@@ -22,7 +23,10 @@ export default function Onboarding() {
   }, [navigate]);
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-background bg-grid p-4 sm:p-6">
+    <div className="relative flex min-h-screen flex-col items-center justify-center bg-background bg-grid p-4 sm:p-6">
+      {/* Dune contours along the bottom - quiet brand backdrop */}
+      <DuneContours className="fixed inset-x-0 bottom-0 h-44 w-full text-foreground opacity-[0.06] sm:h-56" />
+
       {/* Subtle brand in top-left */}
       <div className="fixed top-4 left-4 flex items-center gap-2 text-sm font-semibold text-foreground/60">
         <span className="text-lg">🏰</span>
@@ -30,7 +34,7 @@ export default function Onboarding() {
       </div>
 
       {/* Centered wizard container */}
-      <div className="w-full max-w-[720px]">
+      <div className="relative w-full max-w-[720px]">
         <OnboardingWizard onFinish={handleFinish} />
       </div>
     </div>

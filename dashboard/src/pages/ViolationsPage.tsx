@@ -160,9 +160,9 @@ export default function ViolationsPage() {
 
       {items.length === 0 ? (
         <EmptyState
-          icon={ShieldAlert}
+          variant="castle"
           title="No violations"
-          description="Policy violations from workflow runs will appear here."
+          description="A clean record. Policy violations from runs would land here."
         />
       ) : (
         <div className="space-y-3">

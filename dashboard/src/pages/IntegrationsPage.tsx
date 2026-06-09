@@ -5,7 +5,6 @@ import {
   AlertTriangle,
   Link2,
   Blocks,
-  Plug,
   KeyRound,
 } from "lucide-react";
 import { api } from "@/api/client";
@@ -337,9 +336,9 @@ export default function IntegrationsPage() {
       ) : (
         <section>
           <EmptyState
-            icon={Plug}
+            variant="castle"
             title="No integrations configured yet"
-            description="Connect your workflows to external services."
+            description="Connect your workflows to the world outside the castle walls."
           />
           {/* Popular quick-start cards */}
           <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 max-w-3xl mx-auto">

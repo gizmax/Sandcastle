@@ -1,0 +1,58 @@
+/* ────────────────────────────────────────────────────────────────────
+   Sandcastle brand signature moments (visual revamp PR 4)
+   Flag wave, warm sand skeleton shimmer, dune backdrop helpers.
+   All colors derive from the theme tokens defined in index.css.
+   ──────────────────────────────────────────────────────────────────── */
+
+/* ──── Gentle flag wave on the empty-state sandcastle ──── */
+
+@keyframes brand-flag-wave {
+  0%, 100% { transform: skewY(0deg) scaleX(1); }
+  50%      { transform: skewY(-5deg) scaleX(0.96); }
+}
+
+.brand-flag {
+  transform-box: fill-box;
+  transform-origin: left center;
+  animation: brand-flag-wave 3.4s ease-in-out infinite;
+}
+
+/* ──── Warm sand skeleton shimmer (replaces the cold gray pulse) ──── */
+
+@keyframes brand-sand-sweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+
+.skeleton-sand {
+  background: color-mix(in srgb, var(--color-border) 60%, var(--color-background));
+}
+
+.skeleton-sand-sweep {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--color-accent) 9%, transparent) 40%,
+    color-mix(in srgb, var(--color-accent) 16%, transparent) 50%,
+    color-mix(in srgb, var(--color-accent) 9%, transparent) 60%,
+    transparent 100%
+  );
+  animation: brand-sand-sweep 1.8s ease-in-out infinite;
+}
+
+/* ──── Decorative dune backdrop ──── */
+
+.brand-backdrop {
+  pointer-events: none;
+  user-select: none;
+}
+
+/* ──── Accessibility: respect reduced motion
+        (mirrors the exclusion-list pattern in index.css) ──── */
+
+@media (prefers-reduced-motion: reduce) {
+  .brand-flag,
+  .skeleton-sand-sweep {
+    animation: none !important;
+  }
+}

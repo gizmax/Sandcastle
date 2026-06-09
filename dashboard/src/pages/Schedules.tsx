@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Calendar, Plus, Loader2 } from "lucide-react";
+import { Plus, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { ScheduleTable } from "@/components/schedules/ScheduleTable";
@@ -163,9 +163,9 @@ export default function Schedules() {
 
       {schedules.length === 0 ? (
         <EmptyState
-          icon={Calendar}
+          variant="tide"
           title="No schedules yet"
-          description="No schedules configured. Create a schedule to run workflows on a cron timer."
+          description="Put a workflow on a cron timer and let the tide do the work."
           action={{ label: "New Schedule", onClick: () => setModalOpen(true) }}
         />
       ) : (

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Inbox, AlertTriangle, Layers, List } from "lucide-react";
+import { AlertTriangle, Layers, List } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { DeadLetterTable, type DLQItem } from "@/components/dead-letter/DeadLetterTable";
@@ -200,9 +200,9 @@ export default function DeadLetterPage() {
 
       {items.length === 0 ? (
         <EmptyState
-          icon={Inbox}
+          variant="castle"
           title="No dead letters"
-          description="Failed steps that exceed retry limits will appear here."
+          description="Nothing washed up. Steps that exhaust their retries land here."
         />
       ) : viewMode === "clustered" ? (
         <ErrorClusters

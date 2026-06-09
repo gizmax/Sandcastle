@@ -1253,9 +1253,9 @@ export default function EvolutionPage() {
       {/* Empty state */}
       {evolutions.length === 0 && (
         <EmptyState
-          icon={Sparkles}
+          variant="building"
           title="No evolutions yet"
-          description="Start an evolution to automatically discover better prompts, models, and configurations for your workflows."
+          description="Start an evolution and let it discover better prompts, models, and configurations for your workflows."
         />
       )}
 

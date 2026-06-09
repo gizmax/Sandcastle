@@ -943,7 +943,7 @@ describe("MemoryPage", () => {
       expect(screen.getByText("No memories yet")).toBeInTheDocument();
     });
 
-    expect(screen.getByText(/Memories are created automatically/)).toBeInTheDocument();
+    expect(screen.getByText(/Agents write memories here/)).toBeInTheDocument();
   });
 
   it("Search returns filtered results and shows clear button", async () => {
