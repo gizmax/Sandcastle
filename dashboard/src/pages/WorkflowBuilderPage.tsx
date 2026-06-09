@@ -107,7 +107,14 @@ export default function WorkflowBuilderPage() {
         return;
       }
       if (res.data?.run_id) {
-        navigate(`/runs/${res.data.run_id}`);
+        const runId = res.data.run_id;
+        toast.success("Run started", {
+          action: {
+            label: "Mission Control",
+            onClick: () => navigate(`/runs/${runId}/live`),
+          },
+        });
+        navigate(`/runs/${runId}`);
       }
     },
     [navigate]

@@ -501,9 +501,18 @@ export default function TemplatesPage() {
     if (res.error) {
       toast.error(`Run failed: ${res.error.message}`);
     } else if (res.data) {
-      toast.success("Workflow run queued");
       const runId = (res.data as Record<string, unknown>).run_id as string;
-      if (runId) navigate(`/runs/${runId}`);
+      if (runId) {
+        toast.success("Workflow run queued", {
+          action: {
+            label: "Mission Control",
+            onClick: () => navigate(`/runs/${runId}/live`),
+          },
+        });
+        navigate(`/runs/${runId}`);
+      } else {
+        toast.success("Workflow run queued");
+      }
     }
   }, [detail, fieldValues, runInput, navigate]);
 

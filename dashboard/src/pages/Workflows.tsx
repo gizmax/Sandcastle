@@ -86,7 +86,7 @@ export default function Workflows() {
   const handleRun = useCallback(
     async (input: Record<string, unknown>, callbackUrl?: string) => {
       if (!runModal) return;
-      const res = await api.post("/workflows/run", {
+      const res = await api.post<{ run_id: string }>("/workflows/run", {
         workflow_name: runModal.file_name.replace(".yaml", ""),
         input,
         callback_url: callbackUrl,
@@ -95,6 +95,15 @@ export default function Workflows() {
       if (res.error) {
         toast.error(`Run failed: ${res.error.message}`);
         return;
+      }
+      const runId = res.data?.run_id;
+      if (runId) {
+        toast.success("Run started", {
+          action: {
+            label: "Mission Control",
+            onClick: () => navigate(`/runs/${runId}/live`),
+          },
+        });
       }
       navigate("/runs");
     },
