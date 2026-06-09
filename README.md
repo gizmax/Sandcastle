@@ -1,6 +1,6 @@
 # Sandcastle
 
-**Describe what you want. Go home. Sandcastle ships it.** Production-ready workflow orchestrator for AI agents. 7 AI providers with auto-failover, 22 step types including Claude Managed Agents, 15 agent templates, 4 OCR engines, EU AI Act compliance, and a full-featured dashboard. Define workflows in YAML or let AI design them for you.
+**Your box. Your brains. Your data.** Sandcastle is sovereign agent infrastructure: an open-source, production-ready workflow orchestrator that runs AI agents entirely on hardware you control - local models at $0/run, hard data-residency enforcement, and a tamper-evident audit trail. When you want the cloud, it's there too: 7 AI providers with auto-failover, 22 step types including Claude Managed Agents, 15 agent templates, 4 OCR engines, EU AI Act compliance features, and a full-featured dashboard. Define workflows in YAML or let AI design them for you. European-built.
 
 [![PyPI](https://img.shields.io/badge/PyPI-v0.33.0-blue?style=flat-square)](https://pypi.org/project/sandcastle-ai/0.33.0/)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-blue.svg)](LICENSE)
@@ -86,7 +86,16 @@
 
 ## Why Sandcastle?
 
-AI agent frameworks give you building blocks - LLM calls, tool use, maybe a graph. But when you start building real products, the glue code piles up fast:
+**Sovereignty first.** Every mainstream agent stack assumes your data goes to someone else's cloud and your costs scale with someone else's token meter. Sandcastle inverts that default:
+
+- **Local-first execution.** NVIDIA NIM, Ollama, and oMLX are first-class providers at `region=local`. Spark Mode auto-detects an NVIDIA DGX Spark and flips to local-first defaults with no flags. Air-gap friendly by design.
+- **$0 runs on your hardware.** Inference on your own silicon is metered at `$0.00/run`. No egress, no per-token bill.
+- **Hard data-residency enforcement.** Set `data_residency=local` (or `eu`) and the engine raises before any step could route data off-box - enforcement in the executor, not a policy PDF.
+- **Replayable, auditable runs.** SHA-256 hash-chained audit trail on every run, plus deterministic cassettes: record once, replay offline at $0, identically, with a tamper-evident signature. Audit-ready for the EU AI Act era.
+
+If your workloads live in regulated or sovereignty-sensitive environments - public sector, healthcare, finance - this is the difference between "we have a policy" and "the runtime physically cannot leak."
+
+**And it's a complete orchestrator, not just a residency gate.** AI agent frameworks give you building blocks - LLM calls, tool use, maybe a graph. But when you start building real products, the glue code piles up fast:
 
 - **"Step A scrapes, step B enriches, step C scores."** - You need workflow orchestration.
 - **"Fan out over 50 leads in parallel, then merge."** - You need a DAG engine.
