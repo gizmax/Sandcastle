@@ -415,7 +415,7 @@ export function DependencyGraph({ workflows }: DependencyGraphProps) {
               strokeWidth={highlighted ? 2 : 1.5}
               strokeOpacity={dimmed ? 0.15 : highlighted ? 0.8 : 0.4}
               markerEnd="url(#dep-arrow)"
-              className="transition-all duration-200"
+              className="transition-settle"
             />
           );
         })}
@@ -456,7 +456,7 @@ export function DependencyGraph({ workflows }: DependencyGraphProps) {
                 fill={fill}
                 stroke={stroke}
                 strokeWidth={isHovered ? 2.5 : 1.5}
-                className="transition-all duration-150"
+                className="transition-settle"
               />
               <text
                 x={pos.x}

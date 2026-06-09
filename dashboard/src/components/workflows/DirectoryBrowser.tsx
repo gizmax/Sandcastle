@@ -146,7 +146,7 @@ export function DirectoryBrowser({ open, initialPath, onSelect, onClose }: Direc
               onClick={() => onSelect(currentPath)}
               className={cn(
                 "rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground",
-                "hover:bg-accent-hover transition-all duration-200 shadow-sm"
+                "hover:bg-accent-hover transition-settle shadow-sm"
               )}
             >
               Select This Directory

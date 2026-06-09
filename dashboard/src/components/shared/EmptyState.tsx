@@ -27,7 +27,7 @@ export function EmptyState({ icon: Icon, title, description, action, className }
           onClick={action.onClick}
           className={cn(
             "rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground",
-            "hover:bg-accent-hover transition-all duration-200",
+            "hover:bg-accent-hover transition-settle",
             "shadow-sm hover:shadow-md"
           )}
         >

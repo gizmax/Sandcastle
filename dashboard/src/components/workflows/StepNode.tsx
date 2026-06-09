@@ -96,7 +96,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
     <div
       className={cn(
         "rounded-lg border bg-surface px-4 py-3 shadow-sm min-w-[140px]",
-        "transition-all duration-200",
+        "transition-settle",
         isRunning && "step-running-glow border-accent/60",
         selected
           ? "border-accent ring-2 ring-accent/30 shadow-[0_0_16px_rgba(245,158,11,0.2)]"

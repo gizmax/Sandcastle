@@ -107,7 +107,7 @@ export function InstallModal({
           aria-label={phase === "done" ? `${pack.name} Installed` : `Installing ${pack.name}`}
           className={cn(
             "w-full max-w-md rounded-xl border bg-surface shadow-xl",
-            "transition-all duration-300",
+            "transition-settle",
             phase === "done" ? "border-accent/30 glow-accent" : "border-border"
           )}
         >
@@ -148,7 +148,7 @@ export function InstallModal({
             <div className="px-5 pt-4">
               <div className="h-1.5 w-full overflow-hidden rounded-full bg-border/40">
                 <div
-                  className="h-full rounded-full bg-accent transition-all duration-300 ease-out"
+                  className="h-full rounded-full bg-accent transition-settle ease-out"
                   style={{ width: `${progressPct}%` }}
                 />
               </div>
@@ -162,7 +162,7 @@ export function InstallModal({
                 <div
                   key={item.name}
                   className={cn(
-                    "flex items-center gap-3 rounded-lg px-3 py-2 transition-all duration-200",
+                    "flex items-center gap-3 rounded-lg px-3 py-2 transition-settle",
                     item.status === "installing" && "bg-accent/5",
                     item.status === "done" && "opacity-80"
                   )}
@@ -218,7 +218,7 @@ export function InstallModal({
                   className={cn(
                     "flex flex-1 items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2.5",
                     "text-sm font-medium text-accent-foreground",
-                    "hover:bg-accent-hover transition-all duration-200 shadow-sm"
+                    "hover:bg-accent-hover transition-settle shadow-sm"
                   )}
                 >
                   <ArrowRight className="h-4 w-4" />

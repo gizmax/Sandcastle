@@ -116,7 +116,7 @@ function PipelineNode({
         onMouseLeave={onLeave}
         className={cn(
           "relative h-7 w-7 rounded-full border-2 border-surface",
-          "transition-all duration-200 cursor-pointer",
+          "transition-settle cursor-pointer",
           "hover:scale-125 hover:shadow-md",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
           isRunning && "pipeline-node-pulse"

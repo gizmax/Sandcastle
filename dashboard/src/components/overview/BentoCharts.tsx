@@ -9,14 +9,14 @@ export function BentoCharts({ stats }: { stats: Stats }) {
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5">
       <div className={cn(
         "bg-surface rounded-2xl shadow-sm border border-border",
-        "hover:border-accent/30 transition-all duration-300",
+        "hover:border-accent/30 transition-settle",
         "[&>div]:rounded-2xl [&>div]:border-0 [&>div]:shadow-none [&>div]:bg-transparent",
       )}>
         <RunsChart data={stats.runs_by_day} />
       </div>
       <div className={cn(
         "bg-surface rounded-2xl shadow-sm border border-border",
-        "hover:border-accent/30 transition-all duration-300",
+        "hover:border-accent/30 transition-settle",
         "[&>div]:rounded-2xl [&>div]:border-0 [&>div]:shadow-none [&>div]:bg-transparent",
       )}>
         {stats.cost_by_workflow && <CostChart data={stats.cost_by_workflow} />}

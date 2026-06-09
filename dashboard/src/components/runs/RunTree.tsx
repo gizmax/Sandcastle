@@ -30,7 +30,7 @@ function RunTreeCard({
     <button
       onClick={() => !isCurrent && navigate(`/runs/${run.run_id}`)}
       className={cn(
-        "flex items-center gap-3 rounded-lg border px-3 py-2 text-left text-sm transition-all duration-200",
+        "flex items-center gap-3 rounded-lg border px-3 py-2 text-left text-sm transition-settle",
         isCurrent
           ? "border-accent bg-accent/10 cursor-default"
           : "border-border bg-surface hover:bg-border/20 hover:shadow-sm cursor-pointer"

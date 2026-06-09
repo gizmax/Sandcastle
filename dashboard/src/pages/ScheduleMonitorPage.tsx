@@ -202,7 +202,7 @@ export default function ScheduleMonitorPage() {
           aria-label="Refresh schedules"
           className={cn(
             "flex items-center gap-2 rounded-lg bg-surface border border-border px-3 py-2 text-sm font-medium text-foreground",
-            "hover:bg-background transition-all duration-200"
+            "hover:bg-background transition-settle"
           )}
         >
           <RefreshCw className="h-4 w-4" />
@@ -229,7 +229,7 @@ export default function ScheduleMonitorPage() {
                 key={schedule.id}
                 className={cn(
                   "bg-surface rounded-2xl shadow-sm border border-border",
-                  "hover:border-accent/30 transition-all duration-300",
+                  "hover:border-accent/30 transition-settle",
                   "p-5 flex flex-col gap-4"
                 )}
               >
@@ -315,7 +315,7 @@ export default function ScheduleMonitorPage() {
                     disabled={isToggling}
                     className={cn(
                       "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium",
-                      "border transition-all duration-200",
+                      "border transition-settle",
                       schedule.enabled
                         ? "border-warning/30 bg-warning/5 text-warning hover:bg-warning/10"
                         : "border-success/30 bg-success/5 text-success hover:bg-success/10",
@@ -337,7 +337,7 @@ export default function ScheduleMonitorPage() {
                     className={cn(
                       "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium",
                       "border border-accent/30 bg-accent/5 text-accent hover:bg-accent/10",
-                      "transition-all duration-200",
+                      "transition-settle",
                       (isTriggering || !schedule.enabled) && "opacity-50 cursor-not-allowed"
                     )}
                   >

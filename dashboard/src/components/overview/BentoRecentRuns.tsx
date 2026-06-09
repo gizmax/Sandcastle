@@ -19,7 +19,7 @@ export function BentoRecentRuns({ runs }: { runs: RunItem[] }) {
   return (
     <div className={cn(
       "bg-surface rounded-2xl shadow-sm border border-border",
-      "hover:border-accent/30 transition-all duration-300",
+      "hover:border-accent/30 transition-settle",
       "overflow-hidden",
     )}>
       <div className="px-5 py-4 border-b border-border">

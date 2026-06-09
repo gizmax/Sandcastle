@@ -280,7 +280,7 @@ export default function IntegrationsPage() {
                   onClick={() => setSelectedTool(tool)}
                   className={cn(
                     "relative flex items-start gap-4 rounded-xl border border-border bg-surface p-4",
-                    "text-left transition-all duration-200",
+                    "text-left transition-settle",
                     "hover:border-accent/40 hover:shadow-md hover:shadow-accent/5",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
                   )}
@@ -355,7 +355,7 @@ export default function IntegrationsPage() {
                     onClick={() => setSelectedTool(tool)}
                     className={cn(
                       "flex flex-col items-center gap-2 rounded-xl border border-border bg-surface p-4",
-                      "transition-all duration-200",
+                      "transition-settle",
                       "hover:border-accent/40 hover:shadow-md hover:shadow-accent/5",
                       "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
                     )}
@@ -440,7 +440,7 @@ export default function IntegrationsPage() {
                   onClick={() => setSelectedTool(tool)}
                   className={cn(
                     "flex items-start gap-3 rounded-xl border border-border bg-surface p-3",
-                    "text-left transition-all duration-200",
+                    "text-left transition-settle",
                     "hover:border-accent/40 hover:shadow-md hover:shadow-accent/5",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
                   )}

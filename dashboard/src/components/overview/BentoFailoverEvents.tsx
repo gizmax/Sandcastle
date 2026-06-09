@@ -19,7 +19,7 @@ export function BentoFailoverEvents({ data }: { data: FailoverEventsData }) {
   return (
     <div className={cn(
       "bg-surface rounded-2xl shadow-sm border border-border",
-      "hover:border-accent/30 transition-all duration-300",
+      "hover:border-accent/30 transition-settle",
       "p-5 flex flex-col gap-3",
     )}>
       <div className="flex items-center justify-between">

@@ -66,7 +66,7 @@ export function StepWelcome({ onNext, onSkip }: StepWelcomeProps) {
           onClick={onNext}
           className={cn(
             "inline-flex items-center gap-2 rounded-lg bg-accent px-6 py-2.5 text-sm font-medium text-accent-foreground btn-shimmer",
-            "hover:bg-accent-hover transition-all duration-200 shadow-sm hover:shadow-md"
+            "hover:bg-accent-hover transition-settle shadow-sm hover:shadow-md"
           )}
         >
           Get Started

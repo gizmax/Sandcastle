@@ -326,7 +326,7 @@ export function BentoEmptyState() {
               className={cn(
                 "text-left rounded-xl border border-border p-4",
                 "hover:border-accent/40 hover:bg-accent/5",
-                "transition-all duration-200 active:scale-[0.98] cursor-pointer group",
+                "transition-settle active:scale-[0.98] cursor-pointer group",
               )}
             >
               <span className="text-2xl">{qr.icon}</span>

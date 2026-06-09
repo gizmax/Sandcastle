@@ -128,7 +128,7 @@ export function TemplateDetail({
               className={cn(
                 "flex flex-1 items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2",
                 "text-sm font-medium text-accent-foreground",
-                "hover:bg-accent-hover transition-all duration-200 shadow-sm"
+                "hover:bg-accent-hover transition-settle shadow-sm"
               )}
             >
               <Play className="h-4 w-4" />

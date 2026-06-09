@@ -42,7 +42,7 @@ export function LayoutSwitcher({ layout, setLayout }: LayoutSwitcherProps) {
             localStorage.setItem("sandcastle_overview_layout", opt.id);
           }}
           className={cn(
-            "flex items-center justify-center rounded-lg w-7 h-7 transition-all duration-150",
+            "flex items-center justify-center rounded-lg w-7 h-7 transition-settle",
             layout === opt.id
               ? "bg-accent text-accent-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground",

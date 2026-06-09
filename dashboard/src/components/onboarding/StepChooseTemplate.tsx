@@ -179,7 +179,7 @@ export function StepChooseTemplate({
                 key={template.name}
                 onClick={() => handleSelect(template)}
                 className={cn(
-                  "relative flex flex-col items-start gap-3 rounded-xl border p-4 text-left transition-all duration-200",
+                  "relative flex flex-col items-start gap-3 rounded-xl border p-4 text-left transition-settle",
                   isSelected
                     ? "border-accent bg-accent/5 glow-accent card-selected"
                     : "border-border hover:border-accent/40 hover:bg-accent/[0.02] card-hover-lift"
@@ -254,7 +254,7 @@ export function StepChooseTemplate({
           disabled={!selected}
           className={cn(
             "inline-flex items-center gap-2 rounded-lg bg-accent px-5 py-2 text-sm font-medium text-accent-foreground",
-            "hover:bg-accent-hover transition-all duration-200 shadow-sm",
+            "hover:bg-accent-hover transition-settle shadow-sm",
             "disabled:opacity-60 disabled:cursor-not-allowed"
           )}
         >

@@ -220,7 +220,7 @@ export function CreateScheduleModal({ open, onClose, onSubmit }: CreateScheduleM
                 disabled={!selectedWorkflow}
                 className={cn(
                   "rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground",
-                  "hover:bg-accent-hover transition-all duration-200",
+                  "hover:bg-accent-hover transition-settle",
                   "shadow-sm hover:shadow-md",
                   "disabled:opacity-50 disabled:cursor-not-allowed"
                 )}

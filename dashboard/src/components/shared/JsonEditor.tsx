@@ -42,7 +42,7 @@ export function JsonEditor({ value, onChange, placeholder, className, rows = 8 }
           "w-full rounded-lg border bg-surface px-3 py-2 font-mono text-sm",
           "placeholder:text-muted-foreground/50",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
-          "transition-all duration-200 resize-y",
+          "transition-settle resize-y",
           error ? "border-error" : "border-border"
         )}
       />
