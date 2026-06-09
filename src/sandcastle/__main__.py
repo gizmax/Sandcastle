@@ -4530,6 +4530,51 @@ def _cmd_owners(args: argparse.Namespace) -> None:
         print(f"  {owner}: {steps_str}")
 
 
+def _cmd_audit_verify(args: argparse.Namespace) -> None:
+    """Verify a run cassette's tamper-evident hash chain and keyed signature.
+
+    The target is either a path to a ``.cassette.json`` file or a run ID,
+    which is resolved to the auto-recorded cassette under the data dir
+    (black box compliance mode). Exits 1 on FAIL.
+    """
+    from pathlib import Path
+
+    from sandcastle.engine.cassette import default_cassette_path, verify_cassette
+
+    path = Path(args.target)
+    if not path.exists():
+        path = default_cassette_path(args.target)
+    if not path.exists():
+        print(
+            _color(f"No cassette found for '{args.target}' (looked at {path})", _C.RED),
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    v = verify_cassette(path, key=args.key)
+
+    print(f"Cassette:   {path}")
+    print(f"Records:    {v.chain_length}")
+    print(f"Chain head: {v.chain_head}")
+    if v.signature_ok is None:
+        print("Signature:  not checked (unsigned cassette or no audit key configured)")
+    elif v.signature_ok:
+        print(f"Signature:  {_color('valid', _C.GREEN)}")
+    else:
+        print(f"Signature:  {_color('INVALID', _C.RED)}")
+    print()
+
+    if v.valid:
+        print(_color("PASS", _C.GREEN) + " - hash chain intact, every record verifies")
+        return
+    print(_color("FAIL", _C.RED) + " - the audit trail does not verify")
+    if v.first_broken_index is not None:
+        print(f"  First broken record: chain index {v.first_broken_index}")
+    if v.reason:
+        print(f"  Reason: {v.reason}")
+    sys.exit(1)
+
+
 # ---------------------------------------------------------------------------
 # Argument parser
 # ---------------------------------------------------------------------------
@@ -4885,6 +4930,22 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_connection_args(p_violations_list)
 
+    # --- audit (black box flight recorder) ---
+    p_audit = subparsers.add_parser("audit", help="Signed audit trail (black box)")
+    audit_sub = p_audit.add_subparsers(dest="audit_action")
+
+    p_audit_verify = audit_sub.add_parser(
+        "verify", help="Verify a run's signed cassette: hash chain + signature"
+    )
+    p_audit_verify.add_argument(
+        "target", help="Run ID (resolved under the data dir) or path to a .cassette.json file"
+    )
+    p_audit_verify.add_argument(
+        "--key",
+        default=None,
+        help="Audit key to verify the signature with (default: AUDIT_KEY from env/.env)",
+    )
+
     # --- tools ---
     p_tools = subparsers.add_parser("tools", help="Tool/connector management")
     tools_sub = p_tools.add_subparsers(dest="tools_action")
@@ -5038,6 +5099,15 @@ def main() -> None:
             _cmd_db_migrate(args)
         else:
             print("Usage: sandcastle db migrate", file=sys.stderr)
+            sys.exit(1)
+        return
+
+    # --- audit ---
+    if args.command == "audit":
+        if getattr(args, "audit_action", None) == "verify":
+            _cmd_audit_verify(args)
+        else:
+            print("Usage: sandcastle audit verify <run-id-or-cassette-path>", file=sys.stderr)
             sys.exit(1)
         return
 
