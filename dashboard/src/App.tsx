@@ -33,6 +33,7 @@ const TemplatesPage = lazyWithRetry(() => import("@/pages/TemplatesPage"), "temp
 const IntegrationsPage = lazyWithRetry(() => import("@/pages/IntegrationsPage"), "integrations");
 const EvaluationsPage = lazyWithRetry(() => import("@/pages/EvaluationsPage"), "evaluations");
 const EvolutionPage = lazyWithRetry(() => import("@/pages/EvolutionPage"), "evolution");
+const NightShiftPage = lazyWithRetry(() => import("@/pages/NightShiftPage"), "night-shift");
 const SystemHealthPage = lazyWithRetry(() => import("@/pages/SystemHealthPage"), "system-health");
 const CompliancePage = lazyWithRetry(() => import("@/pages/CompliancePage"), "compliance");
 const MemoryPage = lazyWithRetry(() => import("@/pages/MemoryPage"), "memory");
@@ -142,6 +143,7 @@ export default function App() {
               <Route path="/evaluations" element={<LiteGuard><PageBoundary name="evaluations"><EvaluationsPage /></PageBoundary></LiteGuard>} />
               <Route path="/autopilot" element={<LiteGuard><PageBoundary name="autopilot"><AutoPilotPage /></PageBoundary></LiteGuard>} />
               <Route path="/evolution" element={<LiteGuard><PageBoundary name="evolution"><EvolutionPage /></PageBoundary></LiteGuard>} />
+              <Route path="/night-shift" element={<LiteGuard><PageBoundary name="night-shift"><NightShiftPage /></PageBoundary></LiteGuard>} />
               <Route path="/violations" element={<LiteGuard><PageBoundary name="violations"><ViolationsPage /></PageBoundary></LiteGuard>} />
               <Route path="/optimizer" element={<LiteGuard><PageBoundary name="optimizer"><OptimizerPage /></PageBoundary></LiteGuard>} />
               <Route path="/schedules" element={<PageBoundary name="schedules"><Schedules /></PageBoundary>} />
