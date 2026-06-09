@@ -7993,6 +7993,33 @@ async def execute_workflow(
     if compliance_mode == "eu_ai_act":
         logger.info("EU AI Act compliance mode active")
 
+    # Black box compliance mode: refuse to start unless the flight-recorder
+    # preconditions hold - local data residency and a configured signing key.
+    if compliance_mode == "black_box":
+        if (getattr(settings, "data_residency", "") or "") != "local":
+            return WorkflowResult(
+                run_id=run_id or str(uuid.uuid4()),
+                outputs={},
+                total_cost_usd=0.0,
+                status="failed",
+                error=(
+                    "Black box compliance mode requires data_residency=local "
+                    "(set DATA_RESIDENCY=local) so the signed audit trail never "
+                    "leaves your infrastructure."
+                ),
+            )
+        if not (getattr(settings, "audit_key", "") or ""):
+            return WorkflowResult(
+                run_id=run_id or str(uuid.uuid4()),
+                outputs={},
+                total_cost_usd=0.0,
+                status="failed",
+                error=(
+                    "Black box compliance mode requires a signing key: set the "
+                    "SANDCASTLE_AUDIT_KEY environment variable."
+                ),
+            )
+
     # EU AI Act: warn (or fail in compliance mode) if high-risk workflow has no approval step
     if risk_level == "high":
         has_approval = any(s.type == "approval" for s in workflow.steps)
@@ -8017,6 +8044,15 @@ async def execute_workflow(
 
     if run_id is None:
         run_id = str(uuid.uuid4())
+
+    # Black box compliance mode: every top-level run is recorded to a signed
+    # cassette (the finally-block below persists it on any outcome).
+    if compliance_mode == "black_box" and cassette is None and depth == 0:
+        from sandcastle.engine.cassette import CassetteStore, default_cassette_path
+
+        cassette = CassetteStore(default_cassette_path(run_id), "record")
+        cassette_mode = "record"
+        logger.info("Black box mode: recording signed cassette for run %s", run_id)
 
     if storage is None:
         storage = create_storage()
