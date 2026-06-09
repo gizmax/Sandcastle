@@ -2,6 +2,10 @@ import { useState, useEffect, useCallback } from "react";
 
 type Theme = "light" | "dark";
 
+/** Window event that flips the theme from anywhere (e.g. the command palette).
+ *  Every mounted useTheme instance listens, so all toggles stay in sync. */
+export const THEME_TOGGLE_EVENT = "sandcastle:toggle-theme";
+
 function getInitialTheme(): Theme {
   try {
     const stored = localStorage.getItem("theme");
@@ -28,6 +32,14 @@ export function useTheme() {
       // be persisted (private browsing / quota exceeded).
     }
   }, [theme]);
+
+  // Global toggle event - lets the command palette (or anything else) flip the
+  // theme without holding a reference to this hook instance.
+  useEffect(() => {
+    const handler = () => setTheme((prev) => (prev === "dark" ? "light" : "dark"));
+    window.addEventListener(THEME_TOGGLE_EVENT, handler);
+    return () => window.removeEventListener(THEME_TOGGLE_EVENT, handler);
+  }, []);
 
   const toggleTheme = useCallback(() => {
     setTheme((prev) => (prev === "dark" ? "light" : "dark"));
