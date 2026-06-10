@@ -237,25 +237,24 @@ export function Omnibox({ variant = "default" }: OmniboxProps) {
     }
 
     setRunning(true);
-    // Persist first so the workflow exists, then run it (no inputs required).
-    const saveRes = await api.post("/workflows", {
-      name: result.name,
-      content: result.yaml_content,
-    });
-    if (saveRes.error) {
-      setRunning(false);
-      toast.error(`Save failed: ${saveRes.error.message}`);
-      return;
-    }
+    // Run the YAML inline first — this is what actually matters and works even
+    // when the workflow has non-fatal validation notes or the user lacks save
+    // (admin) rights. Persisting to the library is a best-effort side-effect
+    // that must never block or fail the run.
     const runRes = await api.post<{ run_id: string }>("/workflows/run", {
       workflow: result.yaml_content,
       input: {},
     });
-    setRunning(false);
     if (runRes.error) {
+      setRunning(false);
       toast.error(`Run failed: ${runRes.error.message}`);
       return;
     }
+    // Best-effort persist so it shows up in the library (ignore failures).
+    void api
+      .post("/workflows", { name: result.name, content: result.yaml_content })
+      .catch(() => undefined);
+    setRunning(false);
     if (runRes.data?.run_id) {
       navigate(`/runs/${runRes.data.run_id}`);
     } else {

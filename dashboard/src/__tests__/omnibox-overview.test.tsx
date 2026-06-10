@@ -209,11 +209,11 @@ describe("Omnibox", () => {
     );
   });
 
-  it("runs inline (save + run) and navigates to the run when no inputs are required", async () => {
+  it("runs inline (run first, best-effort save) and navigates to the run when no inputs are required", async () => {
     mockPost
       .mockResolvedValueOnce({ data: GENERATE_RESULT, error: null }) // /generate
-      .mockResolvedValueOnce({ data: { ok: true }, error: null }) // POST /workflows (save)
-      .mockResolvedValueOnce({ data: { run_id: "run-123" }, error: null }); // /workflows/run
+      .mockResolvedValueOnce({ data: { run_id: "run-123" }, error: null }) // /workflows/run (first)
+      .mockResolvedValueOnce({ data: { ok: true }, error: null }); // POST /workflows (best-effort save)
 
     render(<Omnibox />);
     fireEvent.change(screen.getByLabelText(/describe the task for your agent/i), {
