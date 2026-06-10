@@ -111,6 +111,26 @@ vi.mock("@/hooks/usePinnedWorkflows", () => ({
   }),
 }));
 
+// Density context: OverviewBento reads effectiveDensity for the calm/expand
+// default. Preserve the real UiModeProvider/useDensity (the OnboardingWizard
+// tests exercise actual density selection) and only stub useDensity's default
+// when OverviewBento is rendered without a provider.
+vi.mock("@/contexts/UiModeContext", async () => {
+  const actual = await vi.importActual<typeof import("@/contexts/UiModeContext")>(
+    "@/contexts/UiModeContext",
+  );
+  return {
+    ...actual,
+    useDensity: () => {
+      try {
+        return actual.useDensity();
+      } catch {
+        return { effectiveDensity: "Standard" } as ReturnType<typeof actual.useDensity>;
+      }
+    },
+  };
+});
+
 vi.mock("@/hooks/useEventStreamContext", () => ({
   useEventStreamContext: () => ({
     subscribe: vi.fn(() => vi.fn()),
