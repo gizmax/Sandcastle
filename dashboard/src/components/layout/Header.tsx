@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useContext, useEffect, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Menu, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/shared/ThemeToggle";
-import { LiveIndicator } from "@/components/shared/LiveIndicator";
+import { EventStreamContext } from "@/hooks/useEventStreamContext";
 import {
   NotificationCenter,
   type Notification,
@@ -92,6 +92,50 @@ function useSparkModeBadge(): boolean {
       .catch(() => undefined);
   }, []);
   return sparkMode;
+}
+
+const CONNECTION_LABEL: Record<string, string> = {
+  connected: "Live",
+  connecting: "Connecting",
+  disconnected: "Offline",
+};
+
+/**
+ * Quiet system-status chip: connection dot + active model provider, in one
+ * muted, clickable pill that links to provider settings. The connection state
+ * is carried by the dot colour (+ tooltip) instead of an alarming "Offline"
+ * word sitting bare in the bar.
+ */
+function StatusChip({ provider }: { provider: string | null }) {
+  // Read the stream context null-safe: the header must not crash when no
+  // EventStreamProvider is mounted (e.g. isolated tests, error boundaries).
+  const connectionStatus = useContext(EventStreamContext)?.connectionStatus ?? "connecting";
+  const label = provider
+    ? (PROVIDER_BADGE_LABEL[provider] ?? provider)
+    : CONNECTION_LABEL[connectionStatus] ?? "Provider";
+
+  return (
+    <Link
+      to="/settings?tab=providers"
+      data-testid="live-indicator"
+      title={`Model provider${provider ? `: ${PROVIDER_BADGE_LABEL[provider] ?? provider}` : ""} · Stream: ${connectionStatus} — open Providers`}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border border-border/70 bg-background px-2.5 py-1",
+        "text-[11px] font-medium text-muted-foreground transition-colors",
+        "hover:text-foreground hover:border-accent/40",
+      )}
+    >
+      <span
+        className={cn(
+          "inline-block h-2 w-2 rounded-full shrink-0",
+          connectionStatus === "connected" && "bg-success animate-pulse",
+          connectionStatus === "connecting" && "bg-warning animate-pulse",
+          connectionStatus === "disconnected" && "bg-muted-foreground/50",
+        )}
+      />
+      <span className="whitespace-nowrap">{label}</span>
+    </Link>
+  );
 }
 
 const DISMISS_KEY = "sandcastle_update_banner_dismissed";
@@ -232,20 +276,23 @@ export function Header({
         </button>
 
         <div className={cn("flex items-center gap-1 sm:gap-2", "sm:ml-0 ml-auto")}>
-          {advisorProvider && (
-            <span className="hidden sm:inline-flex rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-medium text-accent">
-              {PROVIDER_BADGE_LABEL[advisorProvider] ?? advisorProvider}
-            </span>
-          )}
-          {sparkMode && (
-            <span
-              className="hidden sm:inline-flex items-center gap-1 rounded-full border border-purple-500/30 bg-purple-500/15 px-2 py-0.5 text-[10px] font-medium text-purple-600 dark:text-purple-400"
-              title="Running on a DGX Spark — local models, $0/run, data stays on-box"
-            >
-              ⚡ Spark Mode
-            </span>
-          )}
-          <LiveIndicator />
+          {/* STATUS — passive system state, quiet and clickable */}
+          <div className="hidden sm:flex items-center gap-1.5">
+            <StatusChip provider={advisorProvider} />
+            {sparkMode && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full border border-purple-500/30 bg-purple-500/15 px-2 py-1 text-[10px] font-medium text-purple-600 dark:text-purple-400"
+                title="Running on a DGX Spark — local models, $0/run, data stays on-box"
+              >
+                ⚡ Spark
+              </span>
+            )}
+          </div>
+
+          {/* divider between status and controls */}
+          <div className="hidden sm:block h-5 w-px bg-border mx-1" aria-hidden="true" />
+
+          {/* CONTROLS — interactive actions, pinned right */}
           <ThemeToggle />
           <NotificationCenter
             notifications={notifications}
