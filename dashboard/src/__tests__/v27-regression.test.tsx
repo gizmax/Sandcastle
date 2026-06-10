@@ -61,14 +61,44 @@ vi.mock("@/api/client", () => ({
   },
 }));
 
-vi.mock("react-router-dom", () => ({
-  useNavigate: () => mockNavigate,
-  useLocation: () => ({ pathname: "/", state: null }),
-  useSearchParams: () => [new URLSearchParams(), vi.fn()] as const,
-  Link: ({ children, to, ...rest }: { children: React.ReactNode; to: string }) => (
-    <a href={to} {...rest}>{children}</a>
-  ),
-}));
+// Stateful useSearchParams so tab navigation in the Settings hub actually
+// updates the active tab during tests. Reset between tests via
+// `resetSearchParams()` (exposed on globalThis below).
+vi.mock("react-router-dom", async () => {
+  const React = await import("react");
+  let externalParams = new URLSearchParams();
+  // Reset the seed params *before* a render; the next render's useState picks
+  // it up as the initial value. (Done outside render to stay side-effect free.)
+  (globalThis as Record<string, unknown>).__resetSearchParams = (init?: string) => {
+    externalParams = new URLSearchParams(init ?? "");
+  };
+  function useSearchParams() {
+    const [params, setParams] = React.useState(externalParams);
+    const setSearchParams = (
+      next: URLSearchParams | ((prev: URLSearchParams) => URLSearchParams),
+    ) => {
+      const resolved =
+        typeof next === "function" ? next(new URLSearchParams(externalParams)) : next;
+      externalParams = new URLSearchParams(resolved);
+      setParams(externalParams);
+    };
+    return [params, setSearchParams] as const;
+  }
+  return {
+    useNavigate: () => mockNavigate,
+    useLocation: () => ({ pathname: "/", state: null }),
+    useSearchParams,
+    Link: ({ children, to, ...rest }: { children: React.ReactNode; to: string }) => (
+      <a href={to} {...rest}>{children}</a>
+    ),
+  };
+});
+
+/** Reset the mocked URL search params (defaults to empty = General tab). */
+function resetSearchParams(init?: string) {
+  (globalThis as Record<string, unknown> & { __resetSearchParams?: (s?: string) => void })
+    .__resetSearchParams?.(init);
+}
 
 vi.mock("sonner", () => ({
   toast: {
@@ -646,22 +676,30 @@ describe("SettingsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockNavigate.mockReset();
+    resetSearchParams(); // start on the General tab
   });
 
-  it("Provider cards render all providers from /advisor/status", async () => {
+  const mockGetForSettings = () =>
     mockApi.get.mockImplementation((url: string) => {
       if (url === "/settings") return Promise.resolve(okResponse(mockSettings));
       if (url === "/advisor/status") return Promise.resolve(okResponse(mockAdvisorStatus));
       return Promise.resolve(emptyApiResponse());
     });
 
+  /** Render the hub on a specific tab and wait for its lazy panel to mount. */
+  async function renderTab(tab: string, waitForText: RegExp | string) {
+    resetSearchParams(tab === "general" ? "" : `tab=${tab}`);
     await act(async () => {
       render(<SettingsPage />);
     });
-
     await waitFor(() => {
-      expect(screen.getByText("Anthropic")).toBeInTheDocument();
+      expect(screen.getByText(waitForText)).toBeInTheDocument();
     });
+  }
+
+  it("Provider cards render all providers from /advisor/status (Providers tab)", async () => {
+    mockGetForSettings();
+    await renderTab("providers", "Anthropic");
 
     expect(screen.getByText("Mistral")).toBeInTheDocument();
     expect(screen.getByText("OpenAI")).toBeInTheDocument();
@@ -670,19 +708,8 @@ describe("SettingsPage", () => {
   });
 
   it("'Key set' and 'Set API key' links show correctly based on configured status", async () => {
-    mockApi.get.mockImplementation((url: string) => {
-      if (url === "/settings") return Promise.resolve(okResponse(mockSettings));
-      if (url === "/advisor/status") return Promise.resolve(okResponse(mockAdvisorStatus));
-      return Promise.resolve(emptyApiResponse());
-    });
-
-    await act(async () => {
-      render(<SettingsPage />);
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText("Anthropic")).toBeInTheDocument();
-    });
+    mockGetForSettings();
+    await renderTab("providers", "Anthropic");
 
     // Configured providers show "Key set"
     const keySetElements = screen.getAllByText("Key set");
@@ -693,38 +720,24 @@ describe("SettingsPage", () => {
     expect(setLinks.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("Backend configurator cards expand/collapse on click", async () => {
-    mockApi.get.mockImplementation((url: string) => {
-      if (url === "/settings") return Promise.resolve(okResponse(mockSettings));
-      if (url === "/advisor/status") return Promise.resolve(okResponse(mockAdvisorStatus));
-      return Promise.resolve(emptyApiResponse());
-    });
-
-    await act(async () => {
-      render(<SettingsPage />);
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText("Settings")).toBeInTheDocument();
-    });
+  it("Backend configurator cards expand/collapse on click (Advanced tab)", async () => {
+    mockGetForSettings();
+    await renderTab("advanced", "Infrastructure");
 
     // Find a backend card - "Database" label is from BackendCard
     const dbCard = screen.queryByText("Database");
     if (dbCard) {
-      // Expand the card
       fireEvent.click(dbCard);
-      // After click, the expanded content should show "Add to .env:" text
       await waitFor(() => {
         const envTexts = screen.queryAllByText(/Add to .env/);
-        expect(envTexts.length).toBeGreaterThanOrEqual(0); // Just verifying no crash
+        expect(envTexts.length).toBeGreaterThanOrEqual(0);
       });
     }
-    // Even if the card is not present (settings loaded differently), no crash
-    expect(screen.getByText("Settings")).toBeInTheDocument();
+    // No crash
+    expect(screen.getByText("Infrastructure")).toBeInTheDocument();
   });
 
   it("Copy .env button does not crash when clipboard API is unavailable", async () => {
-    // Clipboard may be unavailable in test/HTTP environment
     const originalClipboard = navigator.clipboard;
     Object.defineProperty(navigator, "clipboard", {
       value: undefined,
@@ -732,24 +745,12 @@ describe("SettingsPage", () => {
       configurable: true,
     });
 
-    mockApi.get.mockImplementation((url: string) => {
-      if (url === "/settings") return Promise.resolve(okResponse(mockSettings));
-      if (url === "/advisor/status") return Promise.resolve(okResponse(mockAdvisorStatus));
-      return Promise.resolve(emptyApiResponse());
-    });
-
-    await act(async () => {
-      render(<SettingsPage />);
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText("Settings")).toBeInTheDocument();
-    });
+    mockGetForSettings();
+    await renderTab("advanced", "Infrastructure");
 
     // No crash even without clipboard API
-    expect(screen.getByText("Settings")).toBeInTheDocument();
+    expect(screen.getByText("Infrastructure")).toBeInTheDocument();
 
-    // Restore
     Object.defineProperty(navigator, "clipboard", {
       value: originalClipboard,
       writable: true,
@@ -757,52 +758,29 @@ describe("SettingsPage", () => {
     });
   });
 
-  it("EU Data Residency toggle is present", async () => {
-    mockApi.get.mockImplementation((url: string) => {
-      if (url === "/settings") return Promise.resolve(okResponse(mockSettings));
-      if (url === "/advisor/status") return Promise.resolve(okResponse(mockAdvisorStatus));
-      return Promise.resolve(emptyApiResponse());
-    });
+  it("EU Data Residency toggle is present (Providers tab)", async () => {
+    mockGetForSettings();
+    await renderTab("providers", "Anthropic");
 
-    await act(async () => {
-      render(<SettingsPage />);
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText("Anthropic")).toBeInTheDocument();
-    });
-
-    // EU toggle should be present as a checkbox or labeled element
     const euToggle = screen.getByLabelText(/EU Data Residency/i);
     expect(euToggle).toBeInTheDocument();
     expect(euToggle).not.toBeChecked();
   });
 
-  it("Save button resets dirty state after successful save", async () => {
-    mockApi.get.mockImplementation((url: string) => {
-      if (url === "/settings") return Promise.resolve(okResponse(mockSettings));
-      if (url === "/advisor/status") return Promise.resolve(okResponse(mockAdvisorStatus));
-      return Promise.resolve(emptyApiResponse());
-    });
+  it("Save button resets dirty state after successful save (General tab budget)", async () => {
+    mockGetForSettings();
     mockApi.patch.mockResolvedValue(okResponse({ ...mockSettings, default_max_cost_usd: 20 }));
 
-    await act(async () => {
-      render(<SettingsPage />);
-    });
+    await renderTab("general", /Default Max Cost per Run/i);
 
-    await waitFor(() => {
-      expect(screen.getByText("Settings")).toBeInTheDocument();
-    });
-
-    // Find the max cost input and change it to make a section dirty
-    const costInput = screen.getByLabelText(/Max cost per run/i);
+    // Find the max cost input and change it to make the budget section dirty
+    const costInput = screen.getByLabelText(/Max Cost per Run/i);
     if (costInput) {
       fireEvent.change(costInput, { target: { value: "20" } });
 
-      // Save button for that section should be enabled
       const saveButtons = screen.getAllByText("Save");
       const enabledSave = saveButtons.find(
-        (btn) => !(btn as HTMLButtonElement).disabled
+        (btn) => !(btn as HTMLButtonElement).disabled,
       );
       if (enabledSave) {
         await act(async () => {
@@ -811,7 +789,6 @@ describe("SettingsPage", () => {
       }
     }
 
-    // Verify the page didn't crash
     expect(screen.getByText("Settings")).toBeInTheDocument();
   });
 });
