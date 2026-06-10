@@ -73,7 +73,14 @@ const CATEGORY_TAB_LABELS: Record<Category, string> = {
 
 const POPULAR_TOOLS = ["slack", "openai", "github", "postgresql"];
 
-export default function IntegrationsPage() {
+/**
+ * Tool catalog + credential management. Rendered as the "Integrations" tab in
+ * the Settings hub and re-exported as the legacy IntegrationsPage for tests.
+ *
+ * @param embedded - when true the panel drops its own page <h1>/subtitle (the
+ *   tab bar supplies the heading) to avoid a duplicate title inside the hub.
+ */
+export default function IntegrationsPanel({ embedded = false }: { embedded?: boolean } = {}) {
   const [tools, setTools] = useState<Tool[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -186,12 +193,14 @@ export default function IntegrationsPage() {
   return (
     <div className="space-y-4 sm:space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Integrations</h1>
-        <p className="mt-1 text-sm text-muted">
-          Connect your workflows to external services and APIs.
-        </p>
-      </div>
+      {!embedded && (
+        <div>
+          <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Integrations</h1>
+          <p className="mt-1 text-sm text-muted">
+            Connect your workflows to external services and APIs.
+          </p>
+        </div>
+      )}
 
       {/* Context banner */}
       {unconfiguredTools.length > 0 && (
