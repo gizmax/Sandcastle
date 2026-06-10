@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
 import { RiskLevelBadge } from "@/components/runs/RiskLevelBadge";
@@ -26,9 +26,14 @@ interface RunsTableProps {
   onPageChange: (offset: number) => void;
   selectedIds?: Set<string>;
   onSelectionChange?: (ids: Set<string>) => void;
+  /**
+   * Optional per-row contextual action menu (re-run, replay, compare, ...).
+   * Rendered in a trailing column; click is isolated from the row navigation.
+   */
+  renderRowActions?: (run: RunItem) => ReactNode;
 }
 
-export function RunsTable({ runs, allRuns, total, limit, offset, onPageChange, selectedIds, onSelectionChange }: RunsTableProps) {
+export function RunsTable({ runs, allRuns, total, limit, offset, onPageChange, selectedIds, onSelectionChange, renderRowActions }: RunsTableProps) {
   const navigate = useNavigate();
   const selectable = !!onSelectionChange;
   const allSelected = selectable && runs.length > 0 && runs.every((r) => selectedIds?.has(r.run_id));
@@ -88,6 +93,11 @@ export function RunsTable({ runs, allRuns, total, limit, offset, onPageChange, s
               <th scope="col" className="px-3 sm:px-5 py-3 text-left font-medium text-muted">Started</th>
               <th scope="col" className="hidden md:table-cell px-3 sm:px-5 py-3 text-left font-medium text-muted">Duration</th>
               <th scope="col" className="px-3 sm:px-5 py-3 text-right font-medium text-muted">Cost</th>
+              {renderRowActions && (
+                <th scope="col" className="w-10 px-3 py-3">
+                  <span className="sr-only">Actions</span>
+                </th>
+              )}
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
@@ -149,6 +159,11 @@ export function RunsTable({ runs, allRuns, total, limit, offset, onPageChange, s
                 <td className="px-3 sm:px-5 py-3 text-right font-data text-muted">
                   {formatCost(run.total_cost_usd)}
                 </td>
+                {renderRowActions && (
+                  <td className="w-10 px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                    {renderRowActions(run)}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
