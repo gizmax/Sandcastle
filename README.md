@@ -55,6 +55,7 @@
 - [Managed Agents](#managed-agents)
 - [Human Approval Gates](#human-approval-gates)
 - [Self-Optimizing Workflows (AutoPilot)](#self-optimizing-workflows-autopilot)
+- [Self-Healing Workflows](#self-healing-workflows)
 - [Hierarchical Workflows (Workflow-as-Step)](#hierarchical-workflows-workflow-as-step)
 - [Policy Engine](#policy-engine)
 - [Privacy Router (PII Redaction)](#privacy-router-pii-redaction)
@@ -1039,6 +1040,33 @@ steps:
         method: llm_judge
         criteria: "Rate completeness, accuracy, and depth 1-10"
 ```
+
+---
+
+## Self-Healing Workflows
+
+When a step lands in the dead letter queue, Sandcastle can fix the workflow itself. The healer scans unresolved failures, gathers the workflow YAML, the failing step, the error, and the last successful run, then asks the advisor LLM for a minimal patch with a diagnosis and a confidence score. Every patch is validated through the DAG parser and filed as a new draft workflow version behind an approval request - a human reviews the diagnosis and diff, approves, and the patched version ships on the next pass.
+
+Once a healed workflow completes its next run, the originating dead-letter item is resolved automatically (`resolved_by="healer"`). If the patch regresses, the item stays open and the healer tries again, up to `healer_max_attempts` times.
+
+```bash
+# Opt in (nightly pass at 03:30 UTC)
+HEALER_ENABLED=true
+
+# Fully autonomous mode: publish high-confidence patches directly
+HEALER_AUTO_APPLY=true
+HEALER_CONFIDENCE_THRESHOLD=0.8
+```
+
+```bash
+# Trigger a pass on demand
+curl -X POST http://localhost:8000/api/healer/run
+
+# Review recent heal attempts (diagnosis, status, workflow, version)
+curl http://localhost:8000/api/healer/activity
+```
+
+Human-in-the-loop by default: with `healer_auto_apply=false`, every patch waits for explicit approval before it goes live.
 
 ---
 
@@ -2228,6 +2256,13 @@ MEMORY_BACKEND=local           # "local" (SQLite + embeddings) or "cloud"
 MEMORY_MAX_AGE_DAYS=90         # TTL for memory decay (0 = keep forever)
 MEMORY_ADMIT_THRESHOLD=0.3     # Minimum quality score for admission
 MEMORY_GRAPH_ENABLED=false     # Enable Neo4j graph backend
+
+# Self-Healing Workflows
+HEALER_ENABLED=false           # Nightly healer pass (opt-in)
+HEALER_AUTO_APPLY=false        # Publish high-confidence patches without approval
+HEALER_CONFIDENCE_THRESHOLD=0.8
+HEALER_MAX_ATTEMPTS=2          # Max heal attempts per dead-letter item
+HEALER_LOOKBACK_HOURS=168      # Scan window for unresolved failures
 
 # License
 LICENSE_KEY=                   # sc_lic_... (community tier if empty)
