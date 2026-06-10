@@ -110,6 +110,11 @@ class Settings(BaseSettings):
     # Budget
     default_max_cost_usd: float = 0.0  # 0 = no limit (must be >= 0)
 
+    # The Architect - autonomous generate->run->evaluate->refine loop
+    architect_max_iterations: int = 3  # loop bound per session
+    architect_budget_usd: float = 1.0  # total live-run spend cap per session
+    architect_score_threshold: float = 0.7  # minimum LLM-judge score to accept
+
     # Workflows directory (default: ~/.sandcastle/workflows)
     workflows_dir: str = _DEFAULT_WORKFLOWS_DIR
 
@@ -334,6 +339,43 @@ class Settings(BaseSettings):
                 v,
             )
             return 0.0
+        return v
+
+    @field_validator("architect_max_iterations", mode="after")
+    @classmethod
+    def _validate_architect_max_iterations(cls, v: int) -> int:
+        """Ensure architect_max_iterations is at least 1."""
+        if v < 1:
+            _logger.warning(
+                "ARCHITECT_MAX_ITERATIONS=%d is invalid (must be >= 1), using 3", v
+            )
+            return 3
+        return v
+
+    @field_validator("architect_budget_usd", mode="after")
+    @classmethod
+    def _validate_architect_budget(cls, v: float) -> float:
+        """Ensure architect_budget_usd is positive."""
+        if v <= 0:
+            _logger.warning(
+                "ARCHITECT_BUDGET_USD=%.2f is invalid (must be > 0), using 1.0", v
+            )
+            return 1.0
+        return v
+
+    @field_validator("architect_score_threshold", mode="after")
+    @classmethod
+    def _validate_architect_threshold(cls, v: float) -> float:
+        """Clamp architect_score_threshold to [0.0, 1.0]."""
+        if v < 0.0 or v > 1.0:
+            clamped = max(0.0, min(1.0, v))
+            _logger.warning(
+                "ARCHITECT_SCORE_THRESHOLD=%.2f is out of range [0.0, 1.0], "
+                "clamping to %.2f",
+                v,
+                clamped,
+            )
+            return clamped
         return v
 
     @field_validator("tool_smtp_port", mode="after")
