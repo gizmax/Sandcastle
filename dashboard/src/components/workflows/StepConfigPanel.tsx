@@ -1,5 +1,7 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import {
+  AlertCircle,
+  AlertTriangle,
   ChevronDown,
   ChevronRight,
   FileSpreadsheet,
@@ -7,6 +9,7 @@ import {
   FlaskConical,
   FolderOpen,
   Gauge,
+  HelpCircle,
   Plus,
   RefreshCw,
   ShieldAlert,
@@ -17,6 +20,13 @@ import {
 } from "lucide-react";
 import { DirectoryBrowser } from "@/components/workflows/DirectoryBrowser";
 import { ToolSelector } from "@/components/workflows/ToolSelector";
+import { HoverCard } from "@/components/shared/HoverCard";
+import {
+  getStepMeta,
+  getAgentTemplateMeta,
+} from "@/lib/builder/stepMetadata";
+import { validateStep, type StepLike } from "@/lib/builder/stepValidation";
+import { humanizeStep } from "@/lib/builder/humanizeStep";
 import { cn } from "@/lib/utils";
 
 export interface RetryConfig {
@@ -307,6 +317,89 @@ function CollapsibleSection({
   );
 }
 
+/**
+ * Reusable line explaining the templating variables available across most
+ * config fields. Kept as a constant so every field's help stays consistent.
+ */
+const TEMPLATE_VARS_BODY: string[] = [
+  "{input.field} — a value from the workflow's input.",
+  "{steps.<id>.output} — the output of a previous step.",
+  "{env.VAR} — an environment variable.",
+];
+
+/**
+ * FieldHelp — a small, keyboard-focusable "?" affordance that reveals a
+ * HoverCard with field-level guidance (what it does, syntax, variables, an
+ * example). Help is opt-in: it only appears on hover or focus, so simple
+ * fields stay quiet. Use it next to a field's <label>.
+ */
+function FieldHelp({
+  label,
+  body,
+  example,
+}: {
+  /** Accessible name, e.g. "Validator Expression help". */
+  label: string;
+  /** Body lines: what it does, syntax, available variables. */
+  body: string[];
+  /** Optional concrete example shown in the card footer. */
+  example?: string;
+}) {
+  const footer: ReactNode | undefined = example
+    ? [
+        "Example:",
+        // monospace example for readability
+        <code
+          key="ex"
+          className="mt-0.5 block break-words font-mono text-[11px] text-foreground"
+        >
+          {example}
+        </code>,
+      ]
+    : undefined;
+
+  return (
+    <HoverCard
+      title={label.replace(/ help$/, "")}
+      body={body}
+      footer={footer}
+      className="ml-1 align-middle"
+    >
+      <HelpCircle
+        aria-label={label}
+        role="img"
+        className="h-3.5 w-3.5 text-muted-foreground transition-colors hover:text-foreground"
+      />
+    </HoverCard>
+  );
+}
+
+/**
+ * LabelWithHelp — a field <label> with an inline FieldHelp affordance, so
+ * complex fields get a "?" next to their name without bespoke markup each time.
+ */
+function LabelWithHelp({
+  text,
+  help,
+  className,
+}: {
+  text: string;
+  help: { body: string[]; example?: string };
+  className?: string;
+}) {
+  return (
+    <label
+      className={cn(
+        "mb-1 flex items-center text-xs font-medium text-muted",
+        className,
+      )}
+    >
+      <span>{text}</span>
+      <FieldHelp label={`${text} help`} body={help.body} example={help.example} />
+    </label>
+  );
+}
+
 export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepConfigPanelProps) {
   const [customPolicy, setCustomPolicy] = useState("");
   const [browseOpen, setBrowseOpen] = useState(false);
@@ -318,9 +411,67 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
     "focus-visible:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
   );
 
+  // The validators/humanizers take the loose StepLike shape (with an index
+  // signature); StepConfig is a structural subset, so we adapt it here once.
+  const stepLike = step as unknown as StepLike;
+  // Plain-English, live summary of what this step does (④).
+  const summary = humanizeStep(stepLike);
+  // Inline validation for this step, cross-checked against sibling step ids (③).
+  const allSteps: StepLike[] = allStepIds.map((id) =>
+    id === step.id ? stepLike : { id, stepType: undefined },
+  );
+  const validation = validateStep(stepLike, allSteps);
+  // Fields that are required-but-empty, so labels can flag them inline.
+  const errorFields = new Set(
+    validation.issues.map((i) => i.field).filter(Boolean) as string[],
+  );
+
   return (
     <div className="space-y-4 p-4">
       <h3 className="text-sm font-semibold text-foreground">Step Configuration</h3>
+
+      {/* Plain-English step summary (④) — calm, secondary helper line. */}
+      <p
+        className="-mt-2 text-xs italic leading-relaxed text-muted-foreground"
+        aria-live="polite"
+      >
+        {summary}
+      </p>
+
+      {/* Inline validation (③) — quietly always-on; lists issues + hints. */}
+      {validation.issues.length > 0 && (
+        <ul
+          className={cn(
+            "space-y-1.5 rounded-lg border p-2.5 text-[11px]",
+            validation.level === "error"
+              ? "border-error/30 bg-error/5"
+              : "border-warning/30 bg-warning/5",
+          )}
+          aria-label="Step validation issues"
+        >
+          {validation.issues.map((issue, i) => (
+            <li key={i} className="flex items-start gap-1.5">
+              {validation.level === "error" ? (
+                <AlertCircle
+                  className="mt-0.5 h-3.5 w-3.5 shrink-0 text-error"
+                  aria-hidden="true"
+                />
+              ) : (
+                <AlertTriangle
+                  className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning"
+                  aria-hidden="true"
+                />
+              )}
+              <span className="text-foreground">
+                {issue.message}
+                {issue.hint && (
+                  <span className="text-muted-foreground"> {issue.hint}</span>
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
 
       <div>
         <label className="mb-1 block text-xs font-medium text-muted">Step ID</label>
@@ -334,7 +485,23 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
       </div>
 
       <div>
-        <label className="mb-1 block text-xs font-medium text-muted">Step Type</label>
+        <label className="mb-1 flex items-center text-xs font-medium text-muted">
+          <span>Step Type</span>
+          {(() => {
+            const meta = getStepMeta(step.stepType);
+            return (
+              <FieldHelp
+                label="Step Type help"
+                body={[
+                  meta.summary,
+                  meta.whenToUse,
+                  ...(meta.costNote ? [meta.costNote] : []),
+                ]}
+                example={meta.example}
+              />
+            );
+          })()}
+        </label>
         <select
           value={step.stepType}
           onChange={(e) => onChange({ ...step, stepType: e.target.value as StepType })}
@@ -382,12 +549,26 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
       {/* Prompt - shown for standard, llm, classify */}
       {(step.stepType === "standard" || step.stepType === "llm") && (
         <div>
-          <label className="mb-1 block text-xs font-medium text-muted">Prompt</label>
+          <LabelWithHelp
+            text="Prompt"
+            help={{
+              body: [
+                "The instructions sent to the model. Plain text with templated variables that get filled in at run time.",
+                ...TEMPLATE_VARS_BODY,
+              ],
+              example: "Summarize {input.text} into three bullet points.",
+            }}
+          />
           <textarea
             value={step.prompt}
             onChange={(e) => onChange({ ...step, prompt: e.target.value })}
             rows={6}
-            className={cn(inputClass, "h-auto py-2 resize-y")}
+            placeholder="Summarize {input.text} into three bullet points."
+            className={cn(
+              inputClass,
+              "h-auto py-2 resize-y",
+              errorFields.has("prompt") && "border-error/60",
+            )}
           />
           <p className="text-[11px] text-muted-foreground mt-0.5">{"Use {input.field} for workflow input or {steps.id.output} for previous step data."}</p>
         </div>
@@ -411,13 +592,23 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
       {step.stepType === "http" && (
         <div className="space-y-3">
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted">URL</label>
+            <LabelWithHelp
+              text="URL"
+              help={{
+                body: [
+                  "The endpoint to call. You can template parts of the URL with workflow data.",
+                  "{input.field} — a value from the workflow's input.",
+                  "{steps.<id>.output} — output of a previous step.",
+                ],
+                example: "https://api.example.com/users/{input.id}",
+              }}
+            />
             <input
               type="text"
               value={step.httpConfig.url}
               onChange={(e) => onChange({ ...step, httpConfig: { ...step.httpConfig, url: e.target.value } })}
-              placeholder="https://api.example.com/data/{input.id}"
-              className={inputClass}
+              placeholder="https://api.example.com/users/{input.id}"
+              className={cn(inputClass, errorFields.has("httpConfig.url") && "border-error/60")}
             />
           </div>
           <div>
@@ -435,7 +626,16 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
             </select>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted">Auth</label>
+            <LabelWithHelp
+              text="Auth"
+              help={{
+                body: [
+                  "How to authenticate the request. Use a scheme:value pair, or the name of an environment variable holding the credential.",
+                  "Keep secrets in env vars rather than hard-coding them here.",
+                ],
+                example: "bearer:{input.token}  or  MY_API_KEY",
+              }}
+            />
             <input
               type="text"
               value={step.httpConfig.auth}
@@ -463,13 +663,29 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
       {step.stepType === "code" && (
         <div className="space-y-3">
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted">Python Code</label>
+            <LabelWithHelp
+              text="Python Code"
+              help={{
+                body: [
+                  "Inline Python run against the workflow data. Runs locally — no LLM.",
+                  "_input — the workflow input (dict).",
+                  "_steps[\"<id>\"] — a previous step's output.",
+                  "json — the standard library module.",
+                  "Assign your output to a variable named result.",
+                ],
+                example: 'data = _steps["fetch"]\nresult = sum(d["score"] for d in data) / len(data)',
+              }}
+            />
             <textarea
               value={step.codeConfig.code}
               onChange={(e) => onChange({ ...step, codeConfig: { ...step.codeConfig, code: e.target.value } })}
               rows={10}
-              placeholder={'data = _steps["prev-step"]\nresult = [item["name"] for item in data]'}
-              className={cn(inputClass, "h-auto py-2 resize-y font-mono text-xs")}
+              placeholder={'data = _steps["fetch"]\nresult = [item["name"] for item in data]'}
+              className={cn(
+                inputClass,
+                "h-auto py-2 resize-y font-mono text-xs",
+                errorFields.has("codeConfig.code") && "border-error/60",
+              )}
             />
             <p className="text-[11px] text-muted-foreground mt-0.5">
               {"Available: _input (workflow input), _steps (previous outputs), json module. Set 'result' variable for output."}
@@ -482,13 +698,27 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
       {step.stepType === "condition" && (
         <div className="space-y-3">
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted">Expression</label>
+            <LabelWithHelp
+              text="Expression"
+              help={{
+                body: [
+                  "A Python expression that must evaluate to true or false. True runs the Then steps, false runs the Else steps.",
+                  "steps — a dict of previous step outputs, e.g. steps['score']['value'].",
+                  "input — the workflow input dict.",
+                ],
+                example: "steps['score']['value'] > 80",
+              }}
+            />
             <input
               type="text"
               value={step.conditionConfig.expression}
               onChange={(e) => onChange({ ...step, conditionConfig: { ...step.conditionConfig, expression: e.target.value } })}
               placeholder="steps['score']['value'] > 80"
-              className={cn(inputClass, "font-mono text-xs")}
+              className={cn(
+                inputClass,
+                "font-mono text-xs",
+                errorFields.has("conditionConfig.expression") && "border-error/60",
+              )}
             />
             <p className="text-[11px] text-muted-foreground mt-0.5">
               {"Python expression. Available: steps (outputs dict), input (workflow input)."}
@@ -521,7 +751,17 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
       {step.stepType === "classify" && (
         <div className="space-y-3">
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted">Input Text</label>
+            <LabelWithHelp
+              text="Input Text"
+              help={{
+                body: [
+                  "The text the model reads to decide a category. Usually a previous step's output.",
+                  "{steps.<id>.output} — output of a previous step.",
+                  "{input.field} — a value from the workflow input.",
+                ],
+                example: "{steps.parse.output.text}",
+              }}
+            />
             <input
               type="text"
               value={step.classifyConfig.input}
@@ -531,13 +771,22 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted">Categories</label>
+            <LabelWithHelp
+              text="Categories"
+              help={{
+                body: [
+                  "The labels the model picks from, comma-separated. The chosen label routes the workflow to the matching branch.",
+                  "Keep them short, distinct, and lowercase for best results.",
+                ],
+                example: "billing, technical, general",
+              }}
+            />
             <input
               type="text"
               value={step.classifyConfig.categories.join(", ")}
               onChange={(e) => onChange({ ...step, classifyConfig: { ...step.classifyConfig, categories: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } })}
               placeholder="billing, technical, general"
-              className={inputClass}
+              className={cn(inputClass, errorFields.has("classifyConfig.categories") && "border-error/60")}
             />
           </div>
           <div>
@@ -558,13 +807,24 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
       {step.stepType === "loop" && (
         <div className="space-y-3">
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted">Iterate Over</label>
+            <LabelWithHelp
+              text="Iterate Over"
+              help={{
+                body: [
+                  "Points at a list. The loop runs its sub-steps once for each item in that list.",
+                  "{steps.<id>.output} — a list produced by a previous step.",
+                  "{input.field} — a list from the workflow input.",
+                  "Inside the loop, refer to the current item as {item}.",
+                ],
+                example: "{steps.fetch.output.items}",
+              }}
+            />
             <input
               type="text"
               value={step.loopConfig.over}
               onChange={(e) => onChange({ ...step, loopConfig: { ...step.loopConfig, over: e.target.value } })}
               placeholder="{steps.fetch.output.items}"
-              className={inputClass}
+              className={cn(inputClass, errorFields.has("loopConfig.over") && "border-error/60")}
             />
           </div>
           <div>
@@ -595,20 +855,43 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
       {step.stepType === "race" && (
         <div className="space-y-3">
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted">Branches (one per line, step IDs comma-separated)</label>
+            <LabelWithHelp
+              text="Branches"
+              help={{
+                body: [
+                  "Each line is one branch: a comma-separated list of step IDs run in order.",
+                  "All branches start in parallel; the first branch whose output passes the validator wins.",
+                ],
+                example: "fast-model, format\nslow-model, format",
+              }}
+            />
             <textarea
               value={step.raceConfig.branches}
               onChange={(e) => onChange({ ...step, raceConfig: { ...step.raceConfig, branches: e.target.value } })}
               rows={4}
-              placeholder={"step-a, step-b\nstep-c, step-d"}
-              className={cn(inputClass, "h-auto py-2 resize-y font-mono text-xs")}
+              placeholder={"fast-model, format\nslow-model, format"}
+              className={cn(
+                inputClass,
+                "h-auto py-2 resize-y font-mono text-xs",
+                errorFields.has("raceConfig.branches") && "border-error/60",
+              )}
             />
             <p className="text-[11px] text-muted-foreground mt-0.5">
               Each line is a branch of step IDs to execute sequentially. All branches run in parallel.
             </p>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted">Validator Expression</label>
+            <LabelWithHelp
+              text="Validator Expression"
+              help={{
+                body: [
+                  "Optional. A Python expression deciding whether a branch's result counts as valid. The first branch that returns true wins the race.",
+                  "output — the finished branch's output value.",
+                  "Leave it blank to accept the first branch that simply completes.",
+                ],
+                example: "len(output) > 0 and 'error' not in output",
+              }}
+            />
             <input
               type="text"
               value={step.raceConfig.validator}
@@ -627,13 +910,22 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
       {step.stepType === "sensor" && (
         <div className="space-y-3">
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted">URL</label>
+            <LabelWithHelp
+              text="URL"
+              help={{
+                body: [
+                  "The endpoint the sensor polls on a fixed interval until the stop condition becomes true.",
+                  "{input.field} and {steps.<id>.output} can be templated into the URL.",
+                ],
+                example: "https://api.example.com/jobs/{steps.start.output.id}",
+              }}
+            />
             <input
               type="text"
               value={step.sensorConfig.url}
               onChange={(e) => onChange({ ...step, sensorConfig: { ...step.sensorConfig, url: e.target.value } })}
               placeholder="https://api.example.com/status"
-              className={inputClass}
+              className={cn(inputClass, errorFields.has("sensorConfig.url") && "border-error/60")}
             />
           </div>
           <div>
@@ -648,13 +940,27 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
             </select>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted">Condition</label>
+            <LabelWithHelp
+              text="Condition"
+              help={{
+                body: [
+                  "A Python expression checked after each poll. Polling stops once it is true.",
+                  "response — the parsed JSON body of the last response.",
+                  "status_code — the HTTP status code (e.g. 200).",
+                ],
+                example: "response.get('status') == 'ready'",
+              }}
+            />
             <input
               type="text"
               value={step.sensorConfig.condition}
               onChange={(e) => onChange({ ...step, sensorConfig: { ...step.sensorConfig, condition: e.target.value } })}
               placeholder="response.get('status') == 'ready'"
-              className={cn(inputClass, "font-mono text-xs")}
+              className={cn(
+                inputClass,
+                "font-mono text-xs",
+                errorFields.has("sensorConfig.condition") && "border-error/60",
+              )}
             />
             <p className="text-[11px] text-muted-foreground mt-0.5">
               {"Python expression. Available: response (parsed JSON), status_code."}
@@ -699,7 +1005,19 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
       {step.stepType === "gate" && (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <label className="text-xs font-medium text-muted">Strategies</label>
+            <span className="flex items-center text-xs font-medium text-muted">
+              <span>Strategies</span>
+              <FieldHelp
+                label="Strategies help"
+                body={[
+                  "How this gate decides to continue. Add one or more strategies; they are evaluated in order.",
+                  "LLM Eval — a model scores the input and approves or rejects automatically.",
+                  "Human Approval — pauses until a person approves (with a timeout fallback).",
+                  "Timeout — auto-approves or auto-rejects after a set number of seconds.",
+                ]}
+                example="Human Approval, falling back to auto-reject after 24h."
+              />
+            </span>
             <button
               type="button"
               onClick={() => {
@@ -765,7 +1083,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
                       updated[idx] = { ...updated[idx], prompt: e.target.value };
                       onChange({ ...step, gateConfig: { ...step.gateConfig, strategies: updated } });
                     }}
-                    placeholder="Evaluation prompt..."
+                    placeholder="Approve only if the draft is factually correct and on-brand."
                     className={inputClass}
                   />
                   <input
@@ -776,7 +1094,7 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
                       updated[idx] = { ...updated[idx], input: e.target.value };
                       onChange({ ...step, gateConfig: { ...step.gateConfig, strategies: updated } });
                     }}
-                    placeholder="{steps.prev.output}"
+                    placeholder="{steps.draft.output}"
                     className={inputClass}
                   />
                   <select
@@ -866,13 +1184,28 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
       {step.stepType === "transform" && (
         <div className="space-y-3">
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted">Template</label>
+            <LabelWithHelp
+              text="Template"
+              help={{
+                body: [
+                  "Reshapes data into a new value — no LLM. Write the output you want with placeholders filled from workflow data.",
+                  "{steps.<id>.output} — output of a previous step.",
+                  "{input.field} — a value from the workflow input.",
+                  "Supports Jinja-style filters, e.g. {{ value | tojson }}.",
+                ],
+                example: '{"summary": "{steps.analyze.output.summary}", "count": {steps.fetch.output.count}}',
+              }}
+            />
             <textarea
               value={step.transformConfig.template}
               onChange={(e) => onChange({ ...step, transformConfig: { ...step.transformConfig, template: e.target.value } })}
               rows={10}
               placeholder={'{"summary": "{steps.analyze.output.summary}", "count": {steps.fetch.output.count}}'}
-              className={cn(inputClass, "h-auto py-2 resize-y font-mono text-xs")}
+              className={cn(
+                inputClass,
+                "h-auto py-2 resize-y font-mono text-xs",
+                errorFields.has("transformConfig.template") && "border-error/60",
+              )}
             />
             <p className="text-[11px] text-muted-foreground mt-0.5">
               {"Use {steps.id.output} for previous step data, {input.field} for workflow input. Supports {{ var | tojson }} syntax."}
@@ -909,13 +1242,27 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted">Message</label>
+            <LabelWithHelp
+              text="Message"
+              help={{
+                body: [
+                  "The notification body sent to the chosen service. Mix plain text with workflow data.",
+                  "{steps.<id>.output} — output of a previous step.",
+                  "{input.field} — a value from the workflow input.",
+                ],
+                example: "Workflow done. Summary: {steps.analyze.output.summary}",
+              }}
+            />
             <textarea
               value={step.notifyConfig.message}
               onChange={(e) => onChange({ ...step, notifyConfig: { ...step.notifyConfig, message: e.target.value } })}
               rows={4}
               placeholder={"Workflow completed. Result: {steps.analyze.output.summary}"}
-              className={cn(inputClass, "h-auto py-2 resize-y")}
+              className={cn(
+                inputClass,
+                "h-auto py-2 resize-y",
+                errorFields.has("notifyConfig.message") && "border-error/60",
+              )}
             />
             <p className="text-[11px] text-muted-foreground mt-0.5">
               {"Use {steps.id.output} for previous step data, {input.field} for workflow input."}
@@ -928,20 +1275,39 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
       {step.stepType === "delegate" && (
         <div className="space-y-3">
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted">Target Workflow</label>
+            <LabelWithHelp
+              text="Target Workflow"
+              help={{
+                body: [
+                  "The workflow to run as a sub-task. Use its file name without the .yaml extension.",
+                  "Its result becomes this step's output.",
+                ],
+                example: "data-enrichment",
+              }}
+            />
             <input
               type="text"
               value={step.delegateConfig.workflow}
               onChange={(e) => onChange({ ...step, delegateConfig: { ...step.delegateConfig, workflow: e.target.value } })}
               placeholder="data-enrichment"
-              className={inputClass}
+              className={cn(inputClass, errorFields.has("delegateConfig.workflow") && "border-error/60")}
             />
             <p className="text-[11px] text-muted-foreground mt-0.5">
               Name of the workflow YAML file (without .yaml extension).
             </p>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted">Task Description</label>
+            <LabelWithHelp
+              text="Task Description"
+              help={{
+                body: [
+                  "Plain-English instructions passed to the delegated workflow as its input.",
+                  "{steps.<id>.output} — output of a previous step.",
+                  "{input.field} — a value from the workflow input.",
+                ],
+                example: "Enrich the contact in {steps.fetch.output} with company data.",
+              }}
+            />
             <textarea
               value={step.delegateConfig.taskDescription}
               onChange={(e) => onChange({ ...step, delegateConfig: { ...step.delegateConfig, taskDescription: e.target.value } })}
@@ -1025,13 +1391,22 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
 
           {/* Start URL */}
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted">Start URL</label>
+            <LabelWithHelp
+              text="Start URL"
+              help={{
+                body: [
+                  "The first page the browser opens before running its actions.",
+                  "{input.field} and {steps.<id>.output} can be templated into the URL.",
+                ],
+                example: "https://example.com/login",
+              }}
+            />
             <input
               type="text"
               value={step.browserConfig.startUrl}
               onChange={(e) => onChange({ ...step, browserConfig: { ...step.browserConfig, startUrl: e.target.value } })}
               placeholder="https://example.com/login"
-              className={inputClass}
+              className={cn(inputClass, errorFields.has("browserConfig.startUrl") && "border-error/60")}
             />
             <p className="text-[11px] text-muted-foreground mt-0.5">
               {"Initial URL the browser navigates to. Supports {input.url} variables."}
@@ -1110,7 +1485,16 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
 
           {/* Credentials env var */}
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted">Credentials Env Var</label>
+            <LabelWithHelp
+              text="Credentials Env Var"
+              help={{
+                body: [
+                  "Name of an environment variable holding login credentials as JSON, e.g. {\"username\": \"...\", \"password\": \"...\"}.",
+                  "The browser uses these to sign in. Storing them in an env var keeps secrets out of the workflow file.",
+                ],
+                example: "BROWSER_CREDENTIALS",
+              }}
+            />
             <input
               type="text"
               value={step.browserConfig.credentials_env}
@@ -1216,7 +1600,26 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
         <div className="space-y-3">
           {/* Template selection */}
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted">Agent Template</label>
+            <label className="mb-1 flex items-center text-xs font-medium text-muted">
+              <span>Agent Template</span>
+              {(() => {
+                const tmpl = step.agentConfig?.template;
+                const tmeta = tmpl ? getAgentTemplateMeta(tmpl) : null;
+                return (
+                  <FieldHelp
+                    label="Agent Template help"
+                    body={
+                      tmeta
+                        ? [tmeta.summary, tmpl ? tmeta.whenToUse : ""].filter(Boolean)
+                        : [
+                            "A built-in agent persona with a ready-made system prompt and tools.",
+                            "Pick one that matches your task, or leave it on Custom and describe your own below.",
+                          ]
+                    }
+                  />
+                );
+              })()}
+            </label>
             <select
               value={step.agentConfig?.template}
               onChange={(e) => onChange({ ...step, agentConfig: { ...step.agentConfig, template: e.target.value, describe: "" } })}
@@ -1253,7 +1656,16 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
 
           {/* Message */}
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted">Message</label>
+            <LabelWithHelp
+              text="Message"
+              help={{
+                body: [
+                  "The task you're handing the agent. Plain text with templated workflow data.",
+                  ...TEMPLATE_VARS_BODY,
+                ],
+                example: "Review {steps.draft.output} and list any factual errors.",
+              }}
+            />
             <textarea
               value={step.agentConfig?.message}
               onChange={(e) => onChange({ ...step, agentConfig: { ...step.agentConfig, message: e.target.value } })}
@@ -1477,8 +1889,23 @@ export function StepConfigPanel({ step, allStepIds, onChange, onDelete }: StepCo
       )}
 
       <div>
-        <label className="mb-1 block text-xs font-medium text-muted">Depends On</label>
-        <div className="space-y-1">
+        <LabelWithHelp
+          text="Depends On"
+          help={{
+            body: [
+              "The steps that must finish before this one starts. This is how you order the workflow.",
+              "Tick a step to wait for its output; reference it later with {steps.<id>.output}.",
+              "Leave all unticked to let this step run as early as possible.",
+            ],
+            example: "Tick \"fetch\" so this step runs after it completes.",
+          }}
+        />
+        <div
+          className={cn(
+            "space-y-1",
+            errorFields.has("dependsOn") && "rounded-lg border border-error/60 p-2",
+          )}
+        >
           {allStepIds
             .filter((sid) => sid !== step.id)
             .map((sid) => (
