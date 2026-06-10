@@ -195,9 +195,19 @@ Fields: http_config: {url, method, headers, body, auth}
 No prompt required.
 
 ### code
-Inline code execution in sandbox.
-Fields: code_config: {code, language}
-language defaults to "python". No prompt required.
+Inline Python in a RESTRICTED sandbox. Fields: code_config: {code, language}
+(language defaults to "python"). No prompt required.
+CRITICAL sandbox rules — code that breaks these FAILS at runtime:
+- NO `import` statements and NO `class` definitions / `__init__` / dunder
+  attributes. Only these names are available: `_input` (the workflow input
+  dict), `_steps` (dict of prior step outputs by id), `json`, `base64`, and a
+  safe builtin subset (len, range, sorted, sum, enumerate, zip, str, int, etc.).
+- Assign the step's output to a variable named `result`.
+- Do real work with plain functions and the allowed names. If you need to fetch
+  a URL, parse HTML/PDF, or call any library, use an `http` or `standard` step
+  instead of a `code` step — do NOT write code that imports requests, re,
+  html.parser, pandas, etc.
+Example: `result = {"count": len(_input.get("items", [])), "first": (_input.get("items") or [None])[0]}`
 
 ### condition
 If/else branching based on an expression.

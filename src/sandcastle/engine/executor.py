@@ -2713,6 +2713,17 @@ async def _execute_llm_step(
     if step.llm_config and step.llm_config.system_prompt:
         system_prompt += step.llm_config.system_prompt
 
+    # Low sampling temperature for deterministic, structured step output. Some
+    # OpenAI-compatible endpoints default to 1.0 (garbled output); pin it. A
+    # per-step llm_config.temperature overrides the global default.
+    from sandcastle.config import settings as _settings
+
+    temperature = _settings.step_temperature
+    if step.llm_config is not None:
+        _step_temp = getattr(step.llm_config, "temperature", None)
+        if _step_temp is not None:
+            temperature = _step_temp
+
     # Map short aliases to real Anthropic model IDs for direct API calls
     _CLAUDE_MODEL_ALIASES = {
         "sonnet": "claude-sonnet-4-6",
@@ -2736,6 +2747,7 @@ async def _execute_llm_step(
                     json={
                         "model": api_model,
                         "max_tokens": 4096,
+                        "temperature": temperature,
                         "system": system_prompt,
                         "messages": [{"role": "user", "content": prompt}],
                     },
@@ -2765,6 +2777,7 @@ async def _execute_llm_step(
                     json={
                         "model": model_info.api_model_id,
                         "max_tokens": 4096,
+                        "temperature": temperature,
                         "messages": [
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": prompt},
@@ -2778,6 +2791,21 @@ async def _execute_llm_step(
                 in_tok = usage.get("prompt_tokens", 0)
                 out_tok = usage.get("completion_tokens", 0)
                 cost = _safe_cost(in_tok, out_tok, model_info.input_price_per_m, model_info.output_price_per_m)
+
+        # An empty model response is a failure, not a silent success — otherwise
+        # a missing key, wrong region, or unauthorized model produces a
+        # "completed" run with empty output and no explanation.
+        if not text or not text.strip():
+            duration = time.monotonic() - started_at
+            return StepResult(
+                step_id=step.id,
+                status="failed",
+                error=(
+                    f"Model '{step.model}' returned an empty response. Check that the "
+                    "provider key, model id, and region/base URL are correct."
+                ),
+                duration_seconds=duration,
+            )
 
         # Try to parse as JSON
         output: Any = text.strip()
@@ -4827,7 +4855,14 @@ async def _execute_code_step(
             return StepResult(
                 step_id=step.id,
                 status="failed",
-                error=f"Code contains blocked pattern: '{blocked.group()}'",
+                error=(
+                    f"Code step uses blocked pattern '{blocked.group()}'. The restricted "
+                    "sandbox runs code without imports or classes: only `_input`, "
+                    "`_steps`, `json`, and `base64` are available, and you must assign "
+                    "the output to `result`. Avoid `import`, `class`/`__init__`, and "
+                    "dunder attributes — do the parsing with plain functions, or use an "
+                    "`http`/`standard` step instead."
+                ),
                 duration_seconds=time.monotonic() - started_at,
             )
 

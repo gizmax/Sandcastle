@@ -46,6 +46,13 @@ class Settings(BaseSettings):
     nim_base_url: str = "http://localhost:8000"
     nim_api_key: str = ""
 
+    # Sampling temperature for LLM/standard steps. Workflow steps do structured,
+    # deterministic work, so a LOW default is essential: some OpenAI-compatible
+    # endpoints (e.g. NVIDIA-hosted models) default to temperature 1.0, which
+    # produces garbled/hallucinated output. Pin a low value; override per step
+    # via the step's llm_config.temperature.
+    step_temperature: float = 0.2
+
     # Spark Mode: on a detected DGX Spark, auto-route default-model LLM steps to the
     # local NIM when it is reachable ($0, on-box). Opt out with SANDCASTLE_SPARK_NIM_-
     # AUTOROUTE=false. nim_probe_timeout_ms bounds the reachability probe.
