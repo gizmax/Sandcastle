@@ -39,6 +39,7 @@ from sandcastle.api.schemas import (
     ApiResponse,
     ApprovalRespondRequest,
     ApprovalResponse,
+    ArchitectRequest,
     AuditEventResponse,
     AuditVerifyResponse,
     AutoPilotStatsResponse,
@@ -3718,6 +3719,113 @@ async def generate_chat(req: Request, request: GenerateChatRequest) -> ApiRespon
         )
 
     return ApiResponse(data=result)
+
+
+# --- The Architect: autonomous generate -> run -> evaluate -> refine ---
+
+# In-memory job store, same pattern as the batch store. Architect sessions are
+# operator-initiated and few; a bounded dict keeps the endpoint dependency-free.
+_architect_jobs: dict[str, dict[str, Any]] = {}
+_ARCHITECT_JOBS_MAX_SIZE = 100
+
+
+def _prune_architect_jobs() -> None:
+    """Drop the oldest finished jobs when the store grows past its cap."""
+    if len(_architect_jobs) <= _ARCHITECT_JOBS_MAX_SIZE:
+        return
+    finished = [
+        jid for jid, j in _architect_jobs.items()
+        if j.get("status") in ("completed", "failed")
+    ]
+    for jid in finished[: len(_architect_jobs) - _ARCHITECT_JOBS_MAX_SIZE]:
+        _architect_jobs.pop(jid, None)
+
+
+async def _run_architect_job(job_id: str, request: ArchitectRequest) -> None:
+    """Drive one Architect session and mirror its progress into the job store."""
+    from sandcastle.engine.architect import design_workflow
+
+    job = _architect_jobs.get(job_id)
+    if job is None:
+        return
+    job["status"] = "running"
+
+    def _progress(msg: str) -> None:
+        job["log"].append(msg)
+
+    try:
+        result = await design_workflow(
+            request.description,
+            test_input=request.test_input,
+            budget_usd=request.budget_usd,
+            max_iterations=request.max_iterations,
+            score_threshold=request.score_threshold,
+            progress=_progress,
+        )
+        job["result"] = result.to_dict()
+        job["status"] = "completed"
+    except Exception as exc:
+        logger.error("Architect job %s failed: %s", job_id, exc)
+        job["status"] = "failed"
+        job["error"] = str(exc)
+    finally:
+        job["completed_at"] = datetime.now(timezone.utc).isoformat()
+
+
+@router.post("/architect")
+async def start_architect(req: Request, request: ArchitectRequest) -> ApiResponse:
+    """Start an Architect session: NL description -> proven workflow template.
+
+    Runs asynchronously; poll GET /api/architect/{job_id} for the per-iteration
+    log and the final bundle path. Admin-gated - the loop executes live runs.
+    """
+    _require_admin(req)
+    await execution_limiter.check(req)
+
+    if not settings.anthropic_api_key and not os.environ.get("ANTHROPIC_API_KEY"):
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="MISSING_API_KEY",
+                    message="An advisor API key is required for the Architect",
+                )
+            ).model_dump(),
+        )
+
+    _prune_architect_jobs()
+    job_id = str(uuid.uuid4())
+    _architect_jobs[job_id] = {
+        "job_id": job_id,
+        "status": "queued",
+        "description": request.description,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "completed_at": None,
+        "log": [],
+        "result": None,
+        "error": None,
+    }
+    asyncio.create_task(_run_architect_job(job_id, request))
+
+    return ApiResponse(data={"job_id": job_id, "status": "queued"})
+
+
+@router.get("/architect/{job_id}")
+async def get_architect_job(job_id: str, req: Request) -> ApiResponse:
+    """Status of an Architect job: per-iteration log, scores, final bundle."""
+    _require_admin(req)
+    job = _architect_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="NOT_FOUND",
+                    message=f"Architect job '{job_id}' not found",
+                )
+            ).model_dump(),
+        )
+    return ApiResponse(data=job)
 
 
 @router.post("/advisor/explain")
