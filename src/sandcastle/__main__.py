@@ -1936,7 +1936,10 @@ def _cmd_generate(args: argparse.Namespace) -> None:
     """Generate a workflow from a natural language description."""
     from sandcastle.engine.generator import generate_workflow_sync
 
-    description = getattr(args, "description", None) or ""
+    # `build`/`new` aliases pass the description positionally; `generate` uses -d.
+    description = (
+        getattr(args, "description", None) or getattr(args, "description_pos", None) or ""
+    )
     if not description:
         try:
             description = input(f"{_color('Describe your workflow:', _C.CYAN)} ").strip()
@@ -4534,6 +4537,113 @@ def _cmd_owners(args: argparse.Namespace) -> None:
 # Argument parser
 # ---------------------------------------------------------------------------
 
+# Command grouping mirrors the dashboard's "Build / Run / Improve / Operate"
+# IA (plus a SETUP group for first-time configuration). This is purely a
+# presentation/discoverability layer over the flat subcommand list — every
+# command below is still registered and dispatched individually, so existing
+# scripts keep working unchanged.
+_COMMAND_GROUPS: list[tuple[str, str, list[tuple[str, str]]]] = [
+    (
+        "BUILD",
+        "Describe, generate and assemble workflows",
+        [
+            ("build", "Generate a workflow from a description (alias of generate)"),
+            ("new", "Generate a workflow from a description (alias of generate)"),
+            ("generate", "Generate a workflow from natural language"),
+            ("templates", "List workflow templates"),
+            ("hub", "Search, install and publish community workflows"),
+            ("publish-mcp", "Emit MCP client config for a workflow"),
+            ("publish-skills", "Publish workflows as Anthropic Skills"),
+            ("describe", "Print a workflow summary with responsibilities"),
+            ("lint", "Check workflow metadata completeness"),
+            ("owners", "Show step ownership for a workflow"),
+        ],
+    ),
+    (
+        "RUN",
+        "Execute workflows and manage their runs",
+        [
+            ("run", "Run a workflow"),
+            ("status", "Show run status and step details"),
+            ("logs", "Stream run events (SSE)"),
+            ("ls", "List runs, workflows or schedules"),
+            ("runs", "List or compare workflow runs"),
+            ("cancel", "Cancel a running workflow"),
+            ("replay", "Replay a workflow run from a step"),
+            ("fork", "Fork a run with modifications"),
+            ("schedule", "Create or delete schedules"),
+            ("approve", "Approve a paused approval step"),
+            ("reject", "Reject a paused approval step"),
+        ],
+    ),
+    (
+        "IMPROVE",
+        "Evaluate and optimize workflow intelligence",
+        [
+            ("eval", "Run an eval suite against a workflow"),
+            ("autopilot", "Manage AutoPilot experiments"),
+        ],
+    ),
+    (
+        "OPERATE",
+        "Serve, monitor and govern your deployment",
+        [
+            ("serve", "Start the API server"),
+            ("worker", "Start the arq background worker"),
+            ("health", "Check API health"),
+            ("doctor", "Run local diagnostics"),
+            ("mcp", "Start the MCP server for IDE clients"),
+            ("share", "Mint or revoke a public run permalink"),
+            ("dlq", "Dead letter queue management"),
+            ("violations", "Review policy violations"),
+            ("tools", "Tool / connector management"),
+            ("db", "Database management"),
+            ("update", "Check for and install updates"),
+            ("rollback", "Roll back to the previous version"),
+        ],
+    ),
+    (
+        "SETUP",
+        "Configure Sandcastle and credentials",
+        [
+            ("init", "Interactive setup wizard (create .env)"),
+            ("keys", "Manage API keys"),
+            ("providers", "List configured AI advisor providers"),
+        ],
+    ),
+]
+
+
+def _grouped_command_epilog() -> str:
+    """Render the grouped command list for the top-level help epilog."""
+    lines = ["", "command groups (mirrors the dashboard's Build / Run / Improve / Operate):", ""]
+    for title, blurb, commands in _COMMAND_GROUPS:
+        lines.append(f"  {_color(title, _C.BOLD)}  {_color(blurb, _C.DIM)}")
+        for name, help_text in commands:
+            lines.append(f"    {name:<16} {help_text}")
+        lines.append("")
+    lines.append("Run 'sandcastle <command> --help' for command-specific options.")
+    return "\n".join(lines)
+
+
+def _print_getting_started() -> None:
+    """Print a short, friendly first-run guide mirroring the dashboard omnibox."""
+    b = lambda s: _color(s, _C.BOLD)  # noqa: E731
+    c = lambda s: _color(s, _C.CYAN)  # noqa: E731
+    dim = lambda s: _color(s, _C.DIM)  # noqa: E731
+    print(b("Sandcastle") + " — describe a workflow, run it, then improve it.\n")
+    print(b("Getting started"))
+    print(f"  1. {c('sandcastle build')} \"what your agent should do\"   "
+          + dim("# describe a workflow"))
+    print(f"  2. {c('sandcastle run')} <workflow>                       "
+          + dim("# run it"))
+    print(f"  3. {c('sandcastle ls runs')}                              "
+          + dim("# see what happened"))
+    print()
+    print("First time here? " + c("sandcastle init") + " sets up your API keys.")
+    print("See all commands grouped by Build / Run / Improve / Operate: "
+          + c("sandcastle help"))
+
 
 def _add_connection_args(parser: argparse.ArgumentParser) -> None:
     """Add --url and --api-key arguments to a subparser."""
@@ -4557,6 +4667,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="sandcastle",
         description="Sandcastle - workflow orchestrator CLI",
+        epilog=_grouped_command_epilog(),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--version", "-V",
@@ -4752,15 +4864,37 @@ def _build_parser() -> argparse.ArgumentParser:
         "--verbose", "-v", action="store_true", help="Show assertion details for failed cases"
     )
 
-    # --- generate ---
-    p_gen = subparsers.add_parser("generate", help="Generate workflow from natural language")
-    p_gen.add_argument("--description", "-d", help="What the workflow should do")
-    p_gen.add_argument(
-        "--output", "-o", metavar="FILE", help="Write YAML to file instead of stdout"
-    )
-    p_gen.add_argument(
-        "--refine", action="store_true", help="Enter refinement loop after generation"
-    )
+    # --- generate (+ friendly aliases: build, new) ---
+    # `build`/`new` mirror the dashboard omnibox: the primary "describe a
+    # workflow" action. They accept the description as a positional argument
+    # (sandcastle build "do X") while still supporting -d for parity with
+    # `generate`. All three route to _cmd_generate.
+    for _gen_name in ("generate", "build", "new"):
+        _is_alias = _gen_name != "generate"
+        _gen_help = (
+            "Generate a workflow from a description (alias of generate)"
+            if _is_alias
+            else "Generate workflow from natural language"
+        )
+        p_gen = subparsers.add_parser(_gen_name, help=_gen_help)
+        if _is_alias:
+            # Positional description so `sandcastle build "..."` just works.
+            p_gen.add_argument(
+                "description_pos",
+                nargs="?",
+                default=None,
+                metavar="DESCRIPTION",
+                help="What the workflow should do",
+            )
+        p_gen.add_argument(
+            "--description", "-d", dest="description", help="What the workflow should do"
+        )
+        p_gen.add_argument(
+            "--output", "-o", metavar="FILE", help="Write YAML to file instead of stdout"
+        )
+        p_gen.add_argument(
+            "--refine", action="store_true", help="Enter refinement loop after generation"
+        )
 
     # --- templates ---
     p_templates = subparsers.add_parser("templates", help="List workflow templates")
@@ -4997,6 +5131,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_owners.add_argument("workflow", help="Workflow name or path to .yaml file")
 
+    # --- help (explicit grouped help command) ---
+    subparsers.add_parser(
+        "help", help="Show grouped help (Build / Run / Improve / Operate)"
+    )
+
     return parser
 
 
@@ -5011,7 +5150,13 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command is None:
-        # No command given - default to serve (backwards compatible)
+        # No command given - print a friendly first-run guide that mirrors the
+        # dashboard's primary action, then exit 0 (backwards compatible).
+        _print_getting_started()
+        sys.exit(0)
+
+    # Explicit 'help' command prints the full grouped help.
+    if args.command == "help":
         parser.print_help()
         sys.exit(0)
 
@@ -5070,6 +5215,8 @@ def main() -> None:
         "publish-skills": _cmd_publish_skills,
         "doctor": _cmd_doctor,
         "generate": _cmd_generate,
+        "build": _cmd_generate,  # alias of generate (dashboard omnibox parity)
+        "new": _cmd_generate,  # alias of generate
         "eval": _cmd_eval,
         "templates": _cmd_templates,
         "replay": _cmd_replay,

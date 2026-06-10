@@ -1138,3 +1138,75 @@ class TestSubCommandParsing:
         parser = _build_parser()
         args = parser.parse_args(["logs", "run-123", "-f"])
         assert args.follow is True
+
+
+# ---------------------------------------------------------------------------
+# Tests: Dashboard-mirrored grouping, aliases and first-run guidance (Wave 2)
+# ---------------------------------------------------------------------------
+
+
+class TestGroupedHelpAndAliases:
+    def test_build_alias_positional_description(self):
+        """'build "<desc>"' should parse the description positionally."""
+        parser = _build_parser()
+        args = parser.parse_args(["build", "scrape competitor pricing daily"])
+        assert args.command == "build"
+        assert args.description_pos == "scrape competitor pricing daily"
+
+    def test_new_alias_positional_description(self):
+        """'new "<desc>"' should parse the description positionally."""
+        parser = _build_parser()
+        args = parser.parse_args(["new", "summarise support tickets"])
+        assert args.command == "new"
+        assert args.description_pos == "summarise support tickets"
+
+    def test_build_alias_supports_dash_d(self):
+        """'build -d "<desc>"' keeps parity with generate's -d flag."""
+        parser = _build_parser()
+        args = parser.parse_args(["build", "-d", "do a thing", "-o", "out.yaml"])
+        assert args.command == "build"
+        assert args.description == "do a thing"
+        assert args.output == "out.yaml"
+
+    def test_generate_still_uses_description_flag(self):
+        """The original 'generate' command is unchanged (no positional)."""
+        parser = _build_parser()
+        args = parser.parse_args(["generate", "-d", "classic"])
+        assert args.command == "generate"
+        assert args.description == "classic"
+        assert not hasattr(args, "description_pos")
+
+    def test_help_command_parses(self):
+        """'help' is a registered command for grouped help."""
+        parser = _build_parser()
+        args = parser.parse_args(["help"])
+        assert args.command == "help"
+
+    def test_epilog_lists_all_four_dashboard_verbs(self):
+        """Top-level help epilog mirrors Build / Run / Improve / Operate."""
+        parser = _build_parser()
+        help_text = parser.format_help()
+        for verb in ("BUILD", "RUN", "IMPROVE", "OPERATE", "SETUP"):
+            assert verb in help_text
+
+    def test_build_alias_routes_to_generate(self):
+        """'build' dispatches through _cmd_generate with the positional desc."""
+        with patch("sandcastle.engine.generator.generate_workflow_sync") as gen, \
+                patch("sys.argv", ["sandcastle", "build", "make a pipeline"]):
+            gen.return_value = MagicMock(
+                validation_errors=[], name="wf", steps_count=2, yaml_content="x: 1"
+            )
+            main()
+        gen.assert_called_once()
+        assert gen.call_args.args[0] == "make a pipeline"
+
+    def test_no_args_prints_getting_started(self, capsys):
+        """Bare 'sandcastle' prints the first-run guide and exits 0."""
+        with patch("sys.argv", ["sandcastle"]):
+            with pytest.raises(SystemExit) as exc:
+                main()
+        assert exc.value.code == 0
+        out = capsys.readouterr().out
+        assert "Getting started" in out
+        assert 'sandcastle build' in out
+        assert "sandcastle run" in out
