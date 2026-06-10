@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sandcastle — The Manifesto. Build anything. Any model. Anywhere, your rules.</title>
+  <meta name="description" content="A declaration of four freedoms for AI agents: build anything from one file, run any model, deploy anywhere on your rules, and watch it learn. Sandcastle — open-source AI workflow orchestrator. pip install sandcastle-ai">
+  <meta name="keywords" content="AI workflow orchestrator, AI agent orchestration, multi-model routing, EU data residency, self-hostable AI, open source AI agents, sandcastle, sandcastle-ai">
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+  <meta name="author" content="Tomas Pflanzer">
+  <link rel="canonical" href="https://sandcastle-ai.eu">
+  <link rel="alternate" hreflang="en" href="https://sandcastle-ai.eu">
+  <link rel="alternate" hreflang="x-default" href="https://sandcastle-ai.eu">
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="Sandcastle — The Manifesto">
+  <meta property="og:description" content="Build anything. Any model. Anywhere, your rules. And it learns. Four freedoms for AI agents. pip install sandcastle-ai.">
+  <meta property="og:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
+  <meta property="og:url" content="https://sandcastle-ai.eu">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Sandcastle">
+  <meta property="og:locale" content="en_US">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Sandcastle — The Manifesto">
+  <meta name="twitter:description" content="Build anything. Any model. Anywhere, your rules. And it learns. Four freedoms for AI agents. pip install sandcastle-ai">
+  <meta name="twitter:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
+  <meta name="twitter:creator" content="@iuditg">
+
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏰</text></svg>">
+
+  <!-- Google Analytics -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-ZN1K4G2TCZ"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-ZN1K4G2TCZ');
+  </script>
+
+  <!-- Performance hints -->
+  <link rel="dns-prefetch" href="https://www.googletagmanager.com">
+
+  <!-- Display: Bricolage Grotesque (characterful grotesk) · Mono: IBM Plex Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <style>
+    /* ============================================================
+       SANDCASTLE — MANIFESTO
+       Swiss-brutalist editorial. Paper & ink. One accent.
+       ============================================================ */
+
+    :root{
+      --paper:      #F7F3EC;   /* warm sand off-white */
+      --paper-2:    #EFE9DD;   /* slightly deeper paper for blocks */
+      --ink:        #1C1814;   /* near-black warm ink */
+      --ink-soft:   #5B524A;   /* muted ink for body */
+      --ink-faint:  #8A8076;   /* captions / hairlines text */
+      --amber:      #F59E0B;   /* THE single accent */
+      --amber-ink:  #8A5500;   /* amber that passes AA on paper */
+      --rule:       #1C1814;
+      --hair:       rgba(28,24,20,.16);
+
+      --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+      --display: "Bricolage Grotesque", "Bricolage", system-ui, sans-serif;
+
+      /* baseline rhythm unit */
+      --u: 8px;
+      --maxw: 1320px;
+      --gutter: clamp(20px, 5vw, 80px);
+    }
+
+    @media (prefers-color-scheme: dark){
+      :root{
+        --paper:    #14110D;
+        --paper-2:  #1B1712;
+        --ink:      #F4EEE3;
+        --ink-soft: #BBB0A2;
+        --ink-faint:#897F71;
+        --rule:     #F4EEE3;
+        --hair:     rgba(244,238,227,.18);
+        --amber-ink:#F5B53C;
+      }
+    }
+
+    *,*::before,*::after{ box-sizing:border-box; }
+
+    html{ -webkit-text-size-adjust:100%; scroll-behavior:smooth; }
+    @media (prefers-reduced-motion: reduce){ html{ scroll-behavior:auto; } }
+
+    body{
+      margin:0;
+      background:var(--paper);
+      color:var(--ink);
+      font-family:var(--display);
+      font-weight:400;
+      line-height:1.18;
+      text-rendering:optimizeLegibility;
+      -webkit-font-smoothing:antialiased;
+      -moz-osx-font-smoothing:grayscale;
+      overflow-x:hidden;
+      /* faint printed-paper grain via overlapping gradients */
+      background-image:
+        radial-gradient(rgba(28,24,20,.020) 1px, transparent 1px);
+      background-size: 4px 4px;
+    }
+
+    ::selection{ background:var(--amber); color:#1C1814; }
+
+    a{ color:inherit; text-decoration:none; }
+
+    /* ---- shared layout ---- */
+    .wrap{
+      width:100%;
+      max-width:var(--maxw);
+      margin-inline:auto;
+      padding-inline:var(--gutter);
+    }
+
+    .mono{
+      font-family:var(--mono);
+      font-weight:500;
+      letter-spacing:.02em;
+      text-transform:uppercase;
+      font-size:clamp(11px,1.05vw,13px);
+      color:var(--ink-faint);
+    }
+
+    .rule{ border:0; border-top:1.5px solid var(--rule); margin:0; }
+
+    /* keyboard focus — sharp, on-brand */
+    a:focus-visible, button:focus-visible{
+      outline:3px solid var(--amber);
+      outline-offset:3px;
+    }
+
+    /* ============================================================
+       MASTHEAD / NAV
+       ============================================================ */
+    header.masthead{
+      position:sticky; top:0; z-index:50;
+      background:color-mix(in srgb, var(--paper) 86%, transparent);
+      backdrop-filter:blur(8px) saturate(120%);
+      -webkit-backdrop-filter:blur(8px) saturate(120%);
+      border-bottom:1.5px solid var(--rule);
+    }
+    .masthead .wrap{
+      display:flex; align-items:center; justify-content:space-between;
+      height:64px; gap:24px;
+    }
+    .brand{
+      display:flex; align-items:baseline; gap:10px;
+      font-weight:700; font-size:19px; letter-spacing:-.02em;
+    }
+    .brand .glyph{ font-size:18px; transform:translateY(1px); }
+    .brand .tm{
+      font-family:var(--mono); font-size:10px; font-weight:500;
+      color:var(--ink-faint); letter-spacing:.08em; text-transform:uppercase;
+      border:1px solid var(--hair); padding:2px 6px; border-radius:2px;
+    }
+    nav.primary{ display:flex; align-items:center; gap:clamp(14px,2vw,28px); }
+    nav.primary a{
+      font-family:var(--mono); font-size:12px; font-weight:500;
+      text-transform:uppercase; letter-spacing:.04em; color:var(--ink-soft);
+      transition:color .15s ease;
+    }
+    nav.primary a:hover{ color:var(--ink); }
+    nav.primary a.cta{
+      color:var(--ink); border:1.5px solid var(--ink);
+      padding:7px 14px; border-radius:2px; background:var(--paper);
+    }
+    nav.primary a.cta:hover{ background:var(--ink); color:var(--paper); }
+    .nav-collapse{ display:none; }
+    @media (max-width:780px){
+      nav.primary a.muted{ display:none; }
+    }
+
+    /* ============================================================
+       HERO — type-only declaration
+       ============================================================ */
+    .hero{ padding:clamp(56px,12vh,140px) 0 clamp(40px,8vh,90px); }
+    .hero .kicker{
+      display:flex; align-items:center; gap:14px; margin-bottom:clamp(28px,5vh,56px);
+    }
+    .hero .kicker .tick{ width:42px; height:1.5px; background:var(--amber); display:inline-block; }
+
+    .statement{
+      font-weight:600;
+      font-size:clamp(34px, 7.2vw, 104px);
+      line-height:.99;
+      letter-spacing:-.035em;
+      max-width:18ch;
+      text-wrap:balance;
+    }
+    .statement .or{ color:var(--ink-faint); font-weight:500; }
+    .statement em{
+      font-style:normal;
+      color:var(--amber-ink);
+      position:relative;
+    }
+    .statement .em-amber{ color:var(--amber-ink); }
+
+    .resolve{
+      margin-top:clamp(28px,5vh,56px);
+      display:grid;
+      grid-template-columns: 1fr;
+      gap:clamp(20px,3vw,40px);
+      align-items:end;
+    }
+    @media (min-width:880px){
+      .resolve{ grid-template-columns: minmax(0,1.4fr) minmax(0,1fr); }
+    }
+    .resolve p.lede{
+      font-size:clamp(17px,2.1vw,24px);
+      line-height:1.4; font-weight:400; color:var(--ink-soft);
+      max-width:46ch; letter-spacing:-.01em;
+    }
+    .resolve p.lede strong{ color:var(--ink); font-weight:600; }
+    .install-line{
+      font-family:var(--mono); font-weight:600;
+      font-size:clamp(15px,1.9vw,20px);
+      background:var(--ink); color:var(--paper);
+      padding:14px 18px; border-radius:3px;
+      display:inline-flex; align-items:center; gap:12px;
+      letter-spacing:0; white-space:nowrap;
+      width:max-content; max-width:100%;
+    }
+    .install-line .pmt{ color:var(--amber); }
+    .install-line button.copy{
+      font-family:var(--mono); font-size:10px; text-transform:uppercase;
+      letter-spacing:.06em; color:var(--paper); background:transparent;
+      border:1px solid rgba(247,243,236,.35); border-radius:2px;
+      padding:3px 7px; cursor:pointer; transition:.15s ease;
+    }
+    .install-line button.copy:hover{ background:var(--amber); color:#1C1814; border-color:var(--amber); }
+
+    /* marquee strip of facts under hero */
+    .factbar{
+      border-top:1.5px solid var(--rule); border-bottom:1.5px solid var(--rule);
+      overflow:hidden; padding:0; margin-top:clamp(40px,7vh,80px);
+      background:var(--paper-2);
+    }
+    .factbar .track{
+      display:flex; gap:0; white-space:nowrap; width:max-content;
+      animation:scrollx 38s linear infinite;
+    }
+    @media (prefers-reduced-motion: reduce){ .factbar .track{ animation:none; } }
+    .factbar .track:hover{ animation-play-state:paused; }
+    .factbar span.item{
+      font-family:var(--mono); font-weight:500; text-transform:uppercase;
+      letter-spacing:.05em; font-size:13px; color:var(--ink-soft);
+      padding:13px 26px; display:inline-flex; align-items:center; gap:26px;
+    }
+    .factbar span.item::after{ content:"·"; color:var(--amber); }
+    @keyframes scrollx{ from{ transform:translateX(0);} to{ transform:translateX(-50%);} }
+
+    /* ============================================================
+       CHAPTERS — four numbered full-bleed declarations
+       ============================================================ */
+    .chapter{
+      padding:clamp(64px,13vh,150px) 0;
+      border-bottom:1.5px solid var(--rule);
+      position:relative;
+    }
+    .chapter:nth-child(even){ background:var(--paper-2); }
+
+    .chapter .grid{
+      display:grid;
+      grid-template-columns:1fr;
+      gap:clamp(24px,4vw,56px);
+    }
+    @media (min-width:980px){
+      .chapter .grid{
+        grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+        align-items:start;
+      }
+      .chapter:nth-child(even) .grid{ direction:rtl; }
+      .chapter:nth-child(even) .grid > *{ direction:ltr; }
+    }
+
+    .ch-head{ position:relative; }
+    .ch-num{
+      font-weight:800;
+      font-size:clamp(96px, 22vw, 300px);
+      line-height:.8;
+      letter-spacing:-.05em;
+      color:transparent;
+      -webkit-text-stroke:2px var(--ink);
+      text-stroke:2px var(--ink);
+      display:block;
+      margin-bottom:clamp(8px,1.5vh,18px);
+      user-select:none;
+    }
+    .chapter:nth-child(odd) .ch-num{
+      color:var(--amber); -webkit-text-stroke:0; text-stroke:0;
+    }
+    .ch-label{
+      font-family:var(--mono); font-weight:500; text-transform:uppercase;
+      letter-spacing:.14em; font-size:13px; color:var(--ink-faint);
+      margin-bottom:clamp(14px,2vh,22px); display:block;
+    }
+    .ch-title{
+      font-weight:700;
+      font-size:clamp(40px, 8.4vw, 116px);
+      line-height:.94;
+      letter-spacing:-.04em;
+      margin:0;
+      text-wrap:balance;
+    }
+    .ch-body{ padding-top:clamp(8px,2vh,40px); }
+    .ch-para{
+      font-size:clamp(17px,1.6vw,21px);
+      line-height:1.5; color:var(--ink-soft); font-weight:400;
+      max-width:42ch; letter-spacing:-.005em;
+      margin:0 0 clamp(24px,4vh,38px);
+    }
+    .ch-para strong{ color:var(--ink); font-weight:600; }
+
+    /* supporting detail card (mono colophon style) */
+    .detail{
+      border:1.5px solid var(--rule); border-radius:3px;
+      background:var(--paper); overflow:hidden;
+    }
+    .chapter:nth-child(even) .detail{ background:var(--paper); }
+    .detail .detail-cap{
+      font-family:var(--mono); font-size:11px; text-transform:uppercase;
+      letter-spacing:.1em; color:var(--ink-faint);
+      padding:11px 16px; border-bottom:1.5px solid var(--hair);
+      display:flex; justify-content:space-between; align-items:center;
+    }
+    .detail .detail-cap .dot{ width:8px;height:8px;border-radius:50%;background:var(--amber); }
+    .detail .detail-body{ padding:18px 16px; font-family:var(--mono); font-size:14px; line-height:1.8; }
+    .detail .detail-body .y-key{ color:var(--amber-ink); }
+    .detail .detail-body .y-str{ color:var(--ink); }
+    .detail .detail-body .y-c{ color:var(--ink-faint); }
+    .detail .detail-body .ln{ display:block; white-space:pre; overflow-x:auto; }
+
+    /* model-swap diff */
+    .swap .row{ display:flex; gap:10px; align-items:baseline; }
+    .swap .minus{ color:var(--ink-faint); }
+    .swap .minus .k{ text-decoration:line-through; }
+    .swap .plus{ color:var(--ink); font-weight:600; }
+    .swap .plus .mk{ color:var(--amber-ink); }
+    .swap .sign{ width:1.2em; display:inline-block; }
+    .swap .plus .sign{ color:var(--amber-ink); }
+
+    /* region/gate list */
+    .gates{ list-style:none; margin:0; padding:0; font-family:var(--mono); }
+    .gates li{
+      display:flex; justify-content:space-between; align-items:center;
+      padding:11px 0; border-bottom:1px solid var(--hair); font-size:14px;
+    }
+    .gates li:last-child{ border-bottom:0; }
+    .gates li .g-name{ color:var(--ink); }
+    .gates li .g-state{ color:var(--ink-faint); font-size:11px; text-transform:uppercase; letter-spacing:.08em; }
+    .gates li .g-state.on{ color:var(--amber-ink); }
+
+    /* sparkline */
+    .spark-wrap{ padding:20px 16px 16px; }
+    .spark-wrap .spark-top{
+      display:flex; justify-content:space-between; align-items:baseline; margin-bottom:14px;
+      font-family:var(--mono); font-size:13px;
+    }
+    .spark-wrap .spark-top b{ color:var(--amber-ink); font-size:22px; font-weight:600; }
+    .spark-wrap svg{ display:block; width:100%; height:64px; }
+    .spark-wrap .spark-foot{
+      font-family:var(--mono); font-size:11px; color:var(--ink-faint);
+      text-transform:uppercase; letter-spacing:.06em; margin-top:10px;
+    }
+
+    /* reveal animation */
+    .reveal{ opacity:0; transform:translateY(26px); transition:opacity .7s cubic-bezier(.2,.7,.2,1), transform .7s cubic-bezier(.2,.7,.2,1); }
+    .reveal.in{ opacity:1; transform:none; }
+    .reveal.d1{ transition-delay:.08s; }
+    .reveal.d2{ transition-delay:.16s; }
+    @media (prefers-reduced-motion: reduce){
+      .reveal{ opacity:1 !important; transform:none !important; transition:none !important; }
+    }
+
+    /* ============================================================
+       SPECIFICS — colophon spec block
+       ============================================================ */
+    .colophon{ padding:clamp(64px,12vh,140px) 0; border-bottom:1.5px solid var(--rule); }
+    .colophon .lab{ margin-bottom:clamp(24px,4vh,44px); }
+    .colophon h2{
+      font-weight:700; font-size:clamp(30px,5vw,68px); letter-spacing:-.035em;
+      line-height:1; margin:0 0 clamp(36px,6vh,60px); max-width:16ch; text-wrap:balance;
+    }
+    .spec-grid{
+      display:grid; grid-template-columns:repeat(2,1fr);
+      border-top:1.5px solid var(--rule); border-left:1.5px solid var(--rule);
+    }
+    @media (min-width:760px){ .spec-grid{ grid-template-columns:repeat(4,1fr); } }
+    .spec-cell{
+      border-right:1.5px solid var(--rule); border-bottom:1.5px solid var(--rule);
+      padding:clamp(18px,2.4vw,28px); min-height:148px;
+      display:flex; flex-direction:column; justify-content:space-between;
+    }
+    .spec-cell .s-num{
+      font-weight:700; font-size:clamp(28px,3.4vw,46px); letter-spacing:-.03em; line-height:1;
+    }
+    .spec-cell .s-num .unit{ color:var(--amber-ink); }
+    .spec-cell .s-lab{
+      font-family:var(--mono); font-size:12px; text-transform:uppercase; letter-spacing:.05em;
+      color:var(--ink-soft); line-height:1.45; margin-top:14px;
+    }
+
+    /* ============================================================
+       FINAL CTA — install as a statement
+       ============================================================ */
+    .closer{
+      padding:clamp(80px,16vh,180px) 0;
+      text-align:center;
+      background:var(--ink); color:var(--paper);
+      border-bottom:1.5px solid var(--rule);
+    }
+    .closer .pre{
+      font-family:var(--mono); text-transform:uppercase; letter-spacing:.16em;
+      font-size:13px; color:var(--amber); margin-bottom:clamp(20px,4vh,40px);
+    }
+    .closer h2{
+      font-weight:600; font-size:clamp(32px,6.4vw,92px); letter-spacing:-.035em;
+      line-height:1; margin:0 0 clamp(36px,6vh,56px); text-wrap:balance;
+      color:var(--paper);
+    }
+    .closer .big-install{
+      font-family:var(--mono); font-weight:600;
+      font-size:clamp(18px,3.6vw,40px);
+      display:inline-flex; align-items:center; gap:16px; flex-wrap:wrap;
+      justify-content:center;
+      border:1.5px solid rgba(247,243,236,.3); border-radius:4px;
+      padding:clamp(16px,2vw,24px) clamp(20px,3vw,34px);
+      letter-spacing:0; cursor:pointer; transition:.18s ease;
+    }
+    .closer .big-install:hover{ border-color:var(--amber); }
+    .closer .big-install .pmt{ color:var(--amber); }
+    .closer .big-install .ci{
+      font-size:.42em; text-transform:uppercase; letter-spacing:.08em;
+      border:1px solid rgba(247,243,236,.4); border-radius:3px; padding:5px 9px; color:var(--paper);
+    }
+    .closer .links{
+      margin-top:clamp(28px,5vh,44px); display:flex; gap:24px; justify-content:center; flex-wrap:wrap;
+      font-family:var(--mono); font-size:13px; text-transform:uppercase; letter-spacing:.04em;
+    }
+    .closer .links a{ color:rgba(247,243,236,.7); border-bottom:1px solid transparent; padding-bottom:2px; }
+    .closer .links a:hover{ color:var(--amber); border-color:var(--amber); }
+
+    /* ============================================================
+       FOOTER — editorial
+       ============================================================ */
+    footer.foot{ padding:clamp(56px,9vh,90px) 0 clamp(40px,6vh,64px); }
+    .foot-top{
+      display:grid; grid-template-columns:1fr; gap:clamp(36px,5vw,64px);
+      padding-bottom:clamp(40px,6vh,60px); border-bottom:1.5px solid var(--rule);
+    }
+    @media (min-width:820px){ .foot-top{ grid-template-columns: minmax(0,1.6fr) repeat(3, minmax(0,1fr)); } }
+    .foot-brand .b{
+      font-weight:700; font-size:clamp(28px,4vw,46px); letter-spacing:-.03em; line-height:1; margin-bottom:18px;
+    }
+    .foot-brand p{ color:var(--ink-soft); max-width:34ch; font-size:15px; line-height:1.55; }
+    .foot-col h4{
+      font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.1em;
+      color:var(--ink-faint); margin:0 0 16px; font-weight:600;
+    }
+    .foot-col a{
+      display:block; font-size:15px; color:var(--ink-soft); padding:6px 0; transition:color .15s ease;
+    }
+    .foot-col a:hover{ color:var(--ink); }
+    .foot-bottom{
+      display:flex; justify-content:space-between; align-items:center; gap:20px; flex-wrap:wrap;
+      padding-top:clamp(24px,4vh,36px);
+      font-family:var(--mono); font-size:12px; color:var(--ink-faint);
+      text-transform:uppercase; letter-spacing:.04em;
+    }
+    .foot-bottom a{ color:var(--ink-faint); }
+    .foot-bottom a:hover{ color:var(--amber-ink); }
+    .foot-bottom .made{ display:flex; align-items:center; gap:8px; }
+    .foot-bottom .eu{ color:var(--amber-ink); }
+
+    @media (max-width:520px){
+      .install-line{ white-space:normal; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- =========================== MASTHEAD =========================== -->
+  <header class="masthead">
+    <div class="wrap">
+      <a class="brand" href="/" aria-label="Sandcastle home">
+        <span class="glyph" aria-hidden="true">🏰</span>
+        <span>Sandcastle</span>
+        <span class="tm">v0.33.0</span>
+      </a>
+      <nav class="primary" aria-label="Primary">
+        <a class="muted" href="/pricing/">Pricing</a>
+        <a class="muted" href="/security/">Security</a>
+        <a class="muted" href="/eu-ai-act/">EU&nbsp;AI&nbsp;Act</a>
+        <a class="muted" href="/hub/">Hub</a>
+        <a class="cta" href="https://github.com/gizmax/Sandcastle">GitHub&nbsp;↗</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <!-- =========================== HERO =========================== -->
+    <section class="hero" aria-labelledby="statement">
+      <div class="wrap">
+        <div class="kicker">
+          <span class="tick" aria-hidden="true"></span>
+          <span class="mono">A Manifesto in Four Freedoms · Est. Europe · Open Source</span>
+        </div>
+
+        <h1 class="statement" id="statement">
+          You shouldn't have to choose between <em>simple</em> and <span class="em-amber">powerful</span>. <span class="or">Or between the cloud and</span> <em>control</em>.
+        </h1>
+
+        <div class="resolve">
+          <p class="lede">
+            So we stopped choosing. <strong>Sandcastle</strong> is an open-source orchestrator for AI agents — define a workflow in one file, run it on any model, ship it anywhere on your own rules, and let it get sharper every run.
+          </p>
+          <div>
+            <span class="install-line" id="heroInstall" role="text">
+              <span class="pmt">$</span><span>pip install sandcastle-ai</span>
+              <button class="copy" data-copy="pip install sandcastle-ai" type="button" aria-label="Copy install command">Copy</button>
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- fact marquee -->
+      <div class="factbar" aria-hidden="true">
+        <div class="track" id="factTrack">
+          <span class="item">7 model providers</span>
+          <span class="item">236 workflow templates</span>
+          <span class="item">22 step types</span>
+          <span class="item">Auto-failover</span>
+          <span class="item">EU data residency</span>
+          <span class="item">Record &amp; replay every run</span>
+          <span class="item">Hard budget caps</span>
+          <span class="item">$0 local steps</span>
+          <span class="item">Self-hostable</span>
+          <span class="item">BSL 1.1 → Apache 2.0 in 2030</span>
+          <!-- duplicate for seamless loop -->
+          <span class="item">7 model providers</span>
+          <span class="item">236 workflow templates</span>
+          <span class="item">22 step types</span>
+          <span class="item">Auto-failover</span>
+          <span class="item">EU data residency</span>
+          <span class="item">Record &amp; replay every run</span>
+          <span class="item">Hard budget caps</span>
+          <span class="item">$0 local steps</span>
+          <span class="item">Self-hostable</span>
+          <span class="item">BSL 1.1 → Apache 2.0 in 2030</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- =========================== CHAPTER 01 =========================== -->
+    <section class="chapter" aria-labelledby="ch1-title">
+      <div class="wrap">
+        <div class="grid">
+          <div class="ch-head reveal">
+            <span class="ch-num" data-count="1" aria-hidden="true">01</span>
+            <span class="ch-label">The First Freedom</span>
+            <h2 class="ch-title" id="ch1-title">Build<br>anything.</h2>
+          </div>
+          <div class="ch-body">
+            <p class="ch-para reveal d1">
+              Complex agents from <strong>one simple file</strong>. 22 step types — parallel fan-out, conditions, loops, gates, deterministic $0 steps. Or skip the YAML entirely and <strong>describe what you want in a sentence</strong>; Sandcastle designs the workflow.
+            </p>
+            <div class="detail reveal d2">
+              <div class="detail-cap"><span>workflow.yaml</span><span class="dot" aria-hidden="true"></span></div>
+              <div class="detail-body" aria-label="Example workflow YAML">
+<span class="ln"><span class="y-key">steps:</span></span>
+<span class="ln">  - <span class="y-key">type:</span> <span class="y-str">llm</span>      <span class="y-c"># research, in parallel</span></span>
+<span class="ln">    <span class="y-key">fan_out:</span> <span class="y-str">5</span></span>
+<span class="ln">  - <span class="y-key">type:</span> <span class="y-str">http</span>     <span class="y-c"># $0 — no model call</span></span>
+<span class="ln">  - <span class="y-key">type:</span> <span class="y-str">gate</span>     <span class="y-c"># human approval</span></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =========================== CHAPTER 02 =========================== -->
+    <section class="chapter" aria-labelledby="ch2-title">
+      <div class="wrap">
+        <div class="grid">
+          <div class="ch-head reveal">
+            <span class="ch-num" data-count="2" aria-hidden="true">02</span>
+            <span class="ch-label">The Second Freedom</span>
+            <h2 class="ch-title" id="ch2-title">Any<br>model.</h2>
+          </div>
+          <div class="ch-body">
+            <p class="ch-para reveal d1">
+              Model-independent by design. <strong>Claude, GPT, Mistral, Gemini, Llama — or fully local.</strong> Swap providers in one line. And when one goes down, <strong>auto-failover</strong> moves to the next while you sleep.
+            </p>
+            <div class="detail reveal d2">
+              <div class="detail-cap"><span>swap one line</span><span class="dot" aria-hidden="true"></span></div>
+              <div class="detail-body swap" aria-label="Model swap example">
+                <div class="row minus ln"><span class="sign">-</span><span><span class="y-key">model:</span> <span class="k">claude-sonnet</span></span></div>
+                <div class="row plus ln"><span class="sign">+</span><span><span class="y-key">model:</span> <span class="mk">mistral-large</span></span></div>
+                <div class="ln" style="margin-top:10px;color:var(--ink-faint)"><span class="sign">&nbsp;</span><span><span class="y-c"># failover: [gpt-4o, local/llama]</span></span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =========================== CHAPTER 03 =========================== -->
+    <section class="chapter" aria-labelledby="ch3-title">
+      <div class="wrap">
+        <div class="grid">
+          <div class="ch-head reveal">
+            <span class="ch-num" data-count="3" aria-hidden="true">03</span>
+            <span class="ch-label">The Third Freedom</span>
+            <h2 class="ch-title" id="ch3-title">Anywhere,<br>your&nbsp;rules.</h2>
+          </div>
+          <div class="ch-body">
+            <p class="ch-para reveal d1">
+              Cloud, your own server, fully isolated or air-gapped, or EU-only. <strong>The same workflow, your gate.</strong> EU data residency is built in — when you enable it, every model call stays in region.
+            </p>
+            <div class="detail reveal d2">
+              <div class="detail-cap"><span>deployment / gate</span><span class="dot" aria-hidden="true"></span></div>
+              <ul class="gates" aria-label="Deployment options">
+                <li><span class="g-name">Cloud</span><span class="g-state">ready</span></li>
+                <li><span class="g-name">Your server (self-host)</span><span class="g-state">ready</span></li>
+                <li><span class="g-name">Isolated / air-gapped</span><span class="g-state">ready</span></li>
+                <li><span class="g-name">EU-only residency</span><span class="g-state on">enabled</span></li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =========================== CHAPTER 04 =========================== -->
+    <section class="chapter" aria-labelledby="ch4-title">
+      <div class="wrap">
+        <div class="grid">
+          <div class="ch-head reveal">
+            <span class="ch-num" data-count="4" aria-hidden="true">04</span>
+            <span class="ch-label">The Fourth Freedom</span>
+            <h2 class="ch-title" id="ch4-title">It<br>learns.</h2>
+          </div>
+          <div class="ch-body">
+            <p class="ch-para reveal d1">
+              It self-tunes on what succeeds and heals what fails. Every run is recorded — so you can <strong>replay your past workflows against new models</strong> and keep the winner. Smarter over time, on autopilot.
+            </p>
+            <div class="detail reveal d2">
+              <div class="detail-cap"><span>quality / per run</span><span class="dot" aria-hidden="true"></span></div>
+              <div class="spark-wrap">
+                <div class="spark-top"><span>best-variant score</span><b id="sparkVal">0.94</b></div>
+                <svg viewBox="0 0 300 64" preserveAspectRatio="none" role="img" aria-label="Improvement sparkline trending up over successive runs">
+                  <polyline id="sparkLine" fill="none" stroke="var(--amber)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"
+                    points="0,52 30,48 60,50 90,40 120,42 150,33 180,30 210,24 240,20 270,12 300,8"/>
+                  <circle cx="300" cy="8" r="4" fill="var(--amber)"/>
+                </svg>
+                <div class="spark-foot">A/B per step · auto-deploy the best variant</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =========================== COLOPHON / SPECIFICS =========================== -->
+    <section class="colophon" aria-labelledby="specs">
+      <div class="wrap">
+        <span class="mono lab">The specifics — for the record</span>
+        <h2 id="specs">No feature gates. One version. Every line above ships free.</h2>
+        <div class="spec-grid">
+          <div class="spec-cell"><div class="s-num">7</div><div class="s-lab">Model providers — Claude, GPT, Gemini, Mistral, MiniMax, OpenRouter, local</div></div>
+          <div class="spec-cell"><div class="s-num">236</div><div class="s-lab">Workflow templates — 118 built-in + 118 community, one-click install</div></div>
+          <div class="spec-cell"><div class="s-num">22</div><div class="s-lab">Step types — mix AI with deterministic $0 steps</div></div>
+          <div class="spec-cell"><div class="s-num">$<span class="unit">0</span></div><div class="s-lab">Local steps cost nothing — http, code, condition, transform, notify</div></div>
+          <div class="spec-cell"><div class="s-num">100<span class="unit">%</span></div><div class="s-lab">Record &amp; replay — every run captured for audit and re-runs</div></div>
+          <div class="spec-cell"><div class="s-num">EU</div><div class="s-lab">Data residency — built for the EU AI Act era, audit-ready trail</div></div>
+          <div class="spec-cell"><div class="s-num">Hard</div><div class="s-lab">Budget caps — per step and per run, stop before the invoice blows up</div></div>
+          <div class="spec-cell"><div class="s-num">2030</div><div class="s-lab">BSL 1.1 today, converts to Apache 2.0 — self-hostable, no lock-in</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =========================== CLOSER =========================== -->
+    <section class="closer" aria-labelledby="closer-h">
+      <div class="wrap">
+        <p class="pre">The declaration ends. The build begins.</p>
+        <h2 id="closer-h">Four freedoms. One command.</h2>
+        <span class="big-install" id="bigInstall" role="button" tabindex="0" aria-label="Copy: pip install sandcastle-ai">
+          <span class="pmt">$</span><span>pip install sandcastle-ai</span>
+          <span class="ci" id="bigCopyLabel">Copy</span>
+        </span>
+        <div class="links">
+          <a href="https://gizmax.github.io/Sandcastle/">Docs ↗</a>
+          <a href="https://pypi.org/project/sandcastle-ai/">PyPI ↗</a>
+          <a href="https://github.com/gizmax/Sandcastle">GitHub ↗</a>
+          <a href="/whatsnew/">What's new</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- =========================== FOOTER =========================== -->
+  <footer class="foot">
+    <div class="wrap">
+      <div class="foot-top">
+        <div class="foot-brand">
+          <div class="b">🏰 Sandcastle</div>
+          <p>An open-source workflow orchestrator for AI agents. Build anything, on any model, anywhere — your rules. European-built.</p>
+        </div>
+        <div class="foot-col">
+          <h4>Product</h4>
+          <a href="/pricing/">Pricing</a>
+          <a href="/hub/">Community Hub</a>
+          <a href="/whatsnew/">What's new</a>
+          <a href="https://pypi.org/project/sandcastle-ai/">PyPI ↗</a>
+        </div>
+        <div class="foot-col">
+          <h4>Trust</h4>
+          <a href="/security/">Security</a>
+          <a href="/eu-ai-act/">EU AI Act</a>
+          <a href="https://github.com/gizmax/Sandcastle">Source ↗</a>
+          <a href="mailto:hello@sandcastle-ai.eu">Contact</a>
+        </div>
+        <div class="foot-col">
+          <h4>Build</h4>
+          <a href="https://gizmax.github.io/Sandcastle/">Documentation ↗</a>
+          <a href="https://github.com/gizmax/Sandcastle">GitHub ↗</a>
+          <a href="https://buymeacoffee.com/gizmax">Buy me a coffee ↗</a>
+        </div>
+      </div>
+      <div class="foot-bottom">
+        <span class="made">Made in <span class="eu">Europe</span> · Open source under BSL 1.1 → Apache 2.0 (2030)</span>
+        <span>© 2026 Sandcastle · <a href="https://sandcastle-ai.eu">sandcastle-ai.eu</a></span>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+  (function(){
+    "use strict";
+    var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    /* ---------- copy-to-clipboard ---------- */
+    function flash(el, label){
+      var prev = el.textContent;
+      el.textContent = "Copied ✓";
+      setTimeout(function(){ el.textContent = prev; }, 1400);
+    }
+    function copyText(txt){
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        return navigator.clipboard.writeText(txt);
+      }
+      return new Promise(function(res){
+        var t=document.createElement("textarea"); t.value=txt; document.body.appendChild(t);
+        t.select(); try{ document.execCommand("copy"); }catch(e){} document.body.removeChild(t); res();
+      });
+    }
+    document.querySelectorAll("[data-copy]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        copyText(btn.getAttribute("data-copy")).then(function(){ flash(btn); });
+      });
+    });
+    var big = document.getElementById("bigInstall");
+    var bigLabel = document.getElementById("bigCopyLabel");
+    function bigCopy(){ copyText("pip install sandcastle-ai").then(function(){ flash(bigLabel); }); }
+    if(big){
+      big.addEventListener("click", bigCopy);
+      big.addEventListener("keydown", function(e){
+        if(e.key==="Enter"||e.key===" "){ e.preventDefault(); bigCopy(); }
+      });
+    }
+
+    /* ---------- scroll reveals + chapter-number count ---------- */
+    var revealEls = Array.prototype.slice.call(document.querySelectorAll(".reveal"));
+    var numbered = Array.prototype.slice.call(document.querySelectorAll(".ch-num[data-count]"));
+
+    if(reduce || !("IntersectionObserver" in window)){
+      revealEls.forEach(function(el){ el.classList.add("in"); });
+      numbered.forEach(function(el){
+        var n = parseInt(el.getAttribute("data-count"),10);
+        el.textContent = (n<10?"0":"")+n;
+      });
+    } else {
+      var io = new IntersectionObserver(function(entries){
+        entries.forEach(function(en){
+          if(en.isIntersecting){ en.target.classList.add("in"); io.unobserve(en.target); }
+        });
+      }, { threshold:.18, rootMargin:"0px 0px -8% 0px" });
+      revealEls.forEach(function(el){ io.observe(el); });
+
+      /* number counter — quick tick from 0 to N on first view */
+      var io2 = new IntersectionObserver(function(entries){
+        entries.forEach(function(en){
+          if(!en.isIntersecting) return;
+          var el = en.target;
+          io2.unobserve(el);
+          var target = parseInt(el.getAttribute("data-count"),10);
+          var start = null, dur = 520;
+          function fmt(v){ v = Math.max(0,Math.min(target,v)); return (v<10?"0":"")+v; }
+          function tick(ts){
+            if(start===null) start=ts;
+            var p = Math.min(1,(ts-start)/dur);
+            var eased = 1 - Math.pow(1-p, 3);
+            el.textContent = fmt(Math.round(eased*target));
+            if(p<1) requestAnimationFrame(tick); else el.textContent = fmt(target);
+          }
+          el.textContent = "00";
+          requestAnimationFrame(tick);
+        });
+      }, { threshold:.4 });
+      numbered.forEach(function(el){ io2.observe(el); });
+    }
+  })();
+  </script>
+</body>
+</html>
