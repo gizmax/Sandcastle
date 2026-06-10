@@ -6,6 +6,7 @@ import { api } from "@/api/client";
 import { useRuns } from "@/hooks/useRuns";
 import { useSavedFilters, type SavedFilterCriteria } from "@/hooks/useSavedFilters";
 import { RunsTable } from "@/components/runs/RunsTable";
+import { RunRowActions } from "@/components/runs/RunRowActions";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ContextBanner } from "@/components/shared/ContextBanner";
@@ -552,6 +553,13 @@ export default function Runs() {
           onPageChange={setOffset}
           selectedIds={selectedIds}
           onSelectionChange={setSelectedIds}
+          renderRowActions={(run) => (
+            <RunRowActions
+              runId={run.run_id}
+              status={run.status}
+              onChanged={() => void refetch()}
+            />
+          )}
         />
       )}
 

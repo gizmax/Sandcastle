@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { GitCompare, RotateCcw, Sparkles, Upload, X, Download, Loader2, Copy, ArrowLeft } from "lucide-react";
+import { GitCompare, RotateCcw, Sparkles, Upload, X, Download, Loader2, Copy, ArrowLeft, Play, Wand2, History } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { VersionHistory } from "@/components/workflows/VersionHistory";
 import { VersionStatusBadge } from "@/components/workflows/VersionStatusBadge";
 import { VersionDiffModal } from "@/components/workflows/VersionDiffModal";
+import { RunWorkflowModal } from "@/components/workflows/RunWorkflowModal";
+import { GenerateVariationModal } from "@/components/workflows/GenerateVariationModal";
 import { Breadcrumb } from "@/components/shared/Breadcrumb";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { CopyButton } from "@/components/shared/CopyButton";
+import { ActionMenu, type ActionMenuItem } from "@/components/shared/ActionMenu";
+import type { InputSchema } from "@/types/inputSchema";
 import { cn, HUB_CONTRIB_URL } from "@/lib/utils";
 
 interface WorkflowVersion {
@@ -41,6 +45,9 @@ export default function WorkflowDetailPage() {
   const [shareOpen, setShareOpen] = useState(false);
   const [shareYaml, setShareYaml] = useState<string | null>(null);
   const [shareLoading, setShareLoading] = useState(false);
+  const [runOpen, setRunOpen] = useState(false);
+  const [variationOpen, setVariationOpen] = useState(false);
+  const [inputSchema, setInputSchema] = useState<InputSchema | undefined>(undefined);
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -64,6 +71,45 @@ export default function WorkflowDetailPage() {
   useEffect(() => {
     void fetchVersions();
   }, [fetchVersions]);
+
+  // Fetch the workflow's input schema so the contextual "Run" action can render
+  // the same typed form the Workflows list uses.
+  useEffect(() => {
+    if (!name) return;
+    let cancelled = false;
+    api.get<{ input_schema?: InputSchema }>(`/workflows/${name}`).then((res) => {
+      if (!cancelled && res.data) setInputSchema(res.data.input_schema);
+    });
+    return () => { cancelled = true; };
+  }, [name]);
+
+  // Run this workflow with the same/new inputs (re-run with inputs).
+  const handleRun = useCallback(
+    async (input: Record<string, unknown>, callbackUrl?: string) => {
+      if (!name) return;
+      const res = await api.post("/workflows/run", {
+        workflow_name: name,
+        input,
+        callback_url: callbackUrl,
+      });
+      setRunOpen(false);
+      if (res.error) {
+        toast.error(`Run failed: ${res.error.message}`);
+        return;
+      }
+      navigate("/runs");
+    },
+    [name, navigate]
+  );
+
+  // Open the generated variation in the builder for review (original untouched).
+  const handleVariationGenerated = useCallback(
+    (yaml: string) => {
+      setVariationOpen(false);
+      navigate("/workflows/builder", { state: { yaml } });
+    },
+    [navigate]
+  );
 
   const handleSelectVersion = useCallback(async (version: number) => {
     setSelectedVersion(version);
@@ -181,17 +227,54 @@ export default function WorkflowDetailPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => navigate("/evolution", { state: { workflow: data.workflow_name } })}
-              className={cn(
-                "flex items-center gap-1.5 rounded-lg border border-accent/30 px-3 py-1.5",
-                "text-sm font-medium text-accent",
-                "hover:bg-accent/10 transition-colors"
-              )}
-            >
-              <Sparkles className="h-4 w-4" />
-              Evolve
-            </button>
+            {/*
+              Contextual workflow actions on the object itself: Run (primary),
+              Generate a variation, Version history, Evolve. Future actions
+              ("Improve overnight", auto-tune) drop into `workflowActions` as a
+              one-liner — see ActionMenu's extension point.
+            */}
+            {(() => {
+              const primary: ActionMenuItem = {
+                id: "run",
+                label: "Run",
+                icon: Play,
+                onSelect: () => setRunOpen(true),
+              };
+              const workflowActions: ActionMenuItem[] = [
+                {
+                  id: "variation",
+                  label: "Generate a variation",
+                  icon: Wand2,
+                  description: "Propose an improved version with AI",
+                  onSelect: () => setVariationOpen(true),
+                },
+                {
+                  id: "evolve",
+                  label: "Evolve",
+                  icon: Sparkles,
+                  description: "Open the evolution optimizer",
+                  onSelect: () =>
+                    navigate("/evolution", { state: { workflow: data.workflow_name } }),
+                },
+              ];
+              if (data.versions.length > 0) {
+                workflowActions.push({
+                  id: "version-history",
+                  label: `Version history (${data.versions.length})`,
+                  icon: History,
+                  description: "Jump to the version timeline below",
+                  onSelect: () => {
+                    document
+                      .getElementById("version-history")
+                      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  },
+                });
+              }
+              // ── Extension point: future workflow actions go here, one line each. ──
+              return (
+                <ActionMenu primary={primary} items={workflowActions} menuLabel="Workflow actions" />
+              );
+            })()}
             <button
               onClick={handleShare}
               className={cn(
@@ -231,7 +314,7 @@ export default function WorkflowDetailPage() {
       )}
 
       {/* Version history */}
-      <div className="rounded-xl border border-border bg-surface shadow-sm overflow-hidden">
+      <div id="version-history" className="rounded-xl border border-border bg-surface shadow-sm overflow-hidden scroll-mt-4">
         <div className="border-b border-border px-4 py-3 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-foreground">
             Version History ({data.versions.length})
@@ -396,6 +479,23 @@ export default function WorkflowDetailPage() {
           </div>
         </div>
       )}
+
+      {/* Run this workflow (re-run with same/new inputs) */}
+      <RunWorkflowModal
+        open={runOpen}
+        workflowName={data.workflow_name}
+        inputSchema={inputSchema}
+        onClose={() => setRunOpen(false)}
+        onRun={handleRun}
+      />
+
+      {/* Generate an improved variation via /generate refine_from */}
+      <GenerateVariationModal
+        open={variationOpen}
+        onClose={() => setVariationOpen(false)}
+        workflowName={data.workflow_name}
+        onGenerated={handleVariationGenerated}
+      />
     </div>
   );
 }
