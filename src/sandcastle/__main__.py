@@ -4752,6 +4752,28 @@ def _build_parser() -> argparse.ArgumentParser:
         "--verbose", "-v", action="store_true", help="Show assertion details for failed cases"
     )
 
+    # --- timemachine ---
+    p_tm = subparsers.add_parser(
+        "timemachine",
+        help="Replay recorded workload against a different model (cost/quality/latency delta)",
+    )
+    p_tm.add_argument("--model", "-m", required=True, help="Target model (e.g. nim/llama-3.1-70b)")
+    p_tm.add_argument("--workflow", "-w", default=None, help="Only replay this workflow")
+    p_tm.add_argument("--since", default="30d", help="Window like 30d / 12h or ISO date (default: 30d)")
+    p_tm.add_argument(
+        "--max-cassettes", type=int, default=20, help="Max recorded runs to replay (default: 20)"
+    )
+    p_tm.add_argument(
+        "--live", action="store_true",
+        help="Re-execute steps with real API calls and judge quality (default: dry-run estimate)",
+    )
+    p_tm.add_argument(
+        "--budget", type=float, default=None,
+        help="Hard cost cap in USD for --live (required with --live)",
+    )
+    p_tm.add_argument("--judge", default=None, help="Judge model for quality scoring (default: haiku)")
+    p_tm.add_argument("--json", action="store_true", help="Print the full report as JSON")
+
     # --- generate ---
     p_gen = subparsers.add_parser("generate", help="Generate workflow from natural language")
     p_gen.add_argument("--description", "-d", help="What the workflow should do")
@@ -5000,6 +5022,119 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _cmd_timemachine(args: argparse.Namespace) -> None:
+    """Replay recorded workload against a different model and print the delta report."""
+    import asyncio
+
+    from sandcastle.engine import timemachine as tm
+    from sandcastle.engine.providers import is_known_model
+
+    model = args.model
+    if not is_known_model(model):
+        print(f"Error: unknown model '{model}'.", file=sys.stderr)
+        sys.exit(1)
+    if args.live and args.budget is None:
+        print(
+            "Error: --live makes real API calls - an explicit --budget cap is required.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    since = None
+    if args.since:
+        try:
+            since = tm.parse_since(args.since)
+        except ValueError as exc:
+            print(f"Error: invalid --since value: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+    mode = "live replay" if args.live else "dry run (pricing only, no API calls)"
+    print()
+    print(_color("  Model Time Machine", _C.BOLD))
+    print(_color("  Target model: ", _C.BOLD) + model)
+    print(_color("  Mode:         ", _C.BOLD) + mode)
+    print()
+
+    async def _go() -> dict:
+        from sandcastle.models.db import init_db
+
+        await init_db()
+        return await tm.run_time_machine(
+            target_model=model,
+            workflow=args.workflow,
+            since=since,
+            max_cassettes=args.max_cassettes,
+            live=args.live,
+            budget_usd=args.budget,
+            judge_model=args.judge,
+        )
+
+    try:
+        report = asyncio.run(_go())
+    except tm.TimeMachineError as exc:
+        print(_color(f"  Refused: {exc}", _C.RED), file=sys.stderr)
+        sys.exit(1)
+    except Exception as exc:
+        print(_color(f"  Time Machine failed: {exc}", _C.RED), file=sys.stderr)
+        sys.exit(1)
+
+    if args.json:
+        print(json.dumps(report, indent=2, default=str))
+        return
+
+    sel = report["selection"]
+    if sel["runs"] == 0:
+        print(_color("  No recorded runs matched the selection.", _C.YELLOW))
+        print("  Run some workflows first, then come back - the Time Machine replays")
+        print("  your real recorded workload, not synthetic benchmarks.")
+        return
+
+    cost = report["cost"]
+    print(
+        f"  Selection: {sel['runs']} runs / {sel['steps']} LLM steps "
+        f"across {len(sel['workflows'])} workflow(s), "
+        f"original spend ${cost['original_usd']:.4f}"
+    )
+    print()
+
+    # Per-workflow table
+    header = (
+        f"  {'WORKFLOW':<28} {'COST':>10} {'->':^4} {'NEW':>10} "
+        f"{'QUALITY':>9} {'LATENCY':>9}"
+    )
+    print(_color(header, _C.BOLD))
+    for wf in report["per_workflow"]:
+        q = wf["quality_delta_pct"]
+        lat = wf["latency_delta_pct"]
+        q_str = f"{q:+.1f}%" if q is not None else "-"
+        l_str = f"{lat:+.1f}%" if lat is not None else "-"
+        print(
+            f"  {wf['workflow'][:28]:<28} ${wf['original_cost_usd']:>9.4f} {'->':^4} "
+            f"${wf['new_cost_usd']:>9.4f} {q_str:>9} {l_str:>9}"
+        )
+    print()
+
+    delta_pct = cost["delta_pct"]
+    delta_str = f" ({delta_pct:+.1f}%)" if delta_pct is not None else ""
+    color = _C.GREEN if cost["delta_usd"] <= 0 else _C.RED
+    print(_color(f"  Cost delta: ${cost['delta_usd']:+.4f}{delta_str}", color))
+    if report.get("live"):
+        live = report["live"]
+        print(
+            f"  Live replay: {live['steps_replayed']} steps replayed, "
+            f"{live['steps_failed']} failed, measured ${live['measured_cost_usd']:.4f} "
+            f"of ${live['budget_usd']:.2f} budget"
+            + (" (truncated at budget)" if live["truncated"] else "")
+        )
+    if report.get("quality"):
+        q = report["quality"]
+        if q["old_avg"] is not None:
+            print(f"  Quality (judge {report['judge_model']}): "
+                  f"{q['old_avg']:.1f} -> {q['new_avg']:.1f} ({q['delta_pct']:+.1f}%)")
+    print()
+    print(_color(f"  {report['verdict']}", _C.BOLD))
+
+
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
@@ -5071,6 +5206,7 @@ def main() -> None:
         "doctor": _cmd_doctor,
         "generate": _cmd_generate,
         "eval": _cmd_eval,
+        "timemachine": _cmd_timemachine,
         "templates": _cmd_templates,
         "replay": _cmd_replay,
         "fork": _cmd_fork,
