@@ -186,7 +186,7 @@ export function HoverCard({
               width: CARD_WIDTH,
             }}
             className={cn(
-              "z-[60] rounded-lg border border-border bg-card text-card-foreground shadow-xl",
+              "z-[80] rounded-lg border border-border bg-surface text-foreground shadow-xl",
               "p-3 text-xs leading-relaxed",
               "motion-safe:transition-opacity motion-safe:duration-150",
               coords ? "opacity-100" : "opacity-0",
