@@ -1015,6 +1015,7 @@ class TestCmdGenerate:
 
         args = MagicMock()
         args.description = None
+        args.description_pos = None  # build/new alias positional; None for `generate`
         args.output = None
         args.refine = False
 
@@ -1028,6 +1029,7 @@ class TestCmdGenerate:
 
         args = MagicMock()
         args.description = None
+        args.description_pos = None  # build/new alias positional; None for `generate`
         args.output = None
         args.refine = False
 

@@ -33,15 +33,20 @@ if (!Element.prototype.scrollIntoView) {
 // ---------------------------------------------------------------------------
 const mockNavigate = vi.fn();
 const mockPost = vi.fn();
+const mockGet = vi.fn();
 
 vi.mock("react-router-dom", () => ({
   useNavigate: () => mockNavigate,
+  // minimal stand-in: render children inside a real anchor
+  Link: ({ children, to }: { children?: unknown; to?: string }) => (
+    <a href={to as string}>{children as never}</a>
+  ),
 }));
 
 vi.mock("@/api/client", () => ({
   api: {
     post: (...args: unknown[]) => mockPost(...args),
-    get: vi.fn(),
+    get: (...args: unknown[]) => mockGet(...args),
     isMockMode: false,
   },
 }));
@@ -118,6 +123,12 @@ function resetOverviewData() {
 beforeEach(() => {
   mockNavigate.mockReset();
   mockPost.mockReset();
+  mockGet.mockReset();
+  // Default: a provider is configured (advisor/status reports one available).
+  mockGet.mockResolvedValue({
+    data: { available: [{ id: "anthropic", configured: true, status: "ok" }] },
+    error: null,
+  });
   localStorage.clear();
   mockDensity = "Standard";
   resetOverviewData();
@@ -133,6 +144,42 @@ describe("Omnibox", () => {
       screen.getByRole("heading", { name: /what should your agent do/i }),
     ).toBeInTheDocument();
     expect(screen.getByLabelText(/describe the task for your agent/i)).toBeInTheDocument();
+  });
+
+  it("warns and disables Build when no AI provider is configured", async () => {
+    // advisor/status reports zero configured providers
+    mockGet.mockResolvedValue({
+      data: { available: [{ id: "anthropic", configured: false, status: "unconfigured" }] },
+      error: null,
+    });
+    render(<Omnibox />);
+    // persistent provider notice appears
+    expect(
+      await screen.findByText(/no ai provider is connected/i),
+    ).toBeInTheDocument();
+    // Build button is disabled even with a description typed
+    fireEvent.change(screen.getByLabelText(/describe the task for your agent/i), {
+      target: { value: "summarize my tickets" },
+    });
+    const build = screen.getByRole("button", { name: /build it/i });
+    expect(build).toBeDisabled();
+    // never calls /generate
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  it("maps a NO_PROVIDER generate error to the connect-a-provider message", async () => {
+    mockPost.mockResolvedValue({
+      data: null,
+      error: { code: "NO_PROVIDER", message: "No AI provider is configured." },
+    });
+    render(<Omnibox />);
+    fireEvent.change(screen.getByLabelText(/describe the task for your agent/i), {
+      target: { value: "do something" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /build it/i }));
+    expect(
+      await screen.findByText(/connect an ai provider to generate workflows/i),
+    ).toBeInTheDocument();
   });
 
   it("submits the description to /generate and renders the result preview", async () => {

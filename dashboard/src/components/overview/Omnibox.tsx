@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
   ArrowRight,
@@ -48,6 +48,36 @@ function prefersReducedMotion(): boolean {
   }
 }
 
+const NO_PROVIDER_MSG =
+  "Connect an AI provider to generate workflows — add a key in Settings → Providers, then try again.";
+
+/**
+ * Map a structured generate error to a clear, honest message. Generation depends
+ * on a model being available; we surface exactly why it failed using the backend
+ * error code (with a message-regex fallback) rather than a vague "try again".
+ */
+function mapGenerateError(error: { code: string; message: string }): string {
+  const code = error.code || "";
+  const msg = error.message || "";
+  if (
+    code === "NO_PROVIDER" ||
+    code === "MISSING_API_KEY" ||
+    /api[_ ]?key|provider|no.*model|unauthor|credential/i.test(msg)
+  ) {
+    return NO_PROVIDER_MSG;
+  }
+  if (code === "UPSTREAM_ERROR") {
+    return "Your AI provider returned an error. Check its key and region in Settings, then try again.";
+  }
+  if (code === "GENERATION_FAILED") {
+    return "Couldn't build that workflow. Try rephrasing or simplifying the request.";
+  }
+  if (code === "NETWORK_ERROR" || code.startsWith("HTTP_5")) {
+    return "Can't reach the Sandcastle backend. Make sure the server is running, then try again.";
+  }
+  return msg || "Couldn't generate that workflow. Try rephrasing.";
+}
+
 interface OmniboxProps {
   /** Compact spacing for use inside the empty state. */
   variant?: "default" | "empty";
@@ -75,6 +105,36 @@ export function Omnibox({ variant = "default" }: OmniboxProps) {
   const [placeholderIdx, setPlaceholderIdx] = useState(0);
 
   const [running, setRunning] = useState(false);
+
+  // Proactive provider availability — generation needs a model. Check once on
+  // mount so we can warn the user up front instead of failing only on submit.
+  // "unknown" while loading / when the backend is unreachable (the global demo
+  // banner already covers that case); "none" only when we positively learn no
+  // provider is configured.
+  const [providerState, setProviderState] = useState<
+    "unknown" | "available" | "none"
+  >("unknown");
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .get<{ available?: { configured?: boolean; status?: string }[] }>(
+        "/advisor/status",
+      )
+      .then((res) => {
+        if (cancelled) return;
+        const list = res.data?.available;
+        if (!Array.isArray(list)) return; // unknown — don't block
+        const ok = list.some((p) => p.configured || p.status === "ok");
+        setProviderState(ok ? "available" : "none");
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const noProvider = providerState === "none";
 
   const reduceMotion = useMemo(() => prefersReducedMotion(), []);
 
@@ -112,6 +172,11 @@ export function Omnibox({ variant = "default" }: OmniboxProps) {
 
   const handleGenerate = useCallback(async () => {
     if (!description.trim()) return;
+    // No model available — don't even hit the backend; tell the user plainly.
+    if (noProvider) {
+      setError(NO_PROVIDER_MSG);
+      return;
+    }
     setLoading(true);
     setError(null);
     setResult(null);
@@ -124,19 +189,11 @@ export function Omnibox({ variant = "default" }: OmniboxProps) {
 
     setLoading(false);
     if (res.error) {
-      // Calm hint when no provider/key is configured rather than a raw error.
-      const msg = res.error.message || "";
-      if (/api[_ ]?key|provider|no.*model|unauthor|credential/i.test(msg)) {
-        setError(
-          "Connect an AI provider to generate workflows. Add a key in Settings, then try again.",
-        );
-      } else {
-        setError(msg || "Couldn't generate that workflow. Try rephrasing.");
-      }
+      setError(mapGenerateError(res.error));
       return;
     }
     if (res.data) setResult(res.data);
-  }, [description]);
+  }, [description, noProvider]);
 
   const handleRefine = useCallback(async () => {
     if (!refineText.trim() || !result) return;
@@ -251,6 +308,23 @@ export function Omnibox({ variant = "default" }: OmniboxProps) {
         </div>
       </div>
 
+      {/* Persistent provider notice — generation needs a model */}
+      {noProvider && !result && (
+        <div className="mb-3 flex items-start gap-2.5 rounded-xl border border-warning/30 bg-warning/5 px-4 py-3 text-sm text-warning">
+          <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>
+            No AI provider is connected — workflow generation needs a model.{" "}
+            <Link
+              to="/settings?tab=providers"
+              className="font-medium underline underline-offset-2 hover:text-warning/80"
+            >
+              Add one in Settings → Providers
+            </Link>{" "}
+            (or run a local model).
+          </span>
+        </div>
+      )}
+
       {/* Input form */}
       {!result && (
         <form
@@ -291,11 +365,12 @@ export function Omnibox({ variant = "default" }: OmniboxProps) {
             />
             <button
               type="submit"
-              disabled={loading || !description.trim()}
+              disabled={loading || !description.trim() || noProvider}
+              title={noProvider ? NO_PROVIDER_MSG : undefined}
               className={cn(
                 "inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold transition-all shrink-0",
                 "active:scale-[0.98]",
-                loading || !description.trim()
+                loading || !description.trim() || noProvider
                   ? "bg-muted/20 text-muted-foreground cursor-not-allowed"
                   : "bg-accent text-accent-foreground hover:bg-accent-hover shadow-sm hover:shadow-md",
               )}
