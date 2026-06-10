@@ -648,7 +648,7 @@ describe("OnboardingWizard (guided beginner flow)", () => {
     expect(screen.getByText("Ready!")).toBeInTheDocument();
   });
 
-  it("Skip keeps Full mode and marks onboarding done", async () => {
+  it("Skip selects Everything density and marks onboarding done", async () => {
     mockApi.get.mockResolvedValue(okResponse({}));
 
     await act(async () => {
@@ -665,10 +665,10 @@ describe("OnboardingWizard (guided beginner flow)", () => {
 
     expect(mockNavigate).toHaveBeenCalledWith("/");
     expect(localStorage.getItem("sandcastle-onboarding-done")).toBe("true");
-    expect(localStorage.getItem("sandcastle-ui-mode")).toBe("full");
+    expect(localStorage.getItem("sandcastle-ui-mode")).toBe("Everything");
   });
 
-  it("completing the guided flow opts into Lite mode", async () => {
+  it("completing the guided flow opts into Standard density", async () => {
     mockApi.get.mockImplementation((url: string) => {
       if (url === "/health/providers") {
         return Promise.resolve(okResponse({
@@ -750,6 +750,6 @@ describe("OnboardingWizard (guided beginner flow)", () => {
 
     expect(mockOnFinish).toHaveBeenCalledTimes(1);
     expect(localStorage.getItem("sandcastle-onboarding-done")).toBe("true");
-    expect(localStorage.getItem("sandcastle-ui-mode")).toBe("lite");
+    expect(localStorage.getItem("sandcastle-ui-mode")).toBe("Standard");
   });
 });

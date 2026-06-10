@@ -7,7 +7,7 @@ import { StepWelcome } from "./StepWelcome";
 import { StepChooseTemplate } from "./StepChooseTemplate";
 import { StepConfigureInputs } from "./StepConfigureInputs";
 import { cn } from "@/lib/utils";
-import { useUiMode } from "@/contexts/UiModeContext";
+import { useDensity } from "@/contexts/UiModeContext";
 import type { InputSchema } from "@/types/inputSchema";
 
 /** Template selection state shared between wizard steps. */
@@ -183,7 +183,7 @@ function StepConnect({ onNext, onSkip }: { onNext: () => void; onSkip: () => voi
 }
 
 // -----------------------------------------------------------------------
-// Step 4: Run the chosen template (best-effort) and finish into Lite mode
+// Step 4: Run the chosen template (best-effort) and finish into Standard density
 // -----------------------------------------------------------------------
 
 interface RunResult {
@@ -356,11 +356,11 @@ function StepRun({
  *   1 Connect   - local (auto-detected) or cloud (paste a key)
  *   2 Pick      - choose one of 3 beginner-friendly templates
  *   3 Configure - fill the template's inputs
- *   4 Run       - run it once, then land in the simplified "Lite" dashboard
+ *   4 Run       - run it once, then land in the balanced "Standard" dashboard
  */
 export function OnboardingWizard({ onFinish }: OnboardingWizardProps) {
   const navigate = useNavigate();
-  const { setMode } = useUiMode();
+  const { setDensity } = useDensity();
 
   const [currentStep, setCurrentStep] = useState(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -393,19 +393,19 @@ export function OnboardingWizard({ onFinish }: OnboardingWizardProps) {
     }
   }, []);
 
-  // Skip = keep the full dashboard (don't force a beginner into Lite).
+  // Skip = power user who wants the whole surface area now.
   const handleSkipToDashboard = useCallback(() => {
     markDone();
-    setMode("full");
+    setDensity("Everything");
     navigate("/");
-  }, [markDone, navigate, setMode]);
+  }, [markDone, navigate, setDensity]);
 
-  // Finish the guided flow = opt into the simplified Lite experience.
+  // Finish the guided flow = land on the balanced default (Standard).
   const handleFinish = useCallback(() => {
     markDone();
-    setMode("lite");
+    setDensity("Standard");
     onFinish();
-  }, [markDone, onFinish, setMode]);
+  }, [markDone, onFinish, setDensity]);
 
   return (
     <div className="flex w-full flex-col gap-8">

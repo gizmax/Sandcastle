@@ -12,7 +12,6 @@ import {
   GitBranch,
   HeartPulse,
   Inbox,
-  Key,
   Layers,
   LayoutDashboard,
   Plug,
@@ -29,7 +28,7 @@ import { cn } from "@/lib/utils";
 import { useRuntimeInfo } from "@/hooks/useRuntimeInfo";
 import { useUpdateCheck } from "@/hooks/useUpdateCheck";
 import { usePinnedWorkflows } from "@/hooks/usePinnedWorkflows";
-import { useUiMode } from "@/contexts/UiModeContext";
+import { useDensity, type Density, type NavGroupId } from "@/contexts/UiModeContext";
 
 interface SidebarProps {
   open: boolean;
@@ -48,52 +47,68 @@ interface NavItem {
 }
 
 interface NavSection {
+  /** Stable group id used for density visibility decisions. */
+  id: NavGroupId;
   label: string;
   items: NavItem[];
+  /** OPERATE renders as a collapsible disclosure. */
   collapsible?: boolean;
 }
 
-const STORAGE_KEY = "sandcastle-ops-expanded";
+const OPS_STORAGE_KEY = "sandcastle-ops-expanded";
+
+// -----------------------------------------------------------------------------
+// 3-verb IA: Home (pinned) + BUILD / RUN / IMPROVE / OPERATE.
+// Visibility per density is resolved at render time via groupVisible().
+// -----------------------------------------------------------------------------
+const HOME_ITEM: NavItem = {
+  to: "/",
+  icon: LayoutDashboard,
+  label: "Home",
+  end: true,
+  shortcut: "⌘ 1",
+};
 
 const navSections: NavSection[] = [
   {
-    label: "MAIN",
+    id: "BUILD",
+    label: "BUILD",
     items: [
-      { to: "/", icon: LayoutDashboard, label: "Overview", end: true, shortcut: "\u2318 1" },
-      { to: "/runs", icon: PlayCircle, label: "Runs", shortcut: "\u2318 2" },
-      { to: "/workflows", icon: GitBranch, label: "Workflows", shortcut: "\u2318 3" },
-    ],
-  },
-  {
-    label: "DISCOVER",
-    items: [
+      { to: "/workflows", icon: GitBranch, label: "Workflows", shortcut: "⌘ 3" },
       { to: "/templates", icon: Layers, label: "Template Hub" },
-      { to: "/integrations", icon: Plug, label: "Integrations" },
     ],
   },
   {
-    label: "OPERATIONS",
-    collapsible: true,
+    id: "RUN",
+    label: "RUN",
     items: [
+      { to: "/runs", icon: PlayCircle, label: "Runs", shortcut: "⌘ 2" },
       { to: "/approvals", icon: ShieldCheck, label: "Approvals", badge: "approvals" },
-      { to: "/evaluations", icon: ClipboardCheck, label: "Evaluations" },
-      { to: "/autopilot", icon: FlaskConical, label: "AutoPilot" },
-      { to: "/evolution", icon: Sparkles, label: "Evolution" },
-      { to: "/violations", icon: ShieldAlert, label: "Violations" },
-      { to: "/compliance", icon: Shield, label: "Compliance" },
-      { to: "/optimizer", icon: Gauge, label: "Optimizer" },
       { to: "/schedules", icon: Calendar, label: "Schedules" },
-      { to: "/schedule-monitor", icon: CalendarClock, label: "Schedule Monitor" },
-      { to: "/dead-letter", icon: Inbox, label: "Dead Letter", badge: "dlq" },
+    ],
+  },
+  {
+    id: "IMPROVE",
+    label: "IMPROVE",
+    items: [
+      { to: "/evolution", icon: Sparkles, label: "Evolution" },
+      { to: "/autopilot", icon: FlaskConical, label: "AutoPilot" },
+      { to: "/optimizer", icon: Gauge, label: "Optimizer" },
+      { to: "/evaluations", icon: ClipboardCheck, label: "Evaluations" },
       { to: "/memory", icon: Brain, label: "Agent Memory" },
     ],
   },
   {
-    label: "SYSTEM",
+    id: "OPERATE",
+    label: "OPERATE",
+    collapsible: true,
     items: [
       { to: "/system-health", icon: HeartPulse, label: "System Health" },
-      { to: "/api-keys", icon: Key, label: "API Keys" },
-      { to: "/settings", icon: Settings, label: "Settings" },
+      { to: "/dead-letter", icon: Inbox, label: "Dead Letter", badge: "dlq" },
+      { to: "/violations", icon: ShieldAlert, label: "Violations" },
+      { to: "/compliance", icon: Shield, label: "Compliance" },
+      { to: "/integrations", icon: Plug, label: "Integrations" },
+      { to: "/schedule-monitor", icon: CalendarClock, label: "Schedule Monitor" },
     ],
   },
 ];
@@ -102,27 +117,23 @@ export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: Sid
   const { info } = useRuntimeInfo();
   const { updateAvailable } = useUpdateCheck();
   const { pinnedWorkflows } = usePinnedWorkflows();
-  const { isLite, setMode } = useUiMode();
+  const { effectiveDensity, setDensity, groupVisible, operateOpenByDefault } = useDensity();
   const version = info?.version ?? "-";
 
-  // In Lite mode, show only the beginner-relevant navigation: drop the whole
-  // OPERATIONS section and API Keys; advanced pages are route-guarded too.
-  const sections = isLite
-    ? navSections
-        .filter((s) => s.label !== "OPERATIONS")
-        .map((s) =>
-          s.label === "SYSTEM"
-            ? { ...s, items: s.items.filter((i) => i.to !== "/api-keys") }
-            : s
-        )
-    : navSections;
+  // Density gates which groups are visible. HOME/BUILD/RUN are always shown;
+  // IMPROVE + OPERATE appear at Standard+.
+  const sections = navSections.filter((s) => groupVisible(s.id));
 
   const [opsExpanded, setOpsExpanded] = useState(() => {
     try {
-      return localStorage.getItem(STORAGE_KEY) === "true";
+      const stored = localStorage.getItem(OPS_STORAGE_KEY);
+      if (stored === "true") return true;
+      if (stored === "false") return false;
     } catch {
-      return false;
+      // storage unavailable
     }
+    // No explicit choice yet: open by default only on "Everything".
+    return operateOpenByDefault;
   });
 
   const opsContentRef = useRef<HTMLDivElement>(null);
@@ -131,7 +142,7 @@ export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: Sid
     setOpsExpanded((prev) => {
       const next = !prev;
       try {
-        localStorage.setItem(STORAGE_KEY, String(next));
+        localStorage.setItem(OPS_STORAGE_KEY, String(next));
       } catch {
         // storage unavailable
       }
@@ -160,6 +171,46 @@ export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: Sid
   }, [opsExpanded]);
 
   const opsBadgeCount = dlqCount + approvalsCount;
+
+  const renderItems = (items: NavItem[]) => (
+    <div className="space-y-0.5">
+      {items.map((item) => (
+        <NavLink
+          key={item.to}
+          to={item.to}
+          end={item.end}
+          onClick={onClose}
+          className={({ isActive }) =>
+            cn(
+              "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium",
+              "transition-all duration-200",
+              isActive
+                ? "bg-accent/10 text-accent"
+                : "text-muted hover:bg-border/40 hover:text-foreground"
+            )
+          }
+        >
+          <item.icon className="h-[18px] w-[18px] shrink-0" />
+          <span className="flex-1">{item.label}</span>
+          {item.shortcut && (
+            <span className="hidden text-[10px] font-normal text-muted-foreground/50 lg:inline">
+              {item.shortcut}
+            </span>
+          )}
+          {item.badge === "dlq" && dlqCount > 0 && (
+            <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-error px-1.5 text-[11px] font-semibold text-white">
+              {dlqCount}
+            </span>
+          )}
+          {item.badge === "approvals" && approvalsCount > 0 && (
+            <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-warning px-1.5 text-[11px] font-semibold text-white">
+              {approvalsCount}
+            </span>
+          )}
+        </NavLink>
+      ))}
+    </div>
+  );
 
   return (
     <>
@@ -197,14 +248,20 @@ export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: Sid
         </div>
 
         <nav className="flex-1 overflow-y-auto px-3 py-3" aria-label="Sidebar">
-          {sections.map((section, sectionIdx) => {
-            const renderItems = (items: NavItem[]) => (
+          {/* Home is pinned at the very top, outside any group. */}
+          {renderItems([HOME_ITEM])}
+
+          {/* Pinned workflows live under Home / BUILD. */}
+          {pinnedWorkflows.length > 0 && (
+            <div className="mt-5">
+              <p className="mb-1.5 px-3 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+                Pinned
+              </p>
               <div className="space-y-0.5">
-                {items.map((item) => (
+                {pinnedWorkflows.map((wfName) => (
                   <NavLink
-                    key={item.to}
-                    to={item.to}
-                    end={item.end}
+                    key={`pinned-${wfName}`}
+                    to={`/workflows/${encodeURIComponent(wfName)}`}
                     onClick={onClose}
                     className={({ isActive }) =>
                       cn(
@@ -216,126 +273,89 @@ export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: Sid
                       )
                     }
                   >
-                    <item.icon className="h-[18px] w-[18px] shrink-0" />
-                    <span className="flex-1">{item.label}</span>
-                    {item.shortcut && (
-                      <span className="hidden text-[10px] font-normal text-muted-foreground/50 lg:inline">
-                        {item.shortcut}
-                      </span>
-                    )}
-                    {item.badge === "dlq" && dlqCount > 0 && (
-                      <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-error px-1.5 text-[11px] font-semibold text-white">
-                        {dlqCount}
-                      </span>
-                    )}
-                    {item.badge === "approvals" && approvalsCount > 0 && (
-                      <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-warning px-1.5 text-[11px] font-semibold text-white">
-                        {approvalsCount}
-                      </span>
-                    )}
+                    <Star className="h-[14px] w-[14px] shrink-0 fill-current text-accent/60" />
+                    <span className="flex-1 truncate">{wfName}</span>
                   </NavLink>
                 ))}
               </div>
-            );
+            </div>
+          )}
 
-            return (
-              <div key={section.label}>
-                <div className={cn(sectionIdx > 0 && "mt-5")}>
-                  {section.collapsible ? (
-                    <>
-                      <button
-                        type="button"
-                        onClick={toggleOps}
-                        className="mb-1.5 flex w-full items-center gap-1 px-3 group"
-                        aria-expanded={opsExpanded}
-                        aria-controls="sidebar-ops-section"
+          {sections.map((section) => (
+            <div key={section.id} className="mt-5">
+              {section.collapsible ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={toggleOps}
+                    className="mb-1.5 flex w-full items-center gap-1 px-3 group"
+                    aria-expanded={opsExpanded}
+                    aria-controls="sidebar-ops-section"
+                  >
+                    <ChevronRight
+                      aria-hidden="true"
+                      className={cn(
+                        "h-3 w-3 text-muted-foreground transition-transform duration-200",
+                        opsExpanded && "rotate-90"
+                      )}
+                    />
+                    <span className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground group-hover:text-foreground transition-colors">
+                      {section.label}
+                    </span>
+                    {!opsExpanded && opsBadgeCount > 0 && (
+                      <span
+                        aria-label={`${opsBadgeCount} items need attention`}
+                        className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-warning/80 px-1 text-[10px] font-semibold text-white"
                       >
-                        <ChevronRight
-                          aria-hidden="true"
-                          className={cn(
-                            "h-3 w-3 text-muted-foreground transition-transform duration-200",
-                            opsExpanded && "rotate-90"
-                          )}
-                        />
-                        <span className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground group-hover:text-foreground transition-colors">
-                          {section.label}
-                        </span>
-                        {!opsExpanded && opsBadgeCount > 0 && (
-                          <span
-                            aria-label={`${opsBadgeCount} items need attention`}
-                            className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-warning/80 px-1 text-[10px] font-semibold text-white"
-                          >
-                            {opsBadgeCount}
-                          </span>
-                        )}
-                      </button>
-                      <div
-                        id="sidebar-ops-section"
-                        ref={opsContentRef}
-                        className="overflow-hidden transition-[max-height] duration-300 ease-in-out"
-                        style={{ maxHeight: opsExpanded ? "none" : "0px" }}
-                      >
-                        {renderItems(section.items)}
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <p className="mb-1.5 px-3 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
-                        {section.label}
-                      </p>
-                      {renderItems(section.items)}
-                    </>
-                  )}
-                </div>
-
-                {/* Pinned workflows section - rendered after MAIN (full mode only) */}
-                {section.label === "MAIN" && !isLite && pinnedWorkflows.length > 0 && (
-                  <div className="mt-5">
-                    <p className="mb-1.5 px-3 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
-                      Pinned
-                    </p>
-                    <div className="space-y-0.5">
-                      {pinnedWorkflows.map((wfName) => (
-                        <NavLink
-                          key={`pinned-${wfName}`}
-                          to={`/workflows/${encodeURIComponent(wfName)}`}
-                          onClick={onClose}
-                          className={({ isActive }) =>
-                            cn(
-                              "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium",
-                              "transition-all duration-200",
-                              isActive
-                                ? "bg-accent/10 text-accent"
-                                : "text-muted hover:bg-border/40 hover:text-foreground"
-                            )
-                          }
-                        >
-                          <Star className="h-[14px] w-[14px] shrink-0 fill-current text-accent/60" />
-                          <span className="flex-1 truncate">{wfName}</span>
-                        </NavLink>
-                      ))}
-                    </div>
+                        {opsBadgeCount}
+                      </span>
+                    )}
+                  </button>
+                  <div
+                    id="sidebar-ops-section"
+                    ref={opsContentRef}
+                    className="overflow-hidden transition-[max-height] duration-300 ease-in-out"
+                    style={{ maxHeight: opsExpanded ? "none" : "0px" }}
+                  >
+                    {renderItems(section.items)}
                   </div>
-                )}
-              </div>
-            );
-          })}
+                </>
+              ) : (
+                <>
+                  <p className="mb-1.5 px-3 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+                    {section.label}
+                  </p>
+                  {renderItems(section.items)}
+                </>
+              )}
+            </div>
+          ))}
         </nav>
 
         <div className="border-t border-border px-5 py-4 space-y-3">
-          <button
-            type="button"
-            onClick={() => setMode(isLite ? "full" : "lite")}
-            title={isLite ? "Show all advanced features" : "Switch to the simplified beginner view"}
-            className="flex w-full items-center justify-between rounded-lg border border-border px-3 py-2 text-xs font-medium text-muted hover:text-foreground hover:border-accent/40 transition-colors"
-          >
-            <span>{isLite ? "Lite mode" : "Full mode"}</span>
-            <span className="text-accent">{isLite ? "Switch to Full" : "Switch to Lite"}</span>
-          </button>
+          {/* Density control: 3-tier segmented selector. */}
+          <DensityControl value={effectiveDensity} onChange={setDensity} />
+
           <NavLink
             to="/settings"
             onClick={onClose}
-            className="flex items-center gap-2 group"
+            className={({ isActive }) =>
+              cn(
+                "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-200",
+                isActive
+                  ? "bg-accent/10 text-accent"
+                  : "text-muted hover:bg-border/40 hover:text-foreground"
+              )
+            }
+          >
+            <Settings className="h-[18px] w-[18px] shrink-0" />
+            <span className="flex-1">Settings</span>
+          </NavLink>
+
+          <NavLink
+            to="/settings"
+            onClick={onClose}
+            className="flex items-center gap-2 px-3 group"
           >
             <p className="text-xs text-muted-foreground group-hover:text-foreground transition-colors">
               Sandcastle v{version}
@@ -360,5 +380,54 @@ export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: Sid
         </div>
       </aside>
     </>
+  );
+}
+
+const DENSITY_OPTIONS: { value: Density; label: string; hint: string }[] = [
+  { value: "Essentials", label: "Essentials", hint: "Just the basics: build & run" },
+  { value: "Standard", label: "Standard", hint: "Adds the intelligence tools" },
+  { value: "Everything", label: "Everything", hint: "Every page, operations open" },
+];
+
+function DensityControl({
+  value,
+  onChange,
+}: {
+  value: Density;
+  onChange: (d: Density) => void;
+}) {
+  return (
+    <div>
+      <p className="mb-1.5 px-1 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+        Density
+      </p>
+      <div
+        role="radiogroup"
+        aria-label="Interface density"
+        className="flex items-center gap-0.5 rounded-lg border border-border p-0.5"
+      >
+        {DENSITY_OPTIONS.map((opt) => {
+          const active = opt.value === value;
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              title={opt.hint}
+              onClick={() => onChange(opt.value)}
+              className={cn(
+                "flex-1 rounded-md px-1.5 py-1 text-[11px] font-medium transition-colors",
+                active
+                  ? "bg-accent/15 text-accent"
+                  : "text-muted hover:text-foreground"
+              )}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
