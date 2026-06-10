@@ -64,6 +64,16 @@ class Settings(BaseSettings):
     lora_lr: float = 1e-4
     lora_epochs: int = 3
 
+    # Self-Healing Workflows: a nightly pass scans unresolved dead-letter items,
+    # asks the advisor LLM for a minimal patch, files it as a draft workflow version
+    # behind an approval request. healer_auto_apply publishes high-confidence patches
+    # (>= healer_confidence_threshold) directly. Off by default; opt in explicitly.
+    healer_enabled: bool = False
+    healer_auto_apply: bool = False
+    healer_confidence_threshold: float = 0.8
+    healer_max_attempts: int = 2
+    healer_lookback_hours: int = 168  # how far back to scan for unresolved failures
+
     # E2B custom template (pre-built sandbox with SDK installed)
     e2b_template: str = ""  # e.g. "sandcastle-runner"
 

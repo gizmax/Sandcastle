@@ -863,6 +863,48 @@ class EvolutionIteration(Base):
     evolution: Mapped[WorkflowEvolution] = relationship(back_populates="iterations")
 
 
+class HealAttempt(Base):
+    """A self-healing attempt for a dead-letter failure.
+
+    Records the LLM diagnosis, the proposed patched workflow version, and the
+    lifecycle of the patch: proposed -> applied/auto_applied -> succeeded/regressed
+    (or rejected when the patch did not parse).
+    """
+
+    __tablename__ = "heal_attempts"
+    __table_args__ = (
+        Index("ix_heal_attempts_dead_letter_id", "dead_letter_id"),
+        Index("ix_heal_attempts_workflow_name", "workflow_name"),
+        Index("ix_heal_attempts_status", "status"),
+        CheckConstraint(
+            "confidence >= 0 AND confidence <= 1", name="ck_heal_attempts_confidence_range"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    dead_letter_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("dead_letter_queue.id", ondelete="CASCADE"), nullable=False
+    )
+    workflow_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    step_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    diagnosis: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    diff: Mapped[str | None] = mapped_column(Text, nullable=True)
+    from_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    to_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="proposed")
+    # proposed, applied, auto_applied, rejected, failed, succeeded, regressed
+    approval_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("approval_requests.id", ondelete="SET NULL"), nullable=True
+    )
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    dead_letter_item: Mapped[DeadLetterItem] = relationship(foreign_keys=[dead_letter_id])
+
+
 # Database engine and session factory
 
 def _build_engine_url() -> str:
