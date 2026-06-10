@@ -99,6 +99,9 @@ from sandcastle.api.schemas import (
     StatsResponse,
     StepDiff,
     StepStatusResponse,
+    TimeMachineJobResponse,
+    TimeMachineStartRequest,
+    TimeMachineStartResponse,
     ToolConnectionCreateRequest,
     ToolConnectionResponse,
     ToolConnectionUpdateRequest,
@@ -12636,5 +12639,157 @@ async def get_evolution_stats(req: Request) -> ApiResponse:
             total_improvements=improvements,
             avg_improvement=float(avg_improvement) if avg_improvement is not None else None,
             top_workflows=top_workflows,
+        )
+    )
+
+
+# --- Model Time Machine (counterfactual replay) ---
+
+
+@router.post("/timemachine", status_code=202)
+async def start_timemachine(req: Request) -> ApiResponse:
+    """Start a Model Time Machine job: replay recorded workload against another model.
+
+    Dry-run (default) prices recorded token volumes against the target model's
+    pricing table - free, no API calls. ``live: true`` re-executes the recorded
+    LLM steps for real and judges old vs new output; it requires an explicit
+    ``budget_usd`` and is refused when the pre-flight estimate exceeds it.
+    Admin-only when auth is enabled.
+    """
+    _require_admin(req)
+    body = await req.json()
+    try:
+        parsed = TimeMachineStartRequest(**body)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    from sandcastle.engine import timemachine as tm
+    from sandcastle.engine.providers import is_known_model
+
+    if not is_known_model(parsed.target_model):
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="UNKNOWN_MODEL",
+                    message=f"Unknown target model '{parsed.target_model}'",
+                )
+            ).model_dump(),
+        )
+    if parsed.judge_model and not is_known_model(parsed.judge_model):
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="UNKNOWN_MODEL",
+                    message=f"Unknown judge model '{parsed.judge_model}'",
+                )
+            ).model_dump(),
+        )
+
+    since_dt = until_dt = None
+    try:
+        if parsed.since:
+            since_dt = tm.parse_since(parsed.since)
+        if parsed.until:
+            until_dt = tm.parse_since(parsed.until)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_DATE", message=str(exc))
+            ).model_dump(),
+        )
+
+    if parsed.live:
+        # Pre-flight: a live replay needs an explicit budget, and the projected
+        # cost (replay + judge calls, from recorded token volumes) must fit it.
+        if parsed.budget_usd is None:
+            raise HTTPException(
+                status_code=400,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="BUDGET_REQUIRED",
+                        message="Live replay makes real API calls - budget_usd is required",
+                    )
+                ).model_dump(),
+            )
+        judge = parsed.judge_model or settings.timemachine_judge_model
+        cassettes = await tm.select_cassettes(
+            workflow=parsed.workflow,
+            since=since_dt,
+            until=until_dt,
+            max_cassettes=parsed.max_cassettes,
+        )
+        estimate = tm.estimate_replay_cost(cassettes, parsed.target_model, judge_model=judge)
+        projected = estimate["projected_total_live_cost_usd"]
+        if projected > parsed.budget_usd:
+            raise HTTPException(
+                status_code=400,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="BUDGET_EXCEEDED",
+                        message=(
+                            f"Estimated live replay cost ${projected:.4f} exceeds budget "
+                            f"${parsed.budget_usd:.4f} - raise the budget or narrow the selection"
+                        ),
+                    )
+                ).model_dump(),
+            )
+
+    job = tm.start_job(
+        target_model=parsed.target_model,
+        workflow=parsed.workflow,
+        since=since_dt,
+        until=until_dt,
+        max_cassettes=parsed.max_cassettes,
+        live=parsed.live,
+        budget_usd=parsed.budget_usd,
+        judge_model=parsed.judge_model,
+    )
+    return ApiResponse(
+        data=TimeMachineStartResponse(
+            job_id=job.job_id,
+            status=job.status,
+            mode="live" if parsed.live else "dry_run",
+            target_model=parsed.target_model,
+        )
+    )
+
+
+@router.get("/timemachine")
+async def list_timemachine_jobs(req: Request) -> ApiResponse:
+    """List recent Time Machine jobs (newest first). Admin-only when auth is enabled."""
+    _require_admin(req)
+    from sandcastle.engine import timemachine as tm
+
+    return ApiResponse(data=tm.list_jobs(limit=20))
+
+
+@router.get("/timemachine/{job_id}")
+async def get_timemachine_job(job_id: str, req: Request) -> ApiResponse:
+    """Get the status and report of a Time Machine job. Admin-only when auth is enabled."""
+    _require_admin(req)
+    from sandcastle.engine import timemachine as tm
+
+    job = tm.get_job(job_id)
+    if job is None:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="NOT_FOUND", message=f"Time Machine job '{job_id}' not found"
+                )
+            ).model_dump(),
+        )
+    return ApiResponse(
+        data=TimeMachineJobResponse(
+            job_id=job["job_id"],
+            status=job["status"],
+            params=job.get("params") or {},
+            created_at=job.get("created_at"),
+            completed_at=job.get("completed_at"),
+            report=job.get("report"),
+            error=job.get("error"),
         )
     )

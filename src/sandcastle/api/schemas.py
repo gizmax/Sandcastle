@@ -1615,5 +1615,41 @@ class BatchStartedResponse(BaseModel):
     status: str = "running"
 
 
+class TimeMachineStartRequest(BaseModel):
+    """Request to start a Model Time Machine job (counterfactual replay)."""
+
+    target_model: str = Field(..., min_length=1, max_length=200)
+    workflow: str | None = Field(None, min_length=1, max_length=200)
+    since: str | None = Field(
+        None, max_length=64, description="Relative window like '30d'/'12h' or an ISO date"
+    )
+    until: str | None = Field(None, max_length=64, description="ISO date upper bound")
+    max_cassettes: int = Field(20, ge=1, le=500)
+    live: bool = Field(False, description="Re-execute steps with real API calls (needs budget)")
+    budget_usd: float | None = Field(None, gt=0, description="Hard cost cap for live replay")
+    judge_model: str | None = Field(None, min_length=1, max_length=200)
+
+
+class TimeMachineStartResponse(BaseModel):
+    """Response returned immediately when a Time Machine job is accepted."""
+
+    job_id: str
+    status: str = "running"
+    mode: str = "dry_run"  # "dry_run" | "live"
+    target_model: str
+
+
+class TimeMachineJobResponse(BaseModel):
+    """Status + report of a Time Machine job."""
+
+    job_id: str
+    status: str  # "running" | "completed" | "failed"
+    params: dict[str, Any] = {}
+    created_at: str | None = None
+    completed_at: str | None = None
+    report: dict[str, Any] | None = None
+    error: str | None = None
+
+
 # Fix forward reference for ApiResponse.meta
 ApiResponse.model_rebuild()
