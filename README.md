@@ -68,6 +68,7 @@
 - [Directory Input & CSV Export](#directory-input--csv-export)
 - [Community Hub](#community-hub)
 - [Verified Templates (.sctpl)](#verified-templates-sctpl)
+  - [The Architect](#the-architect)
 - [Real-time Event Stream](#real-time-event-stream)
 - [Run Time Machine](#run-time-machine)
 - [Budget Guardrails](#budget-guardrails)
@@ -1529,6 +1530,20 @@ sandcastle template search "summarizer"
 The verification is mechanical, not a badge. The replay runs in strict mode: every model step must resolve from the bundled cassette, nothing may call a provider, and the run must complete free of charge. Tamper with the cassette and the SHA-256 checksums break. Tamper with the workflow and its step cache keys no longer match the recording - the replay fails before a single live call. Bundles are treated as untrusted input end to end: extraction is traversal-safe and size-capped, the workflow passes the same security scanner that gates Community Hub installs, and `code`/`http` steps never execute during verification.
 
 Installed bundles land in the community templates directory, so they appear in the Lite wizard and dashboard immediately - with the proof cassette kept alongside for re-verification anytime. A working example ships in the repo: `examples/templates/text-summarizer-1.0.0.sctpl`. Format details: [docs/verified-templates.md](docs/verified-templates.md).
+
+### The Architect
+
+Describe a workflow and get back a proven one. The Architect runs an autonomous loop - generate, run, evaluate, refine - until the workflow actually works: it generates YAML from your description, executes it live with cassette recording on, hard-checks the run (completed, no failures, real output), scores the output against your description with an LLM judge, and feeds any shortfall back into the generator for the next iteration. On success it packs the workflow and its freshly recorded cassette into a verified `.sctpl` bundle and installs it - a template born with its proof attached.
+
+```bash
+sandcastle architect "Summarize a customer email and draft a polite reply" \
+    --input email="Hi, my order arrived damaged..." --budget 0.50
+#   iteration 1: completed  cost $0.0214  score 0.86
+#   PROVEN  email-reply-assistant
+#   Bundle: email-reply-assistant-1.0.0.sctpl
+```
+
+The whole session is budget-capped (`ARCHITECT_BUDGET_USD`, default $1.00) and bounded (`ARCHITECT_MAX_ITERATIONS`, default 3; `ARCHITECT_SCORE_THRESHOLD`, default 0.7). Test inputs come from you (`--input`), the generated input schema, or a plausible set the advisor derives. Also available as an async API job: `POST /api/architect` starts a session, `GET /api/architect/{job_id}` streams the per-iteration log, scores, and the final bundle path.
 
 ---
 
