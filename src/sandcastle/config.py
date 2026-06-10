@@ -125,6 +125,10 @@ class Settings(BaseSettings):
     # Model failover
     failover_cooldown_seconds: float = 60.0
 
+    # Model Time Machine: judge model used to score old vs new outputs on live
+    # replays (any provider-registry model string; default = cheap Claude tier)
+    timemachine_judge_model: str = "haiku"
+
     # Tool connector credentials
     tool_slack_bot_token: str = ""
     tool_jira_api_token: str = ""
