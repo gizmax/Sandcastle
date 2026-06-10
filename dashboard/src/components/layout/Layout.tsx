@@ -98,6 +98,7 @@ const ROUTE_LABELS: Record<string, string> = {
   "/autopilot": "AutoPilot",
   "/violations": "Violations",
   "/optimizer": "Optimizer",
+  "/time-machine": "Time Machine",
   "/schedules": "Schedules",
   "/dead-letter": "Dead Letter",
   "/api-keys": "API Keys",
