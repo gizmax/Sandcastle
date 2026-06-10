@@ -208,6 +208,13 @@ class Settings(BaseSettings):
     update_blackout_end: str = ""  # e.g. "06:00"
     update_approval_required: bool = False  # enterprise: admin must approve
 
+    # Sandcastle Mesh: multiple machines forming one orchestration mesh.
+    # The coordinator routes steps with `requires: [...]` to nodes whose
+    # capability manifest satisfies ALL required capabilities.
+    mesh_enabled: bool = False
+    mesh_token: str = ""  # shared secret for node registration/heartbeat/execution
+    mesh_heartbeat_seconds: int = 15  # node heartbeat interval; dead after 3 missed beats
+
     # Logging
     log_level: str = "info"
 
@@ -254,6 +261,17 @@ class Settings(BaseSettings):
                 ", ".join(sorted(_VALID_MEMORY_BACKENDS)),
             )
             return "local"
+        return v
+
+    @field_validator("mesh_heartbeat_seconds", mode="after")
+    @classmethod
+    def _validate_mesh_heartbeat(cls, v: int) -> int:
+        """Ensure mesh_heartbeat_seconds is at least 1."""
+        if v < 1:
+            _logger.warning(
+                "MESH_HEARTBEAT_SECONDS=%d is invalid (must be >= 1), using 15", v
+            )
+            return 15
         return v
 
     @field_validator("log_level", mode="after")
@@ -542,6 +560,7 @@ class Settings(BaseSettings):
         "tool_postgresql_url",
         "browserbase_api_key",
         "nim_api_key",
+        "mesh_token",
     })
 
     def safe_dump(self) -> dict:

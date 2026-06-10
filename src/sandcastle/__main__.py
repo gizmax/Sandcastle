@@ -950,6 +950,148 @@ def _cmd_serve(args: argparse.Namespace) -> None:
     )
 
 
+async def _node_join_loop(
+    coordinator: str,
+    token: str,
+    name: str,
+    base_url: str,
+    capabilities: list[str],
+    heartbeat_seconds: int,
+) -> None:
+    """Register with the coordinator and heartbeat forever.
+
+    Re-registers automatically when the coordinator forgets us (404 on
+    heartbeat, e.g. after a coordinator DB reset).
+    """
+    import asyncio
+
+    import httpx
+
+    headers = {"X-Mesh-Token": token}
+    register_body = {"name": name, "base_url": base_url, "capabilities": capabilities}
+
+    async with httpx.AsyncClient(timeout=15) as client:
+
+        async def _register() -> str | None:
+            try:
+                resp = await client.post(
+                    f"{coordinator}/api/mesh/register", json=register_body, headers=headers
+                )
+            except httpx.HTTPError as exc:
+                print(f"  {_color('Coordinator unreachable: ' + str(exc), _C.YELLOW)}")
+                return None
+            if resp.status_code != 200:
+                print(
+                    f"  {_color('Registration rejected: HTTP ' + str(resp.status_code), _C.RED)}"
+                    f" {resp.text[:200]}"
+                )
+                return None
+            node = resp.json().get("data") or {}
+            print(
+                f"  {_color('Joined mesh', _C.GREEN)} as "
+                f"{_color(name, _C.BOLD)} ({base_url}) "
+                f"caps={_color(','.join(capabilities), _C.CYAN)} id={node.get('id')}"
+            )
+            return node.get("id")
+
+        node_id = None
+        while node_id is None:
+            node_id = await _register()
+            if node_id is None:
+                await asyncio.sleep(heartbeat_seconds)
+
+        while True:
+            await asyncio.sleep(heartbeat_seconds)
+            try:
+                resp = await client.post(
+                    f"{coordinator}/api/mesh/heartbeat",
+                    json={"node_id": node_id},
+                    headers=headers,
+                )
+            except httpx.HTTPError as exc:
+                print(f"  {_color('Heartbeat failed: ' + str(exc), _C.YELLOW)}")
+                continue
+            if resp.status_code == 404:
+                print(f"  {_color('Coordinator forgot us - re-registering', _C.YELLOW)}")
+                node_id = await _register() or node_id
+            elif resp.status_code != 200:
+                print(
+                    f"  {_color('Heartbeat rejected: HTTP ' + str(resp.status_code), _C.YELLOW)}"
+                )
+
+
+def _cmd_node(args: argparse.Namespace) -> None:
+    """Sandcastle Mesh node commands (currently: join)."""
+    if getattr(args, "node_action", None) != "join":
+        print("Usage: sandcastle node join <coordinator-url> --token <t>", file=sys.stderr)
+        sys.exit(1)
+
+    import asyncio
+    import socket
+
+    coordinator = args.coordinator.rstrip("/")
+    token = args.token or os.getenv("MESH_TOKEN", "")
+    if not token:
+        print(
+            f"  {_color('A mesh token is required: --token <t> or MESH_TOKEN env.', _C.RED)}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # Enable the mesh plane on this node's own API server BEFORE the app
+    # starts, so /api/mesh/execute-step accepts the coordinator's token.
+    os.environ["MESH_ENABLED"] = "true"
+    os.environ["MESH_TOKEN"] = token
+    from sandcastle.config import settings
+
+    settings.mesh_enabled = True
+    settings.mesh_token = token
+
+    if args.capabilities:
+        capabilities = [
+            c.strip().lower() for c in args.capabilities.split(",") if c.strip()
+        ]
+    else:
+        from sandcastle.engine.mesh import detect_local_capabilities
+
+        capabilities = detect_local_capabilities()
+
+    hostname = socket.gethostname()
+    name = args.name or hostname
+    base_url = (args.base_url or f"http://{hostname}:{args.port}").rstrip("/")
+    heartbeat_seconds = args.heartbeat or settings.mesh_heartbeat_seconds
+
+    _print_banner()
+    print(f"  {_color('Sandcastle Mesh node', _C.BOLD)}")
+    print(f"  Coordinator ........ {coordinator}")
+    print(f"  Node ............... {name} ({base_url})")
+    print(f"  Capabilities ....... {_color(','.join(capabilities), _C.CYAN)}")
+    print(f"  Heartbeat .......... every {heartbeat_seconds}s\n")
+
+    if not args.no_serve:
+        # Serve this node's own API (the /api/mesh/execute-step surface)
+        # in a background thread; the heartbeat loop owns the foreground.
+        import threading
+
+        import uvicorn
+
+        config = uvicorn.Config(
+            "sandcastle.main:app", host=args.host, port=args.port, log_level="warning"
+        )
+        server = uvicorn.Server(config)
+        threading.Thread(target=server.run, daemon=True, name="mesh-node-api").start()
+        print(f"  {_color('Node API serving on port ' + str(args.port), _C.GREEN)}")
+
+    try:
+        asyncio.run(
+            _node_join_loop(
+                coordinator, token, name, base_url, capabilities, heartbeat_seconds
+            )
+        )
+    except KeyboardInterrupt:
+        print(f"\n  {_color('Node left the mesh.', _C.DIM)}")
+
+
 def _run_local(
     workflow: str,
     input_data: dict[str, Any],
@@ -4582,6 +4724,40 @@ def _build_parser() -> argparse.ArgumentParser:
         "--reload", action="store_true", default=False, help="Enable auto-reload for development"
     )
 
+    # --- node (Sandcastle Mesh) ---
+    p_node = subparsers.add_parser("node", help="Sandcastle Mesh node commands")
+    node_sub = p_node.add_subparsers(dest="node_action")
+    p_node_join = node_sub.add_parser(
+        "join", help="Join a Sandcastle Mesh as a worker node"
+    )
+    p_node_join.add_argument(
+        "coordinator", help="Coordinator base URL, e.g. http://spark.local:8080"
+    )
+    p_node_join.add_argument(
+        "--token", default="", help="Shared mesh token (or MESH_TOKEN env var)"
+    )
+    p_node_join.add_argument(
+        "--capabilities", default="",
+        help="Comma-separated capability override (default: auto-detect)",
+    )
+    p_node_join.add_argument("--name", default="", help="Node name (default: hostname)")
+    p_node_join.add_argument(
+        "--base-url", default="",
+        help="URL the coordinator uses to reach this node (default: http://<hostname>:<port>)",
+    )
+    p_node_join.add_argument("--host", default="0.0.0.0", help="Bind host for the node API")
+    p_node_join.add_argument(
+        "--port", type=int, default=8080, help="Bind port for the node API (default: 8080)"
+    )
+    p_node_join.add_argument(
+        "--heartbeat", type=int, default=0,
+        help="Heartbeat interval in seconds (default: MESH_HEARTBEAT_SECONDS)",
+    )
+    p_node_join.add_argument(
+        "--no-serve", action="store_true", default=False,
+        help="Do not start the node API server (one is already running)",
+    )
+
     # --- run ---
     p_run = subparsers.add_parser("run", help="Run a workflow")
     p_run.add_argument("workflow", help="Workflow name or path to .yaml file")
@@ -5039,6 +5215,11 @@ def main() -> None:
         else:
             print("Usage: sandcastle db migrate", file=sys.stderr)
             sys.exit(1)
+        return
+
+    # --- node (Sandcastle Mesh) ---
+    if args.command == "node":
+        _cmd_node(args)
         return
 
     # --- schedule ---

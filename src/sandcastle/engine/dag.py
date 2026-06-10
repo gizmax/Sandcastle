@@ -589,6 +589,10 @@ class StepDefinition:
     context_max_tokens: int = 2000  # Max tokens of context to inject
     # Token optimization: truncate step output before passing to dependents
     output_max_tokens: int = 0  # 0 = no limit, >0 = truncate output before passing to dependents
+    # Sandcastle Mesh: capabilities this step requires (e.g. ["gpu", "browser"]).
+    # Empty = run locally as always. Non-empty = the dispatcher picks a live mesh
+    # node whose capability manifest satisfies ALL entries (local node preferred).
+    requires: list[str] = field(default_factory=list)
     # Self-describing metadata
     responsibility: str = ""  # WHAT this step does in one sentence
     source_hint: str = ""  # WHY this step exists (business reason, ticket, who requested)
@@ -989,6 +993,24 @@ def _parse_memory_config(data) -> MemoryConfig | None:
     )
 
 
+def _parse_requires(data: object) -> list[str]:
+    """Coerce a step's ``requires`` field to a normalized list of capability strings.
+
+    Accepts a YAML list (``requires: [gpu, browser]``) or a single scalar
+    (``requires: gpu``). Entries are lowercased and stripped; empty entries are
+    dropped. Backward compatible: missing/None yields [] (= run locally).
+    """
+    if data is None:
+        return []
+    items = data if isinstance(data, list) else [data]
+    out: list[str] = []
+    for item in items:
+        cap = str(item).strip().lower()
+        if cap and cap not in out:
+            out.append(cap)
+    return out
+
+
 def _parse_llm_config(data: dict | None) -> LlmConfig | None:
     """Parse LLM step configuration from YAML data."""
     if data is None:
@@ -1355,6 +1377,8 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
         context_max_tokens=data.get("context_max_tokens", 2000),
         # Token optimization
         output_max_tokens=data.get("output_max_tokens", 0),
+        # Sandcastle Mesh capability requirements (coerce to list[str])
+        requires=_parse_requires(data.get("requires")),
         # Self-describing metadata
         responsibility=data.get("responsibility", ""),
         source_hint=data.get("source_hint", ""),

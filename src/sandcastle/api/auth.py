@@ -34,6 +34,15 @@ PUBLIC_PREFIXES = ("/api/templates", "/api/r/")
 # Path suffixes that don't require authentication (e.g. workflow API spec)
 PUBLIC_SUFFIXES = ("/spec",)
 
+# Mesh control/execution plane: these endpoints enforce their own shared-secret
+# auth (X-Mesh-Token, constant-time, fail-closed when mesh is disabled or the
+# token is unset - see api/mesh.py require_mesh_token). They are exempt from
+# API-key auth so nodes can join without an API key. GET /api/mesh/nodes is
+# NOT listed: operator reads stay behind the regular API-key auth + admin gate.
+MESH_TOKEN_PATHS = frozenset(
+    {"/api/mesh/register", "/api/mesh/heartbeat", "/api/mesh/execute-step"}
+)
+
 # Pepper for HMAC key hashing - falls back to a stable default for dev/local mode.
 # In production, set API_KEY_PEPPER as an environment variable.
 _API_KEY_PEPPER = os.getenv("API_KEY_PEPPER", "sandcastle-default-pepper-change-in-production")
@@ -105,6 +114,11 @@ async def auth_middleware(request: Request, call_next):
 
     # Skip auth for public API paths
     if request.url.path in PUBLIC_PATHS:
+        request.state._auth_checked = True
+        return await call_next(request)
+
+    # Mesh-plane endpoints authenticate themselves with the mesh token
+    if request.url.path in MESH_TOKEN_PATHS:
         request.state._auth_checked = True
         return await call_next(request)
 

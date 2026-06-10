@@ -863,6 +863,36 @@ class EvolutionIteration(Base):
     evolution: Mapped[WorkflowEvolution] = relationship(back_populates="iterations")
 
 
+class MeshNode(Base):
+    """A registered Sandcastle Mesh node (remote machine that executes routed steps).
+
+    Nodes self-register via ``POST /api/mesh/register`` and stay alive by
+    heartbeating every ``mesh_heartbeat_seconds``. A node is considered dead
+    after 3 missed heartbeats (computed at read time, not stored).
+    """
+
+    __tablename__ = "mesh_nodes"
+    __table_args__ = (
+        Index("ix_mesh_nodes_name", "name"),
+        UniqueConstraint("base_url", name="uq_mesh_nodes_base_url"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    base_url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    # Capability manifest, e.g. ["gpu", "spark", "browser", "docker", "code"]
+    capabilities: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    last_heartbeat: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # "alive" | "dead" - persisted snapshot; liveness is recomputed from
+    # last_heartbeat on every read so a stale snapshot never lies.
+    status: Mapped[str] = mapped_column(String(50), default="alive")
+    registered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
 # Database engine and session factory
 
 def _build_engine_url() -> str:
