@@ -122,7 +122,11 @@
     *,*::before,*::after{ box-sizing:border-box; margin:0; padding:0; }
 
     html{ -webkit-text-size-adjust:100%; scroll-behavior:smooth; }
-    @media (prefers-reduced-motion: reduce){ html{ scroll-behavior:auto; } }
+    @media (prefers-reduced-motion: reduce){
+      html{ scroll-behavior:auto; }
+      .card, .feature-card, .collection-card, .cta-card{ transition:none; }
+      .card:hover, .feature-card:hover, .collection-card:hover, .cta-card:hover{ transform:none; }
+    }
 
     body{
       background:var(--paper);
@@ -294,6 +298,82 @@
     .ac-match{ color:var(--amber-ink); font-weight:600; }
 
     /* ============================================================
+       CURATED BAND — Editor's picks + Popular this week
+       Big confident entry point so arrivals aren't dropped on a
+       wall of 287. Cards are larger, accented, editorial.
+       ============================================================ */
+    .curated-section{ padding:clamp(34px,6vh,64px) 0 clamp(28px,5vh,52px); border-top:1.5px solid var(--rule); }
+    .curated-section[hidden]{ display:none; }
+    .curated-head{
+      display:flex; align-items:baseline; justify-content:space-between;
+      gap:16px; flex-wrap:wrap; margin-bottom:clamp(20px,3vh,30px);
+    }
+    .curated-title{
+      font-weight:700; font-size:clamp(24px,3.4vw,38px);
+      letter-spacing:-.03em; line-height:1;
+    }
+    .curated-sub{ color:var(--ink-faint); text-transform:none; letter-spacing:.01em; }
+
+    .curated-grid{
+      display:grid; grid-template-columns:1fr; gap:16px;
+    }
+    @media (min-width:680px){ .curated-grid{ grid-template-columns:repeat(2,1fr); } }
+    @media (min-width:1040px){ .curated-grid{ grid-template-columns:repeat(4,1fr); } }
+
+    .feature-card{
+      position:relative; overflow:hidden;
+      display:flex; flex-direction:column; align-items:stretch; gap:9px;
+      text-align:left; cursor:pointer; font:inherit; color:inherit;
+      background:var(--paper); border:1.5px solid var(--rule); border-radius:3px;
+      padding:18px 18px 16px;
+      transition:transform .15s ease, box-shadow .15s ease;
+    }
+    /* accent wash so featured cards read as a distinct, premium tier */
+    .feature-card::before{
+      content:""; position:absolute; inset:0; pointer-events:none;
+      background:
+        radial-gradient(120% 80% at 100% 0%,
+          color-mix(in srgb, var(--cat) 12%, transparent) 0%, transparent 60%);
+    }
+    .feature-rule{
+      position:absolute; top:0; left:0; right:0; height:4px;
+      background:var(--cat);
+    }
+    .feature-card > *{ position:relative; }
+    .feature-card:hover{ transform:translateY(-3px); box-shadow:7px 7px 0 var(--hair); }
+    .feature-card:hover .feature-name{ color:var(--amber-ink); }
+    .feature-flag{
+      display:inline-flex; align-self:flex-start; align-items:center;
+      margin-top:6px;
+      font-size:10px; letter-spacing:.1em; color:var(--ink-faint);
+      text-transform:uppercase;
+    }
+    .feature-flag.is-pick{
+      color:#1C1814; background:var(--amber);
+      padding:3px 8px; border-radius:2px; letter-spacing:.08em;
+    }
+    .feature-cat{
+      display:inline-flex; align-items:center; gap:7px;
+      font-size:10px; letter-spacing:.06em;
+    }
+    .feature-cat .dot{ width:8px; height:8px; border-radius:50%; display:inline-block; }
+    .feature-name{
+      font-weight:700; font-size:clamp(18px,1.6vw,22px); line-height:1.1;
+      letter-spacing:-.025em; color:var(--ink); transition:color .15s ease;
+    }
+    .feature-desc{
+      font-size:13.5px; line-height:1.45; color:var(--ink-soft);
+      display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden;
+    }
+    .feature-foot{
+      margin-top:auto; padding-top:12px; border-top:1px solid var(--hair);
+      display:flex; align-items:center; justify-content:space-between; gap:10px;
+      font-size:11px; color:var(--ink-faint); text-transform:none; letter-spacing:.01em;
+    }
+    .feature-author{ color:var(--ink-soft); }
+    .feature-dl{ color:var(--amber-ink); }
+
+    /* ============================================================
        COLLECTIONS
        ============================================================ */
     .collections-section{ padding:clamp(28px,5vh,48px) 0; border-top:1.5px solid var(--rule); }
@@ -351,6 +431,11 @@
     .pill:hover{ color:var(--ink); }
     .pill.active{ color:var(--ink); border-bottom-color:var(--amber); }
     .pill .dot{ width:8px; height:8px; border-radius:50%; display:inline-block; }
+    .pill-count{
+      font-size:10px; color:var(--ink-faint); letter-spacing:.04em;
+      font-variant-numeric:tabular-nums;
+    }
+    .pill.active .pill-count{ color:var(--amber-ink); }
 
     .filter-right{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
     .badge-filters{ display:flex; gap:6px; }
@@ -374,6 +459,16 @@
        TEMPLATES SECTION
        ============================================================ */
     .templates-section{ padding:clamp(28px,5vh,52px) 0 clamp(56px,9vh,90px); }
+    .gallery-head{
+      display:flex; align-items:baseline; justify-content:space-between;
+      gap:16px; flex-wrap:wrap; margin-bottom:18px;
+      padding-bottom:14px; border-bottom:1.5px solid var(--rule);
+    }
+    .gallery-title{
+      font-weight:700; font-size:clamp(22px,3vw,34px);
+      letter-spacing:-.03em; line-height:1;
+    }
+    .gallery-count{ color:var(--ink-faint); font-variant-numeric:tabular-nums; }
     .results-info{
       font-family:var(--mono); font-size:12px; text-transform:uppercase;
       letter-spacing:.06em; color:var(--ink-faint); margin-bottom:22px;
@@ -413,22 +508,41 @@
     @media (min-width:1040px){ .grid{ grid-template-columns:repeat(3,1fr); } }
 
     .card{
-      position:relative;
+      position:relative; overflow:hidden;
       border:1.5px solid var(--rule); border-radius:3px;
-      background:var(--paper); padding:20px 20px 18px;
+      background:var(--paper); padding:22px 20px 18px;
       cursor:pointer; display:flex; flex-direction:column;
-      transition:transform .15s ease, box-shadow .15s ease;
+      transition:transform .15s ease, box-shadow .15s ease, border-color .15s ease;
     }
-    .card:hover{ transform:translateY(-3px); box-shadow:6px 6px 0 var(--hair); }
+    /* category accent top-rule — gives the grid colour & rhythm without
+       turning into a glossy SaaS card. Defaults to a hairline, lights up
+       on hover. --cat is set per-card from the category palette. */
+    .card-rule{
+      position:absolute; top:0; left:0; right:0; height:3px;
+      background:var(--cat, var(--ink-faint));
+      opacity:.42; transition:opacity .15s ease;
+    }
+    .card:hover{ transform:translateY(-3px); box-shadow:6px 6px 0 var(--hair); border-color:var(--cat, var(--rule)); }
+    .card:hover .card-rule{ opacity:1; }
     .card:hover .card-title{ color:var(--amber-ink); }
 
-    .card-header-row{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:12px; }
-    .card-category{
-      display:inline-flex; align-items:center; gap:7px;
-      font-family:var(--mono); font-size:11px; font-weight:500;
-      text-transform:uppercase; letter-spacing:.06em;
+    .card-header-row{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:13px; }
+    .card-ident{ display:inline-flex; align-items:center; gap:10px; min-width:0; }
+    /* monogram tile — a per-category initial in a tinted square. Cheap, inline,
+       and makes every card visually distinct at a glance. */
+    .card-monogram{
+      flex:0 0 auto; width:30px; height:30px; border-radius:4px;
+      display:inline-flex; align-items:center; justify-content:center;
+      font-family:var(--display); font-weight:700; font-size:15px;
+      color:var(--cat, var(--ink));
+      background:color-mix(in srgb, var(--cat, var(--ink)) 13%, var(--paper));
+      border:1px solid color-mix(in srgb, var(--cat, var(--ink)) 34%, transparent);
     }
-    .card-category .dot{ width:8px; height:8px; border-radius:50%; display:inline-block; }
+    .card-category{
+      font-family:var(--mono); font-size:11px; font-weight:500;
+      text-transform:uppercase; letter-spacing:.05em;
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
     .card-source-badge{
       font-family:var(--mono); font-size:9px; text-transform:uppercase;
       letter-spacing:.08em; padding:2px 6px; border-radius:2px;
@@ -437,11 +551,11 @@
     .card-source-badge.community{ color:var(--amber-ink); border-color:color-mix(in srgb,var(--amber) 50%,transparent); }
 
     .card-badge{
-      position:absolute; top:-1px; right:14px;
+      position:absolute; top:3px; right:14px;
       font-family:var(--mono); font-size:9px; font-weight:600;
       text-transform:uppercase; letter-spacing:.08em;
       padding:3px 8px; color:#1C1814; background:var(--amber);
-      border-radius:0 0 3px 3px;
+      border-radius:0 0 3px 3px; z-index:1;
     }
     .card-badge--trending{ background:var(--ink); color:var(--paper); }
     .card-badge--new{ background:var(--paper); color:var(--amber-ink); border:1.5px solid var(--amber); border-top:0; padding:1.5px 7px; }
@@ -791,6 +905,17 @@
     </div>
   </section>
 
+  <!-- =========================== CURATED BAND =========================== -->
+  <section class="curated-section" id="curated-section" aria-labelledby="curated-heading" hidden>
+    <div class="container">
+      <div class="curated-head">
+        <h2 id="curated-heading" class="curated-title">Start here</h2>
+        <p class="curated-sub mono">Editor's picks &amp; the most-installed workflows this season</p>
+      </div>
+      <div class="curated-grid" id="curated-grid"></div>
+    </div>
+  </section>
+
   <!-- Collections -->
   <section class="collections-section" id="collections-section">
     <div class="container">
@@ -803,50 +928,8 @@
   <section class="filter-bar">
     <div class="container">
       <div class="filter-inner">
-        <div class="category-pills" id="category-pills">
-          <button class="pill active" data-cat="all">All</button>
-          <button class="pill" data-cat="sales_crm">
-            <span class="dot" style="background:var(--cat-sales_crm)"></span>Sales &amp; CRM
-          </button>
-          <button class="pill" data-cat="marketing">
-            <span class="dot" style="background:var(--cat-marketing)"></span>Marketing
-          </button>
-          <button class="pill" data-cat="support">
-            <span class="dot" style="background:var(--cat-support)"></span>Support
-          </button>
-          <button class="pill" data-cat="engineering">
-            <span class="dot" style="background:var(--cat-engineering)"></span>Engineering
-          </button>
-          <button class="pill" data-cat="hr_legal">
-            <span class="dot" style="background:var(--cat-hr_legal)"></span>HR &amp; Legal
-          </button>
-          <button class="pill" data-cat="general_ai">
-            <span class="dot" style="background:var(--cat-general_ai)"></span>General AI
-          </button>
-          <button class="pill" data-cat="compliance_grc">
-            <span class="dot" style="background:var(--cat-compliance_grc)"></span>Compliance &amp; GRC
-          </button>
-          <button class="pill" data-cat="healthcare">
-            <span class="dot" style="background:var(--cat-healthcare)"></span>Healthcare
-          </button>
-          <button class="pill" data-cat="fintech_banking">
-            <span class="dot" style="background:var(--cat-fintech_banking)"></span>Fintech &amp; Banking
-          </button>
-          <button class="pill" data-cat="llmops_ai_eng">
-            <span class="dot" style="background:var(--cat-llmops_ai_eng)"></span>LLMOps &amp; AI Eng
-          </button>
-          <button class="pill" data-cat="personal">
-            <span class="dot" style="background:var(--cat-personal)"></span>Personal &amp; Life Admin
-          </button>
-          <button class="pill" data-cat="research_intel">
-            <span class="dot" style="background:var(--cat-research_intel)"></span>Research &amp; Intel
-          </button>
-          <button class="pill" data-cat="finance_ops">
-            <span class="dot" style="background:var(--cat-finance_ops)"></span>Finance Ops
-          </button>
-          <button class="pill" data-cat="automation_rpa">
-            <span class="dot" style="background:var(--cat-automation_rpa)"></span>Automation &amp; RPA
-          </button>
+        <div class="category-pills" id="category-pills" role="tablist" aria-label="Filter by category">
+          <button class="pill active" data-cat="all" role="tab" aria-selected="true">All</button>
         </div>
         <div class="filter-right">
           <div class="badge-filters" id="badge-filters">
@@ -870,6 +953,10 @@
   <!-- Template Grid -->
   <section class="templates-section">
     <div class="container">
+      <div class="gallery-head">
+        <h2 class="gallery-title" id="gallery-heading">Browse the library</h2>
+        <span class="gallery-count mono" id="gallery-count"></span>
+      </div>
       <div class="author-bar" id="author-bar">
         <div class="author-avatar" id="author-avatar"></div>
         <div class="author-info">
@@ -1007,23 +1094,59 @@
     var recentlyViewed = [];
 
     /* ========== Constants ========== */
+    /* Every one of the 14 registry categories gets its own accent + readable
+       label. Colours are pulled from the CSS --cat-* tokens at runtime so the
+       light/dark palettes stay in sync; these literals are the light-mode
+       fallback if a custom property can't be resolved. Previously only 6 of 14
+       categories had colours/labels, so two-thirds of the cards rendered a flat
+       grey with a raw snake_case id — the main cause of the "bland" wall. */
     var CAT_COLORS = {
-      sales_crm: '#F59E0B',
-      marketing: '#8B5CF6',
-      support: '#F43F5E',
-      engineering: '#3B82F6',
-      hr_legal: '#10B981',
-      general_ai: '#9CA3AF'
+      general_ai:      '#6B6258',
+      marketing:       '#6D44C9',
+      engineering:     '#2563A8',
+      automation_rpa:  '#0A7DB0',
+      sales_crm:       '#B26A00',
+      hr_legal:        '#0E8A5F',
+      support:         '#C32848',
+      llmops_ai_eng:   '#C53A82',
+      compliance_grc:  '#0E8A82',
+      fintech_banking: '#4B50C0',
+      healthcare:      '#0A8AA0',
+      finance_ops:     '#5C8A00',
+      personal:        '#B26A00',
+      research_intel:  '#8A40C0'
     };
 
     var CAT_LABELS = {
-      sales_crm: 'Sales & CRM',
-      marketing: 'Marketing',
-      support: 'Support',
-      engineering: 'Engineering',
-      hr_legal: 'HR & Legal',
-      general_ai: 'General AI'
+      general_ai:      'General AI',
+      marketing:       'Marketing',
+      engineering:     'Engineering',
+      automation_rpa:  'Automation & RPA',
+      sales_crm:       'Sales & CRM',
+      hr_legal:        'HR & Legal',
+      support:         'Support',
+      llmops_ai_eng:   'LLMOps & AI Eng',
+      compliance_grc:  'Compliance & GRC',
+      fintech_banking: 'Fintech & Banking',
+      healthcare:      'Healthcare',
+      finance_ops:     'Finance Ops',
+      personal:        'Personal & Life Admin',
+      research_intel:  'Research & Intel'
     };
+
+    /* Resolve a category accent to the live CSS token so dark mode tracks too. */
+    function catColor(cat){
+      var fromVar = getComputedStyle(document.documentElement)
+        .getPropertyValue('--cat-' + cat).trim();
+      return fromVar || CAT_COLORS[cat] || '#6B6258';
+    }
+    function catLabel(cat){
+      if (registry && registry.categories){
+        var c = registry.categories.find(function(x){ return x.id === cat; });
+        if (c && c.name) return c.name;
+      }
+      return CAT_LABELS[cat] || cat;
+    }
 
     var COLLECTION_ICONS = {
       'target': '\uD83C\uDFAF',
@@ -1080,6 +1203,8 @@
       }
       // Render - each in its own try/catch so one failure doesn't block others
       try { animateStats(registry.stats); } catch(e) { console.warn('animateStats error:', e); }
+      try { renderCategoryRail(); } catch(e) { console.warn('renderCategoryRail error:', e); }
+      try { renderCurated(); } catch(e) { console.warn('renderCurated error:', e); }
       try { renderCollections(); } catch(e) { console.warn('renderCollections error:', e); }
       try { renderTemplates(); } catch(e) {
         console.error('renderTemplates error:', e);
@@ -1209,6 +1334,83 @@
       renderTemplates();
     }
 
+    /* ========== Category rail ========== */
+    // Built from the registry so all 14 categories show with a live count
+    // (e.g. "AUTOMATION & RPA · 37"). Counts come from the registry's own
+    // category records; "All" is the total template count. Strong scent: each
+    // pill carries its category accent and the active one underlines in amber.
+    function renderCategoryRail(){
+      var rail = document.getElementById('category-pills');
+      if (!rail || !registry) return;
+      var cats = (registry.categories || []).slice().sort(function(a,b){
+        return (b.count||0) - (a.count||0);
+      });
+      var total = (registry.templates || []).length;
+      var html =
+        '<button class="pill' + (activeCategory==='all'?' active':'') + '" data-cat="all" role="tab" aria-selected="' + (activeCategory==='all') + '">' +
+          'All <span class="pill-count">' + total + '</span>' +
+        '</button>';
+      cats.forEach(function(c){
+        var on = activeCategory === c.id;
+        html +=
+          '<button class="pill' + (on?' active':'') + '" data-cat="' + escAttr(c.id) + '" style="--cat:' + catColor(c.id) + '" role="tab" aria-selected="' + on + '">' +
+            '<span class="dot" style="background:' + catColor(c.id) + '"></span>' +
+            escHtml(c.name) +
+            ' <span class="pill-count">' + (c.count||0) + '</span>' +
+          '</button>';
+      });
+      rail.innerHTML = html;
+    }
+
+    /* ========== Curated band ========== */
+    // Curation is derived entirely from the registry, no hand-maintained list:
+    //   1. Editor's picks  = templates flagged `featured: true` in the registry.
+    //   2. Most installed  = highest `downloads`, de-duplicated against picks.
+    // Together they give arrivals a clear entry point instead of a wall of 287.
+    function renderCurated(){
+      var section = document.getElementById('curated-section');
+      var grid = document.getElementById('curated-grid');
+      if (!section || !grid || !registry || !registry.templates) return;
+
+      var picks = registry.templates.filter(function(t){ return t.featured; });
+      var seen = {};
+      picks.forEach(function(t){ seen[t.slug] = true; });
+
+      var popular = registry.templates.slice()
+        .filter(function(t){ return !seen[t.slug]; })
+        .sort(function(a,b){ return (b.downloads||0) - (a.downloads||0); });
+
+      // Build a list of up to 4 cards: all editor's picks first, then fill with
+      // the most-installed workflows.
+      var curated = [];
+      picks.forEach(function(t){ curated.push({ t: t, kind: 'pick' }); });
+      for (var i = 0; i < popular.length && curated.length < 4; i++){
+        curated.push({ t: popular[i], kind: 'popular' });
+      }
+      if (curated.length === 0){ section.hidden = true; return; }
+      section.hidden = false;
+
+      grid.innerHTML = curated.map(function(c){
+        var t = c.t;
+        var color = catColor(t.category);
+        var label = catLabel(t.category);
+        var tagline = c.kind === 'pick' ? "Editor's pick" : 'Popular this week';
+        var dl = t.downloads || 0;
+        return '' +
+          '<button class="feature-card" style="--cat:' + color + '" data-slug="' + escAttr(t.slug) + '" onclick="showDetail(\'' + escAttr(t.slug) + '\')" aria-label="' + escAttr(t.name) + ' — open details">' +
+            '<span class="feature-rule" aria-hidden="true"></span>' +
+            '<span class="feature-flag mono' + (c.kind==='pick'?' is-pick':'') + '">' + tagline + '</span>' +
+            '<span class="feature-cat mono" style="color:' + color + '"><span class="dot" style="background:' + color + '"></span>' + escHtml(label) + '</span>' +
+            '<span class="feature-name">' + escHtml(t.name) + '</span>' +
+            '<span class="feature-desc">' + escHtml(t.description) + '</span>' +
+            '<span class="feature-foot mono">' +
+              '<span class="feature-author">@' + escHtml(t.author) + '</span>' +
+              (dl > 0 ? '<span class="feature-dl">' + formatNumberWithCommas(dl) + ' installs</span>' : '') +
+            '</span>' +
+          '</button>';
+      }).join('');
+    }
+
     /* ========== Collections ========== */
     function renderCollections() {
       var container = document.getElementById('collections-scroll');
@@ -1315,7 +1517,9 @@
 
     function updateCategoryPills() {
       document.querySelectorAll('.pill').forEach(function(p) {
-        p.classList.toggle('active', p.dataset.cat === activeCategory);
+        var on = p.dataset.cat === activeCategory;
+        p.classList.toggle('active', on);
+        p.setAttribute('aria-selected', on ? 'true' : 'false');
       });
     }
 
@@ -1397,6 +1601,8 @@
 
       if (filtered.length === 0) {
         info.textContent = '';
+        var gc0 = document.getElementById('gallery-count');
+        if (gc0) gc0.textContent = '0 / ' + ((registry && registry.templates) ? registry.templates.length : 0);
         grid.innerHTML =
           '<div class="empty-state">' +
             '<div class="empty-state-icon">\uD83D\uDD0D</div>' +
@@ -1417,18 +1623,21 @@
         if (col) context.push('in ' + col.name);
       }
       if (activeCategory !== 'all') {
-        context.push('in ' + (CAT_LABELS[activeCategory] || activeCategory));
+        context.push('in ' + catLabel(activeCategory));
       }
       if (activeAuthor) {
         context.push('by @' + activeAuthor);
       }
       var contextStr = context.length > 0 ? ' ' + context.join(', ') : '';
       info.textContent = filtered.length + ' workflow' + (filtered.length !== 1 ? 's' : '') + contextStr;
+      var gc = document.getElementById('gallery-count');
+      if (gc) gc.textContent = filtered.length + ' / ' + ((registry && registry.templates) ? registry.templates.length : filtered.length);
 
       var html = '';
       filtered.forEach(function(t) {
-        var color = CAT_COLORS[t.category] || '#9CA3AF';
-        var label = CAT_LABELS[t.category] || t.category;
+        var color = catColor(t.category);
+        var label = catLabel(t.category);
+        var monogram = (t.name || '?').trim().charAt(0).toUpperCase();
         var steps = t.step_count || t.steps || 0;
         var models = t.models_used || t.models || [];
         var tags = t.tags || [];
@@ -1490,12 +1699,14 @@
         var favBtnHtml = '<button class="card-fav-btn' + (isFav ? ' active' : '') + '" onclick="event.stopPropagation();toggleFavorite(\'' + escAttr(t.slug) + '\')" title="' + (isFav ? 'Remove from favorites' : 'Add to favorites') + '">' + (isFav ? '\u2665' : '\u2661') + '</button>';
 
         html +=
-          '<div class="card" data-cat="' + t.category + '" data-slug="' + escAttr(t.slug) + '" onclick="showDetail(\'' + escAttr(t.slug) + '\')">' +
+          '<div class="card" data-cat="' + t.category + '" data-slug="' + escAttr(t.slug) + '" style="--cat:' + color + '" onclick="showDetail(\'' + escAttr(t.slug) + '\')">' +
+            '<span class="card-rule" aria-hidden="true"></span>' +
             badgeHtml +
             favBtnHtml +
             '<div class="card-header-row">' +
-              '<div class="card-category" style="color:' + color + '">' +
-                '<span class="dot" style="background:' + color + '"></span>' + escHtml(label) +
+              '<div class="card-ident">' +
+                '<span class="card-monogram" aria-hidden="true">' + escHtml(monogram) + '</span>' +
+                '<div class="card-category" style="color:' + color + '">' + escHtml(label) + '</div>' +
               '</div>' +
               sourceBadgeHtml +
             '</div>' +
@@ -1548,8 +1759,8 @@
       // Track recently viewed
       trackRecentlyViewed(t.slug, t.name);
 
-      var color = CAT_COLORS[t.category] || '#9CA3AF';
-      var label = CAT_LABELS[t.category] || t.category;
+      var color = catColor(t.category);
+      var label = catLabel(t.category);
       var steps = t.step_count || t.steps || 0;
       var models = t.models_used || t.models || [];
       var tools = t.tools_used || t.tools || [];
@@ -2432,7 +2643,7 @@
         html += '<div class="autocomplete-section">';
         html += '<div class="autocomplete-section-label">Categories</div>';
         matchedCats.forEach(function(key) {
-          var color = CAT_COLORS[key] || '#9CA3AF';
+          var color = catColor(key);
           html += '<div class="autocomplete-item" data-type="category" data-value="' + escAttr(key) + '">' +
             '<span class="ac-icon"><span class="dot" style="background:' + color + ';width:8px;height:8px;display:inline-block;border-radius:50%"></span></span>' +
             '<span>' + highlightMatch(escHtml(CAT_LABELS[key]), q) + '</span>' +
