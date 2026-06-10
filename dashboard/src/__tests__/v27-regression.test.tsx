@@ -143,6 +143,11 @@ vi.mock("@/hooks/usePinnedWorkflows", () => ({
   }),
 }));
 
+// Density context: OverviewBento reads effectiveDensity for the calm/expand default.
+vi.mock("@/contexts/UiModeContext", () => ({
+  useDensity: () => ({ effectiveDensity: "Standard" }),
+}));
+
 vi.mock("@/hooks/useEventStreamContext", () => ({
   useEventStreamContext: () => ({
     subscribe: vi.fn(() => vi.fn()),

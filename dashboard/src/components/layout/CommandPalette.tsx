@@ -14,9 +14,11 @@ import {
   Inbox,
   Calendar,
   Clock,
+  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/api/client";
+import { OMNIBOX_FOCUS_EVENT } from "@/components/overview/Omnibox";
 import type { RecentItem } from "@/hooks/useRecentItems";
 
 /* ------------------------------------------------------------------ */
@@ -39,6 +41,8 @@ interface CommandItem {
   /** Extra query params to append */
   search?: string;
   icon: React.ElementType;
+  /** Special non-navigation action. "omnibox" focuses the Overview omnibox. */
+  action?: "omnibox";
 }
 
 interface CommandPaletteProps {
@@ -52,6 +56,7 @@ interface CommandPaletteProps {
 /* ------------------------------------------------------------------ */
 
 const ACTION_COMMANDS: CommandItem[] = [
+  { category: "action", label: "✨ Describe a workflow…", description: "Build an agent from a sentence", link: "/", action: "omnibox", icon: Sparkles },
   { category: "action", label: "/run", description: "Quick run a workflow", link: "/workflows", icon: PlayCircle },
   { category: "action", label: "/approve", description: "Go to pending approvals", link: "/approvals", icon: ShieldCheck },
   { category: "action", label: "/failures", description: "Go to failed runs", link: "/runs", search: "?status=failed", icon: AlertTriangle },
@@ -200,8 +205,9 @@ export function CommandPalette({ open, onClose, recentItems }: CommandPalettePro
       return filtered;
     }
 
-    // Empty query: show recent + pages
+    // Empty query: lead with the omnibox action, then recent + pages
     if (lower.length === 0) {
+      const omniboxAction = ACTION_COMMANDS.find((c) => c.action === "omnibox");
       const recent: CommandItem[] = recentItems.map((ri) => ({
         category: "recent" as const,
         label: ri.label,
@@ -209,10 +215,18 @@ export function CommandPalette({ open, onClose, recentItems }: CommandPalettePro
         link: ri.id,
         icon: iconForRecent(ri),
       }));
-      return [...recent, ...PAGE_ITEMS];
+      return [...(omniboxAction ? [omniboxAction] : []), ...recent, ...PAGE_ITEMS];
     }
 
-    // Search mode: combine API results + page matches
+    // Search mode: combine matching actions + API results + page matches
+    const matchedActions = ACTION_COMMANDS.filter(
+      (c) =>
+        c.action === "omnibox" &&
+        (c.label.toLowerCase().includes(lower) ||
+          c.description.toLowerCase().includes(lower) ||
+          "describe workflow agent".includes(lower)),
+    );
+
     const matchedPages = PAGE_ITEMS.filter(
       (p) =>
         p.label.toLowerCase().includes(lower) ||
@@ -239,7 +253,7 @@ export function CommandPalette({ open, onClose, recentItems }: CommandPalettePro
         icon: GitBranch,
       }));
 
-    return [...runItems, ...workflowItems, ...matchedPages];
+    return [...matchedActions, ...runItems, ...workflowItems, ...matchedPages];
   }, [query, recentItems, apiResults]);
 
   // Group items by category, preserving order
@@ -275,6 +289,18 @@ export function CommandPalette({ open, onClose, recentItems }: CommandPalettePro
   }, [activeIndex]);
 
   function handleSelect(item: CommandItem) {
+    if (item.action === "omnibox") {
+      // Go to the Overview, then focus the omnibox once it's mounted.
+      navigate("/");
+      onClose();
+      // Defer so the Overview (and its omnibox listener) has mounted.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          window.dispatchEvent(new CustomEvent(OMNIBOX_FOCUS_EVENT));
+        });
+      });
+      return;
+    }
     const url = item.link + (item.search ?? "");
     navigate(url);
     onClose();
