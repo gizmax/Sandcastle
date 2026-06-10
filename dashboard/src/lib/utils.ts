@@ -115,3 +115,17 @@ export function formatRelativeTime(date: string | Date): string {
   if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
   return `${Math.floor(diffSec / 86400)}d ago`;
 }
+
+/**
+ * Format a mesh node heartbeat age (seconds) as a compact "Ns/Nm/Nh/Nd ago"
+ * string. Null/undefined means the node has never heartbeated.
+ */
+export function formatHeartbeatAge(seconds: number | null): string {
+  if (seconds === null || seconds === undefined) return "never";
+  if (seconds < 60) return `${Math.round(seconds)}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}

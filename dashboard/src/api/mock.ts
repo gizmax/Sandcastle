@@ -6513,6 +6513,47 @@ const routes: MockRoute[] = [
     handler: () => MOCK_STATS,
   },
   {
+    match: /^\/mesh\/nodes$/,
+    method: "GET",
+    handler: () => ({
+      enabled: true,
+      heartbeat_seconds: 15,
+      local_capabilities: ["code"],
+      nodes: [
+        {
+          id: "mesh-node-spark",
+          name: "dgx-spark",
+          base_url: "http://spark.local:8080",
+          capabilities: ["code", "gpu", "spark", "docker"],
+          last_heartbeat: new Date(Date.now() - 4_000).toISOString(),
+          heartbeat_age_seconds: 4,
+          status: "alive",
+          registered_at: new Date(Date.now() - 86_400_000).toISOString(),
+        },
+        {
+          id: "mesh-node-mac",
+          name: "mac-mini",
+          base_url: "http://mac-mini.local:8080",
+          capabilities: ["code", "browser"],
+          last_heartbeat: new Date(Date.now() - 11_000).toISOString(),
+          heartbeat_age_seconds: 11,
+          status: "alive",
+          registered_at: new Date(Date.now() - 43_200_000).toISOString(),
+        },
+        {
+          id: "mesh-node-server",
+          name: "hetzner-1",
+          base_url: "http://10.0.0.7:8080",
+          capabilities: ["code", "docker"],
+          last_heartbeat: new Date(Date.now() - 312_000).toISOString(),
+          heartbeat_age_seconds: 312,
+          status: "dead",
+          registered_at: new Date(Date.now() - 172_800_000).toISOString(),
+        },
+      ],
+    }),
+  },
+  {
     match: /^\/stats\/forecast$/,
     method: "GET",
     handler: () => {
