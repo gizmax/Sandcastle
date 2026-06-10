@@ -51,6 +51,14 @@ async def start_scheduler() -> None:
             replace_existing=True,
             misfire_grace_time=30,
         )
+        # Register nightly self-healing pass (no-op unless healer_enabled)
+        scheduler.add_job(
+            _run_healer_nightly,
+            trigger=CronTrigger(hour=3, minute=30, timezone=timezone.utc),
+            id="healer_nightly_pass",
+            replace_existing=True,
+            misfire_grace_time=3600,
+        )
         logger.info("Scheduler started")
 
 
@@ -243,6 +251,19 @@ async def _run_scheduled_workflow(
                     logger.info(f"Marked stuck run {run_id} as FAILED")
         except Exception as cleanup_err:
             logger.error(f"Failed to mark run {run_id} as FAILED: {cleanup_err}")
+
+
+async def _run_healer_nightly() -> None:
+    """Run the nightly self-healing pass when the healer is enabled."""
+    if not settings.healer_enabled:
+        return
+    try:
+        from sandcastle.engine.healer import run_healer_pass
+
+        summary = await run_healer_pass()
+        logger.info(f"Nightly healer pass: {summary}")
+    except Exception as e:
+        logger.error(f"Nightly healer pass failed: {e}", exc_info=True)
 
 
 async def _check_approval_timeouts() -> None:

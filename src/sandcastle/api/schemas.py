@@ -718,6 +718,38 @@ class DeadLetterItemResponse(BaseModel):
     resolved_by: str | None = None
 
 
+class HealAttemptResponse(BaseModel):
+    """A self-healing attempt for a dead-letter failure."""
+
+    id: str
+    dead_letter_id: str
+    workflow_name: str
+    step_id: str
+    diagnosis: str = ""
+    confidence: float = 0.0
+    diff: str | None = None
+    from_version: int | None = None
+    to_version: int | None = None
+    status: str
+    approval_id: str | None = None
+    applied_at: datetime | None = None
+    created_at: datetime | None = None
+
+
+class HealerRunSummaryResponse(BaseModel):
+    """Summary of a healer pass."""
+
+    scanned: int = 0
+    proposed: int = 0
+    auto_applied: int = 0
+    rejected: int = 0
+    failed: int = 0
+    skipped: int = 0
+    published_approved: int = 0
+    resolved: int = 0
+    regressed: int = 0
+
+
 class ExperimentResponse(BaseModel):
     """AutoPilot experiment details."""
 
