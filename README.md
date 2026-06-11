@@ -452,7 +452,32 @@ async with AsyncSandcastleClient() as client:
 
 ### CLI
 
-The `sandcastle` command gives you full control from the terminal:
+The `sandcastle` command gives you full control from the terminal. Its help is
+organized to mirror the dashboard's **Build / Run / Improve / Operate** mental
+model — run `sandcastle help` for the grouped command list, or just
+`sandcastle` for a short getting-started guide:
+
+```text
+BUILD     build / new / generate, templates, hub, publish-mcp, publish-skills, describe, lint, owners
+RUN       run, status, logs, ls, runs, cancel, replay, fork, schedule, approve, reject
+IMPROVE   eval, autopilot
+OPERATE   serve, worker, health, doctor, mcp, share, dlq, violations, tools, db, update, rollback
+SETUP     init, keys, providers
+```
+
+The fastest way to start mirrors the dashboard omnibox — describe what your
+agent should do, then run it:
+
+```bash
+# Describe a workflow in plain language (build/new are aliases of `generate`)
+sandcastle build "enrich inbound leads and post a summary to Slack"
+
+# Run it
+sandcastle run lead-enrichment -i target_url=https://example.com
+```
+
+Everything below is still available as before (these aliases only ADD to the
+flat command list — nothing was renamed or removed):
 
 ```bash
 # Interactive setup wizard (API keys, .env, workflows/)
@@ -460,6 +485,9 @@ sandcastle init
 
 # Start the server (API + dashboard on one port)
 sandcastle serve
+
+# Generate a workflow (the classic form; `build` / `new` are friendly aliases)
+sandcastle generate -d "enrich inbound leads" -o workflows/leads.yaml
 
 # Run a workflow
 sandcastle run lead-enrichment -i target_url=https://example.com

@@ -111,6 +111,26 @@ vi.mock("@/hooks/usePinnedWorkflows", () => ({
   }),
 }));
 
+// Density context: OverviewBento reads effectiveDensity for the calm/expand
+// default. Preserve the real UiModeProvider/useDensity (the OnboardingWizard
+// tests exercise actual density selection) and only stub useDensity's default
+// when OverviewBento is rendered without a provider.
+vi.mock("@/contexts/UiModeContext", async () => {
+  const actual = await vi.importActual<typeof import("@/contexts/UiModeContext")>(
+    "@/contexts/UiModeContext",
+  );
+  return {
+    ...actual,
+    useDensity: () => {
+      try {
+        return actual.useDensity();
+      } catch {
+        return { effectiveDensity: "Standard" } as ReturnType<typeof actual.useDensity>;
+      }
+    },
+  };
+});
+
 vi.mock("@/hooks/useEventStreamContext", () => ({
   useEventStreamContext: () => ({
     subscribe: vi.fn(() => vi.fn()),
@@ -648,7 +668,7 @@ describe("OnboardingWizard (guided beginner flow)", () => {
     expect(screen.getByText("Ready!")).toBeInTheDocument();
   });
 
-  it("Skip keeps Full mode and marks onboarding done", async () => {
+  it("Skip selects Everything density and marks onboarding done", async () => {
     mockApi.get.mockResolvedValue(okResponse({}));
 
     await act(async () => {
@@ -665,10 +685,10 @@ describe("OnboardingWizard (guided beginner flow)", () => {
 
     expect(mockNavigate).toHaveBeenCalledWith("/");
     expect(localStorage.getItem("sandcastle-onboarding-done")).toBe("true");
-    expect(localStorage.getItem("sandcastle-ui-mode")).toBe("full");
+    expect(localStorage.getItem("sandcastle-ui-mode")).toBe("Everything");
   });
 
-  it("completing the guided flow opts into Lite mode", async () => {
+  it("completing the guided flow opts into Standard density", async () => {
     mockApi.get.mockImplementation((url: string) => {
       if (url === "/health/providers") {
         return Promise.resolve(okResponse({
@@ -750,6 +770,6 @@ describe("OnboardingWizard (guided beginner flow)", () => {
 
     expect(mockOnFinish).toHaveBeenCalledTimes(1);
     expect(localStorage.getItem("sandcastle-onboarding-done")).toBe("true");
-    expect(localStorage.getItem("sandcastle-ui-mode")).toBe("lite");
+    expect(localStorage.getItem("sandcastle-ui-mode")).toBe("Standard");
   });
 });

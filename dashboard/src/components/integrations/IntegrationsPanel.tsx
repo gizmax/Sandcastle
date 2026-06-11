@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   Link2,
   Blocks,
+  Plug,
   KeyRound,
 } from "lucide-react";
 import { api } from "@/api/client";
@@ -72,7 +73,14 @@ const CATEGORY_TAB_LABELS: Record<Category, string> = {
 
 const POPULAR_TOOLS = ["slack", "openai", "github", "postgresql"];
 
-export default function IntegrationsPage() {
+/**
+ * Tool catalog + credential management. Rendered as the "Integrations" tab in
+ * the Settings hub and re-exported as the legacy IntegrationsPage for tests.
+ *
+ * @param embedded - when true the panel drops its own page <h1>/subtitle (the
+ *   tab bar supplies the heading) to avoid a duplicate title inside the hub.
+ */
+export default function IntegrationsPanel({ embedded = false }: { embedded?: boolean } = {}) {
   const [tools, setTools] = useState<Tool[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -185,12 +193,14 @@ export default function IntegrationsPage() {
   return (
     <div className="space-y-4 sm:space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-xl sm:text-2xl font-semibold font-display tracking-tight text-foreground">Integrations</h1>
-        <p className="mt-1 text-sm text-muted">
-          Connect your workflows to external services and APIs.
-        </p>
-      </div>
+      {!embedded && (
+        <div>
+          <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">Integrations</h1>
+          <p className="mt-1 text-sm text-muted">
+            Connect your workflows to external services and APIs.
+          </p>
+        </div>
+      )}
 
       {/* Context banner */}
       {unconfiguredTools.length > 0 && (
@@ -279,7 +289,7 @@ export default function IntegrationsPage() {
                   onClick={() => setSelectedTool(tool)}
                   className={cn(
                     "relative flex items-start gap-4 rounded-xl border border-border bg-surface p-4",
-                    "text-left transition-settle",
+                    "text-left transition-all duration-200",
                     "hover:border-accent/40 hover:shadow-md hover:shadow-accent/5",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
                   )}
@@ -336,9 +346,9 @@ export default function IntegrationsPage() {
       ) : (
         <section>
           <EmptyState
-            variant="castle"
+            icon={Plug}
             title="No integrations configured yet"
-            description="Connect your workflows to the world outside the castle walls."
+            description="Connect your workflows to external services."
           />
           {/* Popular quick-start cards */}
           <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 max-w-3xl mx-auto">
@@ -354,7 +364,7 @@ export default function IntegrationsPage() {
                     onClick={() => setSelectedTool(tool)}
                     className={cn(
                       "flex flex-col items-center gap-2 rounded-xl border border-border bg-surface p-4",
-                      "transition-settle",
+                      "transition-all duration-200",
                       "hover:border-accent/40 hover:shadow-md hover:shadow-accent/5",
                       "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
                     )}
@@ -439,7 +449,7 @@ export default function IntegrationsPage() {
                   onClick={() => setSelectedTool(tool)}
                   className={cn(
                     "flex items-start gap-3 rounded-xl border border-border bg-surface p-3",
-                    "text-left transition-settle",
+                    "text-left transition-all duration-200",
                     "hover:border-accent/40 hover:shadow-md hover:shadow-accent/5",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
                   )}

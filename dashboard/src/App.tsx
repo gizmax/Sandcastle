@@ -4,7 +4,7 @@ import { Layout } from "@/components/layout/Layout";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { EventStreamProvider } from "@/components/providers/EventStreamProvider";
-import { UiModeProvider, useUiMode } from "@/contexts/UiModeContext";
+import { UiModeProvider, useDensity, type Density } from "@/contexts/UiModeContext";
 import { useAuth } from "@/hooks/useAuth";
 import { AuthGate } from "@/components/auth/AuthGate";
 import { usePageTracking } from "@/hooks/usePageTracking";
@@ -29,10 +29,12 @@ const OptimizerPage = lazyWithRetry(() => import("@/pages/OptimizerPage"), "opti
 const Schedules = lazyWithRetry(() => import("@/pages/Schedules"), "schedules");
 const ScheduleMonitorPage = lazyWithRetry(() => import("@/pages/ScheduleMonitorPage"), "schedule-monitor");
 const DeadLetterPage = lazyWithRetry(() => import("@/pages/DeadLetterPage"), "dead-letter");
-const ApiKeysPage = lazyWithRetry(() => import("@/pages/ApiKeysPage"), "api-keys");
 const SettingsPage = lazyWithRetry(() => import("@/pages/SettingsPage"), "settings");
 const TemplatesPage = lazyWithRetry(() => import("@/pages/TemplatesPage"), "templates");
-const IntegrationsPage = lazyWithRetry(() => import("@/pages/IntegrationsPage"), "integrations");
+// NOTE: ApiKeysPage and IntegrationsPage are no longer mounted as standalone
+// routes — their paths redirect into the Settings hub (/settings?tab=keys|
+// integrations). The page components remain in src/pages for the downstream
+// Settings agent to render as tab content.
 const EvaluationsPage = lazyWithRetry(() => import("@/pages/EvaluationsPage"), "evaluations");
 const EvolutionPage = lazyWithRetry(() => import("@/pages/EvolutionPage"), "evolution");
 const NightShiftPage = lazyWithRetry(() => import("@/pages/NightShiftPage"), "night-shift");
@@ -73,11 +75,30 @@ function FirstRunGuard() {
   return null;
 }
 
-/** In Lite mode, advanced pages are hidden - redirect their routes to Overview. */
-function LiteGuard({ children }: { children: React.ReactNode }) {
-  const { isLite } = useUiMode();
-  if (isLite) return <Navigate to="/" replace />;
+/**
+ * Density-tier route guard. Pages in the IMPROVE + OPERATE nav groups require
+ * at least the given density tier; below it, the route redirects to Home.
+ * Default `min` is "Standard" (the tier at which IMPROVE/OPERATE become visible).
+ */
+function TierGuard({
+  children,
+  min = "Standard",
+}: {
+  children: React.ReactNode;
+  min?: Density;
+}) {
+  const { atLeast } = useDensity();
+  if (!atLeast(min)) return <Navigate to="/" replace />;
   return <>{children}</>;
+}
+
+/**
+ * Settings hub redirect. Legacy standalone pages (/api-keys, /integrations,
+ * /providers) now live as tabs inside SettingsPage. Preserve old links by
+ * 301-style redirecting to /settings?tab=<tab>.
+ */
+function SettingsRedirect({ tab }: { tab: string }) {
+  return <Navigate to={`/settings?tab=${tab}`} replace />;
 }
 
 function NotFound() {
@@ -142,33 +163,55 @@ export default function App() {
             {/* Mission Control lives outside Layout (full-bleed live run theater) */}
             <Route path="/runs/:id/live" element={<PageBoundary name="mission-control"><MissionControlPage /></PageBoundary>} />
 
+            {/*
+             * ============================================================
+             * ROUTE MAP — grouped by the new 3-verb IA (see Sidebar.tsx).
+             * HOME / BUILD / RUN / IMPROVE* / OPERATE* / SETTINGS  (*Standard+ gated)
+             * REDIRECTS: /api-keys|/integrations|/providers -> /settings?tab=...
+             * ============================================================
+             */}
             <Route element={<Layout />}>
+              {/* HOME */}
               <Route path="/" element={<PageBoundary name="overview"><Overview /></PageBoundary>} />
+
+              {/* RUN */}
               <Route path="/runs" element={<PageBoundary name="runs"><Runs /></PageBoundary>} />
               <Route path="/runs/compare" element={<PageBoundary name="run-compare"><RunComparePage /></PageBoundary>} />
               <Route path="/runs/:id" element={<PageBoundary name="run-detail"><RunDetailPage /></PageBoundary>} />
+              <Route path="/approvals" element={<PageBoundary name="approvals"><ApprovalsPage /></PageBoundary>} />
+              <Route path="/schedules" element={<PageBoundary name="schedules"><Schedules /></PageBoundary>} />
+
+              {/* BUILD */}
               <Route path="/workflows" element={<PageBoundary name="workflows"><Workflows /></PageBoundary>} />
               <Route path="/workflows/builder" element={<PageBoundary name="workflow-builder"><WorkflowBuilderPage /></PageBoundary>} />
               <Route path="/workflows/:name" element={<PageBoundary name="workflow-detail"><WorkflowDetailPage /></PageBoundary>} />
               <Route path="/templates" element={<PageBoundary name="templates"><TemplatesPage /></PageBoundary>} />
-              <Route path="/integrations" element={<PageBoundary name="integrations"><IntegrationsPage /></PageBoundary>} />
-              <Route path="/approvals" element={<PageBoundary name="approvals"><ApprovalsPage /></PageBoundary>} />
-              <Route path="/evaluations" element={<LiteGuard><PageBoundary name="evaluations"><EvaluationsPage /></PageBoundary></LiteGuard>} />
-              <Route path="/autopilot" element={<LiteGuard><PageBoundary name="autopilot"><AutoPilotPage /></PageBoundary></LiteGuard>} />
-              <Route path="/evolution" element={<LiteGuard><PageBoundary name="evolution"><EvolutionPage /></PageBoundary></LiteGuard>} />
-              <Route path="/night-shift" element={<LiteGuard><PageBoundary name="night-shift"><NightShiftPage /></PageBoundary></LiteGuard>} />
-              <Route path="/violations" element={<LiteGuard><PageBoundary name="violations"><ViolationsPage /></PageBoundary></LiteGuard>} />
-              <Route path="/optimizer" element={<LiteGuard><PageBoundary name="optimizer"><OptimizerPage /></PageBoundary></LiteGuard>} />
-              <Route path="/schedules" element={<PageBoundary name="schedules"><Schedules /></PageBoundary>} />
-              <Route path="/schedule-monitor" element={<LiteGuard><PageBoundary name="schedule-monitor"><ScheduleMonitorPage /></PageBoundary></LiteGuard>} />
-              <Route path="/dead-letter" element={<LiteGuard><PageBoundary name="dead-letter"><DeadLetterPage /></PageBoundary></LiteGuard>} />
-              <Route path="/api-keys" element={<LiteGuard><PageBoundary name="api-keys"><ApiKeysPage /></PageBoundary></LiteGuard>} />
+
+              {/* IMPROVE — Standard+ */}
+              <Route path="/evolution" element={<TierGuard><PageBoundary name="evolution"><EvolutionPage /></PageBoundary></TierGuard>} />
+              <Route path="/autopilot" element={<TierGuard><PageBoundary name="autopilot"><AutoPilotPage /></PageBoundary></TierGuard>} />
+              <Route path="/optimizer" element={<TierGuard><PageBoundary name="optimizer"><OptimizerPage /></PageBoundary></TierGuard>} />
+              <Route path="/evaluations" element={<TierGuard><PageBoundary name="evaluations"><EvaluationsPage /></PageBoundary></TierGuard>} />
+              <Route path="/memory" element={<TierGuard><PageBoundary name="memory"><MemoryPage /></PageBoundary></TierGuard>} />
+              <Route path="/night-shift" element={<TierGuard><PageBoundary name="night-shift"><NightShiftPage /></PageBoundary></TierGuard>} />
+              <Route path="/time-machine" element={<TierGuard><PageBoundary name="time-machine"><TimeMachinePage /></PageBoundary></TierGuard>} />
+
+              {/* OPERATE — Standard+ */}
+              <Route path="/system-health" element={<TierGuard><PageBoundary name="system-health"><SystemHealthPage /></PageBoundary></TierGuard>} />
+              <Route path="/dead-letter" element={<TierGuard><PageBoundary name="dead-letter"><DeadLetterPage /></PageBoundary></TierGuard>} />
+              <Route path="/violations" element={<TierGuard><PageBoundary name="violations"><ViolationsPage /></PageBoundary></TierGuard>} />
+              <Route path="/compliance" element={<TierGuard><PageBoundary name="compliance"><CompliancePage /></PageBoundary></TierGuard>} />
+              <Route path="/schedule-monitor" element={<TierGuard><PageBoundary name="schedule-monitor"><ScheduleMonitorPage /></PageBoundary></TierGuard>} />
+              <Route path="/fleet" element={<TierGuard><PageBoundary name="fleet"><FleetPage /></PageBoundary></TierGuard>} />
+
+              {/* SETTINGS hub — supports ?tab=general|keys|providers|integrations|advanced. */}
               <Route path="/settings" element={<PageBoundary name="settings"><SettingsPage /></PageBoundary>} />
-              <Route path="/system-health" element={<PageBoundary name="system-health"><SystemHealthPage /></PageBoundary>} />
-              <Route path="/fleet" element={<PageBoundary name="fleet"><FleetPage /></PageBoundary>} />
-              <Route path="/compliance" element={<LiteGuard><PageBoundary name="compliance"><CompliancePage /></PageBoundary></LiteGuard>} />
-              <Route path="/memory" element={<LiteGuard><PageBoundary name="memory"><MemoryPage /></PageBoundary></LiteGuard>} />
-              <Route path="/time-machine" element={<LiteGuard><PageBoundary name="time-machine"><TimeMachinePage /></PageBoundary></LiteGuard>} />
+
+              {/* REDIRECTS — old standalone routes fold into the Settings hub. */}
+              <Route path="/api-keys" element={<SettingsRedirect tab="keys" />} />
+              <Route path="/integrations" element={<SettingsRedirect tab="integrations" />} />
+              <Route path="/providers" element={<SettingsRedirect tab="providers" />} />
+
               <Route path="*" element={<NotFound />} />
             </Route>
           </Routes>

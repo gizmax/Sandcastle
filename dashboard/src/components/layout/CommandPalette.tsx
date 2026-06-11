@@ -24,11 +24,13 @@ import {
   Inbox,
   Calendar,
   Clock,
+  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fuzzyScore } from "@/lib/fuzzy";
 import { api } from "@/api/client";
 import { THEME_TOGGLE_EVENT } from "@/hooks/useTheme";
+import { OMNIBOX_FOCUS_EVENT } from "@/components/overview/Omnibox";
 import type { RecentItem } from "@/hooks/useRecentItems";
 
 /* ------------------------------------------------------------------ */
@@ -53,6 +55,8 @@ interface CommandItem {
   icon: React.ElementType;
   /** Side-effect command (e.g. theme toggle) - runs instead of navigation */
   perform?: () => void;
+  /** Special non-navigation action. "omnibox" focuses the Overview omnibox. */
+  action?: "omnibox";
 }
 
 
@@ -67,6 +71,7 @@ interface CommandPaletteProps {
 /* ------------------------------------------------------------------ */
 
 const ACTION_COMMANDS: CommandItem[] = [
+  { category: "action", label: "✨ Describe a workflow…", description: "Build an agent from a sentence", link: "/", action: "omnibox", icon: Sparkles },
   { category: "action", label: "/run", description: "Quick run a workflow", link: "/workflows", icon: PlayCircle },
   { category: "action", label: "/approve", description: "Go to pending approvals", link: "/approvals", icon: ShieldCheck },
   { category: "action", label: "/failures", description: "Go to failed runs", link: "/runs", search: "?status=failed", icon: AlertTriangle },
@@ -243,8 +248,9 @@ export function CommandPalette({ open, onClose, recentItems }: CommandPalettePro
       return filtered;
     }
 
-    // Empty query: show recent + pages
+    // Empty query: lead with the omnibox action, then recent + pages
     if (lower.length === 0) {
+      const omniboxAction = ACTION_COMMANDS.find((c) => c.action === "omnibox");
       const recent: CommandItem[] = recentItems.map((ri) => ({
         category: "recent" as const,
         label: ri.label,
@@ -252,7 +258,7 @@ export function CommandPalette({ open, onClose, recentItems }: CommandPalettePro
         link: ri.id,
         icon: iconForRecent(ri),
       }));
-      return [...recent, ...PAGE_ITEMS];
+      return [...(omniboxAction ? [omniboxAction] : []), ...recent, ...PAGE_ITEMS];
     }
 
     // Search mode: combine API results + fuzzy page/action matches
@@ -333,6 +339,18 @@ export function CommandPalette({ open, onClose, recentItems }: CommandPalettePro
     if (item.perform) {
       item.perform();
       onClose();
+      return;
+    }
+    if (item.action === "omnibox") {
+      // Go to the Overview, then focus the omnibox once it's mounted.
+      navigate("/");
+      onClose();
+      // Defer so the Overview (and its omnibox listener) has mounted.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          window.dispatchEvent(new CustomEvent(OMNIBOX_FOCUS_EVENT));
+        });
+      });
       return;
     }
     const url = item.link + (item.search ?? "");

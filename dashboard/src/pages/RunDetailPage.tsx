@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { XCircle, GitCompareArrows, Trash2, Download, Copy, FileDown, ChevronDown, ArrowLeft, Sparkles, AlertTriangle, AlertOctagon, Shield, ChevronRight, Share2, ExternalLink, Radar } from "lucide-react";
+import { XCircle, GitCompareArrows, Trash2, Download, Copy, FileDown, ChevronDown, ArrowLeft, Sparkles, AlertTriangle, AlertOctagon, Shield, ChevronRight, Share2, ExternalLink, Radar, RotateCcw, FlaskConical, GitFork } from "lucide-react";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useRuns } from "@/hooks/useRuns";
 import { useEventStreamContext } from "@/hooks/useEventStreamContext";
@@ -14,6 +14,8 @@ import { LiveStream } from "@/components/runs/LiveStream";
 import { Odometer } from "@/components/ui/Odometer";
 import { RunTree } from "@/components/runs/RunTree";
 import { ReplayForkModal } from "@/components/runs/ReplayForkModal";
+import { TryModelModal } from "@/components/runs/TryModelModal";
+import { ActionMenu, type ActionMenuItem } from "@/components/shared/ActionMenu";
 import { PipelineViz } from "@/components/runs/PipelineViz";
 import { StepFlamegraph } from "@/components/runs/StepFlamegraph";
 import { BudgetBar } from "@/components/shared/BudgetBar";
@@ -80,6 +82,8 @@ export default function RunDetailPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<"replay" | "fork">("replay");
   const [modalStepId, setModalStepId] = useState("");
+  const [tryModelOpen, setTryModelOpen] = useState(false);
+  const [tryModelSubmitting, setTryModelSubmitting] = useState(false);
   const [celebrationOpen, setCelebrationOpen] = useState(false);
   const [celebrationMilestone, setCelebrationMilestone] = useState<number | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
@@ -407,6 +411,44 @@ export default function RunDetailPage() {
     setModalOpen(true);
   }, []);
 
+  // First failed step, used to surface a one-click "Replay failed step" action.
+  const failedStepId = useMemo(
+    () => run?.steps?.find((s) => s.status === "failed")?.step_id ?? null,
+    [run]
+  );
+  // Earliest step id, used as the "from" for a full re-run via replay.
+  const firstStepId = useMemo(() => run?.steps?.[0]?.step_id ?? null, [run]);
+
+  // Re-run the whole workflow: replay from the first step with the same inputs.
+  const handleRerun = useCallback(() => {
+    if (!firstStepId) return;
+    setModalStepId(firstStepId);
+    setModalMode("replay");
+    setModalOpen(true);
+  }, [firstStepId]);
+
+  // "Try another model": fork this run with a model override on the chosen step.
+  const handleTryModelSubmit = useCallback(
+    async ({ from_step, model }: { from_step: string; model: string }) => {
+      if (!id) return;
+      setTryModelSubmitting(true);
+      const res = await api.post<{ new_run_id: string }>(`/runs/${id}/fork`, {
+        from_step,
+        changes: { model },
+      });
+      setTryModelSubmitting(false);
+      setTryModelOpen(false);
+      if (res.error) {
+        toast.error(`Failed: ${res.error.message}`);
+      } else if (res.data?.new_run_id) {
+        toast.success("Forked with new model");
+        // Land on a comparison of the original vs the new model run.
+        navigate(`/runs/compare?run_a=${id}&run_b=${res.data.new_run_id}`);
+      }
+    },
+    [id, navigate]
+  );
+
   const handleFork = useCallback((stepId: string) => {
     setModalStepId(stepId);
     setModalMode("fork");
@@ -535,20 +577,77 @@ export default function RunDetailPage() {
             )}
           </div>
           <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-            {run.parent_run_id && (
-              <button
-                onClick={() => navigate(`/runs/compare?run_a=${run.parent_run_id}&run_b=${run.run_id}`)}
-                className={cn(
-                  "flex items-center gap-1.5 rounded-lg border border-accent/30 px-3 py-1.5",
-                  "text-xs sm:text-sm font-medium text-accent",
-                  "hover:bg-accent/10 transition-colors"
-                )}
-              >
-                <GitCompareArrows className="h-4 w-4" />
-                <span className="hidden sm:inline">Compare with Parent</span>
-                <span className="sm:hidden">Compare</span>
-              </button>
-            )}
+            {/*
+              Contextual run actions — power features surfaced ON the run object.
+              Primary adapts to state (failed -> "Replay failed step", otherwise
+              "Re-run"); the rest live in the accessible overflow menu. Future
+              actions ("Heal failure", "Improve overnight", time-machine replay)
+              slot into `runActions` as one extra line each — see ActionMenu.
+            */}
+            {!isRunning && (() => {
+              const primary: ActionMenuItem = failedStepId
+                ? {
+                    id: "replay-failed",
+                    label: "Replay failed step",
+                    icon: RotateCcw,
+                    onSelect: () => handleReplay(failedStepId),
+                  }
+                : {
+                    id: "rerun",
+                    label: "Re-run",
+                    icon: RotateCcw,
+                    disabled: !firstStepId,
+                    onSelect: handleRerun,
+                  };
+
+              const runActions: ActionMenuItem[] = [];
+              // If the primary is "replay failed step", still offer a full re-run.
+              if (failedStepId && firstStepId) {
+                runActions.push({
+                  id: "rerun",
+                  label: "Re-run from start",
+                  icon: RotateCcw,
+                  onSelect: handleRerun,
+                });
+              }
+              runActions.push({
+                id: "try-model",
+                label: "Try another model",
+                icon: FlaskConical,
+                description: "Fork this run on a different model and compare",
+                disabled: !run.steps || run.steps.length === 0,
+                onSelect: () => setTryModelOpen(true),
+              });
+              if (firstStepId) {
+                runActions.push({
+                  id: "fork",
+                  label: "Fork with changes",
+                  icon: GitFork,
+                  description: "Re-run with a tweaked prompt or params",
+                  onSelect: () => handleFork(firstStepId),
+                });
+              }
+              if (run.parent_run_id) {
+                runActions.push({
+                  id: "compare-parent",
+                  label: "Compare with parent",
+                  icon: GitCompareArrows,
+                  onSelect: () =>
+                    navigate(`/runs/compare?run_a=${run.parent_run_id}&run_b=${run.run_id}`),
+                });
+              }
+              runActions.push({
+                id: "compare-other",
+                label: "Compare with another run...",
+                icon: GitCompareArrows,
+                description: "Pick a second run to diff side by side",
+                onSelect: () => navigate(`/runs/compare?run_a=${run.run_id}`),
+              });
+              // ── Extension point: add future contextual run actions here. ──
+              // runActions.push({ id: "heal", label: "Heal failure", icon: HeartPulse, onSelect: ... });
+
+              return <ActionMenu primary={primary} items={runActions} menuLabel="Run actions" />;
+            })()}
             {isRunning && (
               <button
                 onClick={() => navigate(`/runs/${run.run_id}/live`)}
@@ -829,6 +928,19 @@ export default function RunDetailPage() {
                 ? "1 provider"
                 : `${providerStats.length} providers, failover-ready`}
             </span>
+            {/* Test a different model on this real run, right where cost lives. */}
+            {!isRunning && run.steps && run.steps.length > 0 && (
+              <button
+                onClick={() => setTryModelOpen(true)}
+                className={cn(
+                  "ml-auto flex items-center gap-1.5 rounded-lg border border-accent/30 px-2.5 py-1",
+                  "text-xs font-medium text-accent hover:bg-accent/10 transition-colors"
+                )}
+              >
+                <FlaskConical className="h-3.5 w-3.5" />
+                Try another model
+              </button>
+            )}
           </div>
           <div className="flex flex-wrap gap-2">
             {providerStats.map((p) => (
@@ -992,6 +1104,17 @@ export default function RunDetailPage() {
         stepId={modalStepId}
         mode={modalMode}
         onSubmit={handleModalSubmit}
+      />
+
+      {/* Try-another-model Modal (forks the run with a model override) */}
+      <TryModelModal
+        open={tryModelOpen}
+        onClose={() => setTryModelOpen(false)}
+        runId={run.run_id}
+        steps={(run.steps ?? []).map((s) => ({ step_id: s.step_id, model: s.model }))}
+        originalCostUsd={run.total_cost_usd}
+        submitting={tryModelSubmitting}
+        onSubmit={handleTryModelSubmit}
       />
 
       {/* Celebration Modal */}
