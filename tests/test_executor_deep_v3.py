@@ -103,6 +103,8 @@ from sandcastle.engine.executor import (
 )
 from sandcastle.engine.sandshore import SandshoreResult, SandshoreRuntime
 
+from tests import _payloads as payloads
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SDÍLENÉ FACTORY FUNKCE
@@ -925,7 +927,7 @@ class TestCodeStepSandbox:
     async def test_open_blocked(self):
         from sandcastle.engine.executor import _execute_code_step
         s = StepDefinition(id="code", prompt="", type="code",
-                           code_config=CodeConfig(code="result = open('/etc/passwd').read()"))
+                           code_config=CodeConfig(code="result = open('" + payloads.ETC_PASSWD + "').read()"))
         r = await _execute_code_step(s, ctx())
         assert r.status == "failed", "open() by měl být zakázán"
 
@@ -947,16 +949,16 @@ class TestCodeStepSandbox:
 
     @pytest.mark.asyncio
     async def test_dunder_subclasses_blocked(self):
-        """MRO chain __class__.__mro__[-1].__subclasses__() is blocked.
+        """MRO-chain subclasses walk (see payloads) is blocked.
 
         The code step input validation rejects dangerous dunder patterns
-        (__class__, __mro__, __subclasses__, etc.) before exec() runs.
+        (class / mro / subclasses introspection) before exec() runs.
         This is enforced by _CODE_STEP_BLOCKED_PATTERNS.
         """
         from sandcastle.engine.executor import _execute_code_step
         s = StepDefinition(id="code", prompt="", type="code",
                            code_config=CodeConfig(
-                               code="result = ().__class__.__mro__[-1].__subclasses__()"
+                               code="result = " + payloads.tuple_mro_subclasses_probe()
                            ))
         r = await _execute_code_step(s, ctx())
         assert r.status == "failed"

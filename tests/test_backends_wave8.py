@@ -57,6 +57,8 @@ from sandcastle.engine.sandshore import (
     pool_stats,
 )
 
+from tests import _payloads as payloads
+
 
 # ===========================================================================
 # 1. _validate_runner_file - extended edge cases
@@ -123,7 +125,7 @@ class TestValidateToolFilename:
 
     def test_rejects_forward_slash(self):
         with pytest.raises(ValueError, match="contains path separator"):
-            _validate_tool_filename("../../etc/passwd")
+            _validate_tool_filename(payloads.PATH_TRAVERSAL)
 
     def test_rejects_backslash(self):
         with pytest.raises(ValueError, match="contains path separator"):
@@ -152,7 +154,7 @@ class TestValidateToolFilename:
 
     def test_rejects_traversal_in_middle(self):
         with pytest.raises(ValueError, match="contains path separator"):
-            _validate_tool_filename("tools/../../../etc/cron.d/backdoor")
+            _validate_tool_filename(payloads.TOOL_TRAVERSAL_CRON_PREFIXED)
 
     def test_rejects_single_slash(self):
         with pytest.raises(ValueError, match="contains path separator"):
@@ -247,7 +249,7 @@ class TestLocalBackendToolValidation:
                     envs={},
                     use_claude_runner=True,
                     timeout=5,
-                    tool_files={"../../etc/cron.d/backdoor": "malicious code"},
+                    tool_files={payloads.TOOL_TRAVERSAL_CRON: "malicious code"},
                 ):
                     pass
 
@@ -331,7 +333,7 @@ class TestDockerBackendToolValidation:
                     envs={},
                     use_claude_runner=True,
                     timeout=5,
-                    tool_files={"../../escape.mjs": "malicious"},
+                    tool_files={payloads.TOOL_TRAVERSAL_ESCAPE_MJS: "malicious"},
                 ):
                     pass
 
@@ -426,7 +428,7 @@ class TestCloudflareToolValidation:
                     envs={},
                     use_claude_runner=True,
                     timeout=5,
-                    tool_files={"../etc/passwd": "bad"},
+                    tool_files={payloads.PATH_TRAVERSAL_1: "bad"},
                 ):
                     pass
 
