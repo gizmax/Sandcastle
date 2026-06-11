@@ -1054,12 +1054,16 @@ class TestGenerateEndpoint:
     """POST /generate - missing API key."""
 
     def test_generate_missing_api_key(self):
-        """Without ANTHROPIC_API_KEY => 400 MISSING_API_KEY."""
+        """Without any configured provider => 400 NO_PROVIDER."""
         import os
         orig = os.environ.pop("ANTHROPIC_API_KEY", None)
         from sandcastle.config import settings as _s
         orig_key = _s.anthropic_api_key
+        orig_mistral = _s.mistral_api_key
+        orig_openai = _s.openai_api_key
         _s.anthropic_api_key = None
+        _s.mistral_api_key = None
+        _s.openai_api_key = None
 
         try:
             resp = client.post(
@@ -1067,9 +1071,13 @@ class TestGenerateEndpoint:
                 json={"description": "A simple test workflow"},
             )
             assert resp.status_code == 400
-            assert resp.json()["detail"]["error"]["code"] == "MISSING_API_KEY"
+            assert resp.json()["detail"]["error"]["code"] == "NO_PROVIDER"
         finally:
             _s.anthropic_api_key = orig_key
+            _s.mistral_api_key = orig_mistral
+            _s.openai_api_key = orig_openai
+            if orig is not None:
+                os.environ["ANTHROPIC_API_KEY"] = orig
             if orig:
                 os.environ["ANTHROPIC_API_KEY"] = orig
 

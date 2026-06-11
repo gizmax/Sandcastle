@@ -3716,15 +3716,28 @@ async def estimate_run_cost(request: RunEstimateRequest) -> ApiResponse:
 async def generate_workflow(req: Request, request: WorkflowGenerateRequest) -> ApiResponse:
     """Generate a workflow YAML from a natural language description."""
     await execution_limiter.check(req)
+    from sandcastle.engine.generator import _resolve_api_key
     from sandcastle.engine.generator import generate_workflow as _generate
 
-    if not settings.anthropic_api_key and not os.environ.get("ANTHROPIC_API_KEY"):
+    # Generation works with ANY configured advisor provider (Anthropic, Mistral,
+    # OpenAI, Ollama/local, …) — not just Anthropic. Resolve the active
+    # provider's key; an empty result means no provider is usable, so tell the
+    # user clearly instead of failing mid-generation.
+    try:
+        _has_provider = bool(_resolve_api_key())
+    except Exception:
+        _has_provider = False
+    if not _has_provider:
         raise HTTPException(
             status_code=400,
             detail=ApiResponse(
                 error=ErrorResponse(
-                    code="MISSING_API_KEY",
-                    message="ANTHROPIC_API_KEY is required for workflow generation",
+                    code="NO_PROVIDER",
+                    message=(
+                        "No AI provider is configured. Add a provider key in "
+                        "Settings → Providers (or run a local model) to generate "
+                        "workflows."
+                    ),
                 )
             ).model_dump(),
         )

@@ -1,9 +1,13 @@
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import { Handle, Position, type NodeProps, type Node } from "@xyflow/react";
-import { Bell, Brain, Code, Cpu, ExternalLink, FileSpreadsheet, FileText, FlaskConical, Gauge, GitBranch, Globe, MessageSquare, Monitor, Radio, RefreshCw, Repeat, ShieldCheck, Shuffle, Tag, Wrench, Zap } from "lucide-react";
+import { AlertTriangle, Bell, Brain, Code, Cpu, ExternalLink, FileSpreadsheet, FileText, FlaskConical, Gauge, GitBranch, Globe, MessageSquare, Monitor, Radio, RefreshCw, Repeat, ShieldCheck, Shuffle, Tag, Wrench, Zap } from "lucide-react";
 import type { CSSProperties } from "react";
 import { cn } from "@/lib/utils";
 import { getLedConfig } from "@/lib/statusLed";
+import { HoverCard } from "@/components/shared/HoverCard";
+import { getStepMeta } from "@/lib/builder/stepMetadata";
+import { humanizeStep } from "@/lib/builder/humanizeStep";
+import { validateStep, type StepLike, type ValidationResult } from "@/lib/builder/stepValidation";
 import type { StepType } from "@/components/workflows/StepConfigPanel";
 
 type StepNodeData = {
@@ -83,6 +87,46 @@ const STEP_TYPE_RAW_COLORS: Record<string, string> = {
   browser: "217 70 239",
 };
 
+/**
+ * Build the loosely-typed StepLike that `validateStep` understands from the
+ * flattened node `data`. The canvas node only carries a subset of the full
+ * StepConfig (id/type/model/feature flags + browser mode & start URL), so we
+ * only populate the nested config fields we genuinely have. Anything we cannot
+ * see (prompt, httpConfig.url, codeConfig.code, …) is left UNDEFINED on
+ * purpose, and `nodeValidate` below suppresses required-field rules for those
+ * fields so the node never false-positives on data it simply does not receive.
+ */
+function dataToStepLike(data: StepNodeData): StepLike {
+  return {
+    id: data.label,
+    stepType: data.stepType || "standard",
+    // Only the browser start URL is reliably present on the node `data`.
+    browserConfig: data.browserUrl !== undefined ? { startUrl: data.browserUrl } : null,
+  };
+}
+
+/**
+ * The set of step types whose ONLY required field is reachable from the node's
+ * `data`. For these we can trust `validateStep` to flag a real problem. For
+ * every other type the required field (prompt, url, code, …) is not carried by
+ * the node, so we must not surface a (false) "missing field" badge on the
+ * canvas — the config panel owns that validation.
+ */
+const NODE_CHECKABLE_TYPES = new Set<string>(["browser"]);
+
+/**
+ * Run validation using only what the node `data` actually carries. Returns an
+ * "ok" result for types whose required field the node cannot see, so a valid
+ * node (and any node we simply cannot judge) shows no badge — no nagging.
+ */
+function nodeValidate(data: StepNodeData): ValidationResult {
+  const type = data.stepType || "standard";
+  if (!NODE_CHECKABLE_TYPES.has(type)) {
+    return { level: "ok", issues: [] };
+  }
+  return validateStep(dataToStepLike(data));
+}
+
 function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
   const status = data.status || "pending";
   const led = getLedConfig(status);
@@ -93,10 +137,41 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
   const rawColor = STEP_TYPE_RAW_COLORS[stepType] || "115 115 115";
   const isRunning = status === "running";
 
+  // Step metadata + plain-English description for the hover mini-card.
+  const meta = useMemo(() => getStepMeta(stepType), [stepType]);
+  const humanized = useMemo(
+    () => humanizeStep(dataToStepLike(data)),
+    [data],
+  );
+
+  // Canvas-side validation — only flags problems we can actually see in `data`.
+  const validation = useMemo(() => nodeValidate(data), [data]);
+  const hasIssues = validation.issues.length > 0;
+  const issueLevel = validation.level; // "warning" | "error" | "ok"
+
+  // Hover-card body: what the step IS, plus what THIS node specifically does.
+  const cardBody = useMemo(() => {
+    const lines = [meta.summary];
+    if (humanized && humanized !== meta.summary) lines.push(humanized);
+    return lines;
+  }, [meta.summary, humanized]);
+
+  const cardFooter = useMemo(() => {
+    const lines = [meta.whenToUse];
+    if (meta.costNote) lines.push(meta.costNote);
+    return lines;
+  }, [meta.whenToUse, meta.costNote]);
+
   return (
+    <HoverCard
+      title={`${data.label} · ${meta.label}`}
+      body={cardBody}
+      footer={cardFooter}
+    >
     <div
+      data-testid="step-node"
       className={cn(
-        "rounded-lg border bg-surface px-4 py-3 shadow-sm min-w-[140px]",
+        "relative rounded-lg border bg-surface px-4 py-3 shadow-sm min-w-[140px]",
         "transition-settle",
         isRunning && "step-running-glow border-accent/60",
         selected
@@ -114,6 +189,11 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
         position={Position.Top}
         className="!bg-accent !border-surface !w-2.5 !h-2.5"
       />
+
+      {/* Validation badge — only when this node has a problem we can see. */}
+      {hasIssues && (
+        <ValidationBadge level={issueLevel} issues={validation.issues} />
+      )}
 
       <div className="flex items-center gap-2">
         <div
@@ -211,6 +291,57 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
         className="!bg-accent !border-surface !w-2.5 !h-2.5"
       />
     </div>
+    </HoverCard>
+  );
+}
+
+/**
+ * ValidationBadge — a small, non-alarming "needs attention" marker pinned to
+ * the node's top-right corner. Mirrors the DoctorBadge visual language (rounded
+ * pill, tinted bg + colored icon) but lives inside StepNode and is driven by the
+ * canvas-side `validateStep` result. On hover/focus it reveals each issue's
+ * message and fix hint via a HoverCard so the user knows WHAT and HOW.
+ *
+ * Errors read red, warnings amber; both are muted enough to not alarm during
+ * normal editing. Accessible: the trigger has an aria-label summarising the
+ * count and the HoverCard exposes the details (aria-describedby).
+ */
+function ValidationBadge({
+  level,
+  issues,
+}: {
+  level: ValidationResult["level"];
+  issues: ValidationResult["issues"];
+}) {
+  const isError = level === "error";
+  const label = `${issues.length} ${isError ? "error" : "warning"}${
+    issues.length === 1 ? "" : "s"
+  } — ${isError ? "fix before running" : "review"}`;
+
+  const body = issues.map((issue) =>
+    issue.hint ? `${issue.message} ${issue.hint}` : issue.message,
+  );
+
+  return (
+    <HoverCard
+      title={isError ? "Needs fixing" : "Needs attention"}
+      body={body}
+      side="top"
+      className="absolute -right-2 -top-2 z-10"
+    >
+      <span
+        role="img"
+        aria-label={label}
+        className={cn(
+          "inline-flex h-5 w-5 items-center justify-center rounded-full border shadow-sm",
+          isError
+            ? "border-error/40 bg-error/15 text-error"
+            : "border-warning/40 bg-warning/15 text-warning",
+        )}
+      >
+        <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+      </span>
+    </HoverCard>
   );
 }
 

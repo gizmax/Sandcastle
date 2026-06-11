@@ -468,6 +468,12 @@ class SandshoreRuntime:
         envs["MODEL_INPUT_PRICE"] = str(model_info.input_price_per_m)
         envs["MODEL_OUTPUT_PRICE"] = str(model_info.output_price_per_m)
 
+        # Pin a low sampling temperature so steps are deterministic and don't
+        # garble on endpoints that default to 1.0. Per-request override wins.
+        from sandcastle.config import settings as _settings
+
+        envs["STEP_TEMPERATURE"] = str(request.get("temperature", _settings.step_temperature))
+
         if use_claude_runner:
             envs["ANTHROPIC_API_KEY"] = self.anthropic_api_key
         else:

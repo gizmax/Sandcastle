@@ -39,6 +39,11 @@ if (!request.prompt || typeof request.prompt !== "string") {
 const apiKey = process.env.MODEL_API_KEY || "";
 const baseURL = process.env.MODEL_BASE_URL || "https://api.openai.com/v1";
 const modelId = process.env.MODEL_ID || request.model || "gpt-4o";
+// Low default temperature for deterministic step output; some endpoints
+// (e.g. NVIDIA-hosted models) default to 1.0 and produce garbled text.
+const STEP_TEMPERATURE = process.env.STEP_TEMPERATURE
+  ? parseFloat(process.env.STEP_TEMPERATURE)
+  : 0.2;
 
 // Validate max_turns to prevent unbounded execution
 const rawMaxTurns = parseInt(request.max_turns, 10);
@@ -292,6 +297,7 @@ async function run() {
         messages,
         tools,
         tool_choice: "auto",
+        temperature: STEP_TEMPERATURE,
       });
     } catch (err) {
       emit({ type: "error", error: `API call failed: ${err?.message || String(err)}` });

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -12,7 +12,7 @@ import {
   type NodeTypes,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Bell, Brain, Plus, FileText, Play, Save, Monitor, Layers, Wand2, Wrench, RefreshCw, Globe, Code, GitBranch, Tag, Repeat, MessageSquare, Zap, Radio, ShieldCheck, Shuffle, ExternalLink, Sparkles, Plug, ChevronDown, Bot, Search, BarChart, PenTool, Server, TrendingUp, Database, Download, FileEdit, DollarSign, Clipboard } from "lucide-react";
+import { Bell, Brain, Plus, FileText, Play, Save, Monitor, Layers, Wand2, Wrench, RefreshCw, Globe, Code, GitBranch, Tag, Repeat, MessageSquare, Zap, Radio, ShieldCheck, Shuffle, ExternalLink, Sparkles, Plug, ChevronDown, Bot, Search, BarChart, PenTool, Server, TrendingUp, Database, Download, FileEdit, DollarSign, Clipboard, GraduationCap, X, ArrowRight } from "lucide-react";
 import { StepNode } from "@/components/workflows/StepNode";
 import {
   StepConfigPanel,
@@ -34,6 +34,12 @@ import { GenerateChatPanel } from "@/components/workflows/GenerateChatPanel";
 import { ToolSelector } from "@/components/workflows/ToolSelector";
 import { cn } from "@/lib/utils";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
+import { PaletteItem } from "@/components/workflows/PaletteItem";
+import { getNextStepSuggestions } from "@/components/workflows/nextStepSuggestions";
+import { getStepMeta } from "@/lib/builder/stepMetadata";
+
+/** localStorage key persisting the palette "Learn mode" toggle. */
+const LEARN_MODE_KEY = "sandcastle-builder-learn";
 
 const nodeTypes: NodeTypes = {
   step: StepNode,
@@ -665,6 +671,19 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
   const [editWithAiYaml, setEditWithAiYaml] = useState<string | undefined>();
   const [toolsPaletteOpen, setToolsPaletteOpen] = useState(false);
   const [collapsedCategories, setCollapsedCategories] = useState<Record<string, boolean>>({});
+  // Learn mode: when on, palette items show their one-line summary inline.
+  // Default ON for first-timers (no existing steps); persisted to localStorage.
+  const [learnMode, setLearnMode] = useState<boolean>(() => {
+    try {
+      const stored = window.localStorage.getItem(LEARN_MODE_KEY);
+      if (stored != null) return stored === "true";
+    } catch {
+      /* ignore storage errors */
+    }
+    return (initial?.steps?.length ?? 0) === 0;
+  });
+  // Dismissed "Add next:" suggestions bar (reappears for a new selection).
+  const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
   const [confirmReplace, setConfirmReplace] = useState(false);
   const [pendingTemplate, setPendingTemplate] = useState<{
     name: string;
@@ -925,6 +944,21 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
     setCollapsedCategories((prev) => ({ ...prev, [cat]: !prev[cat] }));
   }, []);
 
+  // Persist Learn-mode preference across sessions.
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(LEARN_MODE_KEY, String(learnMode));
+    } catch {
+      /* ignore storage errors */
+    }
+  }, [learnMode]);
+
+  // Reset the dismissed state whenever the selection changes so suggestions
+  // resurface for the newly selected step.
+  useEffect(() => {
+    setSuggestionsDismissed(false);
+  }, [selectedStepId]);
+
   const stepCategories = useMemo(() => [
     {
       key: "ai",
@@ -998,6 +1032,14 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
   ], []);
 
   const selectedStep = steps.find((s) => s.id === selectedStepId);
+  // "Common next steps" — suggested follow-ups for the selected step type.
+  const nextStepSuggestions = useMemo<StepType[]>(
+    () =>
+      selectedStep
+        ? getNextStepSuggestions(selectedStep.stepType || "standard")
+        : [],
+    [selectedStep],
+  );
   const yaml = useMemo(
     () => generateYaml(workflowName, steps, edges, defaultTools),
     [workflowName, steps, edges, defaultTools]
@@ -1013,7 +1055,30 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
 
       {/* Left palette */}
       <div className="hidden lg:block w-48 shrink-0 border-r border-border bg-background/50 p-3">
-        <p className="mb-3 text-xs font-semibold text-muted">PALETTE</p>
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <p className="text-xs font-semibold text-muted">PALETTE</p>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={learnMode}
+            onClick={() => setLearnMode((v) => !v)}
+            title={
+              learnMode
+                ? "Learn mode on — showing a one-line summary under each step"
+                : "Learn mode off — hover a step to learn what it does"
+            }
+            className={cn(
+              "flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold transition-colors",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+              learnMode
+                ? "border-accent/40 bg-accent/10 text-accent"
+                : "border-border text-muted hover:border-accent hover:text-accent",
+            )}
+          >
+            <GraduationCap className="h-3 w-3" />
+            Learn
+          </button>
+        </div>
         <div className="space-y-2">
           {stepCategories.map(({ key, label, icon: CatIcon, items }) => {
             const isCollapsed = !!collapsedCategories[key];
@@ -1036,17 +1101,16 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
                       const { type, icon: Icon, label: stepLabel, color } = item;
                       const tmpl = "template" in item ? (item as { template?: string }).template : undefined;
                       return (
-                        <button
+                        <PaletteItem
                           key={`${type}-${tmpl || stepLabel}`}
-                          onClick={() => addStep(type, tmpl)}
-                          className={cn(
-                            "flex items-center gap-1.5 rounded-lg border border-dashed border-border px-2 py-1.5",
-                            "text-[11px] font-medium text-muted hover:border-accent hover:text-accent transition-colors"
-                          )}
-                        >
-                          <Icon className={cn("h-3 w-3", color)} />
-                          {stepLabel}
-                        </button>
+                          type={type}
+                          template={tmpl}
+                          icon={Icon}
+                          label={stepLabel}
+                          color={color}
+                          showInlineSummary={learnMode}
+                          onAdd={() => addStep(type, tmpl)}
+                        />
                       );
                     })}
                   </div>
@@ -1210,9 +1274,51 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
       <div className="flex flex-1 min-w-0">
         {/* Canvas */}
         <div className={cn(
-          "flex-1 min-w-0 pt-8 lg:pt-0 transition-settle",
+          "relative flex-1 min-w-0 pt-8 lg:pt-0 transition-settle",
           generateModalOpen ? "lg:w-[60%]" : "w-full"
         )}>
+          {/* Common next steps — quiet, dismissible "Add next:" affordance */}
+          {selectedStep && !suggestionsDismissed && nextStepSuggestions.length > 0 && (
+            <div
+              className={cn(
+                "absolute left-1/2 top-10 lg:top-3 z-10 -translate-x-1/2",
+                "flex items-center gap-1.5 rounded-full border border-border bg-surface/95 px-2.5 py-1.5 shadow-sm backdrop-blur-sm",
+              )}
+              role="group"
+              aria-label="Suggested next steps"
+            >
+              <span className="flex items-center gap-1 text-[11px] font-medium text-muted">
+                <ArrowRight className="h-3 w-3" />
+                Add next:
+              </span>
+              {nextStepSuggestions.map((sType) => {
+                const meta = getStepMeta(sType);
+                return (
+                  <button
+                    key={sType}
+                    type="button"
+                    onClick={() => addStep(sType)}
+                    title={meta.summary}
+                    aria-label={`Add ${meta.label} step. ${meta.summary}`}
+                    className={cn(
+                      "rounded-full border border-dashed border-border px-2 py-0.5 text-[11px] font-medium text-muted",
+                      "hover:border-accent hover:text-accent transition-colors",
+                    )}
+                  >
+                    {meta.label}
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                onClick={() => setSuggestionsDismissed(true)}
+                aria-label="Dismiss suggestions"
+                className="ml-0.5 rounded-full p-0.5 text-muted hover:text-foreground transition-colors"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          )}
           <ErrorBoundary name="WorkflowBuilder-ReactFlow">
             <ReactFlow
               nodes={nodes}

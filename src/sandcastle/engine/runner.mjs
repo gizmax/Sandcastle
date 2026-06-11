@@ -47,6 +47,12 @@ const options = {
     model: request.model || "sonnet",
     maxTurns,
 };
+// Pin a low sampling temperature for deterministic step output (best-effort —
+// honoured by SDKs that expose it). Default 0.2; per-request override wins.
+const _stepTemp = process.env.STEP_TEMPERATURE
+    ? parseFloat(process.env.STEP_TEMPERATURE)
+    : 0.2;
+if (Number.isFinite(_stepTemp)) options.temperature = _stepTemp;
 if (request.output_format) options.outputFormat = request.output_format;
 if (request.max_budget_usd) options.maxBudgetUsd = request.max_budget_usd;
 if (request.timeout) options.timeoutMs = request.timeout * 1000;
