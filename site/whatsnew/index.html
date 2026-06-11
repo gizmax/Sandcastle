@@ -3,24 +3,31 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>What's New - Sandcastle</title>
-  <meta name="description" content="Sandcastle release history. v0.33.0 - Your Box, Your Brains: Spark Mode auto-detects an NVIDIA DGX Spark and flips to local-first defaults, a first-class nim/* local provider ($0/run, data-stays-on-box), and Overnight Self-Tune that trains a task-specific LoRA adapter on your own eval data - local on the NVIDIA DGX Spark.">
-  <meta name="author" content="Tomas Pflanzer @gizmax">
+  <title>What's New — The Log — Sandcastle</title>
+  <meta name="description" content="The Sandcastle release log. v0.33.0 — Your Box, Your Brains: auto-detected Spark Mode, first-class local nim/* inference at $0/run, and Overnight Self-Tune (LoRA) on your own data. Every version ships something you'll actually use.">
+  <meta name="keywords" content="Sandcastle changelog, AI workflow orchestrator releases, release notes, sandcastle-ai, what's new">
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+  <meta name="author" content="Tomas Pflanzer">
+  <link rel="canonical" href="https://sandcastle-ai.eu/whatsnew/">
+  <link rel="alternate" hreflang="en" href="https://sandcastle-ai.eu/whatsnew/">
+  <link rel="alternate" hreflang="x-default" href="https://sandcastle-ai.eu/whatsnew/">
 
   <!-- Open Graph -->
-  <meta property="og:title" content="What's New - Sandcastle v0.33.0">
-  <meta property="og:description" content="Your Box, Your Brains. Auto-detected Spark Mode, first-class local nim/* inference at $0/run, and Overnight Self-Tune (LoRA) on your own data - local on the NVIDIA DGX Spark.">
+  <meta property="og:title" content="What's New — Sandcastle — The Log">
+  <meta property="og:description" content="The Sandcastle release log. v0.33.0 — Your Box, Your Brains. Auto-detected Spark Mode, first-class local nim/* inference at $0/run, and Overnight Self-Tune (LoRA) on your own data.">
   <meta property="og:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
   <meta property="og:url" content="https://sandcastle-ai.eu/whatsnew/">
   <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Sandcastle">
+  <meta property="og:locale" content="en_US">
 
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="What's New - Sandcastle v0.33.0">
-  <meta name="twitter:description" content="Your Box, Your Brains. Auto-detected Spark Mode, first-class local nim/* inference at $0/run, and Overnight Self-Tune (LoRA) on your own data - local on the NVIDIA DGX Spark.">
+  <meta name="twitter:title" content="What's New — Sandcastle — The Log">
+  <meta name="twitter:description" content="The Sandcastle release log. v0.33.0 — Your Box, Your Brains. Auto-detected Spark Mode, first-class local nim/* inference at $0/run, and Overnight Self-Tune (LoRA) on your own data.">
   <meta name="twitter:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
+  <meta name="twitter:creator" content="@iuditg">
 
-  <link rel="canonical" href="https://sandcastle-ai.eu/whatsnew/">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏰</text></svg>">
 
   <!-- Google Analytics -->
@@ -32,1183 +39,1549 @@
     gtag('config', 'G-ZN1K4G2TCZ');
   </script>
 
+  <!-- Performance hints -->
+  <link rel="dns-prefetch" href="https://www.googletagmanager.com">
+
+  <!-- Display: Bricolage Grotesque (characterful grotesk) · Mono: IBM Plex Mono -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 
   <style>
-    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    /* ============================================================
+       SANDCASTLE — MANIFESTO · THE LOG
+       Swiss-brutalist editorial release journal. Paper & ink. One accent.
+       ============================================================ */
 
-    :root {
-      --bg: #0a0a0a;
-      --surface: #141414;
-      --surface-hover: #1a1a1a;
-      --border: #262626;
-      --border-light: #333;
-      --text: #f5f5f5;
-      --text-muted: #a3a3a3;
-      --text-dim: #737373;
-      --accent: #f59e0b;
-      --accent-hover: #fbbf24;
-      --accent-dim: rgba(245, 158, 11, 0.15);
-      --green: #22c55e;
-      --green-dim: rgba(34, 197, 94, 0.12);
-      --blue: #3b82f6;
-      --blue-dim: rgba(59, 130, 246, 0.12);
-      --purple: #a855f7;
-      --purple-dim: rgba(168, 85, 247, 0.12);
-      --code-bg: #0d0d0d;
-      --radius: 8px;
-      --radius-sm: 4px;
-      --font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      --font-mono: "IBM Plex Mono", "SF Mono", "Fira Code", Menlo, monospace;
+    :root{
+      --paper:      #F7F3EC;   /* warm sand off-white */
+      --paper-2:    #EFE9DD;   /* slightly deeper paper for blocks */
+      --ink:        #1C1814;   /* near-black warm ink */
+      --ink-soft:   #5B524A;   /* muted ink for body */
+      --ink-faint:  #8A8076;   /* captions / hairlines text */
+      --amber:      #F59E0B;   /* THE single accent */
+      --amber-ink:  #8A5500;   /* amber that passes AA on paper */
+      --rule:       #1C1814;
+      --hair:       rgba(28,24,20,.16);
+
+      --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+      --display: "Bricolage Grotesque", "Bricolage", system-ui, sans-serif;
+
+      /* baseline rhythm unit */
+      --u: 8px;
+      --maxw: 1320px;
+      --gutter: clamp(20px, 5vw, 80px);
     }
 
-    html { scroll-behavior: smooth; -webkit-font-smoothing: antialiased; }
-    body { font-family: var(--font-sans); background: var(--bg); color: var(--text); line-height: 1.6; overflow-x: hidden; }
-    a { color: var(--accent); text-decoration: none; transition: color 0.2s; }
-    a:hover { color: var(--accent-hover); }
-    code, pre, .mono { font-family: var(--font-mono); }
-    .container { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
-
-    /* Fade-in */
-    .fade-in { opacity: 0; transform: translateY(24px); transition: opacity 0.6s ease, transform 0.6s ease; }
-    .fade-in.visible { opacity: 1; transform: translateY(0); }
-
-    /* Nav */
-    nav { position: fixed; top: 0; left: 0; right: 0; z-index: 100; background: rgba(10, 10, 10, 0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); }
-    .nav-inner { display: flex; align-items: center; justify-content: space-between; height: 64px; }
-    .nav-brand { font-size: 18px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 10px; }
-    .nav-links { display: flex; gap: 28px; align-items: center; }
-    .nav-links a { font-size: 14px; font-weight: 500; color: var(--text-muted); }
-    .nav-links a:hover { color: var(--text); }
-
-    /* Hero */
-    .hero { padding: 140px 0 80px; text-align: center; }
-    .hero-badge { display: inline-flex; align-items: center; gap: 8px; padding: 6px 16px; font-size: 13px; font-weight: 500; color: var(--accent); background: var(--accent-dim); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 100px; margin-bottom: 32px; }
-    .hero h1 { font-size: clamp(32px, 5vw, 56px); font-weight: 700; letter-spacing: -0.03em; line-height: 1.15; margin-bottom: 20px; }
-    .hero h1 .accent { color: var(--accent); }
-    .hero p { font-size: clamp(16px, 2vw, 19px); color: var(--text-muted); max-width: 640px; margin: 0 auto; line-height: 1.7; }
-    .intro-row { display: flex; gap: 32px; align-items: center; margin-bottom: 28px; }
-    .intro-row > p { flex: 0 1 720px; margin-bottom: 0 !important; }
-    .intro-nv-slot { flex: 1; display: flex; justify-content: center; align-items: center; min-width: 0; }
-    .release-nv { flex-shrink: 0; display: inline-flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 20px; background: rgba(118, 185, 0, 0.06); border: 1px solid rgba(118, 185, 0, 0.30); border-radius: 14px; text-decoration: none; transition: background .2s, border-color .2s, transform .2s; }
-    .release-nv:hover { background: rgba(118, 185, 0, 0.12); border-color: rgba(118, 185, 0, 0.55); transform: translateY(-1px); }
-    .release-nv small { font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-dim); }
-    .release-nv img { width: 72px; height: auto; display: block; }
-    .release-nv strong { font-size: 12px; font-weight: 700; color: #76B900; letter-spacing: 0.02em; }
-    @media (max-width: 820px) { .intro-row { flex-direction: column; align-items: flex-start; gap: 20px; } }
-
-    /* Nav CTA button */
-    .btn-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); }
-    .btn-secondary:hover { background: var(--surface-hover); border-color: var(--border-light); }
-
-    /* Footer */
-    footer { border-top: 1px solid var(--border); padding: 48px 0; margin-top: 80px; }
-    .footer-inner { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 24px; }
-    .footer-left { font-size: 14px; color: var(--text-dim); line-height: 1.6; }
-    .footer-left a { color: var(--text-muted); }
-    .footer-left a:hover { color: var(--accent); }
-    .footer-links { display: flex; gap: 24px; }
-    .footer-links a { font-size: 14px; color: var(--text-muted); transition: color 0.2s; }
-    .footer-links a:hover { color: var(--accent); }
-
-    /* Release layout */
-    .releases { padding: 0 0 80px; }
-    .release { margin-bottom: 64px; }
-    .release:last-child { margin-bottom: 0; }
-
-    /* Release header */
-    .release-header { display: flex; align-items: baseline; gap: 16px; margin-bottom: 32px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
-    .release-version { font-family: var(--font-mono); font-size: 28px; font-weight: 700; color: var(--text); }
-    .release-name { font-size: 20px; font-weight: 600; color: var(--text-muted); }
-    .release-date { font-size: 13px; color: var(--text-dim); margin-left: auto; font-family: var(--font-mono); }
-    .badge-latest { display: inline-flex; align-items: center; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; background: var(--accent); color: #0a0a0a; padding: 3px 10px; border-radius: 100px; margin-left: 8px; vertical-align: middle; }
-
-    /* Feature grid */
-    .feature-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
-    .feature-card { padding: 24px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); transition: border-color 0.2s, transform 0.2s; }
-    .feature-card:hover { border-color: var(--border-light); transform: translateY(-2px); }
-    .feature-card h4 { font-size: 15px; font-weight: 600; margin-bottom: 10px; color: var(--text); }
-    .feature-card p { font-size: 14px; color: var(--text-muted); line-height: 1.65; }
-    .feature-card p + p { margin-top: 8px; }
-    .feature-card .feature-tag { display: inline-block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: 2px 8px; border-radius: 100px; margin-bottom: 12px; }
-    .feature-tag.green { background: var(--green-dim); color: var(--green); }
-    .feature-tag.blue { background: var(--blue-dim); color: var(--blue); }
-    .feature-tag.amber { background: var(--accent-dim); color: var(--accent); }
-    .feature-tag.purple { background: var(--purple-dim); color: var(--purple); }
-
-    /* Code block */
-    .feature-card pre {
-      background: var(--code-bg);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      padding: 14px 16px;
-      font-size: 12px;
-      line-height: 1.6;
-      overflow-x: auto;
-      margin-top: 14px;
-      color: var(--text-muted);
+    @media (prefers-color-scheme: dark){
+      :root{
+        --paper:    #14110D;
+        --paper-2:  #1B1712;
+        --ink:      #F4EEE3;
+        --ink-soft: #BBB0A2;
+        --ink-faint:#897F71;
+        --rule:     #F4EEE3;
+        --hair:     rgba(244,238,227,.18);
+        --amber-ink:#F5B53C;
+      }
     }
-    .feature-card pre .hl { color: var(--accent); }
 
-    /* Wide card (spans 2 cols when grid allows) */
-    .feature-card.wide { grid-column: span 2; }
+    *,*::before,*::after{ box-sizing:border-box; }
 
-    /* Inline code */
-    .feature-card code { font-size: 12px; background: var(--code-bg); padding: 2px 6px; border-radius: var(--radius-sm); color: var(--accent); font-family: var(--font-mono); }
+    html{ -webkit-text-size-adjust:100%; scroll-behavior:smooth; }
+    @media (prefers-reduced-motion: reduce){ html{ scroll-behavior:auto; } }
 
-    /* Stat row inside a card */
-    .stat-row { display: flex; gap: 24px; margin-top: 14px; }
-    .stat-item .stat-num { font-size: 22px; font-weight: 700; font-family: var(--font-mono); color: var(--accent); }
-    .stat-item .stat-label { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+    body{
+      margin:0;
+      background:var(--paper);
+      color:var(--ink);
+      font-family:var(--display);
+      font-weight:400;
+      line-height:1.18;
+      text-rendering:optimizeLegibility;
+      -webkit-font-smoothing:antialiased;
+      -moz-osx-font-smoothing:grayscale;
+      overflow-x:hidden;
+      /* faint printed-paper grain via overlapping gradients */
+      background-image:
+        radial-gradient(rgba(28,24,20,.020) 1px, transparent 1px);
+      background-size: 4px 4px;
+    }
 
-    /* Responsive */
-    @media (max-width: 768px) {
-      .release-header { flex-wrap: wrap; gap: 8px; }
-      .release-date { margin-left: 0; }
-      .feature-grid { grid-template-columns: 1fr; }
-      .feature-card.wide { grid-column: span 1; }
-      .nav-links a span { display: none; }
+    ::selection{ background:var(--amber); color:#1C1814; }
+
+    a{ color:inherit; text-decoration:none; }
+
+    /* ---- shared layout ---- */
+    .wrap{
+      width:100%;
+      max-width:var(--maxw);
+      margin-inline:auto;
+      padding-inline:var(--gutter);
+    }
+
+    .mono{
+      font-family:var(--mono);
+      font-weight:500;
+      letter-spacing:.02em;
+      text-transform:uppercase;
+      font-size:clamp(11px,1.05vw,13px);
+      color:var(--ink-faint);
+    }
+
+    .rule{ border:0; border-top:1.5px solid var(--rule); margin:0; }
+
+    /* keyboard focus — sharp, on-brand */
+    a:focus-visible, button:focus-visible{
+      outline:3px solid var(--amber);
+      outline-offset:3px;
+    }
+
+    /* ============================================================
+       MASTHEAD / NAV
+       ============================================================ */
+    header.masthead{
+      position:sticky; top:0; z-index:50;
+      background:color-mix(in srgb, var(--paper) 86%, transparent);
+      backdrop-filter:blur(8px) saturate(120%);
+      -webkit-backdrop-filter:blur(8px) saturate(120%);
+      border-bottom:1.5px solid var(--rule);
+    }
+    .masthead .wrap{
+      display:flex; align-items:center; justify-content:space-between;
+      height:64px; gap:24px;
+    }
+    .brand{
+      display:flex; align-items:baseline; gap:10px;
+      font-weight:700; font-size:19px; letter-spacing:-.02em;
+    }
+    .brand .glyph{ font-size:18px; transform:translateY(1px); }
+    .brand .tm{
+      font-family:var(--mono); font-size:10px; font-weight:500;
+      color:var(--ink-faint); letter-spacing:.08em; text-transform:uppercase;
+      border:1px solid var(--hair); padding:2px 6px; border-radius:2px;
+    }
+    nav.primary{ display:flex; align-items:center; gap:clamp(14px,2vw,28px); }
+    nav.primary a{
+      font-family:var(--mono); font-size:12px; font-weight:500;
+      text-transform:uppercase; letter-spacing:.04em; color:var(--ink-soft);
+      transition:color .15s ease;
+    }
+    nav.primary a:hover{ color:var(--ink); }
+    nav.primary a[aria-current="page"]{ color:var(--amber-ink); }
+    nav.primary a.cta{
+      color:var(--ink); border:1.5px solid var(--ink);
+      padding:7px 14px; border-radius:2px; background:var(--paper);
+    }
+    nav.primary a.cta:hover{ background:var(--ink); color:var(--paper); }
+    @media (max-width:780px){
+      nav.primary a.muted{ display:none; }
+    }
+
+    /* ============================================================
+       HERO — type-driven log header
+       ============================================================ */
+    .hero{ padding:clamp(56px,12vh,128px) 0 clamp(36px,7vh,72px); }
+    .hero .kicker{
+      display:flex; align-items:center; gap:14px; margin-bottom:clamp(26px,5vh,52px);
+    }
+    .hero .kicker .tick{ width:42px; height:1.5px; background:var(--amber); display:inline-block; }
+
+    .hero-grid{
+      display:grid; grid-template-columns:1fr; gap:clamp(28px,5vw,56px);
+      align-items:end;
+    }
+    @media (min-width:900px){
+      .hero-grid{ grid-template-columns: minmax(0,1.55fr) minmax(0,1fr); }
+    }
+
+    .hero h1{
+      font-weight:700;
+      font-size:clamp(44px, 9vw, 140px);
+      line-height:.9;
+      letter-spacing:-.04em;
+      margin:0;
+      text-wrap:balance;
+    }
+    .hero h1 .amber{ color:var(--amber-ink); }
+    .hero p.lede{
+      margin:clamp(22px,4vh,34px) 0 0;
+      font-size:clamp(16px,1.9vw,21px);
+      line-height:1.5; color:var(--ink-soft); max-width:44ch;
+      letter-spacing:-.005em;
+    }
+    .hero p.lede strong{ color:var(--ink); font-weight:600; }
+
+    /* big current-version block, mono, editorial */
+    .latest-stamp{
+      border:1.5px solid var(--rule); border-radius:3px;
+      background:var(--paper-2); overflow:hidden;
+      align-self:end;
+    }
+    .latest-stamp .ls-cap{
+      font-family:var(--mono); font-size:11px; text-transform:uppercase;
+      letter-spacing:.1em; color:var(--ink-faint);
+      padding:11px 16px; border-bottom:1.5px solid var(--hair);
+      display:flex; justify-content:space-between; align-items:center; gap:12px;
+    }
+    .latest-stamp .ls-cap .dot{ width:8px;height:8px;border-radius:50%;background:var(--amber); }
+    .latest-stamp .ls-body{ padding:clamp(16px,2vw,22px) 16px 18px; }
+    .latest-stamp .ls-ver{
+      font-family:var(--mono); font-weight:600;
+      font-size:clamp(34px,6vw,58px); letter-spacing:-.02em; line-height:.95;
+      color:var(--amber-ink); display:block;
+    }
+    .latest-stamp .ls-name{
+      font-weight:600; font-size:clamp(17px,2vw,22px); letter-spacing:-.02em;
+      margin-top:10px; color:var(--ink);
+    }
+    .latest-stamp .ls-meta{
+      font-family:var(--mono); font-size:12px; color:var(--ink-faint);
+      text-transform:uppercase; letter-spacing:.05em; margin-top:14px;
+      display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap;
+    }
+
+    /* ============================================================
+       THE LOG — editorial release journal
+       ============================================================ */
+    .log{ padding:0 0 clamp(64px,12vh,120px); }
+
+    .entry{
+      border-top:1.5px solid var(--rule);
+      padding:clamp(40px,7vh,80px) 0;
+      display:grid;
+      grid-template-columns:1fr;
+      gap:clamp(24px,4vw,56px);
+    }
+    /* margin version-number layout on wide screens; collapses gracefully */
+    @media (min-width:880px){
+      .entry{
+        grid-template-columns: minmax(220px, 0.9fr) minmax(0, 3fr);
+        align-items:start;
+      }
+    }
+
+    /* latest gets a subtle amber wash + heavier top rule */
+    .entry.is-latest{
+      border-top:3px solid var(--amber);
+      background:
+        linear-gradient(180deg,
+          color-mix(in srgb, var(--amber) 7%, transparent),
+          transparent 220px);
+    }
+
+    /* --- the margin: version + date as an editorial sidenote --- */
+    .entry-margin{ position:relative; }
+    @media (min-width:880px){
+      .entry-margin{ position:sticky; top:96px; }
+    }
+    .ver{
+      font-family:var(--mono); font-weight:600;
+      font-size:clamp(30px,4.4vw,52px);
+      letter-spacing:-.02em; line-height:.92;
+      display:block; word-break:break-word;
+    }
+    .entry.is-latest .ver{ color:var(--amber-ink); }
+    .ver-date{
+      font-family:var(--mono); font-size:12px; letter-spacing:.05em;
+      text-transform:uppercase; color:var(--ink-faint);
+      margin-top:12px; display:block;
+    }
+    .ver-tag{
+      display:inline-flex; align-items:center; gap:6px;
+      font-family:var(--mono); font-size:10px; font-weight:600;
+      text-transform:uppercase; letter-spacing:.08em;
+      color:#1C1814; background:var(--amber);
+      padding:3px 9px; border-radius:2px; margin-top:14px;
+    }
+    .ver-rule{
+      display:none;
+    }
+    @media (min-width:880px){
+      .ver-rule{
+        display:block; height:1.5px; background:var(--hair);
+        margin-top:18px;
+      }
+    }
+
+    /* --- the body: title, lede, feature list --- */
+    .entry-body{ min-width:0; }
+    .entry-title{
+      font-weight:700;
+      font-size:clamp(28px,4.6vw,60px);
+      line-height:.98; letter-spacing:-.035em;
+      margin:0 0 clamp(16px,2.5vh,24px);
+      text-wrap:balance;
+    }
+    .entry-lede{
+      font-size:clamp(15px,1.55vw,18px);
+      line-height:1.6; color:var(--ink-soft);
+      max-width:60ch; margin:0 0 clamp(26px,4vh,38px);
+      letter-spacing:-.005em;
+    }
+    .entry-lede em{ font-style:italic; color:var(--ink); }
+    .entry-lede code, .feat code, .stat-strip code, .entry-lede .ic{
+      font-family:var(--mono); font-size:.88em;
+      background:color-mix(in srgb, var(--ink) 7%, transparent);
+      color:var(--amber-ink); padding:1px 5px; border-radius:2px;
+    }
+    @media (prefers-color-scheme: dark){
+      .entry-lede code, .feat code, .stat-strip code, .entry-lede .ic{
+        background:color-mix(in srgb, var(--ink) 10%, transparent);
+      }
+    }
+
+    /* feature list — tight, hairline-divided, mono micro-labels */
+    .feats{ list-style:none; margin:0; padding:0; }
+    .feat{
+      display:grid; grid-template-columns:1fr; gap:6px 16px;
+      padding:clamp(16px,2.4vh,20px) 0;
+      border-top:1px solid var(--hair);
+    }
+    .feat:first-child{ border-top:1.5px solid var(--rule); }
+    @media (min-width:620px){
+      .feat{ grid-template-columns: 128px 1fr; align-items:baseline; }
+    }
+    .feat-chip{
+      font-family:var(--mono); font-weight:600;
+      font-size:11px; text-transform:uppercase; letter-spacing:.06em;
+      color:var(--ink-soft);
+      display:inline-flex; align-items:center; gap:7px;
+      align-self:start;
+    }
+    .feat-chip::before{
+      content:""; width:7px; height:7px; border-radius:1px;
+      background:var(--ink-faint); flex:none;
+    }
+    /* tag colour coding — single amber accent + ink tones (AA on paper) */
+    .feat-chip.headline{ color:var(--amber-ink); }
+    .feat-chip.headline::before{ background:var(--amber); }
+    .feat-chip.feat-new::before{ background:var(--amber); }
+    .feat-chip.feat-fix{ color:var(--ink-faint); }
+    .feat-chip.feat-fix::before{ background:var(--ink-faint); }
+    .feat-chip.feat-docs{ color:var(--ink-faint); }
+    .feat-chip.feat-docs::before{ background:var(--ink-faint); }
+
+    .feat-text h3{
+      font-family:var(--display);
+      font-weight:600; font-size:clamp(16px,1.7vw,20px);
+      letter-spacing:-.015em; line-height:1.25;
+      margin:0 0 6px; color:var(--ink);
+    }
+    .feat-text p{
+      font-size:clamp(14px,1.35vw,16px); line-height:1.55;
+      color:var(--ink-soft); margin:0; max-width:62ch;
+    }
+    .feat-text p + p{ margin-top:8px; }
+    .feat-text strong{ color:var(--ink); font-weight:600; }
+
+    /* by-the-numbers strip */
+    .stat-strip{
+      display:flex; flex-wrap:wrap; gap:clamp(20px,4vw,44px);
+      margin-top:6px;
+    }
+    .stat-strip .s{ display:flex; flex-direction:column; gap:4px; }
+    .stat-strip .s b{
+      font-family:var(--mono); font-weight:600;
+      font-size:clamp(22px,2.6vw,30px); letter-spacing:-.01em;
+      color:var(--amber-ink); line-height:1;
+    }
+    .stat-strip .s span{
+      font-family:var(--mono); font-size:11px; text-transform:uppercase;
+      letter-spacing:.05em; color:var(--ink-faint); line-height:1.4; max-width:22ch;
+    }
+
+    /* NVIDIA "runs local on" badge (kept, restyled to paper/ink) */
+    .nv-badge{
+      display:inline-flex; flex-direction:column; align-items:flex-start; gap:6px;
+      border:1.5px solid var(--hair); border-radius:3px;
+      padding:12px 16px; margin-top:18px; background:var(--paper);
+      transition:border-color .2s ease, transform .2s ease;
+    }
+    .nv-badge:hover{ border-color:var(--amber); transform:translateY(-1px); }
+    .nv-badge small{
+      font-family:var(--mono); font-size:9px; letter-spacing:.14em;
+      text-transform:uppercase; color:var(--ink-faint);
+    }
+    .nv-badge strong{
+      font-family:var(--mono); font-size:13px; font-weight:600;
+      letter-spacing:.02em; color:var(--ink);
+    }
+    .nv-badge .nv-mark{ color:var(--amber-ink); font-weight:700; }
+
+    /* ============================================================
+       CLOSER — install statement
+       ============================================================ */
+    .closer{
+      padding:clamp(72px,15vh,160px) 0;
+      text-align:center;
+      background:var(--ink); color:var(--paper);
+      border-top:1.5px solid var(--rule); border-bottom:1.5px solid var(--rule);
+    }
+    .closer .pre{
+      font-family:var(--mono); text-transform:uppercase; letter-spacing:.16em;
+      font-size:13px; color:var(--amber); margin-bottom:clamp(20px,4vh,40px);
+    }
+    .closer h2{
+      font-weight:600; font-size:clamp(30px,6vw,82px); letter-spacing:-.035em;
+      line-height:1; margin:0 0 clamp(34px,6vh,52px); text-wrap:balance;
+      color:var(--paper);
+    }
+    .closer .big-install{
+      font-family:var(--mono); font-weight:600;
+      font-size:clamp(17px,3.4vw,38px);
+      display:inline-flex; align-items:center; gap:16px; flex-wrap:wrap;
+      justify-content:center;
+      border:1.5px solid rgba(247,243,236,.3); border-radius:4px;
+      padding:clamp(15px,2vw,24px) clamp(18px,3vw,34px);
+      letter-spacing:0; cursor:pointer; transition:.18s ease;
+    }
+    .closer .big-install:hover{ border-color:var(--amber); }
+    .closer .big-install .pmt{ color:var(--amber); }
+    .closer .big-install .ci{
+      font-size:.42em; text-transform:uppercase; letter-spacing:.08em;
+      border:1px solid rgba(247,243,236,.4); border-radius:3px; padding:5px 9px; color:var(--paper);
+    }
+    .closer .links{
+      margin-top:clamp(28px,5vh,44px); display:flex; gap:24px; justify-content:center; flex-wrap:wrap;
+      font-family:var(--mono); font-size:13px; text-transform:uppercase; letter-spacing:.04em;
+    }
+    .closer .links a{ color:rgba(247,243,236,.7); border-bottom:1px solid transparent; padding-bottom:2px; }
+    .closer .links a:hover{ color:var(--amber); border-color:var(--amber); }
+
+    /* ============================================================
+       FOOTER — editorial
+       ============================================================ */
+    footer.foot{ padding:clamp(56px,9vh,90px) 0 clamp(40px,6vh,64px); }
+    .foot-top{
+      display:grid; grid-template-columns:1fr; gap:clamp(36px,5vw,64px);
+      padding-bottom:clamp(40px,6vh,60px); border-bottom:1.5px solid var(--rule);
+    }
+    @media (min-width:820px){ .foot-top{ grid-template-columns: minmax(0,1.6fr) repeat(3, minmax(0,1fr)); } }
+    .foot-brand .b{
+      font-weight:700; font-size:clamp(28px,4vw,46px); letter-spacing:-.03em; line-height:1; margin-bottom:18px;
+    }
+    .foot-brand p{ color:var(--ink-soft); max-width:34ch; font-size:15px; line-height:1.55; }
+    .foot-col h4{
+      font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.1em;
+      color:var(--ink-faint); margin:0 0 16px; font-weight:600;
+    }
+    .foot-col a{
+      display:block; font-size:15px; color:var(--ink-soft); padding:6px 0; transition:color .15s ease;
+    }
+    .foot-col a:hover{ color:var(--ink); }
+    .foot-bottom{
+      display:flex; justify-content:space-between; align-items:center; gap:20px; flex-wrap:wrap;
+      padding-top:clamp(24px,4vh,36px);
+      font-family:var(--mono); font-size:12px; color:var(--ink-faint);
+      text-transform:uppercase; letter-spacing:.04em;
+    }
+    .foot-bottom a{ color:var(--ink-faint); }
+    .foot-bottom a:hover{ color:var(--amber-ink); }
+    .foot-bottom .made{ display:flex; align-items:center; gap:8px; }
+    .foot-bottom .eu{ color:var(--amber-ink); }
+
+    /* reveal animation */
+    .reveal{ opacity:0; transform:translateY(22px); transition:opacity .7s cubic-bezier(.2,.7,.2,1), transform .7s cubic-bezier(.2,.7,.2,1); }
+    .reveal.in{ opacity:1; transform:none; }
+    @media (prefers-reduced-motion: reduce){
+      .reveal{ opacity:1 !important; transform:none !important; transition:none !important; }
     }
   </style>
 </head>
 <body>
 
-  <!-- Nav -->
-  <nav>
-    <div class="container nav-inner">
-      <a href="/" class="nav-brand">🏰 Sandcastle</a>
-      <div class="nav-links">
-        <a href="/hub/">Hub</a>
-        <a href="/security/">Security</a>
-        <a href="/eu-ai-act/">EU AI Act</a>
-        <a href="/whatsnew/" style="color: var(--accent);">What's New</a>
-        <a href="/pricing/">Pricing</a>
-        <a href="https://github.com/gizmax/Sandcastle" target="_blank" rel="noopener">GitHub</a>
-        <a href="https://gizmax.github.io/Sandcastle/" target="_blank" rel="noopener" class="btn-secondary" style="padding:8px 16px;font-size:13px;">Live Demo</a>
-      </div>
-    </div>
-  </nav>
-
-  <!-- Hero -->
-  <header class="hero fade-in">
-    <div class="container">
-      <div class="hero-badge">v0.33 - Your Box, Your Brains</div>
-      <h1>What's New in <span class="accent">Sandcastle</span></h1>
-      <p>Every version ships something you'll actually use. No roadmap fluff. No "coming soon." Shipped code or nothing.</p>
+  <!-- =========================== MASTHEAD =========================== -->
+  <header class="masthead">
+    <div class="wrap">
+      <a class="brand" href="/" aria-label="Sandcastle home">
+        <span class="glyph" aria-hidden="true">🏰</span>
+        <span>Sandcastle</span>
+        <span class="tm">v0.33.0</span>
+      </a>
+      <nav class="primary" aria-label="Primary">
+        <a class="muted" href="/pricing/">Pricing</a>
+        <a class="muted" href="/security/">Security</a>
+        <a class="muted" href="/eu-ai-act/">EU&nbsp;AI&nbsp;Act</a>
+        <a class="muted" href="/hub/">Hub</a>
+        <a href="/whatsnew/" aria-current="page">What's&nbsp;New</a>
+        <a class="cta" href="https://github.com/gizmax/Sandcastle">GitHub&nbsp;↗</a>
+      </nav>
     </div>
   </header>
 
   <main>
-    <div class="container releases">
-
-      <!-- v0.33.0 -->
-      <div class="release fade-in">
-        <div class="release-header">
-          <span class="release-version">v0.33.0</span>
-          <span class="release-name">Your Box, Your Brains <span class="badge-latest">Latest</span></span>
-          <span class="release-date">June 4, 2026</span>
+    <!-- =========================== HERO =========================== -->
+    <section class="hero" aria-labelledby="log-title">
+      <div class="wrap">
+        <div class="kicker">
+          <span class="tick" aria-hidden="true"></span>
+          <span class="mono">What's New / The Log · Shipped code or nothing</span>
         </div>
 
-        <div class="intro-row">
-        <p style="max-width: 720px; color: var(--text-muted); font-size: 15px; line-height: 1.7; margin-bottom: 28px;">
-          Every agent you've ever run phoned home. Sent your data somewhere. Billed you by the token. You accepted it, because that was the deal. The deal just changed. NVIDIA put a Grace-Blackwell supercomputer and 128GB of unified memory on a desk; most teams will run a demo and screenshot the tokens-per-second. We made Sandcastle treat it like home. Plug in a DGX Spark and it knows - no flag, no config: Spark Mode lights up, defaults flip to local-first, and inference goes first-class local through a new <code>nim/*</code> provider at <code>$0.00/run</code>, data that never leaves the box. Then it learns: Overnight Self-Tune trains a task-specific LoRA on your <em>own</em> eval data while you sleep. You wanted to stop renting. Here's the deed. And Spark is only the headline - this release also bundles offline deterministic cassettes, shareable run permalinks, a one-command local runner, a Template Hub explosion (new categories + a community gallery), a provider-neutral dashboard refresh, the 2026-06 model wave, and a security &amp; reliability sweep. Roughly three weeks of work in one drop.
-        </p>
-        <div class="intro-nv-slot">
-          <a class="release-nv" href="https://www.nvidia.com/en-us/products/workstations/dgx-spark/" target="_blank" rel="noopener" title="Sandcastle runs local on NVIDIA DGX Spark">
-            <small>Runs local on</small>
-            <img src="../img/nvidia-logo.png" alt="NVIDIA" width="72">
-            <strong>DGX Spark</strong>
-          </a>
-        </div>
-        </div>
-
-        <div class="feature-grid">
-
-          <div class="feature-card wide">
-            <span class="feature-tag amber">Headline</span>
-            <h4>Spark Mode - your box, zero flags</h4>
-            <p>Sandcastle auto-detects an NVIDIA DGX Spark (GB10 Grace-Blackwell, 128GB unified memory) and flips to local-first defaults on its own - no flag, no config. A startup banner, a dashboard badge, and <code>GET /api/runtime</code> all say the same thing: you're running on your own silicon. Designed to run local on the DGX Spark - your data, your box, your rules.</p>
+        <div class="hero-grid">
+          <div>
+            <h1 id="log-title">The&nbsp;<span class="amber">Log.</span></h1>
+            <p class="lede">
+              Every version ships something you'll actually use. No roadmap fluff, no "coming soon" — <strong>shipped code or nothing</strong>. This is the running record.
+            </p>
           </div>
 
-          <div class="feature-card">
-            <span class="feature-tag green">New</span>
-            <h4>Local inference, first-class</h4>
-            <p>A new <code>nim/*</code> provider (NVIDIA NIM, OpenAI-compatible) joins <code>ollama</code> and <code>oMLX</code> - every one at <code>region=local</code>, <code>$0.00/run</code>, data-stays-on-box. On a detected Spark the bare default model auto-routes to the local NIM. No token meter. No egress.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag blue">New</span>
-            <h4>Overnight Self-Tune</h4>
-            <p>The evolution loop can train a task-specific LoRA adapter on a workflow's <em>own</em> eval data and route to it - the box gets better at <em>your</em> task, on <em>your</em> data, for $0. Train it overnight, wake up to a model tuned to your workflow.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag green">New</span>
-            <h4>Deterministic cassettes</h4>
-            <p>Record a run once, replay it offline at $0 - identically, provider-free, with a tamper-evident signature. A new <strong>strict mode</strong> hard-fails on a modified cassette. Demos that never call an API; tests that never flake on the network.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag green">New</span>
-            <h4>Shareable run permalinks</h4>
-            <p>Loom-for-workflows: a public, secrets-scrubbed link to any run, with a 30-day TTL. Send the result, not a screenshot - no login, no replay cost, nothing private leaks.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag blue">New</span>
-            <h4><code>sandcastle run --local</code></h4>
-            <p>One command, in-process, zero external dependencies - no server, no queue, no Redis. First-run onboarding now picks your engine for you. The fastest path from <code>pip install</code> to a finished workflow.</p>
-          </div>
-
-          <div class="feature-card wide">
-            <span class="feature-tag purple">Templates</span>
-            <h4>Template Hub explosion</h4>
-            <p>The biggest content drop yet. New categories - <strong>Automation &amp; RPA</strong>, plus several more - and dozens of provider-neutral browser / computer-use RPA workflows that run on whatever model you point them at. A living <strong>community gallery</strong> seeded with 31 workflows from 19 authors, synced to the web hub. Three viral creative use-cases too: Action Figure Me, Glow-Up Restore, Ad Creative Factory.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag blue">New</span>
-            <h4>Tool step + UGC Studio</h4>
-            <p>A first-class <code>tool</code> step type and a self-healing UGC Studio flow with a vision judge - reference-image creative that checks its own output and retries until it passes.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag green">Models</span>
-            <h4>2026-06 model refresh</h4>
-            <p>The June wave wired in: <strong>GPT Image 2</strong>, <strong>Gemini 3.5</strong>, and <strong>GPT-5.2</strong> - with retired models cleaned out so nothing routes to a dead endpoint.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag green">Dashboard</span>
-            <h4>Provider-neutral, dark-first</h4>
-            <p>A refresh that tells the real story: Sandcastle runs on any provider, not one. Dark-first design, demo runs seeded with real provider models, and recovery from stale-deploy chunk misses instead of a dead-end "Connection error".</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag blue">New</span>
-            <h4>Built for code assistants</h4>
-            <p><code>llms.txt</code> + <code>llms-full.txt</code> ship in the repo and on the site, so a code-generating assistant can read Sandcastle's surface and scaffold a correct workflow on the first try.</p>
-          </div>
-
-          <div class="feature-card wide">
-            <span class="feature-tag purple">Hardening</span>
-            <h4>Security &amp; reliability sweep</h4>
-            <p>A browser-step <strong>SSRF guard</strong> blocks requests to internal/disallowed hosts. Share tokens carry a TTL; dynamic <code>nim/*</code> model ids are validated; an auth pepper and a step-cache cap landed. The sync run endpoint no longer reports <code>completed</code> when persistence fails - it retries and returns <code>verification_pending</code>. Browser dom / computer-use / lightpanda modes stop crashing on a never-defined <code>sandbox_exec</code>. Packaging gained its missing runtime deps, and the last test-isolation flakes are gone.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag purple">Milestone</span>
-            <h4>By the numbers</h4>
-            <div class="stat-row">
-              <div class="stat-item">
-                <div class="stat-num">20+</div>
-                <div class="stat-label">PRs shipped since v0.32.2</div>
-              </div>
-              <div class="stat-item">
-                <div class="stat-num">$0</div>
-                <div class="stat-label">Local inference / run</div>
-              </div>
-              <div class="stat-item">
-                <div class="stat-num">3</div>
-                <div class="stat-label">Local providers (nim/ollama/oMLX)</div>
-              </div>
-              <div class="stat-item">
-                <div class="stat-num">0</div>
-                <div class="stat-label">Tokens leaving the box</div>
-              </div>
+          <aside class="latest-stamp" aria-label="Latest release">
+            <div class="ls-cap"><span>Latest release</span><span class="dot" aria-hidden="true"></span></div>
+            <div class="ls-body">
+              <span class="ls-ver">v0.33.0</span>
+              <div class="ls-name">Your Box, Your Brains</div>
+              <div class="ls-meta"><span>June&nbsp;4,&nbsp;2026</span><span><a href="#v0-33-0">Read&nbsp;↓</a></span></div>
             </div>
-          </div>
-
+          </aside>
         </div>
       </div>
+    </section>
 
-      <!-- v0.32.2 -->
-      <div class="release fade-in">
-        <div class="release-header">
-          <span class="release-version">v0.32.2</span>
-          <span class="release-name">Your Sandbox, Your Silicon</span>
-          <span class="release-date">May 19, 2026</span>
-        </div>
+    <hr class="rule" aria-hidden="true" style="display:none">
 
-        <p style="max-width: 720px; color: var(--text-muted); font-size: 15px; line-height: 1.7; margin-bottom: 28px;">
-          Anthropic shipped a managed-agents update on May 19. Most teams will read the blog post and move on. We extracted everything. Self-hosted sandboxes that keep your org key inside your boundary. A Memory MCP server that fills the gap Anthropic left when they declared memory_stores incompatible with self-hosted runs. MCP tunnels with WIF token exchange so your private Jira can be reached by a managed agent without static secrets. Live work-queue telemetry in the dashboard. Three production case-study blueprints. Five sandbox cookbooks. 150 new tests, validated across six iterations. Zero regressions. You wanted control over where your model runs. Here it is.
-        </p>
+    <!-- =========================== THE LOG =========================== -->
+    <section class="log" aria-label="Release log">
+      <div class="wrap">
 
-        <div class="feature-grid">
-
-          <div class="feature-card wide">
-            <span class="feature-tag amber">Headline</span>
-            <h4>Self-hosted sandboxes - your code, your silicon</h4>
-            <p>Five providers in the runtime enum: <code>cloudflare</code>, <code>daytona</code>, <code>modal</code>, <code>vercel</code>, <code>docker</code>. Each gets a cookbook under <code>deploy/cookbooks/</code> with a copy-paste-ready spawn script and image. Your org key never leaves your boundary - the worker refuses to start if <code>ANTHROPIC_API_KEY</code> is present in the sandbox env. Only <code>sk-ant-oat01-</code> environment-scoped keys get past the gate. A foot-gun that would have leaked your org budget now raises before the first network call.</p>
+        <!-- ===================== v0.33.0 ===================== -->
+        <article class="entry is-latest reveal" id="v0-33-0" aria-labelledby="t-0330">
+          <div class="entry-margin">
+            <span class="ver">v0.33.0</span>
+            <span class="ver-date">June 4, 2026</span>
+            <span class="ver-tag">★ Latest</span>
+            <div class="ver-rule" aria-hidden="true"></div>
           </div>
+          <div class="entry-body">
+            <h2 class="entry-title" id="t-0330">Your Box, Your Brains</h2>
+            <p class="entry-lede">
+              Every agent you've ever run phoned home, sent your data somewhere, billed you by the token. The deal just changed. NVIDIA put a Grace-Blackwell supercomputer and 128&nbsp;GB of unified memory on a desk — most teams will run a demo and screenshot the tokens-per-second. We made Sandcastle treat it like home. Plug in a DGX Spark and it knows: <span class="ic">Spark Mode</span> lights up, defaults flip to local-first, and inference goes first-class local through a new <code>nim/*</code> provider at <code>$0.00/run</code>, data that never leaves the box. Then it learns — Overnight Self-Tune trains a task-specific LoRA on your <em>own</em> eval data while you sleep. You wanted to stop renting. Here's the deed. And Spark is only the headline: this drop also bundles offline cassettes, run permalinks, a one-command local runner, a Template Hub explosion, a provider-neutral dashboard refresh, the 2026-06 model wave, and a security &amp; reliability sweep. Roughly three weeks of work in one release.
+            </p>
 
-          <div class="feature-card">
-            <span class="feature-tag green">New</span>
-            <h4>Memory MCP server</h4>
-            <p>Anthropic explicitly documented that <code>memory_stores</code> cannot be combined with self-hosted sandboxes. We filled the gap. <code>sandcastle.engine.memory_mcp_server</code> wraps mem0 + persistent Qdrant + Anthropic Haiku for memory decisions. Four tools, two resources, one prompt. Helm chart + docker-compose. NetworkPolicy egress to Cloudflare CIDR only.</p>
+            <a class="nv-badge" href="https://www.nvidia.com/en-us/products/workstations/dgx-spark/" target="_blank" rel="noopener" title="Sandcastle runs local on NVIDIA DGX Spark">
+              <small>Runs local on</small>
+              <strong><span class="nv-mark">▸</span> NVIDIA DGX Spark</strong>
+            </a>
+
+            <ul class="feats">
+              <li class="feat">
+                <span class="feat-chip headline">feat · headline</span>
+                <div class="feat-text">
+                  <h3>Spark Mode — your box, zero flags</h3>
+                  <p>Sandcastle auto-detects an NVIDIA DGX Spark (GB10 Grace-Blackwell, 128&nbsp;GB unified memory) and flips to local-first defaults on its own — no flag, no config. A startup banner, a dashboard badge, and <code>GET /api/runtime</code> all say the same thing: you're running on your own silicon. Your data, your box, your rules.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Local inference, first-class</h3>
+                  <p>A new <code>nim/*</code> provider (NVIDIA NIM, OpenAI-compatible) joins <code>ollama</code> and <code>oMLX</code> — every one at <code>region=local</code>, <code>$0.00/run</code>, data-stays-on-box. On a detected Spark the bare default model auto-routes to the local NIM. No token meter. No egress.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Overnight Self-Tune</h3>
+                  <p>The evolution loop can train a task-specific LoRA adapter on a workflow's <em>own</em> eval data and route to it — the box gets better at <em>your</em> task, on <em>your</em> data, for $0. Train it overnight, wake up to a model tuned to your workflow.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Deterministic cassettes</h3>
+                  <p>Record a run once, replay it offline at $0 — identically, provider-free, with a tamper-evident signature. A new <strong>strict mode</strong> hard-fails on a modified cassette. Demos that never call an API; tests that never flake on the network.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Shareable run permalinks</h3>
+                  <p>Loom-for-workflows: a public, secrets-scrubbed link to any run, with a 30-day TTL. Send the result, not a screenshot — no login, no replay cost, nothing private leaks.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3><code>sandcastle run --local</code></h3>
+                  <p>One command, in-process, zero external dependencies — no server, no queue, no Redis. First-run onboarding now picks your engine for you. The fastest path from <code>pip install</code> to a finished workflow.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat · templates</span>
+                <div class="feat-text">
+                  <h3>Template Hub explosion</h3>
+                  <p>The biggest content drop yet. New categories — <strong>Automation &amp; RPA</strong>, plus several more — and dozens of provider-neutral browser / computer-use RPA workflows that run on whatever model you point them at. A living <strong>community gallery</strong> seeded with 31 workflows from 19 authors, synced to the web hub. Three viral creative use-cases too: Action Figure Me, Glow-Up Restore, Ad Creative Factory.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Tool step + UGC Studio</h3>
+                  <p>A first-class <code>tool</code> step type and a self-healing UGC Studio flow with a vision judge — reference-image creative that checks its own output and retries until it passes.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat · models</span>
+                <div class="feat-text">
+                  <h3>2026-06 model refresh</h3>
+                  <p>The June wave wired in: <strong>GPT Image 2</strong>, <strong>Gemini 3.5</strong>, and <strong>GPT-5.2</strong> — with retired models cleaned out so nothing routes to a dead endpoint.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat · dashboard</span>
+                <div class="feat-text">
+                  <h3>Provider-neutral, dark-first dashboard</h3>
+                  <p>A refresh that tells the real story: Sandcastle runs on any provider, not one. Dark-first design, demo runs seeded with real provider models, and recovery from stale-deploy chunk misses instead of a dead-end "Connection error".</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-docs">docs</span>
+                <div class="feat-text">
+                  <h3>Built for code assistants</h3>
+                  <p><code>llms.txt</code> + <code>llms-full.txt</code> ship in the repo and on the site, so a code-generating assistant can read Sandcastle's surface and scaffold a correct workflow on the first try.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-fix">fix · hardening</span>
+                <div class="feat-text">
+                  <h3>Security &amp; reliability sweep</h3>
+                  <p>A browser-step <strong>SSRF guard</strong> blocks requests to internal/disallowed hosts. Share tokens carry a TTL; dynamic <code>nim/*</code> model ids are validated; an auth pepper and a step-cache cap landed. The sync run endpoint no longer reports <code>completed</code> when persistence fails — it retries and returns <code>verification_pending</code>. Browser dom / computer-use / lightpanda modes stop crashing on a never-defined <code>sandbox_exec</code>. Packaging gained its missing runtime deps, and the last test-isolation flakes are gone.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip">milestone</span>
+                <div class="feat-text">
+                  <div class="stat-strip">
+                    <div class="s"><b>20+</b><span>PRs shipped since v0.32.2</span></div>
+                    <div class="s"><b>$0</b><span>Local inference / run</span></div>
+                    <div class="s"><b>3</b><span>Local providers (nim/ollama/oMLX)</span></div>
+                    <div class="s"><b>0</b><span>Tokens leaving the box</span></div>
+                  </div>
+                </div>
+              </li>
+            </ul>
           </div>
+        </article>
 
-          <div class="feature-card">
-            <span class="feature-tag blue">New</span>
-            <h4>MCP tunnels with WIF auth</h4>
-            <p>Gated beta, header <code>mcp-client-2025-11-20</code>. Your internal Jira / Snowflake / Confluence is reachable from a managed agent through a cloudflared tunnel authenticated with WIF tokens. No static secrets. 60s skew-cached token exchange. Manual cert mode also supported for air-gapped setups.</p>
+        <!-- ===================== v0.32.2 ===================== -->
+        <article class="entry reveal" id="v0-32-2" aria-labelledby="t-0322">
+          <div class="entry-margin">
+            <span class="ver">v0.32.2</span>
+            <span class="ver-date">May 19, 2026</span>
+            <div class="ver-rule" aria-hidden="true"></div>
           </div>
-
-          <div class="feature-card">
-            <span class="feature-tag green">New</span>
-            <h4>Live work-queue dashboard</h4>
-            <p><code>WorkQueuePanel</code> on the run detail page, SSE-driven. Depth, sparkline (Recharts), pill (green &lt; 5, amber 5-50, red &gt; 50), <code>aria-live="polite"</code>, exponential backoff up to 30 s. You see the backlog before the pager fires.</p>
+          <div class="entry-body">
+            <h2 class="entry-title" id="t-0322">Your Sandbox, Your Silicon</h2>
+            <p class="entry-lede">
+              Anthropic shipped a managed-agents update on May 19. Most teams will read the blog post and move on. We extracted everything. Self-hosted sandboxes that keep your org key inside your boundary. A Memory MCP server that fills the gap Anthropic left when they declared <span class="ic">memory_stores</span> incompatible with self-hosted runs. MCP tunnels with WIF token exchange so your private Jira can be reached by a managed agent without static secrets. Live work-queue telemetry in the dashboard. Three production case-study blueprints. Five sandbox cookbooks. 150 new tests, validated across six iterations. Zero regressions. You wanted control over where your model runs. Here it is.
+            </p>
+            <ul class="feats">
+              <li class="feat">
+                <span class="feat-chip headline">feat · headline</span>
+                <div class="feat-text">
+                  <h3>Self-hosted sandboxes — your code, your silicon</h3>
+                  <p>Five providers in the runtime enum: <code>cloudflare</code>, <code>daytona</code>, <code>modal</code>, <code>vercel</code>, <code>docker</code>. Each gets a cookbook under <code>deploy/cookbooks/</code> with a copy-paste-ready spawn script and image. Your org key never leaves your boundary — the worker refuses to start if <code>ANTHROPIC_API_KEY</code> is present in the sandbox env. Only <code>sk-ant-oat01-</code> environment-scoped keys get past the gate. A foot-gun that would have leaked your org budget now raises before the first network call.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Memory MCP server</h3>
+                  <p>Anthropic explicitly documented that <code>memory_stores</code> cannot be combined with self-hosted sandboxes. We filled the gap. <code>sandcastle.engine.memory_mcp_server</code> wraps mem0 + persistent Qdrant + Anthropic Haiku for memory decisions. Four tools, two resources, one prompt. Helm chart + docker-compose. NetworkPolicy egress to Cloudflare CIDR only.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>MCP tunnels with WIF auth</h3>
+                  <p>Gated beta, header <code>mcp-client-2025-11-20</code>. Your internal Jira / Snowflake / Confluence is reachable from a managed agent through a cloudflared tunnel authenticated with WIF tokens. No static secrets. 60s skew-cached token exchange. Manual cert mode also supported for air-gapped setups.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Live work-queue dashboard</h3>
+                  <p><code>WorkQueuePanel</code> on the run detail page, SSE-driven. Depth, sparkline (Recharts), pill (green &lt;&nbsp;5, amber 5–50, red &gt;&nbsp;50), <code>aria-live="polite"</code>, exponential backoff up to 30&nbsp;s. You see the backlog before the pager fires.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Webhook-driven workers</h3>
+                  <p>New <code>session.status_run_started</code> event in <code>SUPPORTED_EVENTS</code>. A worker can now run as a webhook handler instead of a long-poll loop — saves RAM, latency, and your AWS bill. HMAC verification round-trips <code>sha256=</code> prefix and bare digest forms.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat · templates</span>
+                <div class="feat-text">
+                  <h3>Three production case studies</h3>
+                  <p>Not tutorials. Blueprints. Amplitude designer (multiagent + accessibility specialist + computer-use + Cloudflare). Clay GTM (project_manager + researcher / writer / qualifier + Daytona). Rogo analyst on private data (Vercel + WIF tunnel + risk_level high + mandatory approval + eval gate).</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip">feat · quality</span>
+                <div class="feat-text">
+                  <h3>Tested six different ways</h3>
+                  <p>150 new tests. Sequential re-run, file isolation, randomized + pollution cluster, pytest-repeat 10x stress, module + CLI smoke, consolidated verdict. Zero flakes. Zero new regression categories. Documented in the PR.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip">milestone</span>
+                <div class="feat-text">
+                  <div class="stat-strip">
+                    <div class="s"><b>150</b><span>New v0.32.2 tests</span></div>
+                    <div class="s"><b>5</b><span>Sandbox cookbooks</span></div>
+                    <div class="s"><b>6</b><span>Validation iterations</span></div>
+                    <div class="s"><b>0</b><span>Regressions</span></div>
+                  </div>
+                </div>
+              </li>
+            </ul>
           </div>
+        </article>
 
-          <div class="feature-card">
-            <span class="feature-tag blue">New</span>
-            <h4>Webhook-driven workers</h4>
-            <p>New <code>session.status_run_started</code> event in <code>SUPPORTED_EVENTS</code>. A worker can now run as a webhook handler instead of a long-poll loop - saves RAM, latency, and your AWS bill. HMAC verification round-trips <code>sha256=</code> prefix and bare digest forms.</p>
+        <!-- ===================== v0.32 ===================== -->
+        <article class="entry reveal" id="v0-32" aria-labelledby="t-032">
+          <div class="entry-margin">
+            <span class="ver">v0.32</span>
+            <span class="ver-date">May 16, 2026</span>
+            <div class="ver-rule" aria-hidden="true"></div>
           </div>
-
-          <div class="feature-card">
-            <span class="feature-tag purple">Templates</span>
-            <h4>Three production case studies</h4>
-            <p>Not tutorials. Blueprints. Amplitude designer (multiagent + accessibility specialist + computer-use + Cloudflare). Clay GTM (project_manager + researcher / writer / qualifier + Daytona). Rogo analyst on private data (Vercel + WIF tunnel + risk_level high + mandatory approval + eval gate).</p>
+          <div class="entry-body">
+            <h2 class="entry-title" id="t-032">Claude Agents Deep Integration</h2>
+            <p class="entry-lede">
+              You shipped the agent. The client wants the integration. The auditor wants the trail. The user wants you to ask the next question without restarting the whole workflow. v0.32 is the answer to every one of those. Sandcastle now exposes every Anthropic Managed Agents primitive shipped under the <span class="ic">managed-agents-2026-04-01</span> beta umbrella, plus the things Anthropic doesn't ship: cryptographically verifiable trajectory replay, a Skills publisher that turns workflows into uploadable Claude Skills, and an Agent SDK runtime for teams that want in-process execution. Two weeks of work, 169 new tests, one release.
+            </p>
+            <ul class="feats">
+              <li class="feat">
+                <span class="feat-chip headline">feat · headline</span>
+                <div class="feat-text">
+                  <h3>Every Anthropic primitive surfaced</h3>
+                  <p>Memory Stores, Multiagent coordinator, Outcomes API, Webhooks. All four came out from Anthropic under the same beta header in April and May 2026; Sandcastle now wires each one into the YAML and the dashboard so a single workflow can attach versioned memory, spawn 20 parallel specialist agents, define outcomes the eval pipeline reads automatically, and emit lifecycle events to a webhook endpoint.</p>
+                  <p>Add three lines of YAML, get a multi-agent system that meets your eval gate.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Skills Publisher</h3>
+                  <p><code>sandcastle publish-skills --upload</code> converts every workflow into a tar.gz SKILL.md package with strict frontmatter and uploads to <code>/v1/skills</code>. Your workflows are now callable from every Anthropic Skills-aware client. Pair with v0.31 MCP-first publishing and Sandcastle covers both major distribution channels.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Trajectory Replay</h3>
+                  <p>New <code>type: trajectory-replay</code> step computes SHA-256 over a recorded tool-call sequence and diffs against a candidate run. Sandcastle's audit trail is a hash chain, so the replay is cryptographically verifiable. EU AI Act auditors love this.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Agent SDK runtime</h3>
+                  <p><code>runtime: "agent-sdk"</code> swaps Managed Agents for in-process Claude Agent SDK. For EU sovereignty, air-gapped, regulated teams who can't send session state to Anthropic's hosted infra. Lazy-imports the SDK; graceful error when not installed.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip">feat · polish</span>
+                <div class="feat-text">
+                  <h3>Live Agent Reasoning panel</h3>
+                  <p>Run detail page now subscribes to an SSE event stream and shows agent.thinking, agent.tool_use, and agent.message events as they fire. Thread-grouped, collapsible. The dashboard finally shows what the agent is actually doing.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-fix">fix</span>
+                <div class="feat-text">
+                  <h3>Five wire fixes (table stakes)</h3>
+                  <p>tools_enabled finally reaches the API (was parsed but ignored). temperature, max_tokens, thinking_budget on ManagedAgentConfig. stream config field actually used. Pricing table mapping every Claude 4.x model. Fallback chains of up to 5 templates.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Tool Search + examples convention</h3>
+                  <p>Mark tools with <code>defer_loading: true</code> and 1–5 invocation examples per tool. Anthropic's own measurements: tool-selection accuracy 49% to 74%, usable context up 85%, parameter accuracy 72% to 90%. New docs/tool-examples-convention.md.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Computer Use + MCP Elicitation</h3>
+                  <p>New <code>type: computer-use</code> step type with the <code>computer_20251124</code> beta + an 8-item safety pre-flight (prompt-injection guard, page-load deadline, screenshot bounds). Plus the 6th MCP primitive (Elicitation, spec rev 2025-11-25) lets workflows ask the user for a missing input mid-run.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip">milestone</span>
+                <div class="feat-text">
+                  <div class="stat-strip">
+                    <div class="s"><b>15,176</b><span>Tests passing</span></div>
+                    <div class="s"><b>169</b><span>New v0.32 tests</span></div>
+                    <div class="s"><b>9</b><span>New modules</span></div>
+                    <div class="s"><b>24</b><span>Step types</span></div>
+                  </div>
+                </div>
+              </li>
+            </ul>
           </div>
+        </article>
 
-          <div class="feature-card">
-            <span class="feature-tag amber">Quality</span>
-            <h4>Tested six different ways</h4>
-            <p>150 new tests. Sequential re-run, file isolation, randomized + pollution cluster, pytest-repeat 10x stress, module + CLI smoke, consolidated verdict. Zero flakes. Zero new regression categories. Documented in the PR.</p>
+        <!-- ===================== v0.31 ===================== -->
+        <article class="entry reveal" id="v0-31" aria-labelledby="t-031">
+          <div class="entry-margin">
+            <span class="ver">v0.31</span>
+            <span class="ver-date">May 14, 2026</span>
+            <div class="ver-rule" aria-hidden="true"></div>
           </div>
-
-          <div class="feature-card">
-            <span class="feature-tag purple">Milestone</span>
-            <h4>By the numbers</h4>
-            <div class="stat-row">
-              <div class="stat-item">
-                <div class="stat-num">150</div>
-                <div class="stat-label">New v0.32.2 tests</div>
-              </div>
-              <div class="stat-item">
-                <div class="stat-num">5</div>
-                <div class="stat-label">Sandbox cookbooks</div>
-              </div>
-              <div class="stat-item">
-                <div class="stat-num">6</div>
-                <div class="stat-label">Validation iterations</div>
-              </div>
-              <div class="stat-item">
-                <div class="stat-num">0</div>
-                <div class="stat-label">Regressions</div>
-              </div>
-            </div>
+          <div class="entry-body">
+            <h2 class="entry-title" id="t-031">Compliance &amp; Connections</h2>
+            <p class="entry-lede">
+              Eighty days. That is how long you have until the EU AI Act's general-purpose obligations go live. After 2 August 2026, "we'll figure it out later" stops being an acceptable answer. v0.31 is the answer you can ship today: a dedicated EU AI Act landing your CISO can actually read, ten ready-made compliance workflow templates mapped to specific Articles and Annex IV, eval gates that block a regressing model from getting promoted, and MCP-first publishing that turns every workflow you've already built into a first-class tool inside Claude Desktop, Cursor, Windsurf, or any MCP client. The work was quiet. The result is loud.
+            </p>
+            <ul class="feats">
+              <li class="feat">
+                <span class="feat-chip headline">feat · headline</span>
+                <div class="feat-text">
+                  <h3>Built for August 2, 2026</h3>
+                  <p>The EU AI Act deadline is on the calendar whether you like it or not. v0.31 ships a dedicated <a href="/eu-ai-act/">landing page</a> mapping every Sandcastle control to a specific Article (9, 11, 12, 14, 25, 49, 50, 73) and Annex IV, plus ten production-ready compliance workflow templates: DPIA, vendor risk assessment, incident reporting, bias audit, model card generator, AI inventory, risk register, GDPR data-subject request, human oversight log, and Annex IV transparency report.</p>
+                  <p>Bring the templates. Customize the prompts. Hand the auditor the audit trail. Done.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>MCP-First Publishing</h3>
+                  <p>One command: <code>sandcastle publish-mcp researcher</code>. Paste the snippet into Claude Desktop, Cursor, or Windsurf. Your workflow is now a tool the AI client can call. Every workflow you already built becomes reachable from every MCP client in the ecosystem — the full five-primitive spec (tools, resources, prompts, sampling, roots) and a <code>.well-known/mcp.json</code> discovery manifest included.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Eval gates that block bad models</h3>
+                  <p>Define a golden dataset of inputs and expected scores. Set a minimum threshold. Promote with <code>?strict=true</code> and Sandcastle runs the gate before flipping the production version. The new model regresses by even a hair? Promotion fails closed. Eval-driven development is no longer a future plan.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-fix">fix · polish</span>
+                <div class="feat-text">
+                  <h3>A dashboard that doesn't crash</h3>
+                  <p>Overview page split into twenty focused components, each wrapped in its own error boundary. One slow API endpoint no longer wipes the page. Every section that loads stays loaded. The 2,261-line monolith is now a 241-line orchestrator.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-fix">fix</span>
+                <div class="feat-text">
+                  <h3>Cost estimates that tell the truth</h3>
+                  <p>The token estimator used to assume 1,000 tokens per run for every workflow on Earth. Now it reads each workflow's actual run history, blends the price per million, and gives each one its own number. Evolution makes better keep/discard calls. AutoPilot stops lying about the cost of an experiment.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-fix">fix · security</span>
+                <div class="feat-text">
+                  <h3>Codex Audit Rounds 9 + 10</h3>
+                  <p>Five HIGH findings closed: tenant-scoped cache and Mem0 scope, XSS-safe report config, SSRF-guarded WeasyPrint URL fetching, A2A budget enforcement, version-list 404 correctness. Plus one MEDIUM: cross-tenant prompt injection in the workflow generator. <code>tenant_id</code> threaded through every executor path so neighbouring tenants cannot see each other's cache hits, memory reads, or prompt context.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-fix">fix · a11y</span>
+                <div class="feat-text">
+                  <h3>Dashboard accessibility pass</h3>
+                  <p><code>aria-expanded</code>, <code>aria-controls</code>, <code>aria-hidden</code>, focus-visible rings, sr-only labels on every search and filter input, modal widths that scale up on tablet, disabled opacity bumped to WCAG-AA contrast, and localStorage wrapped in try/catch so private browsing degrades gracefully. Eight separate polish items in one release.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Per-workflow stats API</h3>
+                  <p><code>GET /api/workflows/stats</code> returns run count, success rate, average cost, and last-run status for every workflow visible to your tenant. Cached in-process for 30 seconds. The dashboard grid now shows real metrics instead of placeholder data.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip">milestone</span>
+                <div class="feat-text">
+                  <div class="stat-strip">
+                    <div class="s"><b>15,014</b><span>Tests passing</span></div>
+                    <div class="s"><b>10</b><span>Compliance YAMLs</span></div>
+                    <div class="s"><b>5</b><span>MCP primitives</span></div>
+                    <div class="s"><b>80</b><span>Days to deadline</span></div>
+                  </div>
+                </div>
+              </li>
+            </ul>
           </div>
+        </article>
 
+        <!-- ===================== v0.30 ===================== -->
+        <article class="entry reveal" id="v0-30" aria-labelledby="t-030">
+          <div class="entry-margin">
+            <span class="ver">v0.30</span>
+            <span class="ver-date">April 10, 2026</span>
+            <div class="ver-rule" aria-hidden="true"></div>
+          </div>
+          <div class="entry-body">
+            <h2 class="entry-title" id="t-030">Agents Unleashed</h2>
+            <p class="entry-lede">
+              v0.30 is the biggest Sandcastle release yet. Claude Managed Agents are now workflow steps. Pick from 15 built-in agent templates — or describe what you need and AI designs the agent for you. Combine cloud agents, local models, OCR, and PDF reports in one YAML file. Plus: GLM-OCR with 94.6% accuracy runs locally for free, and every run now tells you exactly where your tokens go.
+            </p>
+            <ul class="feats">
+              <li class="feat">
+                <span class="feat-chip headline">feat · headline</span>
+                <div class="feat-text">
+                  <h3>Claude Managed Agents as Workflow Steps</h3>
+                  <p>Delegate to Anthropic's cloud agent runtime. Agents get bash, files, web search, code execution. Use them alongside Mistral, oMLX, or any other provider. One YAML, best tool per step.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>15 Built-in Agent Templates</h3>
+                  <p>researcher, coder, analyst, writer, reviewer, scraper, tester, devops, translator, designer, sql_expert, seo_specialist, legal_analyst, financial_analyst, project_manager. One line: <code>agent_template: researcher</code></p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Describe Mode</h3>
+                  <p>Don't pick a template. Describe what you need: "Data analyst who creates charts from CSVs." AI designs the agent automatically — system prompt, tools, packages, network.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Agent Chaining</h3>
+                  <p>output_format (json/files/markdown), shared_files between agents, fallback_template on failure. Agents collaborate in multi-step pipelines.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>GLM-OCR Engine</h3>
+                  <p>0.9B model, 94.6% accuracy, #1 on OmniDocBench. Runs locally via Ollama. Free. Handles tables, handwriting, math, code blocks. 4th OCR engine alongside pymupdf and Chandra.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip">feat · perf</span>
+                <div class="feat-text">
+                  <h3>Token Waste Detection</h3>
+                  <p>Every run generates a token efficiency report. Detects duplicate file reads, duplicate prompts, oversized context. output_max_tokens limits what passes between steps. Cache-aware execution.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip">milestone</span>
+                <div class="feat-text">
+                  <div class="stat-strip">
+                    <div class="s"><b>21</b><span>Step types</span></div>
+                    <div class="s"><b>15</b><span>Agent templates</span></div>
+                    <div class="s"><b>4</b><span>OCR engines</span></div>
+                    <div class="s"><b>325</b><span>New tests</span></div>
+                  </div>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- ===================== v0.28.1 ===================== -->
+        <article class="entry reveal" id="v0-28-1" aria-labelledby="t-0281">
+          <div class="entry-margin">
+            <span class="ver">v0.28.1</span>
+            <span class="ver-date">April 1, 2026</span>
+            <div class="ver-rule" aria-hidden="true"></div>
+          </div>
+          <div class="entry-body">
+            <h2 class="entry-title" id="t-0281">Every Step Knows Its Story</h2>
+            <p class="entry-lede">
+              v0.28.1 is about making what you've built understandable. Steps explain why they exist. Errors tell you what went wrong. The CLI shows you what's happening in real-time. And LLM steps can now pull in fresh context from memory, web, or files before they run.
+            </p>
+            <ul class="feats">
+              <li class="feat">
+                <span class="feat-chip headline">feat · headline</span>
+                <div class="feat-text">
+                  <h3>Self-Describing Workflows</h3>
+                  <p>Every step can declare its <code>responsibility</code>, <code>source_hint</code>, <code>owner</code>, and <code>added_date</code>. Three new CLI commands: <code>sandcastle describe</code>, <code>sandcastle lint</code>, <code>sandcastle owners</code>. Audit trail enriched. Dashboard shows metadata on steps and workflow cards.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>context_query — Dynamic Context for LLM Steps</h3>
+                  <p>Steps fetch relevant context before execution. Four sources: Agent Memory (semantic search), web (Tavily), local files (keyword search), custom (shell command). Available as <code>{context}</code> in prompts.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip">feat · ux</span>
+                <div class="feat-text">
+                  <h3>sandcastle run --stream</h3>
+                  <p>Live terminal output with colors: green for done, yellow for running, red for failed. Shows step timing, cost, and responsibility. Ctrl+C runs in background.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip">feat · ux</span>
+                <div class="feat-text">
+                  <h3>Real-Time Step Progress</h3>
+                  <p>Dashboard shows live checkmarks via SSE as steps complete. No more refreshing to see progress.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip">feat · ux</span>
+                <div class="feat-text">
+                  <h3>Detailed Errors + PDF Download</h3>
+                  <p>Full error messages in red callout boxes (not just "failed"). Download PDF button for report steps.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Batch Cancel + Semantic Search</h3>
+                  <p>Cancel running batches mid-flight. Template search with "Did you mean…" fuzzy suggestions.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip">feat · quality</span>
+                <div class="feat-text">
+                  <h3>540 New Tests</h3>
+                  <p>280 template e2e tests (top 20 templates). 260 provider integration tests (all 7 providers). Full validation coverage.</p>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- ===================== v0.28 ===================== -->
+        <article class="entry reveal" id="v0-28" aria-labelledby="t-028">
+          <div class="entry-margin">
+            <span class="ver">v0.28</span>
+            <span class="ver-date">March 29, 2026</span>
+            <div class="ver-rule" aria-hidden="true"></div>
+          </div>
+          <div class="entry-body">
+            <h2 class="entry-title" id="t-028">Batch, Monitor, Report.</h2>
+            <p class="entry-lede">
+              v0.28 is where Sandcastle stops being a tool and becomes a platform. Batch-process thousands of items. Monitor your schedules. Generate beautiful PDF reports with charts. Parse scanned documents with AI. Auto-update without downtime. And now — run everything locally on Apple Silicon with oMLX.
+            </p>
+            <ul class="feats">
+              <li class="feat">
+                <span class="feat-chip headline">feat · headline</span>
+                <div class="feat-text">
+                  <h3>Auto-Update System</h3>
+                  <p>CLI: <code>sandcastle update</code>. Dashboard: one-click with rollback. Stable/beta/pinned channels. Blackout windows. Enterprise approval policies. Never manually pip install again.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Batch Run</h3>
+                  <p>Upload 1000 items, Sandcastle fans out into parallel runs. Progress tracking, per-item results, aggregate cost. <code>POST /workflows/{name}/batch</code></p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>PDF Report Engine</h3>
+                  <p>New step type: <code>type: report</code>. Professional-grade PDFs with cover page, table of contents, charts, KPI boxes, callouts. 3 themes. WeasyPrint under the hood. <code>pip install sandcastle-ai[report]</code></p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Schedule Monitor</h3>
+                  <p>Dashboard page showing all cron schedules: last run, next run countdown, success rate, pause/resume. No more guessing what failed overnight.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Chandra OCR</h3>
+                  <p>Parse scanned documents, handwriting, tables from images. 90+ languages including Czech. <code>ocr_engine: chandra</code> in parse step. <code>pip install sandcastle-ai[ocr]</code></p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>oMLX — Local AI on Apple Silicon</h3>
+                  <p>7th provider. Run Llama 4, Mistral, Gemma, Qwen locally. Zero cloud costs. Zero data leaving your machine. OpenAI-compatible.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Workflow Version Diff</h3>
+                  <p>Every edit versioned. Compare any two versions with YAML diff highlighting. See exactly what changed.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip">feat · ux</span>
+                <div class="feat-text">
+                  <h3>Activity Feed + Run Compare</h3>
+                  <p>Real-time activity stream on dashboard. Select 2 runs and compare side-by-side.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Deep Research Pipeline</h3>
+                  <p>OpenVLAW-inspired 6-step template: parallel research, judge, verify, typeset, audit. Built-in.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip">milestone</span>
+                <div class="feat-text">
+                  <div class="stat-strip">
+                    <div class="s"><b>7</b><span>AI providers</span></div>
+                    <div class="s"><b>20</b><span>Step types</span></div>
+                    <div class="s"><b>125</b><span>Templates</span></div>
+                    <div class="s"><b>44</b><span>New oMLX tests</span></div>
+                  </div>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- ===================== v0.2666b1 ===================== -->
+        <article class="entry reveal" id="v0-2666b1" aria-labelledby="t-2666b1">
+          <div class="entry-margin">
+            <span class="ver">v0.2666b1</span>
+            <span class="ver-date">March 27, 2026</span>
+            <div class="ver-rule" aria-hidden="true"></div>
+          </div>
+          <div class="entry-body">
+            <h2 class="entry-title" id="t-2666b1">Hardened</h2>
+            <p class="entry-lede">
+              v0.2666 was the vision. v0.2666b1 is the proof. We shipped universal advisor, EU data residency, smart failover. Then we spent a week trying to break it. 1,875 new tests. 90 bug fixes. 10 security patches. Every edge case we found — fixed.
+            </p>
+            <ul class="feats">
+              <li class="feat">
+                <span class="feat-chip headline">feat · ai</span>
+                <div class="feat-text">
+                  <h3>AI Assistant got smarter</h3>
+                  <p>Generates workflow, finds errors, fixes them automatically. Suggests matching templates. Learns your style from existing workflows. Knows which tools you have configured.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip">feat · ux</span>
+                <div class="feat-text">
+                  <h3>First 60 seconds redesigned</h3>
+                  <p>Auto-detects Ollama and API keys on first load. One-click demo workflow runs in 10 seconds. Onboarding wizard: 2 steps, not 5.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Failover Dashboard</h3>
+                  <p>See when and why providers failed over. Per-workflow cost recommendations with savings amounts.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Agent Memory Page</h3>
+                  <p>Search, browse, delete agent memories. Importance scores and decay visualization.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-fix">fix · security</span>
+                <div class="feat-text">
+                  <h3>Security hardened</h3>
+                  <p>Admin auth on evolution endpoints, template injection prevention, EU residency enforced on every LLM call, rate limiting, credential logging sanitized.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-fix">fix · perf</span>
+                <div class="feat-text">
+                  <h3>Faster everywhere</h3>
+                  <p>GZip compression, 2-phase dashboard loading, cache headers, database indexes, search debounce.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip">milestone</span>
+                <div class="feat-text">
+                  <div class="stat-strip">
+                    <div class="s"><b>1,875</b><span>New tests</span></div>
+                    <div class="s"><b>90</b><span>Bug fixes</span></div>
+                    <div class="s"><b>10</b><span>Security patches</span></div>
+                    <div class="s"><b>14,361</b><span>Total tests</span></div>
+                  </div>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- ===================== v0.2666 ===================== -->
+        <article class="entry reveal" id="v0-2666" aria-labelledby="t-2666">
+          <div class="entry-margin">
+            <span class="ver">v0.2666</span>
+            <span class="ver-date">March 26, 2026</span>
+            <div class="ver-rule" aria-hidden="true"></div>
+          </div>
+          <div class="entry-body">
+            <h2 class="entry-title" id="t-2666">Your AI, Your Rules, Your Borders</h2>
+            <p class="entry-lede">
+              The release where Sandcastle stopped being an orchestrator and became a platform. You used to choose a provider and hope for the best. Now you describe what you want and the system figures out the rest — which model, which provider, what it costs, where the data lives, and what happens when something breaks.
+            </p>
+            <ul class="feats">
+              <li class="feat">
+                <span class="feat-chip headline">feat · headline</span>
+                <div class="feat-text">
+                  <h3>Universal Advisor — one setting changes everything</h3>
+                  <p>Set <code>SANDCASTLE_ADVISOR_PROVIDER=mistral</code> and every AI feature — generation, evolution, evaluation, quality scoring — switches to Mistral. Tomorrow you want Claude? Change one line. Ollama on your laptop? Same line. Six providers, one setting, zero code changes.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip">feat · compliance</span>
+                <div class="feat-text">
+                  <h3>EU Data Residency</h3>
+                  <p>Set <code>DATA_RESIDENCY=eu</code>. That's it. All AI processing routes through EU providers or stays local. Try sending data to a US provider with EU mode on — Sandcastle won't let you. Not a promise. Enforcement.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip">feat · reliability</span>
+                <div class="feat-text">
+                  <h3>Smart Auto-Failover</h3>
+                  <p>Provider hits a rate limit at 3 AM? Sandcastle switches to the next one. No error. No alert. No intervention. You wake up, check the dashboard, see "Failover activated 2x overnight. $0.12 additional cost." That's the whole story.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>SLO-Aware Routing</h3>
+                  <p>Critical analysis gets Claude Opus. Simple formatting gets Haiku. Not because you configured 47 rules — because Sandcastle matches model quality to task importance automatically. You set the priorities. It picks the brain.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip">feat · cost</span>
+                <div class="feat-text">
+                  <h3>Cost Intelligence — you'll finally know where the money goes</h3>
+                  <p>Per-provider cost breakdown. "Last 30 days: $120 via Claude. Same workloads via Mistral: $45." One click to see the math. And proactive recommendations that actually make sense — "Switch these 3 workflows to Mistral and save $75/month with EU residency included."</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>OpenClaw Integration</h3>
+                  <p>New step type: <code>type: openclaw</code>. Your workflows can now call OpenClaw agents as a step in any pipeline. One more thing you don't have to build yourself.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Document Parser</h3>
+                  <p>New step type: <code>type: parse</code>. PDF, DOCX, XLSX at 576 pages per second. No external service. No API key. No monthly bill. Just <code>pip install sandcastle-ai[parse]</code> and go.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip">feat · ux</span>
+                <div class="feat-text">
+                  <h3>Dashboard that gets out of your way</h3>
+                  <p>Getting Started checklist for new users. Quick Run cards — jump straight to results. Collapsible sidebar. Step palette with categories. Backend configurator with copy-paste .env snippets. Lazy loading. The dashboard got simpler by getting smarter.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip">milestone</span>
+                <div class="feat-text">
+                  <div class="stat-strip">
+                    <div class="s"><b>6</b><span>AI providers</span></div>
+                    <div class="s"><b>20</b><span>Step types</span></div>
+                    <div class="s"><b>576</b><span>Pages/sec parsed</span></div>
+                    <div class="s"><b>0</b><span>Lines to switch providers</span></div>
+                  </div>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- ===================== v0.25.0 ===================== -->
+        <article class="entry reveal" id="v0-25-0" aria-labelledby="t-0250">
+          <div class="entry-margin">
+            <span class="ver">v0.25.0</span>
+            <span class="ver-date">March 20, 2026</span>
+            <div class="ver-rule" aria-hidden="true"></div>
+          </div>
+          <div class="entry-body">
+            <h2 class="entry-title" id="t-0250">Evolution</h2>
+            <ul class="feats">
+              <li class="feat">
+                <span class="feat-chip headline">feat · headline</span>
+                <div class="feat-text">
+                  <h3>Workflow Evolution</h3>
+                  <p>Your workflows optimize themselves. Set an eval suite, click "Evolve", and Sandcastle autonomously mutates prompts, swaps models, and simplifies steps — keeping only changes that improve your score.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Composite Scoring</h3>
+                  <p><code>quality * confidence - cost_penalty - latency_penalty</code>. Every mutation is evaluated mechanically. No subjective judgments.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Mutation Operators</h3>
+                  <p>Three strategies: prompt refinement (LLM-guided), model swapping (haiku &lt;-&gt; sonnet based on quality/cost), and simplification (the AI learns that less is more).</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Evolution Dashboard</h3>
+                  <p>Track every iteration. See the score evolve. Compare baseline vs best. Accept the winner with one click.</p>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- ===================== v0.24.0 ===================== -->
+        <article class="entry reveal" id="v0-24-0" aria-labelledby="t-0240">
+          <div class="entry-margin">
+            <span class="ver">v0.24.0</span>
+            <span class="ver-date">March 19, 2026</span>
+            <div class="ver-rule" aria-hidden="true"></div>
+          </div>
+          <div class="entry-body">
+            <h2 class="entry-title" id="t-0240">Ecosystem</h2>
+            <ul class="feats">
+              <li class="feat">
+                <span class="feat-chip headline">feat · headline</span>
+                <div class="feat-text">
+                  <h3>Workflow as API</h3>
+                  <p>Your workflows are now production APIs. One click to publish, one curl to call. Your customers hit the endpoint, you see every run in the dashboard. <code>POST /api/v1/lead-enrichment</code> with a Bearer key and a JSON body.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Living Dashboard</h3>
+                  <p>The dashboard shows real data now. Real-time sparklines update on every run. Anomaly detection catches cost spikes and error streaks automatically. Heatmap shows 6 months of activity — click any day to drill down into individual runs.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Agent Marketplace</h3>
+                  <p>Publish your workflows to the community hub. Others rate them, install them, remix them. Think npm for AI agents. One command to publish, one click to install.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Multi-Agent Delegation</h3>
+                  <p>Agents that call other agents. Dynamic routing: the output of one step picks which workflow runs next. Full depth tracking, real-time progress events at every level of delegation.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>File Upload</h3>
+                  <p>Workflows accept real documents now. Drop a PDF, CSV, or image into the run modal. Text files are inlined into prompts. Binary files are passed as references to your agent steps.</p>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- ===================== v0.23.0 ===================== -->
+        <article class="entry reveal" id="v0-23-0" aria-labelledby="t-0230">
+          <div class="entry-margin">
+            <span class="ver">v0.23.0</span>
+            <span class="ver-date">March 18, 2026</span>
+            <div class="ver-rule" aria-hidden="true"></div>
+          </div>
+          <div class="entry-body">
+            <h2 class="entry-title" id="t-0230">Enterprise Trust</h2>
+            <ul class="feats">
+              <li class="feat">
+                <span class="feat-chip">feat · compliance</span>
+                <div class="feat-text">
+                  <h3>EU AI Act Compliance</h3>
+                  <p>Risk classification per EU AI Act categories. Compliance mode that blocks high-risk workflows without human approval. Transparency reports (Article 13), Annex IV technical documentation, global emergency stop.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-fix">feat · security</span>
+                <div class="feat-text">
+                  <h3>Tamper-Evident Audit Trail</h3>
+                  <p>SHA-256 hash chain on every event. Each entry links to the previous — if anyone modifies a record, the chain breaks. Verify integrity via API. 7 executor hooks + 9 admin action hooks. 3 query endpoints.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat · privacy</span>
+                <div class="feat-text">
+                  <h3>Privacy Router</h3>
+                  <p>7 PII patterns: email, phone, SSN, credit card, IP address, IBAN, date of birth. Per-workflow or per-server config. Redact sensitive data before it touches your LLM, or run in audit-only mode.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat · infra</span>
+                <div class="feat-text">
+                  <h3>Browser Modes</h3>
+                  <p>LightPanda (10x faster CDP, zero memory bloat) and Browserbase (cloud, zero cold-start) join E2B, Docker, and local as sandbox options. Playwright pre-baked in the Dockerfile. Switch backends with one env var.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat · observability</span>
+                <div class="feat-text">
+                  <h3>OpenTelemetry</h3>
+                  <p>Workflow and step-level OTLP spans. Cost, duration, and token counts on every trace. Compatible with Jaeger, Tempo, Honeycomb, Datadog. <code>pip install sandcastle-ai[otel]</code></p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat · integrations</span>
+                <div class="feat-text">
+                  <h3>5 New Connectors</h3>
+                  <p>Langfuse (LLM observability), Qdrant (vector search), GCS (Google Cloud Storage), Azure Blob Storage, and Exa (semantic web search). 63 total connectors.</p>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- ===================== v0.22.0 ===================== -->
+        <article class="entry reveal" id="v0-22-0" aria-labelledby="t-0220">
+          <div class="entry-margin">
+            <span class="ver">v0.22.0</span>
+            <span class="ver-date">March 17, 2026</span>
+            <div class="ver-rule" aria-hidden="true"></div>
+          </div>
+          <div class="entry-body">
+            <h2 class="entry-title" id="t-0220">Reliability &amp; Cost</h2>
+            <ul class="feats">
+              <li class="feat">
+                <span class="feat-chip">feat · cost</span>
+                <div class="feat-text">
+                  <h3>Cost Estimation</h3>
+                  <p><code>POST /runs/estimate</code> tells you what a workflow will cost before you run it. Per-step breakdown with model pricing baked in. Set budget guardrails. Workflows that would exceed the budget are blocked before a single token is spent.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-fix">feat · security</span>
+                <div class="feat-text">
+                  <h3>Secret Scrubber</h3>
+                  <p>Catches credential URLs, PEM keys, Azure AccountKey, and JSON-quoted secrets before they reach logs or LLM context. Two-layer defense. Idempotent — safe to run multiple times on the same payload.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip">feat · quality</span>
+                <div class="feat-text">
+                  <h3>Eval Framework</h3>
+                  <p>Detects quality regressions with IEEE 754-safe integer basis points. No more floating-point false positives that cause flaky CI. Define expected outputs, run evals on every commit, catch regressions at 0.01 percentage point precision.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat · integrations</span>
+                <div class="feat-text">
+                  <h3>Composio Integration</h3>
+                  <p>500+ business app actions through a single step type. Gmail, Slack, Notion, Salesforce, HubSpot, and more — all wired in via the Composio connector. One auth flow, any tool, zero custom code.</p>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </article>
+
+      </div>
+    </section>
+
+    <!-- =========================== CLOSER =========================== -->
+    <section class="closer" aria-labelledby="closer-h">
+      <div class="wrap">
+        <p class="pre">The log keeps growing. So does the build.</p>
+        <h2 id="closer-h">Run the latest in one command.</h2>
+        <span class="big-install" id="bigInstall" role="button" tabindex="0" aria-label="Copy: pip install sandcastle-ai">
+          <span class="pmt">$</span><span>pip install sandcastle-ai</span>
+          <span class="ci" id="bigCopyLabel">Copy</span>
+        </span>
+        <div class="links">
+          <a href="https://gizmax.github.io/Sandcastle/">Docs ↗</a>
+          <a href="https://pypi.org/project/sandcastle-ai/">PyPI ↗</a>
+          <a href="https://github.com/gizmax/Sandcastle">GitHub ↗</a>
+          <a href="/">Home</a>
         </div>
       </div>
-
-      <!-- v0.32 -->
-      <div class="release fade-in">
-        <div class="release-header">
-          <span class="release-version">v0.32</span>
-          <span class="release-name">Claude Agents Deep Integration</span>
-          <span class="release-date">May 16, 2026</span>
-        </div>
-
-        <p style="max-width: 720px; color: var(--text-muted); font-size: 15px; line-height: 1.7; margin-bottom: 28px;">
-          You shipped the agent. The client wants the integration. The auditor wants the trail. The user wants you to ask the next question without restarting the whole workflow. v0.32 is the answer to every one of those. Sandcastle now exposes every Anthropic Managed Agents primitive shipped under the managed-agents-2026-04-01 beta umbrella, plus the things Anthropic doesn't ship: cryptographically verifiable trajectory replay, a Skills publisher that turns workflows into uploadable Claude Skills, and an Agent SDK runtime for teams that want in-process execution. Two weeks of work, 169 new tests, one release.
-        </p>
-
-        <div class="feature-grid">
-
-          <div class="feature-card wide">
-            <span class="feature-tag amber">Headline</span>
-            <h4>Every Anthropic primitive surfaced</h4>
-            <p>Memory Stores, Multiagent coordinator, Outcomes API, Webhooks. All four came out from Anthropic under the same beta header in April and May 2026; Sandcastle now wires each one into the YAML and the dashboard so a single workflow can attach versioned memory, spawn 20 parallel specialist agents, define outcomes the eval pipeline reads automatically, and emit lifecycle events to a webhook endpoint.</p>
-            <p>Add three lines of YAML, get a multi-agent system that meets your eval gate.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag blue">New</span>
-            <h4>Skills Publisher</h4>
-            <p><code>sandcastle publish-skills --upload</code> converts every workflow into a tar.gz SKILL.md package with strict frontmatter and uploads to <code>/v1/skills</code>. Your workflows are now callable from every Anthropic Skills-aware client. Pair with v0.31 MCP-first publishing and Sandcastle covers both major distribution channels.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag green">New</span>
-            <h4>Trajectory Replay</h4>
-            <p>New <code>type: trajectory-replay</code> step computes SHA-256 over a recorded tool-call sequence and diffs against a candidate run. Sandcastle's audit trail is a hash chain, so the replay is cryptographically verifiable - a property neither LangSmith nor Braintrust ships. EU AI Act auditors love this.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag blue">New</span>
-            <h4>Agent SDK runtime</h4>
-            <p><code>runtime: "agent-sdk"</code> swaps Managed Agents for in-process Claude Agent SDK. For EU sovereignty, air-gapped, regulated teams who can't send session state to Anthropic's hosted infra. Lazy-imports the SDK; graceful error when not installed.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag amber">Polish</span>
-            <h4>Live Agent Reasoning panel</h4>
-            <p>Run detail page now subscribes to an SSE event stream and shows agent.thinking, agent.tool_use, and agent.message events as they fire. Thread-grouped, collapsible. The dashboard finally shows what the agent is actually doing.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag purple">Fix</span>
-            <h4>Five wire fixes (table stakes)</h4>
-            <p>tools_enabled finally reaches the API (was parsed but ignored). temperature, max_tokens, thinking_budget on ManagedAgentConfig. stream config field actually used. Pricing table mapping every Claude 4.x model. Fallback chains of up to 5 templates.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag green">New</span>
-            <h4>Tool Search + examples convention</h4>
-            <p>Mark tools with <code>defer_loading: true</code> and 1-5 invocation examples per tool. Anthropic's own measurements: tool-selection accuracy 49% to 74%, usable context up 85%, parameter accuracy 72% to 90%. New docs/tool-examples-convention.md.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag blue">New</span>
-            <h4>Computer Use + MCP Elicitation</h4>
-            <p>New <code>type: computer-use</code> step type with the <code>computer_20251124</code> beta + an 8-item safety pre-flight (prompt-injection guard, page-load deadline, screenshot bounds). Plus the 6th MCP primitive (Elicitation, spec rev 2025-11-25) lets workflows ask the user for a missing input mid-run.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag purple">Milestone</span>
-            <h4>By the numbers</h4>
-            <div class="stat-row">
-              <div class="stat-item">
-                <div class="stat-num">15,176</div>
-                <div class="stat-label">Tests passing</div>
-              </div>
-              <div class="stat-item">
-                <div class="stat-num">169</div>
-                <div class="stat-label">New v0.32 tests</div>
-              </div>
-              <div class="stat-item">
-                <div class="stat-num">9</div>
-                <div class="stat-label">New modules</div>
-              </div>
-              <div class="stat-item">
-                <div class="stat-num">24</div>
-                <div class="stat-label">Step types</div>
-              </div>
-            </div>
-          </div>
-
-        </div>
-      </div>
-
-      <!-- v0.31 -->
-      <div class="release fade-in">
-        <div class="release-header">
-          <span class="release-version">v0.31</span>
-          <span class="release-name">Compliance & Connections</span>
-          <span class="release-date">May 14, 2026</span>
-        </div>
-
-        <p style="max-width: 720px; color: var(--text-muted); font-size: 15px; line-height: 1.7; margin-bottom: 28px;">
-          Eighty days. That is how long you have until the EU AI Act's general-purpose obligations go live. After 2 August 2026, "we'll figure it out later" stops being an acceptable answer. v0.31 is the answer you can ship today: a dedicated EU AI Act landing your CISO can actually read, ten ready-made compliance workflow templates mapped to specific Articles and Annex IV, eval gates that block a regressing model from getting promoted, and MCP-first publishing that turns every workflow you've already built into a first-class tool inside Claude Desktop, Cursor, Windsurf, or any MCP client. The work was quiet. The result is loud.
-        </p>
-
-        <div class="feature-grid">
-
-          <div class="feature-card wide">
-            <span class="feature-tag amber">Headline</span>
-            <h4>Built for August 2, 2026</h4>
-            <p>The EU AI Act deadline is on the calendar whether you like it or not. v0.31 ships a dedicated <a href="/eu-ai-act/">landing page</a> mapping every Sandcastle control to a specific Article (9, 11, 12, 14, 25, 49, 50, 73) and Annex IV, plus ten production-ready compliance workflow templates: DPIA, vendor risk assessment, incident reporting, bias audit, model card generator, AI inventory, risk register, GDPR data-subject request, human oversight log, and Annex IV transparency report.</p>
-            <p>Bring the templates. Customize the prompts. Hand the auditor the audit trail. Done.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag blue">New</span>
-            <h4>MCP-First Publishing</h4>
-            <p>One command: <code>sandcastle publish-mcp researcher</code>. Paste the snippet into Claude Desktop, Cursor, or Windsurf. Your workflow is now a tool the AI client can call. Every workflow you already built becomes reachable from every MCP client in the ecosystem - the full five-primitive spec (tools, resources, prompts, sampling, roots) and a <code>.well-known/mcp.json</code> discovery manifest included.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag green">New</span>
-            <h4>Eval Gates That Block Bad Models</h4>
-            <p>Define a golden dataset of inputs and expected scores. Set a minimum threshold. Promote with <code>?strict=true</code> and Sandcastle runs the gate before flipping the production version. The new model regresses by even a hair? Promotion fails closed. Eval-driven development is no longer a future plan.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag amber">Polish</span>
-            <h4>A Dashboard That Doesn't Crash</h4>
-            <p>Overview page split into twenty focused components, each wrapped in its own error boundary. One slow API endpoint no longer wipes the page. Every section that loads stays loaded. The 2,261-line monolith is now a 241-line orchestrator.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag purple">Fix</span>
-            <h4>Cost Estimates That Tell the Truth</h4>
-            <p>The token estimator used to assume 1,000 tokens per run for every workflow on Earth. Now it reads each workflow's actual run history, blends the price per million, and gives each one its own number. Evolution makes better keep/discard calls. AutoPilot stops lying about the cost of an experiment.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag green">Security</span>
-            <h4>Codex Audit Rounds 9 + 10</h4>
-            <p>Five HIGH findings closed: tenant-scoped cache and Mem0 scope, XSS-safe report config, SSRF-guarded WeasyPrint URL fetching, A2A budget enforcement, version-list 404 correctness. Plus one MEDIUM: cross-tenant prompt injection in the workflow generator. <code>tenant_id</code> threaded through every executor path so neighbouring tenants cannot see each other's cache hits, memory reads, or prompt context.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag blue">Polish</span>
-            <h4>Dashboard accessibility pass</h4>
-            <p><code>aria-expanded</code>, <code>aria-controls</code>, <code>aria-hidden</code>, focus-visible rings, sr-only labels on every search and filter input, modal widths that scale up on tablet, disabled opacity bumped to WCAG-AA contrast, and localStorage wrapped in try/catch so private browsing degrades gracefully. Eight separate polish items in one release.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag amber">New</span>
-            <h4>Per-workflow stats API</h4>
-            <p><code>GET /api/workflows/stats</code> returns run count, success rate, average cost, and last-run status for every workflow visible to your tenant. Cached in-process for 30 seconds. The dashboard grid now shows real metrics instead of placeholder data.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag purple">Milestone</span>
-            <h4>By the numbers</h4>
-            <div class="stat-row">
-              <div class="stat-item">
-                <div class="stat-num">15,014</div>
-                <div class="stat-label">Tests passing</div>
-              </div>
-              <div class="stat-item">
-                <div class="stat-num">10</div>
-                <div class="stat-label">Compliance YAMLs</div>
-              </div>
-              <div class="stat-item">
-                <div class="stat-num">5</div>
-                <div class="stat-label">MCP primitives</div>
-              </div>
-              <div class="stat-item">
-                <div class="stat-num">80</div>
-                <div class="stat-label">Days to deadline</div>
-              </div>
-            </div>
-          </div>
-
-        </div>
-      </div>
-
-      <!-- v0.30 -->
-      <div class="release fade-in">
-        <div class="release-header">
-          <span class="release-version">v0.30</span>
-          <span class="release-name">Agents Unleashed</span>
-          <span class="release-date">April 10, 2026</span>
-        </div>
-
-        <p style="max-width: 640px; color: var(--text-muted); font-size: 15px; line-height: 1.7; margin-bottom: 28px;">
-          v0.30 is the biggest Sandcastle release yet. Claude Managed Agents are now workflow steps. Pick from 15 built-in agent templates - or describe what you need and AI designs the agent for you. Combine cloud agents, local models, OCR, and PDF reports in one YAML file. Plus: GLM-OCR with 94.6% accuracy runs locally for free, and every run now tells you exactly where your tokens go.
-        </p>
-
-        <div class="feature-grid">
-
-          <div class="feature-card wide">
-            <span class="feature-tag amber">Headline</span>
-            <h4>Claude Managed Agents as Workflow Steps</h4>
-            <p>Delegate to Anthropic's cloud agent runtime. Agents get bash, files, web search, code execution. Use them alongside Mistral, oMLX, or any other provider. One YAML, best tool per step.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag blue">New</span>
-            <h4>15 Built-in Agent Templates</h4>
-            <p>researcher, coder, analyst, writer, reviewer, scraper, tester, devops, translator, designer, sql_expert, seo_specialist, legal_analyst, financial_analyst, project_manager. One line: <code>agent_template: researcher</code></p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag green">New</span>
-            <h4>Describe Mode</h4>
-            <p>Don't pick a template. Describe what you need: "Data analyst who creates charts from CSVs." AI designs the agent automatically - system prompt, tools, packages, network.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag blue">New</span>
-            <h4>Agent Chaining</h4>
-            <p>output_format (json/files/markdown), shared_files between agents, fallback_template on failure. Agents collaborate in multi-step pipelines.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag green">New</span>
-            <h4>GLM-OCR Engine</h4>
-            <p>0.9B model, 94.6% accuracy, #1 on OmniDocBench. Runs locally via Ollama. Free. Handles tables, handwriting, math, code blocks. 4th OCR engine alongside pymupdf and Chandra.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag amber">Perf</span>
-            <h4>Token Waste Detection</h4>
-            <p>Every run generates a token efficiency report. Detects duplicate file reads, duplicate prompts, oversized context. output_max_tokens limits what passes between steps. Cache-aware execution.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag purple">Milestone</span>
-            <h4>By the numbers</h4>
-            <div class="stat-row">
-              <div class="stat-item">
-                <div class="stat-num">21</div>
-                <div class="stat-label">Step types</div>
-              </div>
-              <div class="stat-item">
-                <div class="stat-num">15</div>
-                <div class="stat-label">Agent templates</div>
-              </div>
-              <div class="stat-item">
-                <div class="stat-num">4</div>
-                <div class="stat-label">OCR engines</div>
-              </div>
-              <div class="stat-item">
-                <div class="stat-num">325</div>
-                <div class="stat-label">New tests</div>
-              </div>
-            </div>
-          </div>
-
-        </div>
-      </div>
-
-      <!-- v0.28.1 -->
-      <div class="release fade-in">
-        <div class="release-header">
-          <span class="release-version">v0.28.1</span>
-          <span class="release-name">Every Step Knows Its Story</span>
-          <span class="release-date">April 1, 2026</span>
-        </div>
-
-        <p style="max-width: 640px; color: var(--text-muted); font-size: 15px; line-height: 1.7; margin-bottom: 28px;">
-          v0.28.1 is about making what you've built understandable. Steps explain why they exist. Errors tell you what went wrong. The CLI shows you what's happening in real-time. And LLM steps can now pull in fresh context from memory, web, or files before they run.
-        </p>
-
-        <div class="feature-grid">
-
-          <div class="feature-card wide">
-            <span class="feature-tag amber">Headline</span>
-            <h4>Self-Describing Workflows</h4>
-            <p>Every step can declare its <code>responsibility</code>, <code>source_hint</code>, <code>owner</code>, and <code>added_date</code>. Three new CLI commands: <code>sandcastle describe</code>, <code>sandcastle lint</code>, <code>sandcastle owners</code>. Audit trail enriched. Dashboard shows metadata on steps and workflow cards.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag blue">New</span>
-            <h4>context_query - Dynamic Context for LLM Steps</h4>
-            <p>Steps fetch relevant context before execution. Four sources: Agent Memory (semantic search), web (Tavily), local files (keyword search), custom (shell command). Available as <code>{context}</code> in prompts.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag green">UX</span>
-            <h4>sandcastle run --stream</h4>
-            <p>Live terminal output with colors: green for done, yellow for running, red for failed. Shows step timing, cost, and responsibility. Ctrl+C runs in background.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag blue">UX</span>
-            <h4>Real-Time Step Progress</h4>
-            <p>Dashboard shows live checkmarks via SSE as steps complete. No more refreshing to see progress.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag amber">UX</span>
-            <h4>Detailed Errors + PDF Download</h4>
-            <p>Full error messages in red callout boxes (not just "failed"). Download PDF button for report steps.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag green">New</span>
-            <h4>Batch Cancel + Semantic Search</h4>
-            <p>Cancel running batches mid-flight. Template search with "Did you mean..." fuzzy suggestions.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag purple">Quality</span>
-            <h4>540 New Tests</h4>
-            <p>280 template e2e tests (top 20 templates). 260 provider integration tests (all 7 providers). Full validation coverage.</p>
-          </div>
-
-        </div>
-      </div>
-
-      <!-- v0.28 -->
-      <div class="release fade-in">
-        <div class="release-header">
-          <span class="release-version">v0.28</span>
-          <span class="release-name">Batch, Monitor, Report.</span>
-          <span class="release-date">March 29, 2026</span>
-        </div>
-
-        <p style="max-width: 640px; color: var(--text-muted); font-size: 15px; line-height: 1.7; margin-bottom: 28px;">
-          v0.28 is where Sandcastle stops being a tool and becomes a platform. Batch-process thousands of items. Monitor your schedules. Generate beautiful PDF reports with charts. Parse scanned documents with AI. Auto-update without downtime. And now - run everything locally on Apple Silicon with oMLX.
-        </p>
-
-        <div class="feature-grid">
-
-          <div class="feature-card wide">
-            <span class="feature-tag amber">Headline</span>
-            <h4>Auto-Update System</h4>
-            <p>CLI: <code>sandcastle update</code>. Dashboard: one-click with rollback. Stable/beta/pinned channels. Blackout windows. Enterprise approval policies. Never manually pip install again.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag blue">New</span>
-            <h4>Batch Run</h4>
-            <p>Upload 1000 items, Sandcastle fans out into parallel runs. Progress tracking, per-item results, aggregate cost.</p>
-            <pre><span class="hl">POST</span> /workflows/{name}/batch</pre>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag green">New</span>
-            <h4>PDF Report Engine</h4>
-            <p>New step type: <code>type: report</code>. Professional-grade PDFs with cover page, table of contents, charts, KPI boxes, callouts. 3 themes. WeasyPrint under the hood.</p>
-            <p><code>pip install sandcastle-ai[report]</code></p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag blue">New</span>
-            <h4>Schedule Monitor</h4>
-            <p>Dashboard page showing all cron schedules: last run, next run countdown, success rate, pause/resume. No more guessing what failed overnight.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag purple">New</span>
-            <h4>Chandra OCR</h4>
-            <p>Parse scanned documents, handwriting, tables from images. 90+ languages including Czech. <code>ocr_engine: chandra</code> in parse step.</p>
-            <p><code>pip install sandcastle-ai[ocr]</code></p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag amber">New</span>
-            <h4>oMLX - Local AI on Apple Silicon</h4>
-            <p>7th provider. Run Llama 4, Mistral, Gemma, Qwen locally. Zero cloud costs. Zero data leaving your machine. OpenAI-compatible.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag green">New</span>
-            <h4>Workflow Version Diff</h4>
-            <p>Every edit versioned. Compare any two versions with YAML diff highlighting. See exactly what changed.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag blue">UX</span>
-            <h4>Activity Feed + Run Compare</h4>
-            <p>Real-time activity stream on dashboard. Select 2 runs and compare side-by-side.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag amber">Milestone</span>
-            <h4>By the numbers</h4>
-            <div class="stat-row">
-              <div class="stat-item">
-                <div class="stat-num">7</div>
-                <div class="stat-label">AI providers</div>
-              </div>
-              <div class="stat-item">
-                <div class="stat-num">20</div>
-                <div class="stat-label">Step types</div>
-              </div>
-              <div class="stat-item">
-                <div class="stat-num">125</div>
-                <div class="stat-label">Templates</div>
-              </div>
-              <div class="stat-item">
-                <div class="stat-num">44</div>
-                <div class="stat-label">New oMLX tests</div>
-              </div>
-            </div>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag green">New</span>
-            <h4>Deep Research Pipeline</h4>
-            <p>OpenVLAW-inspired 6-step template: parallel research, judge, verify, typeset, audit. Built-in.</p>
-          </div>
-
-        </div>
-      </div>
-
-      <!-- v0.2666b1 -->
-      <div class="release fade-in">
-        <div class="release-header">
-          <span class="release-version">v0.2666b1</span>
-          <span class="release-name">Hardened</span>
-          <span class="release-date">March 27, 2026</span>
-        </div>
-
-        <p style="max-width: 640px; color: var(--text-muted); font-size: 15px; line-height: 1.7; margin-bottom: 28px;">
-          v0.2666 was the vision. v0.2666b1 is the proof. We shipped universal advisor, EU data residency, smart failover. Then we spent a week trying to break it. 1,875 new tests. 90 bug fixes. 10 security patches. Every edge case we found - fixed.
-        </p>
-
-        <div class="feature-grid">
-
-          <div class="feature-card wide">
-            <span class="feature-tag amber">AI</span>
-            <h4>AI Assistant got smarter</h4>
-            <p>Generates workflow, finds errors, fixes them automatically. Suggests matching templates. Learns your style from existing workflows. Knows which tools you have configured.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag green">UX</span>
-            <h4>First 60 seconds redesigned</h4>
-            <p>Auto-detects Ollama and API keys on first load. One-click demo workflow runs in 10 seconds. Onboarding wizard: 2 steps, not 5.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag blue">New</span>
-            <h4>Failover Dashboard</h4>
-            <p>See when and why providers failed over. Per-workflow cost recommendations with savings amounts.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag blue">New</span>
-            <h4>Agent Memory Page</h4>
-            <p>Search, browse, delete agent memories. Importance scores and decay visualization.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag amber">Security</span>
-            <h4>Security hardened</h4>
-            <p>Admin auth on evolution endpoints, template injection prevention, EU residency enforced on every LLM call, rate limiting, credential logging sanitized.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag purple">Performance</span>
-            <h4>Faster everywhere</h4>
-            <p>GZip compression, 2-phase dashboard loading, cache headers, database indexes, search debounce.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag green">Milestone</span>
-            <h4>By the numbers</h4>
-            <div class="stat-row">
-              <div class="stat-item">
-                <div class="stat-num">1,875</div>
-                <div class="stat-label">New tests</div>
-              </div>
-              <div class="stat-item">
-                <div class="stat-num">90</div>
-                <div class="stat-label">Bug fixes</div>
-              </div>
-              <div class="stat-item">
-                <div class="stat-num">10</div>
-                <div class="stat-label">Security patches</div>
-              </div>
-              <div class="stat-item">
-                <div class="stat-num">14,361</div>
-                <div class="stat-label">Total tests</div>
-              </div>
-            </div>
-          </div>
-
-        </div>
-      </div>
-
-      <!-- v0.2666 -->
-      <div class="release fade-in">
-        <div class="release-header">
-          <span class="release-version">v0.2666</span>
-          <span class="release-name">Your AI, Your Rules, Your Borders</span>
-          <span class="release-date">March 26, 2026</span>
-        </div>
-
-        <p style="max-width: 640px; color: var(--text-muted); font-size: 15px; line-height: 1.7; margin-bottom: 28px;">
-          The release where Sandcastle stopped being an orchestrator and became a platform. You used to choose a provider and hope for the best. Now you describe what you want and the system figures out the rest - which model, which provider, what it costs, where the data lives, and what happens when something breaks.
-        </p>
-
-        <div class="feature-grid">
-
-          <div class="feature-card wide">
-            <span class="feature-tag amber">Headline</span>
-            <h4>Universal Advisor - one setting changes everything</h4>
-            <p>Set <code>SANDCASTLE_ADVISOR_PROVIDER=mistral</code> and every AI feature - generation, evolution, evaluation, quality scoring - switches to Mistral. Tomorrow you want Claude? Change one line. Ollama on your laptop? Same line. Six providers, one setting, zero code changes.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag green">Compliance</span>
-            <h4>EU Data Residency</h4>
-            <p>Set <code>DATA_RESIDENCY=eu</code>. That's it. All AI processing routes through EU providers or stays local. Try sending data to a US provider with EU mode on - Sandcastle won't let you. Not a promise. Enforcement.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag blue">Reliability</span>
-            <h4>Smart Auto-Failover</h4>
-            <p>Provider hits a rate limit at 3 AM? Sandcastle switches to the next one. No error. No alert. No intervention. You wake up, check the dashboard, see "Failover activated 2x overnight. $0.12 additional cost." That's the whole story.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag purple">Intelligence</span>
-            <h4>SLO-Aware Routing</h4>
-            <p>Critical analysis gets Claude Opus. Simple formatting gets Haiku. Not because you configured 47 rules - because Sandcastle matches model quality to task importance automatically. You set the priorities. It picks the brain.</p>
-          </div>
-
-          <div class="feature-card wide">
-            <span class="feature-tag amber">Cost</span>
-            <h4>Cost Intelligence - you'll finally know where the money goes</h4>
-            <p>Per-provider cost breakdown. "Last 30 days: $120 via Claude. Same workloads via Mistral: $45." One click to see the math. And proactive recommendations that actually make sense - not just data, but advice. "Switch these 3 workflows to Mistral and save $75/month with EU residency included."</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag purple">Integration</span>
-            <h4>OpenClaw Integration</h4>
-            <p>New step type: <code>type: openclaw</code>. Your workflows can now call OpenClaw agents as a step in any pipeline. One more thing you don't have to build yourself.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag blue">New</span>
-            <h4>Document Parser</h4>
-            <p>New step type: <code>type: parse</code>. PDF, DOCX, XLSX at 576 pages per second. No external service. No API key. No monthly bill. Just <code>pip install sandcastle-ai[parse]</code> and go.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag green">UX</span>
-            <h4>Dashboard that gets out of your way</h4>
-            <p>Getting Started checklist for new users. Quick Run cards - jump straight to results. Collapsible sidebar. Step palette with categories. Backend configurator with copy-paste .env snippets. Lazy loading. The dashboard got simpler by getting smarter.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag amber">Milestone</span>
-            <h4>By the numbers</h4>
-            <div class="stat-row">
-              <div class="stat-item">
-                <div class="stat-num">6</div>
-                <div class="stat-label">AI providers</div>
-              </div>
-              <div class="stat-item">
-                <div class="stat-num">20</div>
-                <div class="stat-label">Step types</div>
-              </div>
-              <div class="stat-item">
-                <div class="stat-num">576</div>
-                <div class="stat-label">Pages/sec parsed</div>
-              </div>
-              <div class="stat-item">
-                <div class="stat-num">0</div>
-                <div class="stat-label">Lines to switch providers</div>
-              </div>
-            </div>
-          </div>
-
-        </div>
-      </div>
-
-      <!-- v0.25.0 -->
-      <div class="release fade-in">
-        <div class="release-header">
-          <span class="release-version">v0.25.0</span>
-          <span class="release-name">Evolution</span>
-          <span class="release-date">March 20, 2026</span>
-        </div>
-
-        <div class="feature-grid">
-
-          <div class="feature-card wide">
-            <span class="feature-tag amber">New</span>
-            <h4>Workflow Evolution</h4>
-            <p>Your workflows optimize themselves. Set an eval suite, click "Evolve", and Sandcastle autonomously mutates prompts, swaps models, and simplifies steps - keeping only changes that improve your score.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag blue">New</span>
-            <h4>Composite Scoring</h4>
-            <p><code>quality * confidence - cost_penalty - latency_penalty</code>. Every mutation is evaluated mechanically. No subjective judgments.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag green">New</span>
-            <h4>Mutation Operators</h4>
-            <p>Three strategies: prompt refinement (LLM-guided), model swapping (haiku &lt;-&gt; sonnet based on quality/cost), and simplification (the AI learns that less is more).</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag purple">New</span>
-            <h4>Evolution Dashboard</h4>
-            <p>Track every iteration. See the score evolve. Compare baseline vs best. Accept the winner with one click.</p>
-          </div>
-
-        </div>
-      </div>
-
-      <!-- v0.24.0 -->
-      <div class="release fade-in">
-        <div class="release-header">
-          <span class="release-version">v0.24.0</span>
-          <span class="release-name">Ecosystem</span>
-          <span class="release-date">March 19, 2026</span>
-        </div>
-
-        <div class="feature-grid">
-
-          <div class="feature-card wide">
-            <span class="feature-tag amber">New</span>
-            <h4>Workflow as API</h4>
-            <p>Your workflows are now production APIs. One click to publish, one curl to call. Your customers hit the endpoint, you see every run in the dashboard.</p>
-            <pre><span class="hl">curl</span> -X POST "https://api.example.com/api/v1/lead-enrichment" \
-  -H "Authorization: Bearer $SANDCASTLE_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"company": "Acme Corp", "domain": "acme.com"}'</pre>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag green">New</span>
-            <h4>Living Dashboard</h4>
-            <p>The dashboard shows real data now. Real-time sparklines update on every run. Anomaly detection catches cost spikes and error streaks automatically.</p>
-            <p>Heatmap shows 6 months of activity - click any day to drill down into individual runs.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag purple">New</span>
-            <h4>Agent Marketplace</h4>
-            <p>Publish your workflows to the community hub. Others rate them, install them, remix them.</p>
-            <p>Think npm for AI agents. One command to publish, one click to install.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag blue">New</span>
-            <h4>Multi-Agent Delegation</h4>
-            <p>Agents that call other agents. Dynamic routing: the output of one step picks which workflow runs next.</p>
-            <p>Full depth tracking, real-time progress events at every level of delegation.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag amber">New</span>
-            <h4>File Upload</h4>
-            <p>Workflows accept real documents now. Drop a PDF, CSV, or image into the run modal.</p>
-            <p>Text files are inlined into prompts. Binary files are passed as references to your agent steps.</p>
-          </div>
-
-        </div>
-      </div>
-
-      <!-- v0.23.0 -->
-      <div class="release fade-in">
-        <div class="release-header">
-          <span class="release-version">v0.23.0</span>
-          <span class="release-name">Enterprise Trust</span>
-          <span class="release-date">March 18, 2026</span>
-        </div>
-
-        <div class="feature-grid">
-
-          <div class="feature-card">
-            <span class="feature-tag green">Compliance</span>
-            <h4>EU AI Act Compliance</h4>
-            <p>Risk classification per EU AI Act categories. Compliance mode that blocks high-risk workflows without human approval.</p>
-            <p>Transparency reports (Article 13), Annex IV technical documentation, global emergency stop.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag amber">Security</span>
-            <h4>Tamper-Evident Audit Trail</h4>
-            <p>SHA-256 hash chain on every event. Each entry links to the previous - if anyone modifies a record, the chain breaks.</p>
-            <p>Verify integrity via API. 7 executor hooks + 9 admin action hooks. 3 query endpoints.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag blue">Privacy</span>
-            <h4>Privacy Router</h4>
-            <p>7 PII patterns: email, phone, SSN, credit card, IP address, IBAN, date of birth.</p>
-            <p>Per-workflow or per-server config. Redact sensitive data before it touches your LLM, or run in audit-only mode.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag purple">Infrastructure</span>
-            <h4>Browser Modes</h4>
-            <p>LightPanda (10x faster CDP, zero memory bloat) and Browserbase (cloud, zero cold-start) join E2B, Docker, and local as sandbox options.</p>
-            <p>Playwright pre-baked in the Dockerfile. Switch backends with one env var.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag blue">Observability</span>
-            <h4>OpenTelemetry</h4>
-            <p>Workflow and step-level OTLP spans. Cost, duration, and token counts on every trace. Compatible with Jaeger, Tempo, Honeycomb, Datadog.</p>
-            <p><code>pip install sandcastle-ai[otel]</code></p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag green">Integrations</span>
-            <h4>5 New Connectors</h4>
-            <p>Langfuse (LLM observability), Qdrant (vector search), GCS (Google Cloud Storage), Azure Blob Storage, and Exa (semantic web search).</p>
-            <div class="stat-row">
-              <div class="stat-item">
-                <div class="stat-num">63</div>
-                <div class="stat-label">Total connectors</div>
-              </div>
-            </div>
-          </div>
-
-        </div>
-      </div>
-
-      <!-- v0.22.0 -->
-      <div class="release fade-in">
-        <div class="release-header">
-          <span class="release-version">v0.22.0</span>
-          <span class="release-name">Reliability &amp; Cost</span>
-          <span class="release-date">March 17, 2026</span>
-        </div>
-
-        <div class="feature-grid">
-
-          <div class="feature-card">
-            <span class="feature-tag amber">Cost</span>
-            <h4>Cost Estimation</h4>
-            <p><code>POST /runs/estimate</code> tells you what a workflow will cost before you run it. Per-step breakdown with model pricing baked in.</p>
-            <p>Set budget guardrails. Workflows that would exceed the budget are blocked before a single token is spent.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag blue">Security</span>
-            <h4>Secret Scrubber</h4>
-            <p>Catches credential URLs, PEM keys, Azure AccountKey, and JSON-quoted secrets before they reach logs or LLM context.</p>
-            <p>Two-layer defense. Idempotent - safe to run multiple times on the same payload.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag green">Quality</span>
-            <h4>Eval Framework</h4>
-            <p>Detects quality regressions with IEEE 754-safe integer basis points. No more floating-point false positives that cause flaky CI.</p>
-            <p>Define expected outputs, run evals on every commit, catch regressions at 0.01 percentage point precision.</p>
-          </div>
-
-          <div class="feature-card">
-            <span class="feature-tag purple">Integrations</span>
-            <h4>Composio Integration</h4>
-            <p>500+ business app actions through a single step type. Gmail, Slack, Notion, Salesforce, HubSpot, and more - all wired in via the Composio connector.</p>
-            <p>One auth flow, any tool, zero custom code.</p>
-          </div>
-
-        </div>
-      </div>
-
-    </div>
+    </section>
   </main>
 
-  <!-- Footer -->
-  <footer>
-    <div class="container footer-inner">
-      <div class="footer-left">
-        Sandcastle &middot; Built by <a href="https://github.com/gizmax">Tomas Pflanzer</a>
+  <!-- =========================== FOOTER =========================== -->
+  <footer class="foot">
+    <div class="wrap">
+      <div class="foot-top">
+        <div class="foot-brand">
+          <div class="b">🏰 Sandcastle</div>
+          <p>An open-source workflow orchestrator for AI agents. Build anything, on any model, anywhere — your rules. European-built.</p>
+        </div>
+        <div class="foot-col">
+          <h4>Product</h4>
+          <a href="/pricing/">Pricing</a>
+          <a href="/hub/">Community Hub</a>
+          <a href="/whatsnew/">What's new</a>
+          <a href="https://pypi.org/project/sandcastle-ai/">PyPI ↗</a>
+        </div>
+        <div class="foot-col">
+          <h4>Trust</h4>
+          <a href="/security/">Security</a>
+          <a href="/eu-ai-act/">EU AI Act</a>
+          <a href="https://github.com/gizmax/Sandcastle">Source ↗</a>
+          <a href="mailto:hello@sandcastle-ai.eu">Contact</a>
+        </div>
+        <div class="foot-col">
+          <h4>Build</h4>
+          <a href="https://gizmax.github.io/Sandcastle/">Documentation ↗</a>
+          <a href="https://github.com/gizmax/Sandcastle">GitHub ↗</a>
+          <a href="https://buymeacoffee.com/gizmax">Buy me a coffee ↗</a>
+        </div>
       </div>
-      <div class="footer-links">
-        <a href="/">Home</a>
-        <a href="/hub/">Hub</a>
-        <a href="/security/">Security</a>
-        <a href="/eu-ai-act/">EU AI Act</a>
-        <a href="/whatsnew/">What's New</a>
-        <a href="/pricing/">Pricing</a>
-        <a href="https://github.com/gizmax/Sandcastle">GitHub</a>
-        <a href="https://pypi.org/project/sandcastle-ai/">PyPI</a>
+      <div class="foot-bottom">
+        <span class="made">Made in <span class="eu">Europe</span> · Open source under BSL 1.1 → Apache 2.0 (2030)</span>
+        <span>© 2026 Sandcastle · <a href="https://sandcastle-ai.eu">sandcastle-ai.eu</a></span>
       </div>
     </div>
   </footer>
 
   <script>
-    document.addEventListener('DOMContentLoaded', function () {
-      var targets = document.querySelectorAll('.fade-in');
-      if (!('IntersectionObserver' in window)) {
-        targets.forEach(function (el) { el.classList.add('visible'); });
-        return;
-      }
-      var observer = new IntersectionObserver(function (entries) {
-        entries.forEach(function (entry) {
-          if (entry.isIntersecting) {
-            entry.target.classList.add('visible');
-            observer.unobserve(entry.target);
-          }
-        });
-      }, { threshold: 0.1 });
-      targets.forEach(function (el) { observer.observe(el); });
-    });
-  </script>
+  (function(){
+    "use strict";
+    var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+    /* ---------- copy-to-clipboard ---------- */
+    function flash(el){
+      var prev = el.textContent;
+      el.textContent = "Copied ✓";
+      setTimeout(function(){ el.textContent = prev; }, 1400);
+    }
+    function copyText(txt){
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        return navigator.clipboard.writeText(txt);
+      }
+      return new Promise(function(res){
+        var t=document.createElement("textarea"); t.value=txt; document.body.appendChild(t);
+        t.select(); try{ document.execCommand("copy"); }catch(e){} document.body.removeChild(t); res();
+      });
+    }
+    var big = document.getElementById("bigInstall");
+    var bigLabel = document.getElementById("bigCopyLabel");
+    function bigCopy(){ copyText("pip install sandcastle-ai").then(function(){ flash(bigLabel); }); }
+    if(big){
+      big.addEventListener("click", bigCopy);
+      big.addEventListener("keydown", function(e){
+        if(e.key==="Enter"||e.key===" "){ e.preventDefault(); bigCopy(); }
+      });
+    }
+
+    /* ---------- scroll reveals ---------- */
+    var revealEls = Array.prototype.slice.call(document.querySelectorAll(".reveal"));
+    if(reduce || !("IntersectionObserver" in window)){
+      revealEls.forEach(function(el){ el.classList.add("in"); });
+    } else {
+      var io = new IntersectionObserver(function(entries){
+        entries.forEach(function(en){
+          if(en.isIntersecting){ en.target.classList.add("in"); io.unobserve(en.target); }
+        });
+      }, { threshold:.08, rootMargin:"0px 0px -6% 0px" });
+      revealEls.forEach(function(el){ io.observe(el); });
+    }
+  })();
+  </script>
 </body>
 </html>

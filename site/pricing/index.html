@@ -3,18 +3,31 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Pricing - Sandcastle</title>
-  <meta name="description" content="Sandcastle pricing - free for development and testing. Commercial licenses for production use.">
-  <meta name="author" content="Tomas Pflanzer @gizmax">
-  <meta name="robots" content="noindex, nofollow">
+  <title>Sandcastle — Pricing. Free to build. Licensed to ship.</title>
+  <meta name="description" content="Sandcastle pricing — free forever for development, testing, and personal projects under BSL 1.1. Commercial licenses for production: Pro from $49/mo, Enterprise custom. Converts to Apache 2.0 in 2030.">
+  <meta name="keywords" content="Sandcastle pricing, AI orchestrator license, BSL 1.1, open source AI agents, production license, self-hosted AI">
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+  <meta name="author" content="Tomas Pflanzer">
+  <link rel="canonical" href="https://sandcastle-ai.eu/pricing/">
+  <link rel="alternate" hreflang="en" href="https://sandcastle-ai.eu/pricing/">
+  <link rel="alternate" hreflang="x-default" href="https://sandcastle-ai.eu/pricing/">
 
   <!-- Open Graph -->
-  <meta property="og:title" content="Pricing - Sandcastle">
-  <meta property="og:description" content="Free for development. Commercial licenses for production deployments.">
+  <meta property="og:title" content="Sandcastle — Pricing">
+  <meta property="og:description" content="Free to build. Licensed to ship. Free forever for development under BSL 1.1; commercial licenses for production. Converts to Apache 2.0 in 2030.">
+  <meta property="og:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
   <meta property="og:url" content="https://sandcastle-ai.eu/pricing/">
   <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Sandcastle">
+  <meta property="og:locale" content="en_US">
 
-  <link rel="canonical" href="https://sandcastle-ai.eu/pricing/">
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Sandcastle — Pricing">
+  <meta name="twitter:description" content="Free to build. Licensed to ship. Free forever for development under BSL 1.1; commercial licenses for production.">
+  <meta name="twitter:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
+  <meta name="twitter:creator" content="@iuditg">
+
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏰</text></svg>">
 
   <!-- Google Analytics -->
@@ -26,561 +39,785 @@
     gtag('config', 'G-ZN1K4G2TCZ');
   </script>
 
+  <!-- Performance hints -->
+  <link rel="dns-prefetch" href="https://www.googletagmanager.com">
+
+  <!-- Display: Bricolage Grotesque (characterful grotesk) · Mono: IBM Plex Mono -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 
   <style>
-    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    /* ============================================================
+       SANDCASTLE — MANIFESTO · PRICING
+       Swiss-brutalist editorial. Paper & ink. One accent.
+       ============================================================ */
 
-    :root {
-      --bg: #0a0a0a;
-      --surface: #141414;
-      --surface-hover: #1a1a1a;
-      --surface-raised: #1e1e1e;
-      --border: #262626;
-      --border-light: #333;
-      --text: #f5f5f5;
-      --text-muted: #a3a3a3;
-      --text-dim: #737373;
-      --accent: #f59e0b;
-      --accent-hover: #fbbf24;
-      --accent-dim: rgba(245, 158, 11, 0.15);
-      --green: #22c55e;
-      --green-dim: rgba(34, 197, 94, 0.12);
-      --blue: #3b82f6;
-      --blue-dim: rgba(59, 130, 246, 0.12);
-      --code-bg: #0d0d0d;
-      --radius: 8px;
-      --radius-sm: 4px;
-      --radius-lg: 12px;
-      --font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      --font-mono: "IBM Plex Mono", "SF Mono", "Fira Code", Menlo, monospace;
+    :root{
+      --paper:      #F7F3EC;   /* warm sand off-white */
+      --paper-2:    #EFE9DD;   /* slightly deeper paper for blocks */
+      --ink:        #1C1814;   /* near-black warm ink */
+      --ink-soft:   #5B524A;   /* muted ink for body */
+      --ink-faint:  #8A8076;   /* captions / hairlines text */
+      --amber:      #F59E0B;   /* THE single accent */
+      --amber-ink:  #8A5500;   /* amber that passes AA on paper */
+      --rule:       #1C1814;
+      --hair:       rgba(28,24,20,.16);
+
+      --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+      --display: "Bricolage Grotesque", "Bricolage", system-ui, sans-serif;
+
+      /* baseline rhythm unit */
+      --u: 8px;
+      --maxw: 1320px;
+      --gutter: clamp(20px, 5vw, 80px);
     }
 
-    html { scroll-behavior: smooth; -webkit-font-smoothing: antialiased; }
-    body { font-family: var(--font-sans); background: var(--bg); color: var(--text); line-height: 1.6; overflow-x: hidden; }
-    a { color: var(--accent); text-decoration: none; transition: color 0.2s; }
-    a:hover { color: var(--accent-hover); }
-    code, .mono { font-family: var(--font-mono); }
-    .container { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
-
-    /* Nav */
-    nav { position: fixed; top: 0; left: 0; right: 0; z-index: 100; background: rgba(10, 10, 10, 0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); }
-    .nav-inner { display: flex; align-items: center; justify-content: space-between; height: 64px; }
-    .nav-brand { font-size: 18px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 10px; }
-    .nav-links { display: flex; gap: 16px; align-items: center; }
-    .nav-link { font-size: 14px; font-weight: 500; color: var(--text-muted); transition: color 0.2s; }
-    .nav-link:hover { color: var(--text); }
-
-    /* Hero */
-    .hero { padding: 140px 0 80px; text-align: center; position: relative; overflow: hidden; }
-    .hero::after {
-      content: '';
-      position: absolute;
-      top: 50%; left: 50%;
-      transform: translate(-50%, -40%);
-      width: 600px; height: 400px;
-      background: radial-gradient(ellipse, rgba(245, 158, 11, 0.08) 0%, transparent 65%);
-      pointer-events: none;
-      z-index: 0;
-    }
-    .hero > .container { position: relative; z-index: 1; }
-    .hero-badge {
-      display: inline-flex; align-items: center; gap: 8px;
-      padding: 6px 16px; font-size: 13px; font-weight: 500;
-      color: var(--accent); background: var(--accent-dim);
-      border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 100px;
-      margin-bottom: 32px;
-    }
-    .hero h1 { font-size: clamp(32px, 5vw, 52px); font-weight: 700; letter-spacing: -0.03em; line-height: 1.15; margin-bottom: 20px; }
-    .hero h1 .accent { color: var(--accent); }
-    .hero p { font-size: clamp(16px, 2vw, 18px); color: var(--text-muted); max-width: 600px; margin: 0 auto; line-height: 1.7; }
-
-    /* Pricing grid */
-    .pricing-section { padding: 0 0 80px; }
-    .pricing-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 20px;
-      align-items: start;
+    @media (prefers-color-scheme: dark){
+      :root{
+        --paper:    #14110D;
+        --paper-2:  #1B1712;
+        --ink:      #F4EEE3;
+        --ink-soft: #BBB0A2;
+        --ink-faint:#897F71;
+        --rule:     #F4EEE3;
+        --hair:     rgba(244,238,227,.18);
+        --amber-ink:#F5B53C;
+      }
     }
 
-    .pricing-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-lg);
-      padding: 32px 28px;
-      display: flex;
-      flex-direction: column;
-      gap: 24px;
-      transition: border-color 0.2s, transform 0.2s;
-      position: relative;
+    *,*::before,*::after{ box-sizing:border-box; }
+
+    html{ -webkit-text-size-adjust:100%; scroll-behavior:smooth; }
+    @media (prefers-reduced-motion: reduce){ html{ scroll-behavior:auto; } }
+
+    body{
+      margin:0;
+      background:var(--paper);
+      color:var(--ink);
+      font-family:var(--display);
+      font-weight:400;
+      line-height:1.18;
+      text-rendering:optimizeLegibility;
+      -webkit-font-smoothing:antialiased;
+      -moz-osx-font-smoothing:grayscale;
+      overflow-x:hidden;
+      /* faint printed-paper grain via overlapping gradients */
+      background-image:
+        radial-gradient(rgba(28,24,20,.020) 1px, transparent 1px);
+      background-size: 4px 4px;
     }
 
-    .pricing-card:hover {
-      border-color: var(--border-light);
-      transform: translateY(-2px);
+    ::selection{ background:var(--amber); color:#1C1814; }
+
+    a{ color:inherit; text-decoration:none; }
+
+    /* ---- shared layout ---- */
+    .wrap{
+      width:100%;
+      max-width:var(--maxw);
+      margin-inline:auto;
+      padding-inline:var(--gutter);
     }
 
-    .pricing-card.featured {
-      border-color: var(--accent);
-      box-shadow: 0 0 32px rgba(245, 158, 11, 0.08);
+    .mono{
+      font-family:var(--mono);
+      font-weight:500;
+      letter-spacing:.02em;
+      text-transform:uppercase;
+      font-size:clamp(11px,1.05vw,13px);
+      color:var(--ink-faint);
     }
 
-    .pricing-card.featured::before {
-      content: 'Most Popular';
-      position: absolute;
-      top: -12px; left: 50%;
-      transform: translateX(-50%);
-      padding: 4px 16px;
-      font-size: 11px; font-weight: 700;
-      text-transform: uppercase; letter-spacing: 0.06em;
-      color: #000; background: var(--accent);
-      border-radius: 100px;
-      white-space: nowrap;
+    .rule{ border:0; border-top:1.5px solid var(--rule); margin:0; }
+
+    /* keyboard focus — sharp, on-brand */
+    a:focus-visible, button:focus-visible{
+      outline:3px solid var(--amber);
+      outline-offset:3px;
     }
 
-    .card-header { display: flex; flex-direction: column; gap: 8px; }
-
-    .card-icon {
-      width: 44px; height: 44px;
-      border-radius: 10px;
-      display: flex; align-items: center; justify-content: center;
-      margin-bottom: 4px;
+    /* ============================================================
+       MASTHEAD / NAV
+       ============================================================ */
+    header.masthead{
+      position:sticky; top:0; z-index:50;
+      background:color-mix(in srgb, var(--paper) 86%, transparent);
+      backdrop-filter:blur(8px) saturate(120%);
+      -webkit-backdrop-filter:blur(8px) saturate(120%);
+      border-bottom:1.5px solid var(--rule);
     }
-    .card-icon svg { width: 22px; height: 22px; stroke-width: 1.75; }
-    .card-icon.free { background: var(--green-dim); }
-    .card-icon.pro { background: var(--accent-dim); }
-    .card-icon.enterprise { background: var(--blue-dim); }
-
-    .card-name { font-size: 20px; font-weight: 700; }
-    .card-desc { font-size: 14px; color: var(--text-muted); line-height: 1.5; }
-
-    .card-price { display: flex; align-items: baseline; gap: 4px; }
-    .price-amount { font-size: 40px; font-weight: 700; font-family: var(--font-mono); letter-spacing: -0.02em; }
-    .price-period { font-size: 14px; color: var(--text-dim); }
-    .price-note { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
-
-    .card-features { display: flex; flex-direction: column; gap: 10px; flex: 1; }
-    .card-features li {
-      font-size: 14px; color: var(--text-muted);
-      display: flex; align-items: flex-start; gap: 10px;
-      line-height: 1.5; list-style: none;
+    .masthead .wrap{
+      display:flex; align-items:center; justify-content:space-between;
+      height:64px; gap:24px;
     }
-    .card-features li svg { width: 16px; height: 16px; flex-shrink: 0; margin-top: 3px; }
-    .card-features li .check { color: var(--green); }
-    .card-features li .accent-check { color: var(--accent); }
-
-    .card-cta {
-      display: flex; align-items: center; justify-content: center;
-      gap: 8px; padding: 14px 24px;
-      font-family: var(--font-sans); font-size: 15px; font-weight: 600;
-      border-radius: var(--radius);
-      cursor: pointer; border: none;
-      transition: all 0.2s;
-      text-decoration: none; text-align: center;
+    .brand{
+      display:flex; align-items:baseline; gap:10px;
+      font-weight:700; font-size:19px; letter-spacing:-.02em;
     }
-
-    .cta-secondary {
-      color: var(--text); background: var(--surface-raised);
-      border: 1px solid var(--border);
+    .brand .glyph{ font-size:18px; transform:translateY(1px); }
+    .brand .tm{
+      font-family:var(--mono); font-size:10px; font-weight:500;
+      color:var(--ink-faint); letter-spacing:.08em; text-transform:uppercase;
+      border:1px solid var(--hair); padding:2px 6px; border-radius:2px;
     }
-    .cta-secondary:hover {
-      background: var(--surface-hover); border-color: var(--border-light);
-      color: var(--text);
+    nav.primary{ display:flex; align-items:center; gap:clamp(14px,2vw,28px); }
+    nav.primary a{
+      font-family:var(--mono); font-size:12px; font-weight:500;
+      text-transform:uppercase; letter-spacing:.04em; color:var(--ink-soft);
+      transition:color .15s ease;
+    }
+    nav.primary a:hover{ color:var(--ink); }
+    nav.primary a[aria-current="page"]{ color:var(--amber-ink); }
+    nav.primary a.cta{
+      color:var(--ink); border:1.5px solid var(--ink);
+      padding:7px 14px; border-radius:2px; background:var(--paper);
+    }
+    nav.primary a.cta:hover{ background:var(--ink); color:var(--paper); }
+    @media (max-width:780px){
+      nav.primary a.muted{ display:none; }
     }
 
-    .cta-primary {
-      color: #000; background: var(--accent);
+    /* ============================================================
+       PAGE HEADER — type-driven
+       ============================================================ */
+    .phead{ padding:clamp(56px,12vh,140px) 0 clamp(36px,7vh,72px); }
+    .phead .kicker{
+      display:flex; align-items:center; gap:14px; margin-bottom:clamp(24px,5vh,48px);
     }
-    .cta-primary:hover {
-      background: var(--accent-hover); color: #000;
-      transform: translateY(-1px);
-      box-shadow: 0 4px 20px rgba(245, 158, 11, 0.3);
+    .phead .kicker .tick{ width:42px; height:1.5px; background:var(--amber); display:inline-block; }
+    .phead h1{
+      font-weight:700;
+      font-size:clamp(40px, 8.4vw, 116px);
+      line-height:.95;
+      letter-spacing:-.04em;
+      margin:0;
+      max-width:14ch;
+      text-wrap:balance;
+    }
+    .phead h1 em{ font-style:normal; color:var(--amber-ink); }
+    .phead .lede{
+      margin-top:clamp(24px,5vh,44px);
+      display:grid; grid-template-columns:1fr; gap:clamp(18px,3vw,40px);
+      align-items:end;
+    }
+    @media (min-width:880px){
+      .phead .lede{ grid-template-columns:minmax(0,1.4fr) minmax(0,1fr); }
+    }
+    .phead .lede p{
+      font-size:clamp(17px,2vw,23px); line-height:1.4; font-weight:400;
+      color:var(--ink-soft); max-width:48ch; letter-spacing:-.01em; margin:0;
+    }
+    .phead .lede p strong{ color:var(--ink); font-weight:600; }
+    .phead .lede .meta{
+      font-family:var(--mono); font-size:12px; text-transform:uppercase;
+      letter-spacing:.04em; color:var(--ink-faint); line-height:1.9;
+    }
+    .phead .lede .meta b{ color:var(--amber-ink); font-weight:600; }
+
+    /* ============================================================
+       PRICE SHEET — editorial tiers, hairline-ruled
+       ============================================================ */
+    .sheet{ border-top:1.5px solid var(--rule); }
+
+    .tier{
+      border-bottom:1.5px solid var(--rule);
+      padding:clamp(34px,6vh,64px) 0;
+      position:relative;
+    }
+    .tier.is-rec{ background:var(--paper-2); }
+
+    .tier .grid{
+      display:grid; grid-template-columns:1fr; gap:clamp(24px,4vw,56px);
+    }
+    @media (min-width:980px){
+      .tier .grid{
+        grid-template-columns:minmax(0,4.5fr) minmax(0,5.5fr) minmax(0,3fr);
+        align-items:start;
+      }
     }
 
-    .cta-outline {
-      color: var(--blue); background: transparent;
-      border: 1px solid rgba(59, 130, 246, 0.3);
+    /* left column — number + name */
+    .tier .id{ position:relative; }
+    .tier .t-num{
+      font-family:var(--mono); font-weight:500; font-size:13px;
+      letter-spacing:.12em; color:var(--ink-faint); display:block;
+      margin-bottom:clamp(10px,1.5vh,16px);
     }
-    .cta-outline:hover {
-      background: var(--blue-dim);
-      border-color: rgba(59, 130, 246, 0.5);
-      color: var(--blue);
+    .tier .t-name{
+      font-weight:700; font-size:clamp(34px,5.4vw,64px);
+      line-height:.95; letter-spacing:-.035em; margin:0;
+    }
+    .tier.is-rec .t-name{ color:var(--amber-ink); }
+    .tier .t-tag{
+      display:inline-block; margin-top:14px;
+      font-family:var(--mono); font-size:11px; text-transform:uppercase;
+      letter-spacing:.08em; padding:4px 9px; border-radius:2px;
+    }
+    .tier .t-tag.rec{ background:var(--amber); color:#1C1814; }
+    .tier .t-tag.lic{ border:1px solid var(--hair); color:var(--ink-faint); }
+    .tier .t-desc{
+      margin-top:clamp(16px,2.5vh,24px);
+      font-size:clamp(15px,1.5vw,18px); line-height:1.5;
+      color:var(--ink-soft); max-width:34ch;
     }
 
-    /* Comparison table */
-    .comparison-section { padding: 80px 0; border-top: 1px solid var(--border); }
-    .section-label {
-      display: inline-block; font-size: 13px; font-weight: 600;
-      text-transform: uppercase; letter-spacing: 0.08em;
-      color: var(--accent); margin-bottom: 12px;
+    /* middle column — price + features */
+    .tier .price{
+      display:flex; align-items:baseline; gap:8px; flex-wrap:wrap;
+      margin-bottom:6px;
     }
-    .section-title {
-      font-size: clamp(24px, 3.5vw, 36px); font-weight: 700;
-      letter-spacing: -0.02em; margin-bottom: 16px; line-height: 1.2;
+    .tier .price .amt{
+      font-family:var(--mono); font-weight:600;
+      font-size:clamp(44px,7vw,76px); letter-spacing:-.03em; line-height:.9;
     }
-    .section-subtitle {
-      font-size: 16px; color: var(--text-muted);
-      max-width: 600px; line-height: 1.6; margin-bottom: 48px;
+    .tier.is-rec .price .amt{ color:var(--amber-ink); }
+    .tier .price .per{
+      font-family:var(--mono); font-size:clamp(14px,1.4vw,17px);
+      color:var(--ink-faint); letter-spacing:.02em;
+    }
+    .tier .price-note{
+      font-family:var(--mono); font-size:12px; color:var(--ink-faint);
+      letter-spacing:.02em; margin-bottom:clamp(22px,3.5vh,32px);
+    }
+    .tier .price-note b{ color:var(--amber-ink); font-weight:600; }
+
+    .feat{ list-style:none; margin:0; padding:0; }
+    .feat li{
+      display:grid; grid-template-columns:auto 1fr; gap:12px; align-items:baseline;
+      padding:11px 0; border-bottom:1px solid var(--hair);
+      font-size:clamp(14px,1.4vw,16px); color:var(--ink-soft); line-height:1.45;
+    }
+    .feat li:last-child{ border-bottom:0; }
+    .feat li .mk{
+      font-family:var(--mono); font-size:11px; font-weight:600;
+      letter-spacing:.04em; color:var(--ink-faint); text-transform:uppercase;
+      min-width:2.2em;
+    }
+    .tier.is-rec .feat li .mk{ color:var(--amber-ink); }
+    .feat li strong{ color:var(--ink); font-weight:600; }
+
+    /* right column — CTA */
+    .tier .act{ display:flex; flex-direction:column; gap:14px; }
+    .tier .btn{
+      display:inline-flex; align-items:center; justify-content:space-between; gap:12px;
+      font-family:var(--mono); font-weight:600; font-size:14px;
+      text-transform:uppercase; letter-spacing:.04em;
+      padding:14px 18px; border-radius:3px; transition:.16s ease;
+      border:1.5px solid var(--ink); color:var(--ink); background:var(--paper);
+    }
+    .tier .btn:hover{ background:var(--ink); color:var(--paper); }
+    .tier .btn.solid{ background:var(--ink); color:var(--paper); }
+    .tier .btn.solid:hover{ background:var(--amber); color:#1C1814; border-color:var(--amber); }
+    .tier.is-rec .btn{ border-color:var(--amber-ink); }
+    .tier .act .fine{
+      font-family:var(--mono); font-size:11px; color:var(--ink-faint);
+      letter-spacing:.02em; line-height:1.6;
     }
 
-    .compare-table { width: 100%; border-collapse: collapse; }
-    .compare-table thead th {
-      font-size: 14px; font-weight: 600;
-      padding: 14px 16px; text-align: left;
-      border-bottom: 1px solid var(--border);
-      color: var(--text);
+    /* ============================================================
+       LEDGER — feature comparison as a printed table
+       ============================================================ */
+    .ledger{ padding:clamp(64px,12vh,140px) 0; border-bottom:1.5px solid var(--rule); }
+    .ledger .lab{ margin-bottom:clamp(16px,2.5vh,24px); }
+    .ledger h2{
+      font-weight:700; font-size:clamp(30px,5vw,64px); letter-spacing:-.035em;
+      line-height:1; margin:0 0 clamp(14px,2.5vh,24px); max-width:16ch; text-wrap:balance;
     }
-    .compare-table thead th:first-child { color: var(--text-dim); }
-    .compare-table thead th.highlight { color: var(--accent); }
+    .ledger .sub{
+      font-size:clamp(15px,1.5vw,18px); color:var(--ink-soft); max-width:52ch;
+      line-height:1.5; margin:0 0 clamp(32px,5vh,52px);
+    }
+    .ltable-scroll{ overflow-x:auto; }
+    table.ltable{
+      width:100%; border-collapse:collapse; min-width:640px;
+      font-family:var(--mono);
+    }
+    table.ltable th, table.ltable td{
+      text-align:left; padding:13px 16px; border-bottom:1px solid var(--hair);
+      font-size:13px; font-weight:400; letter-spacing:.01em;
+    }
+    table.ltable thead th{
+      border-bottom:1.5px solid var(--rule); text-transform:uppercase;
+      letter-spacing:.06em; font-weight:600; font-size:12px; color:var(--ink);
+      vertical-align:bottom;
+    }
+    table.ltable thead th:first-child{ color:var(--ink-faint); }
+    table.ltable thead th.hl{ color:var(--amber-ink); }
+    table.ltable thead th.col{ text-align:center; }
+    table.ltable td:first-child{
+      font-family:var(--display); font-weight:500; font-size:15px;
+      color:var(--ink); letter-spacing:-.01em;
+    }
+    table.ltable td.cell{ text-align:center; color:var(--ink-soft); }
+    table.ltable td.cell.yes{ color:var(--amber-ink); }
+    table.ltable td.cell.no{ color:var(--ink-faint); }
+    table.ltable tbody tr:hover td{ background:color-mix(in srgb, var(--paper-2) 60%, transparent); }
+    table.ltable .mark svg{ width:17px; height:17px; vertical-align:middle; }
 
-    .compare-table tbody td {
-      font-size: 14px; padding: 12px 16px;
-      border-bottom: 1px solid var(--border);
-      color: var(--text-muted);
+    /* ============================================================
+       FAQ — editorial Q&A with hairline dividers
+       ============================================================ */
+    .faq{ padding:clamp(64px,12vh,140px) 0; border-bottom:1.5px solid var(--rule); }
+    .faq .lab{ margin-bottom:clamp(16px,2.5vh,24px); }
+    .faq h2{
+      font-weight:700; font-size:clamp(30px,5vw,64px); letter-spacing:-.035em;
+      line-height:1; margin:0 0 clamp(36px,6vh,60px); max-width:14ch;
     }
-    .compare-table tbody td:first-child {
-      font-weight: 500; color: var(--text);
+    .qa{ border-top:1.5px solid var(--rule); }
+    .qa .row{
+      display:grid; grid-template-columns:1fr; gap:8px;
+      padding:clamp(22px,3.5vh,32px) 0; border-bottom:1px solid var(--hair);
     }
-    .compare-table tbody tr:hover td { background: var(--surface); }
-    .compare-table .check-cell { text-align: center; }
-    .compare-table .check-cell svg { width: 18px; height: 18px; }
-    .compare-table .yes { color: var(--green); }
-    .compare-table .no { color: var(--text-dim); }
-    .compare-table .accent-text { color: var(--accent); font-weight: 500; }
+    @media (min-width:820px){
+      .qa .row{ grid-template-columns:minmax(0,5fr) minmax(0,7fr); gap:clamp(24px,4vw,56px); align-items:start; }
+    }
+    .qa .q{
+      font-weight:600; font-size:clamp(18px,2vw,24px); letter-spacing:-.02em;
+      line-height:1.2; margin:0;
+    }
+    .qa .q .qn{
+      font-family:var(--mono); font-size:12px; font-weight:500; color:var(--amber-ink);
+      letter-spacing:.06em; margin-right:10px; vertical-align:middle;
+    }
+    .qa .a{
+      font-size:clamp(15px,1.5vw,17px); line-height:1.6; color:var(--ink-soft); margin:0;
+    }
+    .qa .a code{
+      font-family:var(--mono); font-size:.86em; background:var(--paper-2);
+      padding:2px 6px; border-radius:2px; color:var(--amber-ink);
+      border:1px solid var(--hair);
+    }
+    .qa .a a{ color:var(--amber-ink); border-bottom:1px solid var(--hair); }
+    .qa .a a:hover{ border-color:var(--amber-ink); }
 
-    /* FAQ */
-    .faq-section { padding: 80px 0; border-top: 1px solid var(--border); }
-    .faq-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; }
-    .faq-item { padding: 24px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
-    .faq-item h4 { font-size: 15px; font-weight: 600; margin-bottom: 10px; line-height: 1.4; }
-    .faq-item p { font-size: 14px; color: var(--text-muted); line-height: 1.65; }
-    .faq-item code { font-size: 12px; background: var(--code-bg); padding: 2px 6px; border-radius: var(--radius-sm); color: var(--accent); }
+    /* ============================================================
+       CLOSER — install as a statement
+       ============================================================ */
+    .closer{
+      padding:clamp(80px,16vh,180px) 0;
+      text-align:center;
+      background:var(--ink); color:var(--paper);
+      border-bottom:1.5px solid var(--rule);
+    }
+    .closer .pre{
+      font-family:var(--mono); text-transform:uppercase; letter-spacing:.16em;
+      font-size:13px; color:var(--amber); margin-bottom:clamp(20px,4vh,40px);
+    }
+    .closer h2{
+      font-weight:600; font-size:clamp(32px,6.4vw,92px); letter-spacing:-.035em;
+      line-height:1; margin:0 0 clamp(36px,6vh,56px); text-wrap:balance;
+      color:var(--paper);
+    }
+    .closer .big-install{
+      font-family:var(--mono); font-weight:600;
+      font-size:clamp(18px,3.6vw,40px);
+      display:inline-flex; align-items:center; gap:16px; flex-wrap:wrap;
+      justify-content:center;
+      border:1.5px solid rgba(247,243,236,.3); border-radius:4px;
+      padding:clamp(16px,2vw,24px) clamp(20px,3vw,34px);
+      letter-spacing:0; cursor:pointer; transition:.18s ease;
+    }
+    .closer .big-install:hover{ border-color:var(--amber); }
+    .closer .big-install .pmt{ color:var(--amber); }
+    .closer .big-install .ci{
+      font-size:.42em; text-transform:uppercase; letter-spacing:.08em;
+      border:1px solid rgba(247,243,236,.4); border-radius:3px; padding:5px 9px; color:var(--paper);
+    }
+    .closer .links{
+      margin-top:clamp(28px,5vh,44px); display:flex; gap:24px; justify-content:center; flex-wrap:wrap;
+      font-family:var(--mono); font-size:13px; text-transform:uppercase; letter-spacing:.04em;
+    }
+    .closer .links a{ color:rgba(247,243,236,.7); border-bottom:1px solid transparent; padding-bottom:2px; }
+    .closer .links a:hover{ color:var(--amber); border-color:var(--amber); }
 
-    /* CTA */
-    .bottom-cta { padding: 80px 0; border-top: 1px solid var(--border); }
-    .bottom-cta-card {
-      position: relative; background: var(--surface);
-      border: 1px solid var(--border); border-radius: var(--radius-lg);
-      padding: 48px 32px; text-align: center; overflow: hidden;
+    /* ============================================================
+       FOOTER — editorial
+       ============================================================ */
+    footer.foot{ padding:clamp(56px,9vh,90px) 0 clamp(40px,6vh,64px); }
+    .foot-top{
+      display:grid; grid-template-columns:1fr; gap:clamp(36px,5vw,64px);
+      padding-bottom:clamp(40px,6vh,60px); border-bottom:1.5px solid var(--rule);
     }
-    .bottom-cta-card::before {
-      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
-      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    @media (min-width:820px){ .foot-top{ grid-template-columns: minmax(0,1.6fr) repeat(3, minmax(0,1fr)); } }
+    .foot-brand .b{
+      font-weight:700; font-size:clamp(28px,4vw,46px); letter-spacing:-.03em; line-height:1; margin-bottom:18px;
     }
-    .bottom-cta-card h3 { font-size: clamp(22px, 3vw, 30px); font-weight: 700; margin-bottom: 12px; }
-    .bottom-cta-card p { font-size: 16px; color: var(--text-muted); max-width: 540px; margin: 0 auto 28px; }
-    .btn-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
-
-    /* Footer */
-    footer { border-top: 1px solid var(--border); padding: 48px 0; }
-    .footer-inner { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 24px; }
-    .footer-left { font-size: 14px; color: var(--text-dim); line-height: 1.6; }
-    .footer-left a { color: var(--text-muted); }
-    .footer-left a:hover { color: var(--accent); }
-    .footer-links { display: flex; gap: 24px; }
-    .footer-links a { font-size: 14px; color: var(--text-muted); transition: color 0.2s; }
-    .footer-links a:hover { color: var(--accent); }
-
-    /* Responsive */
-    @media (max-width: 900px) {
-      .pricing-grid { grid-template-columns: 1fr; max-width: 440px; margin: 0 auto; }
-      .pricing-card.featured { order: -1; }
-      .faq-grid { grid-template-columns: 1fr; }
-      .compare-table { font-size: 13px; }
-      .compare-table thead th, .compare-table tbody td { padding: 10px 10px; }
+    .foot-brand p{ color:var(--ink-soft); max-width:34ch; font-size:15px; line-height:1.55; }
+    .foot-col h4{
+      font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.1em;
+      color:var(--ink-faint); margin:0 0 16px; font-weight:600;
     }
-    @media (max-width: 600px) {
-      .hero { padding: 110px 0 60px; }
-      .compare-table { display: block; overflow-x: auto; }
+    .foot-col a{
+      display:block; font-size:15px; color:var(--ink-soft); padding:6px 0; transition:color .15s ease;
     }
+    .foot-col a:hover{ color:var(--ink); }
+    .foot-bottom{
+      display:flex; justify-content:space-between; align-items:center; gap:20px; flex-wrap:wrap;
+      padding-top:clamp(24px,4vh,36px);
+      font-family:var(--mono); font-size:12px; color:var(--ink-faint);
+      text-transform:uppercase; letter-spacing:.04em;
+    }
+    .foot-bottom a{ color:var(--ink-faint); }
+    .foot-bottom a:hover{ color:var(--amber-ink); }
+    .foot-bottom .made{ display:flex; align-items:center; gap:8px; }
+    .foot-bottom .eu{ color:var(--amber-ink); }
   </style>
 </head>
 <body>
 
-  <!-- Nav -->
-  <nav>
-    <div class="container nav-inner">
-      <a href="/" class="nav-brand">🏰 Sandcastle</a>
-      <div class="nav-links">
-        <a href="/hub/" class="nav-link">Hub</a>
-        <a href="/security/" class="nav-link">Security</a>
-        <a href="/eu-ai-act/" class="nav-link">EU AI Act</a>
-        <a href="/whatsnew/" class="nav-link">What's New</a>
-        <a href="/pricing/" class="nav-link" style="color: var(--accent);">Pricing</a>
-        <a href="https://github.com/gizmax/Sandcastle" target="_blank" rel="noopener" class="nav-link">GitHub</a>
-        <a href="https://gizmax.github.io/Sandcastle/" target="_blank" rel="noopener" class="nav-link btn-secondary" style="padding:8px 16px;font-size:13px;">Live Demo</a>
-      </div>
-    </div>
-  </nav>
-
-  <!-- Hero -->
-  <header class="hero">
-    <div class="container">
-      <div class="hero-badge">Simple, transparent pricing</div>
-      <h1>Free to build.<br><span class="accent">Licensed to ship.</span></h1>
-      <p>Sandcastle is free for development, testing, and personal projects. Production deployments require a commercial license.</p>
+  <!-- =========================== MASTHEAD =========================== -->
+  <header class="masthead">
+    <div class="wrap">
+      <a class="brand" href="/" aria-label="Sandcastle home">
+        <span class="glyph" aria-hidden="true">🏰</span>
+        <span>Sandcastle</span>
+        <span class="tm">v0.33.0</span>
+      </a>
+      <nav class="primary" aria-label="Primary">
+        <a class="muted" href="/pricing/" aria-current="page">Pricing</a>
+        <a class="muted" href="/security/">Security</a>
+        <a class="muted" href="/eu-ai-act/">EU&nbsp;AI&nbsp;Act</a>
+        <a class="muted" href="/hub/">Hub</a>
+        <a class="cta" href="https://github.com/gizmax/Sandcastle">GitHub&nbsp;↗</a>
+      </nav>
     </div>
   </header>
 
-  <!-- Pricing Cards -->
-  <section class="pricing-section">
-    <div class="container">
-      <div class="pricing-grid">
+  <main>
+    <!-- =========================== PAGE HEADER =========================== -->
+    <section class="phead" aria-labelledby="ph-title">
+      <div class="wrap">
+        <div class="kicker">
+          <span class="tick" aria-hidden="true"></span>
+          <span class="mono">Pricing / What It Costs</span>
+        </div>
 
-        <!-- Community -->
-        <div class="pricing-card">
-          <div class="card-header">
-            <div class="card-icon free">
-              <svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-            </div>
-            <div class="card-name">Community</div>
-            <div class="card-desc">For developers, hobbyists, and open-source projects. Full access to all features.</div>
+        <h1 id="ph-title">Free to&nbsp;build.<br><em>Licensed to&nbsp;ship.</em></h1>
+
+        <div class="lede">
+          <p>
+            Sandcastle is <strong>free forever</strong> for development, testing, and personal projects. Every feature, every model provider, every sandbox backend — all of it, no gate. A commercial license unlocks <strong>production use</strong>, and the whole thing converts to <strong>Apache 2.0 in 2030</strong>.
+          </p>
+          <div class="meta">
+            License&nbsp;··&nbsp;<b>BSL 1.1</b><br>
+            Change date&nbsp;··&nbsp;<b>→ Apache 2.0 (2030)</b><br>
+            Hosting&nbsp;··&nbsp;<b>Self-hostable, no lock-in</b>
           </div>
-          <div>
-            <div class="card-price">
-              <span class="price-amount">$0</span>
-              <span class="price-period">forever</span>
-            </div>
-            <div class="price-note">BSL-1.1 license - non-production use</div>
-          </div>
-          <ul class="card-features">
-            <li><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>All features included</li>
-            <li><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>All sandbox backends (E2B, Docker, Cloudflare, Local)</li>
-            <li><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Dashboard + API</li>
-            <li><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>118 community templates</li>
-            <li><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Community support via GitHub</li>
-          </ul>
-          <a href="https://github.com/gizmax/Sandcastle" class="card-cta cta-secondary">Get Started</a>
-        </div>
-
-        <!-- Pro -->
-        <div class="pricing-card featured">
-          <div class="card-header">
-            <div class="card-icon pro">
-              <svg viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-            </div>
-            <div class="card-name">Pro</div>
-            <div class="card-desc">For startups and teams running Sandcastle in production. Self-hosted.</div>
-          </div>
-          <div>
-            <div class="card-price">
-              <span class="price-amount">$49</span>
-              <span class="price-period">/month</span>
-            </div>
-            <div class="price-note">Billed annually ($588/year) or $59/month</div>
-          </div>
-          <ul class="card-features">
-            <li><svg class="accent-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Everything in Community</li>
-            <li><svg class="accent-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><strong>Production use license</strong></li>
-            <li><svg class="accent-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Up to 10 team members</li>
-            <li><svg class="accent-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Email support (48h response)</li>
-            <li><svg class="accent-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Commercial invoice</li>
-          </ul>
-          <a href="mailto:tom@pflanzer.cz?subject=Sandcastle%20Pro%20License" class="card-cta cta-primary">Get Pro License</a>
-        </div>
-
-        <!-- Enterprise -->
-        <div class="pricing-card">
-          <div class="card-header">
-            <div class="card-icon enterprise">
-              <svg viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-            </div>
-            <div class="card-name">Enterprise</div>
-            <div class="card-desc">For organizations that need custom terms, SLA, and dedicated support.</div>
-          </div>
-          <div>
-            <div class="card-price">
-              <span class="price-amount">Custom</span>
-            </div>
-            <div class="price-note">Annual contract, volume pricing</div>
-          </div>
-          <ul class="card-features">
-            <li><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Everything in Pro</li>
-            <li><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Unlimited team members</li>
-            <li><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Priority support (24h SLA)</li>
-            <li><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Custom license terms</li>
-            <li><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Onboarding + architecture review</li>
-          </ul>
-          <a href="mailto:tom@pflanzer.cz?subject=Sandcastle%20Enterprise%20Inquiry" class="card-cta cta-outline">Contact Us</a>
-        </div>
-
-      </div>
-    </div>
-  </section>
-
-  <!-- Comparison -->
-  <section class="comparison-section">
-    <div class="container">
-      <div class="section-label">Compare Plans</div>
-      <h2 class="section-title">Feature comparison</h2>
-      <p class="section-subtitle">All plans include the full Sandcastle platform. Paid plans add production rights and support.</p>
-
-      <table class="compare-table">
-        <thead>
-          <tr>
-            <th>Feature</th>
-            <th>Community</th>
-            <th class="highlight">Pro</th>
-            <th>Enterprise</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>Workflow engine + DAG executor</td>
-            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
-            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
-            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
-          </tr>
-          <tr>
-            <td>Dashboard + REST API</td>
-            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
-            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
-            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
-          </tr>
-          <tr>
-            <td>All sandbox backends (E2B, Docker, CF, Local)</td>
-            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
-            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
-            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
-          </tr>
-          <tr>
-            <td>53 tool integrations</td>
-            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
-            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
-            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
-          </tr>
-          <tr>
-            <td>Policy engine + PII redaction</td>
-            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
-            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
-            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
-          </tr>
-          <tr>
-            <td>Community templates (118)</td>
-            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
-            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
-            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
-          </tr>
-          <tr>
-            <td>Production deployment rights</td>
-            <td class="check-cell"><svg class="no" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
-            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
-            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
-          </tr>
-          <tr>
-            <td>Team members</td>
-            <td class="check-cell accent-text">-</td>
-            <td class="check-cell accent-text">Up to 10</td>
-            <td class="check-cell accent-text">Unlimited</td>
-          </tr>
-          <tr>
-            <td>Support</td>
-            <td>GitHub Issues</td>
-            <td class="accent-text">Email (48h)</td>
-            <td class="accent-text">Priority (24h SLA)</td>
-          </tr>
-          <tr>
-            <td>Commercial invoice</td>
-            <td class="check-cell"><svg class="no" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
-            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
-            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
-          </tr>
-          <tr>
-            <td>Custom license terms</td>
-            <td class="check-cell"><svg class="no" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
-            <td class="check-cell"><svg class="no" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
-            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
-          </tr>
-          <tr>
-            <td>Onboarding + architecture review</td>
-            <td class="check-cell"><svg class="no" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
-            <td class="check-cell"><svg class="no" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
-            <td class="check-cell"><svg class="yes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </section>
-
-  <!-- FAQ -->
-  <section class="faq-section">
-    <div class="container">
-      <div class="section-label">FAQ</div>
-      <h2 class="section-title">Common questions</h2>
-      <p class="section-subtitle">Everything you need to know about Sandcastle licensing.</p>
-
-      <div class="faq-grid">
-        <div class="faq-item">
-          <h4>What counts as "production use"?</h4>
-          <p>Any deployment that serves real users, processes real data, or runs as part of a business operation. Internal tools used by your team for day-to-day work also count as production.</p>
-        </div>
-        <div class="faq-item">
-          <h4>Can I use it for free during development?</h4>
-          <p>Yes. The Community plan covers local development, testing, CI/CD pipelines, demos, prototypes, personal projects, and open-source contributions. No restrictions.</p>
-        </div>
-        <div class="faq-item">
-          <h4>What happens after the BSL Change Date (2030)?</h4>
-          <p>The license automatically converts to Apache 2.0. After that date, all versions released before it become fully open source with no production restrictions.</p>
-        </div>
-        <div class="faq-item">
-          <h4>Is there a free tier for startups?</h4>
-          <p>If you're a bootstrapped startup with fewer than 5 people and under $100k ARR, reach out - we offer discounted or free production licenses on a case-by-case basis.</p>
-        </div>
-        <div class="faq-item">
-          <h4>Do I need a license per server?</h4>
-          <p>No. The Pro license covers your entire team (up to 10 members) regardless of how many servers or instances you run. Enterprise is unlimited.</p>
-        </div>
-        <div class="faq-item">
-          <h4>Can I modify the source code?</h4>
-          <p>Yes. All plans allow you to modify, fork, and create derivative works. Your modifications remain under BSL-1.1 terms (or Apache 2.0 after 2030).</p>
-        </div>
-        <div class="faq-item">
-          <h4>How do I get an invoice for my company?</h4>
-          <p>Pro and Enterprise plans include commercial invoices. Email <a href="mailto:tom@pflanzer.cz">tom@pflanzer.cz</a> with your company details and we'll send a proper invoice.</p>
-        </div>
-        <div class="faq-item">
-          <h4>What if I need custom terms?</h4>
-          <p>Enterprise plan includes custom license agreements. If you need specific clauses (indemnification, data processing, SLA), we can work with your legal team.</p>
         </div>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- Bottom CTA -->
-  <section class="bottom-cta">
-    <div class="container">
-      <div class="bottom-cta-card">
-        <h3>Ready to ship?</h3>
-        <p>Start building for free today. When you're ready for production, we'll get you licensed in minutes.</p>
-        <div class="btn-row">
-          <a href="mailto:tom@pflanzer.cz?subject=Sandcastle%20License%20Inquiry" class="card-cta cta-primary">Get a License</a>
-          <a href="https://github.com/gizmax/Sandcastle" class="card-cta cta-secondary">View on GitHub</a>
+    <!-- =========================== PRICE SHEET =========================== -->
+    <section class="sheet" aria-label="Pricing tiers">
+      <div class="wrap">
+
+        <!-- ── 01 · COMMUNITY ───────────────────────────────── -->
+        <article class="tier" aria-labelledby="t1">
+          <div class="grid">
+            <div class="id">
+              <span class="t-num">01 / Community</span>
+              <h2 class="t-name" id="t1">Community</h2>
+              <span class="t-tag lic">BSL 1.1 · non-production</span>
+              <p class="t-desc">For developers, hobbyists, and open-source projects. Full access to every feature.</p>
+            </div>
+            <div class="mid">
+              <div class="price"><span class="amt">$0</span><span class="per">forever</span></div>
+              <div class="price-note">Develop, test, prototype — <b>no restrictions</b></div>
+              <ul class="feat">
+                <li><span class="mk">All</span><span><strong>Every feature included</strong> — no feature gates, one version</span></li>
+                <li><span class="mk">Run</span><span>All sandbox backends — E2B, Docker, Cloudflare, Local</span></li>
+                <li><span class="mk">UI</span><span>Dashboard + REST API</span></li>
+                <li><span class="mk">Lib</span><span>118 community templates, one-click install</span></li>
+                <li><span class="mk">Help</span><span>Community support via GitHub Issues</span></li>
+              </ul>
+            </div>
+            <div class="act">
+              <a class="btn" href="https://github.com/gizmax/Sandcastle">Get started <span aria-hidden="true">↗</span></a>
+              <span class="fine">Clone, build, run locally — free, today.</span>
+            </div>
+          </div>
+        </article>
+
+        <!-- ── 02 · PRO (recommended) ───────────────────────── -->
+        <article class="tier is-rec" aria-labelledby="t2">
+          <div class="grid">
+            <div class="id">
+              <span class="t-num">02 / Pro</span>
+              <h2 class="t-name" id="t2">Pro</h2>
+              <span class="t-tag rec">Recommended for production</span>
+              <p class="t-desc">For startups and teams running Sandcastle in production. Self-hosted, your infrastructure.</p>
+            </div>
+            <div class="mid">
+              <div class="price"><span class="amt">$49</span><span class="per">/ month</span></div>
+              <div class="price-note">Billed annually <b>($588 / year)</b> · or $59 / month</div>
+              <ul class="feat">
+                <li><span class="mk">Base</span><span>Everything in Community</span></li>
+                <li><span class="mk">Ship</span><span><strong>Production use license</strong></span></li>
+                <li><span class="mk">Team</span><span>Up to 10 team members</span></li>
+                <li><span class="mk">SLA</span><span>Email support — 48h response</span></li>
+                <li><span class="mk">Bill</span><span>Commercial invoice</span></li>
+              </ul>
+            </div>
+            <div class="act">
+              <a class="btn solid" href="mailto:tom@pflanzer.cz?subject=Sandcastle%20Pro%20License">Get Pro license <span aria-hidden="true">→</span></a>
+              <span class="fine">Licensed in minutes. Bootstrapped startup? See the FAQ.</span>
+            </div>
+          </div>
+        </article>
+
+        <!-- ── 03 · ENTERPRISE ──────────────────────────────── -->
+        <article class="tier" aria-labelledby="t3">
+          <div class="grid">
+            <div class="id">
+              <span class="t-num">03 / Enterprise</span>
+              <h2 class="t-name" id="t3">Enterprise</h2>
+              <span class="t-tag lic">Annual contract · volume</span>
+              <p class="t-desc">For organizations that need custom terms, an SLA, and dedicated support.</p>
+            </div>
+            <div class="mid">
+              <div class="price"><span class="amt">Custom</span></div>
+              <div class="price-note">Annual contract · volume pricing</div>
+              <ul class="feat">
+                <li><span class="mk">Base</span><span>Everything in Pro</span></li>
+                <li><span class="mk">Team</span><span>Unlimited team members</span></li>
+                <li><span class="mk">SLA</span><span>Priority support — 24h SLA</span></li>
+                <li><span class="mk">Legal</span><span>Custom license terms</span></li>
+                <li><span class="mk">Setup</span><span>Onboarding + architecture review</span></li>
+              </ul>
+            </div>
+            <div class="act">
+              <a class="btn" href="mailto:tom@pflanzer.cz?subject=Sandcastle%20Enterprise%20Inquiry">Contact us <span aria-hidden="true">→</span></a>
+              <span class="fine">Indemnification, DPA, SLA — we'll work with your legal team.</span>
+            </div>
+          </div>
+        </article>
+
+      </div>
+    </section>
+
+    <!-- =========================== LEDGER / COMPARISON =========================== -->
+    <section class="ledger" aria-labelledby="ledger-h">
+      <div class="wrap">
+        <span class="mono lab">Compare plans — line by line</span>
+        <h2 id="ledger-h">The whole platform ships in every plan.</h2>
+        <p class="sub">All plans include the full Sandcastle platform. Paid plans add production rights and support — nothing technical is held back.</p>
+
+        <div class="ltable-scroll">
+          <table class="ltable">
+            <thead>
+              <tr>
+                <th scope="col">Feature</th>
+                <th scope="col" class="col">Community</th>
+                <th scope="col" class="col hl">Pro</th>
+                <th scope="col" class="col">Enterprise</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Workflow engine + DAG executor</td>
+                <td class="cell yes mark" aria-label="Community: yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+                <td class="cell yes mark" aria-label="Pro: yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+                <td class="cell yes mark" aria-label="Enterprise: yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+              </tr>
+              <tr>
+                <td>Dashboard + REST API</td>
+                <td class="cell yes mark" aria-label="Community: yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+                <td class="cell yes mark" aria-label="Pro: yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+                <td class="cell yes mark" aria-label="Enterprise: yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+              </tr>
+              <tr>
+                <td>All sandbox backends (E2B, Docker, CF, Local)</td>
+                <td class="cell yes mark" aria-label="Community: yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+                <td class="cell yes mark" aria-label="Pro: yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+                <td class="cell yes mark" aria-label="Enterprise: yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+              </tr>
+              <tr>
+                <td>53 tool integrations</td>
+                <td class="cell yes mark" aria-label="Community: yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+                <td class="cell yes mark" aria-label="Pro: yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+                <td class="cell yes mark" aria-label="Enterprise: yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+              </tr>
+              <tr>
+                <td>Policy engine + PII redaction</td>
+                <td class="cell yes mark" aria-label="Community: yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+                <td class="cell yes mark" aria-label="Pro: yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+                <td class="cell yes mark" aria-label="Enterprise: yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+              </tr>
+              <tr>
+                <td>Community templates (118)</td>
+                <td class="cell yes mark" aria-label="Community: yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+                <td class="cell yes mark" aria-label="Pro: yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+                <td class="cell yes mark" aria-label="Enterprise: yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+              </tr>
+              <tr>
+                <td>Production deployment rights</td>
+                <td class="cell no mark" aria-label="Community: no"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+                <td class="cell yes mark" aria-label="Pro: yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+                <td class="cell yes mark" aria-label="Enterprise: yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+              </tr>
+              <tr>
+                <td>Team members</td>
+                <td class="cell no">—</td>
+                <td class="cell yes">Up to 10</td>
+                <td class="cell yes">Unlimited</td>
+              </tr>
+              <tr>
+                <td>Support</td>
+                <td class="cell">GitHub Issues</td>
+                <td class="cell yes">Email · 48h</td>
+                <td class="cell yes">Priority · 24h SLA</td>
+              </tr>
+              <tr>
+                <td>Commercial invoice</td>
+                <td class="cell no mark" aria-label="Community: no"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+                <td class="cell yes mark" aria-label="Pro: yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+                <td class="cell yes mark" aria-label="Enterprise: yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+              </tr>
+              <tr>
+                <td>Custom license terms</td>
+                <td class="cell no mark" aria-label="Community: no"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+                <td class="cell no mark" aria-label="Pro: no"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+                <td class="cell yes mark" aria-label="Enterprise: yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+              </tr>
+              <tr>
+                <td>Onboarding + architecture review</td>
+                <td class="cell no mark" aria-label="Community: no"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+                <td class="cell no mark" aria-label="Pro: no"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+                <td class="cell yes mark" aria-label="Enterprise: yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- Footer -->
-  <footer>
-    <div class="container footer-inner">
-      <div class="footer-left">
-        Sandcastle &middot; Built by <a href="https://github.com/gizmax">Tomas Pflanzer</a>
+    <!-- =========================== FAQ =========================== -->
+    <section class="faq" aria-labelledby="faq-h">
+      <div class="wrap">
+        <span class="mono lab">FAQ — for the record</span>
+        <h2 id="faq-h">Common questions.</h2>
+
+        <div class="qa">
+          <div class="row">
+            <h3 class="q"><span class="qn" aria-hidden="true">Q.01</span>What counts as "production use"?</h3>
+            <p class="a">Any deployment that serves real users, processes real data, or runs as part of a business operation. Internal tools your team uses for day-to-day work also count as production.</p>
+          </div>
+          <div class="row">
+            <h3 class="q"><span class="qn" aria-hidden="true">Q.02</span>Can I use it for free during development?</h3>
+            <p class="a">Yes. The Community plan covers local development, testing, CI/CD pipelines, demos, prototypes, personal projects, and open-source contributions. No restrictions.</p>
+          </div>
+          <div class="row">
+            <h3 class="q"><span class="qn" aria-hidden="true">Q.03</span>What happens after the BSL Change Date (2030)?</h3>
+            <p class="a">The license automatically converts to <code>Apache 2.0</code>. After that date, all versions released before it become fully open source with no production restrictions.</p>
+          </div>
+          <div class="row">
+            <h3 class="q"><span class="qn" aria-hidden="true">Q.04</span>Is there a free tier for startups?</h3>
+            <p class="a">If you're a bootstrapped startup with fewer than 5 people and under $100k ARR, reach out — we offer discounted or free production licenses on a case-by-case basis.</p>
+          </div>
+          <div class="row">
+            <h3 class="q"><span class="qn" aria-hidden="true">Q.05</span>Do I need a license per server?</h3>
+            <p class="a">No. The Pro license covers your entire team (up to 10 members) regardless of how many servers or instances you run. Enterprise is unlimited.</p>
+          </div>
+          <div class="row">
+            <h3 class="q"><span class="qn" aria-hidden="true">Q.06</span>Can I modify the source code?</h3>
+            <p class="a">Yes. All plans allow you to modify, fork, and create derivative works. Your modifications remain under BSL 1.1 terms (or Apache 2.0 after 2030).</p>
+          </div>
+          <div class="row">
+            <h3 class="q"><span class="qn" aria-hidden="true">Q.07</span>How do I get an invoice for my company?</h3>
+            <p class="a">Pro and Enterprise plans include commercial invoices. Email <a href="mailto:tom@pflanzer.cz">tom@pflanzer.cz</a> with your company details and we'll send a proper invoice.</p>
+          </div>
+          <div class="row">
+            <h3 class="q"><span class="qn" aria-hidden="true">Q.08</span>What if I need custom terms?</h3>
+            <p class="a">The Enterprise plan includes custom license agreements. If you need specific clauses — indemnification, data processing, SLA — we can work with your legal team.</p>
+          </div>
+        </div>
       </div>
-      <div class="footer-links">
-        <a href="/">Home</a>
-        <a href="/hub/">Hub</a>
-        <a href="/security/">Security</a>
-        <a href="/eu-ai-act/">EU AI Act</a>
-        <a href="/whatsnew/">What's New</a>
-        <a href="/pricing/">Pricing</a>
-        <a href="https://github.com/gizmax/Sandcastle">GitHub</a>
-        <a href="https://pypi.org/project/sandcastle-ai/">PyPI</a>
+    </section>
+
+    <!-- =========================== CLOSER =========================== -->
+    <section class="closer" aria-labelledby="closer-h">
+      <div class="wrap">
+        <p class="pre">Start free. License when you ship.</p>
+        <h2 id="closer-h">Build for free today.</h2>
+        <span class="big-install" id="bigInstall" role="button" tabindex="0" aria-label="Copy: pip install sandcastle-ai">
+          <span class="pmt">$</span><span>pip install sandcastle-ai</span>
+          <span class="ci" id="bigCopyLabel">Copy</span>
+        </span>
+        <div class="links">
+          <a href="mailto:tom@pflanzer.cz?subject=Sandcastle%20License%20Inquiry">Get a license ↗</a>
+          <a href="https://github.com/gizmax/Sandcastle">GitHub ↗</a>
+          <a href="https://pypi.org/project/sandcastle-ai/">PyPI ↗</a>
+          <a href="https://gizmax.github.io/Sandcastle/">Docs ↗</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- =========================== FOOTER =========================== -->
+  <footer class="foot">
+    <div class="wrap">
+      <div class="foot-top">
+        <div class="foot-brand">
+          <div class="b">🏰 Sandcastle</div>
+          <p>An open-source workflow orchestrator for AI agents. Build anything, on any model, anywhere — your rules. European-built.</p>
+        </div>
+        <div class="foot-col">
+          <h4>Product</h4>
+          <a href="/pricing/">Pricing</a>
+          <a href="/hub/">Community Hub</a>
+          <a href="/whatsnew/">What's new</a>
+          <a href="https://pypi.org/project/sandcastle-ai/">PyPI ↗</a>
+        </div>
+        <div class="foot-col">
+          <h4>Trust</h4>
+          <a href="/security/">Security</a>
+          <a href="/eu-ai-act/">EU AI Act</a>
+          <a href="https://github.com/gizmax/Sandcastle">Source ↗</a>
+          <a href="mailto:hello@sandcastle-ai.eu">Contact</a>
+        </div>
+        <div class="foot-col">
+          <h4>Build</h4>
+          <a href="https://gizmax.github.io/Sandcastle/">Documentation ↗</a>
+          <a href="https://github.com/gizmax/Sandcastle">GitHub ↗</a>
+          <a href="https://buymeacoffee.com/gizmax">Buy me a coffee ↗</a>
+        </div>
+      </div>
+      <div class="foot-bottom">
+        <span class="made">Made in <span class="eu">Europe</span> · Open source under BSL 1.1 → Apache 2.0 (2030)</span>
+        <span>© 2026 Sandcastle · <a href="https://sandcastle-ai.eu">sandcastle-ai.eu</a></span>
       </div>
     </div>
   </footer>
 
+  <script>
+  (function(){
+    "use strict";
+    /* ---------- copy-to-clipboard ---------- */
+    function flash(el){
+      var prev = el.textContent;
+      el.textContent = "Copied ✓";
+      setTimeout(function(){ el.textContent = prev; }, 1400);
+    }
+    function copyText(txt){
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        return navigator.clipboard.writeText(txt);
+      }
+      return new Promise(function(res){
+        var t=document.createElement("textarea"); t.value=txt; document.body.appendChild(t);
+        t.select(); try{ document.execCommand("copy"); }catch(e){} document.body.removeChild(t); res();
+      });
+    }
+    var big = document.getElementById("bigInstall");
+    var bigLabel = document.getElementById("bigCopyLabel");
+    function bigCopy(){ copyText("pip install sandcastle-ai").then(function(){ flash(bigLabel); }); }
+    if(big){
+      big.addEventListener("click", bigCopy);
+      big.addEventListener("keydown", function(e){
+        if(e.key==="Enter"||e.key===" "){ e.preventDefault(); bigCopy(); }
+      });
+    }
+  })();
+  </script>
 </body>
 </html>
