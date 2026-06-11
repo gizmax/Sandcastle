@@ -18,6 +18,7 @@ const Overview = lazyWithRetry(() => import("@/pages/Overview"), "overview");
 const Runs = lazyWithRetry(() => import("@/pages/Runs"), "runs");
 const RunComparePage = lazyWithRetry(() => import("@/pages/RunComparePage"), "run-compare");
 const RunDetailPage = lazyWithRetry(() => import("@/pages/RunDetailPage"), "run-detail");
+const MissionControlPage = lazyWithRetry(() => import("@/pages/MissionControlPage"), "mission-control");
 const Workflows = lazyWithRetry(() => import("@/pages/Workflows"), "workflows");
 const WorkflowBuilderPage = lazyWithRetry(() => import("@/pages/WorkflowBuilderPage"), "workflow-builder");
 const WorkflowDetailPage = lazyWithRetry(() => import("@/pages/WorkflowDetailPage"), "workflow-detail");
@@ -137,6 +138,9 @@ export default function App() {
           <Routes>
             {/* Onboarding lives outside Layout (full-screen, no sidebar) */}
             <Route path="/onboarding" element={<PageBoundary name="onboarding"><Onboarding /></PageBoundary>} />
+
+            {/* Mission Control lives outside Layout (full-bleed live run theater) */}
+            <Route path="/runs/:id/live" element={<PageBoundary name="mission-control"><MissionControlPage /></PageBoundary>} />
 
             <Route element={<Layout />}>
               <Route path="/" element={<PageBoundary name="overview"><Overview /></PageBoundary>} />

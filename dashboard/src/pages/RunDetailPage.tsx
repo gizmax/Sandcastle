@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { XCircle, GitCompareArrows, Trash2, Download, Copy, FileDown, ChevronDown, ArrowLeft, Sparkles, AlertTriangle, AlertOctagon, Shield, ChevronRight, Share2, ExternalLink } from "lucide-react";
+import { XCircle, GitCompareArrows, Trash2, Download, Copy, FileDown, ChevronDown, ArrowLeft, Sparkles, AlertTriangle, AlertOctagon, Shield, ChevronRight, Share2, ExternalLink, Radar } from "lucide-react";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useRuns } from "@/hooks/useRuns";
 import { useEventStreamContext } from "@/hooks/useEventStreamContext";
@@ -547,6 +547,21 @@ export default function RunDetailPage() {
                 <GitCompareArrows className="h-4 w-4" />
                 <span className="hidden sm:inline">Compare with Parent</span>
                 <span className="sm:hidden">Compare</span>
+              </button>
+            )}
+            {isRunning && (
+              <button
+                onClick={() => navigate(`/runs/${run.run_id}/live`)}
+                title="Open Mission Control - watch this run live"
+                className={cn(
+                  "flex items-center gap-1.5 rounded-lg px-3 py-1.5",
+                  "bg-accent text-accent-foreground text-xs sm:text-sm font-medium",
+                  "hover:bg-accent-hover transition-colors btn-shimmer"
+                )}
+              >
+                <Radar className="h-4 w-4" />
+                <span className="hidden sm:inline">Mission Control</span>
+                <span className="sm:hidden">Live</span>
               </button>
             )}
             {isRunning && (

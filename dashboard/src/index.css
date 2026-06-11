@@ -482,6 +482,33 @@ button:active:not(:disabled), [role="button"]:active:not(:disabled), .btn:active
   animation: celebration-checkmark-draw 0.5s ease-out 0.3s both;
 }
 
+/* ──── Mission Control (live run theater) ──── */
+
+/* One-shot green glow when a node lands in the completed state */
+@keyframes mission-flash-success {
+  0%   { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.55); }
+  100% { box-shadow: 0 0 0 14px rgba(34, 197, 94, 0); }
+}
+.mission-node-flash {
+  animation: mission-flash-success 900ms ease-out both;
+  border-radius: var(--radius-lg);
+}
+
+/* One-shot red glow when a node fails */
+@keyframes mission-flash-error {
+  0%   { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.55); }
+  100% { box-shadow: 0 0 0 14px rgba(239, 68, 68, 0); }
+}
+.mission-node-flash-error {
+  animation: mission-flash-error 900ms ease-out both;
+  border-radius: var(--radius-lg);
+}
+
+/* Thought stream lines slide in like a terminal log */
+.mission-feed-line {
+  animation: log-line-enter 200ms ease-out both;
+}
+
 /* Accessibility: disable animations for users who prefer reduced motion */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -509,7 +536,10 @@ button:active:not(:disabled), [role="button"]:active:not(:disabled), .btn:active
   .celebration-modal-enter,
   .celebration-checkmark-draw,
   .animate-bell-shake,
-  .animate-scale-in {
+  .animate-scale-in,
+  .mission-node-flash,
+  .mission-node-flash-error,
+  .mission-feed-line {
     animation: none !important;
   }
   .btn-shimmer::after {
