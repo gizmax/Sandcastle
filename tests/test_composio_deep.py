@@ -791,12 +791,12 @@ class TestTypeSets:
 # ===================================================================
 
 class TestStepDefinitionFieldCount:
-    """StepDefinition should have exactly 50 fields."""
+    """StepDefinition should have exactly 51 fields (50 + ``requires`` for Mesh)."""
 
     def test_field_count(self):
         fields = dataclasses.fields(StepDefinition)
-        assert len(fields) == 50, (
-            f"Expected 50 fields, got {len(fields)}: "
+        assert len(fields) == 51, (
+            f"Expected 51 fields, got {len(fields)}: "
             f"{[f.name for f in fields]}"
         )
 

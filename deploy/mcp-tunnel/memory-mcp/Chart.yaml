@@ -3,7 +3,7 @@ name: memory-mcp
 description: Sandcastle Memory MCP server behind a Cloudflare MCP tunnel (outbound-only, no inbound ingress required)
 type: application
 version: 0.1.0
-appVersion: "0.33.0"
+appVersion: "0.40.0"
 keywords:
   - sandcastle
   - mcp
