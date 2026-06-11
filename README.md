@@ -68,6 +68,7 @@
 - [Evaluations](#evaluations)
 - [Directory Input & CSV Export](#directory-input--csv-export)
 - [Community Hub](#community-hub)
+- [Verified Templates (.sctpl)](#verified-templates-sctpl)
 - [Real-time Event Stream](#real-time-event-stream)
 - [Run Time Machine](#run-time-machine)
 - [Budget Guardrails](#budget-guardrails)
@@ -1557,6 +1558,34 @@ sandcastle hub install-collection marketing-pro
 # Publish your own template
 sandcastle hub publish my-workflow.yaml
 ```
+
+---
+
+## Verified Templates (.sctpl)
+
+Every shared template can carry a replayable proof that it works. A `.sctpl` bundle packages a workflow together with recorded cassettes of a real run and a checksummed manifest - and `sandcastle template verify` replays that proof on your machine, offline, at $0, before anything runs live.
+
+```bash
+# Record a run, then pack the proof into a single distributable bundle
+sandcastle run --local --record proof.cassette.json my-workflow.yaml -i topic="AI agents"
+sandcastle pack my-workflow.yaml --cassette proof.cassette.json \
+    --author you --input topic="AI agents"
+
+# Verify any bundle before trusting it: checksums + strict offline replay
+sandcastle template verify my-workflow-1.0.0.sctpl
+#   PASS  cassettes/proof.cassette.json  6 step(s) replayed at $0
+#   Verified: the bundled cassette(s) replay the workflow at $0.
+
+# Install (verifies first - a failing bundle does not install)
+sandcastle template install https://example.com/my-workflow-1.0.0.sctpl --sha256 <sha>
+
+# Search the verified template index
+sandcastle template search "summarizer"
+```
+
+The verification is mechanical, not a badge. The replay runs in strict mode: every model step must resolve from the bundled cassette, nothing may call a provider, and the run must complete free of charge. Tamper with the cassette and the SHA-256 checksums break. Tamper with the workflow and its step cache keys no longer match the recording - the replay fails before a single live call. Bundles are treated as untrusted input end to end: extraction is traversal-safe and size-capped, the workflow passes the same security scanner that gates Community Hub installs, and `code`/`http` steps never execute during verification.
+
+Installed bundles land in the community templates directory, so they appear in the Lite wizard and dashboard immediately - with the proof cassette kept alongside for re-verification anytime. A working example ships in the repo: `examples/templates/text-summarizer-1.0.0.sctpl`. Format details: [docs/verified-templates.md](docs/verified-templates.md).
 
 ---
 

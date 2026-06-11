@@ -1,0 +1,17 @@
+{
+  "format_version": 1,
+  "generated_at": "2026-06-09T00:00:00Z",
+  "description": "Index of verified Sandcastle template bundles (.sctpl). Each entry points at a bundle that carries its own proof-of-execution: recorded cassettes that `sandcastle template verify` replays offline at $0. The sha256 is the checksum of the bundle file itself - pass it to `sandcastle template install --sha256` to pin the download.",
+  "templates": [
+    {
+      "name": "text-summarizer",
+      "version": "1.0.0",
+      "description": "Deep text analysis with parallel key-point extraction and structural analysis, producing a tailored executive summary",
+      "author": "gizmax",
+      "tags": ["text", "summarization", "formatting", "example"],
+      "download_url": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/examples/templates/text-summarizer-1.0.0.sctpl",
+      "sha256": "6f78667779934e64094b805bd88944bd16f01d66b48e219dc17140d8f13596ed",
+      "sandcastle_version": "0.33.0"
+    }
+  ]
+}

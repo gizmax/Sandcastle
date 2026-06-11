@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -3221,6 +3222,339 @@ def _cmd_hub(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Verified template bundles (.sctpl) - pack / verify / install / search
+# ---------------------------------------------------------------------------
+
+_TEMPLATE_INDEX_MAX_SIZE = 5 * 1024 * 1024  # 5MB - prevent DoS via oversized index
+
+
+def _sanitize_bundle_stem(name: str) -> str:
+    """Sanitize a bundle/template name to a safe filename stem (no traversal)."""
+    import re as _re
+
+    base = name.split("/")[-1]
+    safe = _re.sub(r"[^a-zA-Z0-9_\-]", "_", base).lstrip(".")
+    return safe or "template"
+
+
+def _cmd_pack(args: argparse.Namespace) -> None:
+    """Pack a workflow + recorded cassettes into a distributable .sctpl bundle."""
+    from sandcastle.engine.bundle import BundleError, create_bundle
+
+    # Same resolution describe/lint use: file path, workflows dir, built-in template.
+    wf_path = Path(_resolve_workflow_file(args.workflow))
+
+    for cp in args.cassettes:
+        if not Path(cp).exists():
+            print(f"{_color('Error', _C.RED)}: cassette not found: {cp}", file=sys.stderr)
+            sys.exit(1)
+
+    example_inputs: dict[str, Any] = {}
+    if args.input_file:
+        example_inputs = _load_input_file(args.input_file)
+    example_inputs.update(_parse_input_pairs(args.input))
+
+    try:
+        bundle_path = create_bundle(
+            wf_path,
+            list(args.cassettes),
+            args.output,  # None -> <name>-<version>.sctpl in the working directory
+            name=args.name,
+            version=args.bundle_version,
+            description=args.description,
+            author=args.author,
+            license_id=args.license_id,
+            example_inputs=example_inputs,
+            created_at=args.created_at,
+        )
+    except BundleError as exc:
+        print(f"{_color('Error', _C.RED)}: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"{_color('Packed', _C.GREEN)}: {bundle_path}")
+
+    if getattr(args, "no_verify", False):
+        return
+
+    # Prove the bundle before it ships: a bundle that does not verify is not
+    # a verified template, so pack fails loudly instead of producing one.
+    print(_color("Verifying the freshly packed bundle...", _C.CYAN))
+    if not _print_verify_report(str(bundle_path)):
+        print(
+            f"{_color('Error', _C.RED)}: the packed bundle does not verify - "
+            "record the cassette with the same inputs you pass to pack "
+            "(--input/--input-file), or use --no-verify to skip.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
+def _print_verify_report(bundle: str, as_json: bool = False) -> bool:
+    """Verify *bundle* and print a PASS/FAIL report. Returns overall pass."""
+    from sandcastle.engine.bundle import verify_bundle
+
+    result = verify_bundle(bundle)
+
+    if as_json:
+        print(
+            json.dumps(
+                {
+                    "ok": result.ok,
+                    "errors": result.errors,
+                    "manifest": result.manifest,
+                    "cassettes": [
+                        {
+                            "file": c.file,
+                            "passed": c.passed,
+                            "detail": c.detail,
+                            "replay_hits": c.replay_hits,
+                            "replay_misses": c.replay_misses,
+                        }
+                        for c in result.cassette_results
+                    ],
+                },
+                indent=2,
+                default=str,
+            )
+        )
+        return result.ok
+
+    manifest = result.manifest
+    if manifest:
+        print(
+            f"  {manifest.get('name', '?')} v{manifest.get('version', '?')}"
+            f"  by {manifest.get('author') or 'unknown'}"
+            f"  (sandcastle {manifest.get('sandcastle_version', '?')})"
+        )
+    for err in result.errors:
+        print(f"  {_color('FAIL', _C.RED)}  {err}")
+    for c in result.cassette_results:
+        mark = _color("PASS", _C.GREEN) if c.passed else _color("FAIL", _C.RED)
+        print(f"  {mark}  {c.file}  {c.detail}")
+    if result.ok:
+        print(_color("Verified: the bundled cassette(s) replay the workflow at $0.", _C.GREEN))
+    else:
+        print(_color("Verification FAILED.", _C.RED))
+    return result.ok
+
+
+def _cmd_template_verify(args: argparse.Namespace) -> None:
+    """Verify a bundle's proof-of-execution: checksums + strict offline replay."""
+    ok = _print_verify_report(args.bundle, as_json=getattr(args, "json", False))
+    sys.exit(0 if ok else 1)
+
+
+def _download_bundle(url: str, dest: Path) -> None:
+    """Download a bundle over https with timeout and size cap."""
+    import urllib.request
+    from urllib.parse import urlparse
+
+    from sandcastle.engine.bundle import MAX_BUNDLE_SIZE
+
+    if urlparse(url).scheme != "https":
+        print(f"{_color('Error', _C.RED)}: bundle URLs must use https://", file=sys.stderr)
+        sys.exit(1)
+    try:
+        with urllib.request.urlopen(url, timeout=15) as resp:
+            raw = resp.read(MAX_BUNDLE_SIZE + 1)
+        if len(raw) > MAX_BUNDLE_SIZE:
+            print(
+                f"{_color('Error', _C.RED)}: download exceeds size limit"
+                f" ({MAX_BUNDLE_SIZE} bytes)",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        dest.write_bytes(raw)
+    except SystemExit:
+        raise
+    except Exception as exc:
+        print(f"{_color('Error', _C.RED)}: failed to download bundle: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _cmd_template_install(args: argparse.Namespace) -> None:
+    """Verify a bundle, then install its workflow where the wizard can find it."""
+    import hashlib
+    import tempfile
+
+    from sandcastle.engine.bundle import read_bundle
+
+    source = args.source
+    force = getattr(args, "force", False)
+
+    with tempfile.TemporaryDirectory(prefix="sctpl-install-") as tmp:
+        if source.startswith(("http://", "https://")):
+            bundle_path = Path(tmp) / "download.sctpl"
+            _download_bundle(source, bundle_path)
+        else:
+            bundle_path = Path(source)
+            if not bundle_path.exists():
+                print(f"{_color('Error', _C.RED)}: bundle not found: {source}", file=sys.stderr)
+                sys.exit(1)
+
+        # Pin to the index checksum when given (sandcastle template search prints it).
+        expected_sha = getattr(args, "sha256", None)
+        if expected_sha:
+            actual = hashlib.sha256(bundle_path.read_bytes()).hexdigest()
+            if actual != expected_sha.lower().strip():
+                print(
+                    f"{_color('Error', _C.RED)}: bundle checksum mismatch\n"
+                    f"  Expected: {expected_sha}\n  Got:      {actual}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+
+        # Verify first - install refuses a failing bundle unless --force.
+        if not _print_verify_report(str(bundle_path)):
+            if not force:
+                print(
+                    f"{_color('Error', _C.RED)}: refusing to install an unverified bundle "
+                    "(use --force to override).",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            print(_color("Installing anyway (--force).", _C.YELLOW))
+
+        try:
+            manifest, workflow_yaml, cassettes = read_bundle(bundle_path)
+        except Exception as exc:
+            print(f"{_color('Error', _C.RED)}: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+        # Install into the community templates dir - the same place dashboard hub
+        # installs land, so the Lite wizard and dashboard surface it immediately.
+        if getattr(args, "dir", None):
+            target_dir = Path(args.dir)
+        else:
+            from sandcastle.templates import _TEMPLATES_DIR
+
+            target_dir = _TEMPLATES_DIR / "community"
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        stem = _sanitize_bundle_stem(str(manifest["name"]))
+        target_path = (target_dir / f"{stem}.yaml").resolve()
+        if not str(target_path).startswith(str(target_dir.resolve())):
+            print(f"{_color('Error', _C.RED)}: unsafe template name in manifest", file=sys.stderr)
+            sys.exit(1)
+        if target_path.exists() and not force:
+            print(
+                f"{_color('Error', _C.RED)}: '{target_path}' already exists. "
+                "Use --force to overwrite.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        target_path.write_text(workflow_yaml)
+        # Keep the proof next to the workflow so anyone can re-run the replay.
+        for arcname, blob in cassettes.items():
+            cassette_name = _sanitize_bundle_stem(Path(arcname).stem) + ".cassette.json"
+            (target_dir / f"{stem}.{cassette_name}").write_bytes(blob)
+
+    print(f"{_color('Installed', _C.GREEN)}: {manifest['name']} v{manifest['version']}"
+          f" -> {target_path}")
+    print(f"  Proof cassette(s): {len(cassettes)} (kept alongside for offline replay)")
+    print(f"  Run it: sandcastle run --local {target_path}")
+
+
+def _fetch_template_index() -> dict:
+    """Fetch the verified template index with size limit protection."""
+    import json
+    import urllib.request
+
+    from sandcastle.config import settings
+
+    url = settings.template_index_url
+    try:
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            raw = resp.read(_TEMPLATE_INDEX_MAX_SIZE + 1)
+            if len(raw) > _TEMPLATE_INDEX_MAX_SIZE:
+                print(
+                    f"{_color('Error', _C.RED)}: template index exceeds size limit"
+                    f" ({_TEMPLATE_INDEX_MAX_SIZE} bytes)",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            data = json.loads(raw)
+            if not isinstance(data, dict):
+                print(
+                    f"{_color('Error', _C.RED)}: template index has invalid structure",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            return data
+    except SystemExit:
+        raise
+    except Exception as exc:
+        print(
+            f"{_color('Error', _C.RED)}: could not reach the template index at {url}\n"
+            f"  ({exc})\n"
+            "  Check your connection, or point TEMPLATE_INDEX_URL at your own index.json.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
+def _cmd_template_search(args: argparse.Namespace) -> None:
+    """Search the verified template index (a static index.json of .sctpl bundles)."""
+    index = _fetch_template_index()
+    templates = index.get("templates", [])
+    query = getattr(args, "query", "").strip().lower()
+
+    if not query:
+        print("Error: search query cannot be empty", file=sys.stderr)
+        sys.exit(1)
+
+    results = []
+    for t in templates:
+        if not isinstance(t, dict):
+            continue
+        name = str(t.get("name", "")).lower()
+        desc = str(t.get("description", "")).lower()
+        tags = [str(tag).lower() for tag in t.get("tags", [])]
+        if query in name or query in desc or any(query in tag for tag in tags):
+            results.append(t)
+
+    if getattr(args, "json", False):
+        print(json.dumps(results, indent=2))
+        return
+
+    if not results:
+        print(f"No verified templates found for query '{query}'.")
+        return
+
+    headers = ["NAME", "VERSION", "AUTHOR", "DESCRIPTION"]
+    rows = [
+        [
+            str(t.get("name", "")),
+            str(t.get("version", "")),
+            str(t.get("author", "")),
+            str(t.get("description", "")),
+        ]
+        for t in results
+    ]
+    print(_table(headers, rows))
+    print(f"\n{_color(str(len(results)), _C.CYAN)} result(s).")
+    print("Install one with: sandcastle template install <download_url> --sha256 <sha256>")
+    print("(use --json to see download_url and sha256)")
+
+
+def _cmd_template(args: argparse.Namespace) -> None:
+    """Route template sub-commands."""
+    action = getattr(args, "template_action", None)
+    template_dispatch: dict[str, Any] = {
+        "verify": _cmd_template_verify,
+        "install": _cmd_template_install,
+        "search": _cmd_template_search,
+    }
+    handler = template_dispatch.get(action)
+    if handler:
+        handler(args)
+    else:
+        print("Usage: sandcastle template {verify,install,search}", file=sys.stderr)
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
 # API helpers (shared by new command groups)
 # ---------------------------------------------------------------------------
 
@@ -5040,6 +5374,76 @@ def _build_parser() -> argparse.ArgumentParser:
         "--force", action="store_true", help="Skip security warnings (errors still block)"
     )
 
+    # --- pack ---
+    p_pack = subparsers.add_parser(
+        "pack", help="Pack a workflow + recorded cassettes into a .sctpl bundle"
+    )
+    p_pack.add_argument("workflow", help="Workflow .yaml path or built-in template name")
+    p_pack.add_argument(
+        "--cassette", "-c", action="append", required=True, dest="cassettes",
+        metavar="FILE", help="Recorded cassette file - proof-of-execution (repeatable)",
+    )
+    p_pack.add_argument(
+        "--output", "-o", default=None, help="Output path (default: <name>-<version>.sctpl)"
+    )
+    p_pack.add_argument("--name", default=None, help="Bundle name (default: workflow name)")
+    p_pack.add_argument(
+        "--bundle-version", default="1.0.0", help="Bundle version (default: 1.0.0)"
+    )
+    p_pack.add_argument(
+        "--description", default=None, help="Description (default: workflow description)"
+    )
+    p_pack.add_argument("--author", default="", help="Author handle (e.g. gizmax)")
+    p_pack.add_argument(
+        "--license", default="MIT", dest="license_id", help="SPDX license id (default: MIT)"
+    )
+    p_pack.add_argument(
+        "--created-at", default=None,
+        help="ISO 8601 timestamp (default: the workflow's last git commit date)",
+    )
+    p_pack.add_argument(
+        "--input", "-i", action="append",
+        help="Example input key=value - must match the recording (repeatable)",
+    )
+    p_pack.add_argument(
+        "--input-file", "-f", help="JSON file with the example inputs used when recording"
+    )
+    p_pack.add_argument(
+        "--no-verify", action="store_true", help="Skip the post-pack verification replay"
+    )
+
+    # --- template (verified bundles) ---
+    p_template = subparsers.add_parser(
+        "template", help="Verified template bundles (.sctpl): verify, install, search"
+    )
+    template_sub = p_template.add_subparsers(dest="template_action")
+
+    t_verify = template_sub.add_parser(
+        "verify", help="Replay a bundle's cassettes against its workflow - offline, $0"
+    )
+    t_verify.add_argument("bundle", help="Path to a .sctpl bundle")
+    t_verify.add_argument("--json", action="store_true", help="JSON output")
+
+    t_install = template_sub.add_parser(
+        "install", help="Verify a bundle, then install its workflow"
+    )
+    t_install.add_argument("source", help="Path or https:// URL of a .sctpl bundle")
+    t_install.add_argument(
+        "--dir", "-d", default=None,
+        help="Target directory (default: the community templates dir the wizard reads)",
+    )
+    t_install.add_argument(
+        "--force", action="store_true",
+        help="Install even if verification fails; overwrite an existing template",
+    )
+    t_install.add_argument(
+        "--sha256", default=None, help="Expected SHA-256 of the bundle file (from the index)"
+    )
+
+    t_search = template_sub.add_parser("search", help="Search the verified template index")
+    t_search.add_argument("query", help="Search query")
+    t_search.add_argument("--json", action="store_true", help="JSON output")
+
     # --- describe ---
     p_describe = subparsers.add_parser(
         "describe", help="Print workflow summary with responsibilities"
@@ -5147,6 +5551,8 @@ def main() -> None:
         "approve": _cmd_approve,
         "reject": _cmd_reject,
         "hub": _cmd_hub,
+        "pack": _cmd_pack,
+        "template": _cmd_template,
         "keys": _cmd_keys,
         "dlq": _cmd_dlq,
         "violations": _cmd_violations,

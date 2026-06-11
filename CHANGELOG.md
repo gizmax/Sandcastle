@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Verified template bundles (`.sctpl`)**: every shared template can now carry a replayable proof it works. `sandcastle pack` zips a workflow with its recorded cassettes and a SHA-256-checksummed manifest; `sandcastle template verify` replays the proof locally in strict mode - offline, $0, provider never called - and reports PASS/FAIL per cassette. A tampered cassette breaks the checksums; a tampered workflow breaks the replay.
+- **`sandcastle template install <bundle-or-url>`**: verifies first (a failing bundle does not install without `--force`), supports https sources with `--sha256` pinning, and lands templates where the Lite wizard and dashboard surface them.
+- **`sandcastle template search`**: queries a static verified-template index (`TEMPLATE_INDEX_URL`, spec + starter index in `hub/template-index.json`).
+- Example verified bundle at `examples/templates/text-summarizer-1.0.0.sctpl`, reproducibly built offline by `scripts/build_example_bundle.py`. Format documentation in `docs/verified-templates.md`.
+
 ## [0.33.0] - 2026-06-04 - "Your Box, Your Brains"
 
 Every agent you've ever run phoned home. Sent your data somewhere. Billed you by the token. You accepted it, because that was the deal. The deal just changed.
