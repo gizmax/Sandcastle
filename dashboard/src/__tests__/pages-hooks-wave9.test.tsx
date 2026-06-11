@@ -247,7 +247,7 @@ describe("ApprovalsPage", () => {
     render(<ApprovalsPage />);
     await waitFor(() => {
       expect(screen.getByText("No approvals")).toBeInTheDocument();
-      expect(screen.getByText("Workflow steps requiring human review will appear here.")).toBeInTheDocument();
+      expect(screen.getByText("Nothing waiting on you. Steps that need human sign-off surface here.")).toBeInTheDocument();
     });
   });
 

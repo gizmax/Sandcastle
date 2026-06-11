@@ -4,7 +4,6 @@ import {
   ArrowDown,
   ArrowUp,
   Minus,
-  GitCompareArrows,
   ArrowLeftRight,
   ChevronDown,
   Clock,
@@ -569,7 +568,7 @@ export default function RunComparePage() {
         {(!runA || !runB) && !data && (
           <div className="py-12">
             <EmptyState
-              icon={GitCompareArrows}
+              variant="tide"
               title="Select two runs to compare"
               description="Choose Run A and Run B from the dropdowns above to see a side-by-side comparison."
             />
@@ -579,7 +578,7 @@ export default function RunComparePage() {
         {error && (
           <div className="py-12">
             <EmptyState
-              icon={GitCompareArrows}
+              variant="ruin"
               title="Cannot compare runs"
               description={error}
             />

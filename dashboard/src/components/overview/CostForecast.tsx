@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { TrendingUp, TrendingDown, AlertTriangle, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/api/client";
+import { TideChart } from "@/components/brand";
 
 interface DayData {
   date: string;
@@ -80,7 +81,10 @@ export function CostForecast() {
           </div>
           <h3 className="text-sm font-medium text-foreground">Cost Forecast</h3>
         </div>
-        <p className="text-xs text-muted text-center py-8">{error || "No data"}</p>
+        <div className="flex flex-col items-center gap-2 py-6">
+          <TideChart className="h-8 w-36 text-muted-foreground" />
+          <p className="text-xs text-muted text-center">{error || "No cost data yet"}</p>
+        </div>
       </div>
     );
   }

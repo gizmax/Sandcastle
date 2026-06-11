@@ -974,14 +974,14 @@ export default function TemplatesPage() {
             </div>
           ) : communityError ? (
             <EmptyState
-              icon={Globe}
+              variant="ruin"
               title="Could not load community workflows"
               description="Check your connection and try again."
               action={{ label: "Retry", onClick: handleCommunityRetry }}
             />
           ) : communityFiltered.length === 0 ? (
             <EmptyState
-              icon={Globe}
+              variant={communitySearch ? "tide" : "castle"}
               title={communitySearch ? "No matching workflows" : "No community workflows yet"}
               description={communitySearch ? "Try adjusting your search." : "Be the first to contribute!"}
               action={
@@ -1567,7 +1567,7 @@ function PacksView({
         {searchResults.length === 0 ? (
           <>
             <EmptyState
-              icon={Layers}
+              variant="tide"
               title="No templates found"
               description="Try adjusting your search query."
             />
@@ -2002,7 +2002,7 @@ function AllTemplatesEmpty({
   return (
     <>
       <EmptyState
-        icon={Layers}
+        variant="tide"
         title="No templates found"
         description={
           isInstalledFilter
@@ -2067,7 +2067,7 @@ function IntegrationView({
   if (filteredGroups.length === 0) {
     return (
       <EmptyState
-        icon={Plug}
+        variant={search ? "tide" : "castle"}
         title={search ? "No matching integrations" : "No integrations found"}
         description={search ? "Try adjusting your search query." : "Template packs with tool integrations will appear here."}
       />

@@ -297,7 +297,7 @@ export default function EvaluationsPage() {
       {/* Eval runs list */}
       {runs.length === 0 ? (
         <EmptyState
-          icon={ClipboardCheck}
+          variant="castle"
           title="No evaluations yet"
           description="Run your first eval suite via CLI (sandcastle eval suite.yaml) or the API."
         />

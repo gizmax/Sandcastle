@@ -7,6 +7,7 @@ import "@fontsource/bricolage-grotesque/700.css";
 import "./index.css";
 import "./styles/panels.css";
 import "./styles/status-lights.css";
+import "./styles/brand.css";
 import App from "./App.tsx";
 
 // Apply the theme immediately to prevent a flash. Dark-first: a stored preference

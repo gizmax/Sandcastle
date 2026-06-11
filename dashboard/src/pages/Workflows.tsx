@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { GitBranch, LayoutGrid, Network, Plus, Search, Star, Trash2, X, Loader2 } from "lucide-react";
+import { LayoutGrid, Network, Plus, Search, Star, Trash2, X, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { WorkflowList } from "@/components/workflows/WorkflowList";
@@ -276,9 +276,9 @@ export default function Workflows() {
       {viewMode === "graph" ? (
         workflows.length === 0 ? (
           <EmptyState
-            icon={GitBranch}
+            variant="castle"
             title="No workflows found"
-            description="No workflows found. Add YAML files to your workflows directory to get started."
+            description="Drop YAML files into your workflows directory, or build one right here."
             action={{ label: "Create Workflow", onClick: () => navigate("/workflows/builder") }}
           />
         ) : (
@@ -330,14 +330,14 @@ export default function Workflows() {
 
           {workflows.length === 0 ? (
             <EmptyState
-              icon={GitBranch}
+              variant="castle"
               title="No workflows found"
-              description="No workflows found. Add YAML files to your workflows directory to get started."
+              description="Drop YAML files into your workflows directory, or build one right here."
               action={{ label: "Create Workflow", onClick: () => navigate("/workflows/builder") }}
             />
           ) : filteredWorkflows.length === 0 ? (
             <EmptyState
-              icon={Search}
+              variant="tide"
               title="No matching workflows"
               description={`No workflows match "${searchQuery}".`}
               action={{ label: "Clear search", onClick: () => setSearchQuery("") }}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Key, Plus, Loader2, Sparkles, Server } from "lucide-react";
+import { Plus, Loader2, Sparkles, Server } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { ApiKeyTable, type ApiKeyItem } from "@/components/api-keys/ApiKeyTable";
@@ -227,9 +227,9 @@ export default function ApiKeysPage() {
 
       {keys.length === 0 ? (
         <EmptyState
-          icon={Key}
+          variant="castle"
           title="No API keys yet"
-          description="Create your first API key to authenticate requests."
+          description="Mint your first key to authenticate API requests."
           action={{ label: "Create API Key", onClick: () => setCreateModalOpen(true) }}
         />
       ) : (

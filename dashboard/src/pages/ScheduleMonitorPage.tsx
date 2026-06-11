@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
-  Calendar, Clock, Play, Pause, AlertTriangle, CheckCircle2,
+  Clock, Play, Pause, AlertTriangle, CheckCircle2,
   Loader2, RefreshCw, RotateCcw,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -213,7 +213,7 @@ export default function ScheduleMonitorPage() {
 
       {schedules.length === 0 ? (
         <EmptyState
-          icon={Calendar}
+          variant="tide"
           title="No schedules configured"
           description="Create a schedule from the Schedules page to start monitoring automated workflow runs."
         />

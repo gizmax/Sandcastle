@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { ArrowRight, Castle, Check, CheckCircle, Loader2, Rocket } from "lucide-react";
 import { api } from "@/api/client";
 import { cn } from "@/lib/utils";
+import { DuneContours } from "@/components/brand";
 
 const CHECKLIST_KEY = "sandcastle_getting_started";
 
@@ -151,7 +152,8 @@ export function BentoEmptyState() {
   return (
     <div className="space-y-4">
       {!cls.dismissed && (
-        <div className="bg-surface rounded-2xl shadow-sm border border-border p-6">
+        <div className="relative overflow-hidden bg-surface rounded-2xl shadow-sm border border-border p-6">
+          <DuneContours className="absolute inset-x-0 bottom-0 h-28 w-full text-foreground opacity-[0.05]" />
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
               <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-accent/10">

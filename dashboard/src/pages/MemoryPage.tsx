@@ -267,12 +267,12 @@ export default function MemoryPage() {
       {/* Memory list */}
       {memories.length === 0 ? (
         <EmptyState
-          icon={Brain}
+          variant={searchQuery ? "tide" : "castle"}
           title={searchQuery ? "No matching memories" : "No memories yet"}
           description={
             searchQuery
               ? "Try a different search query or clear the filter."
-              : "Memories are created automatically as agents learn from workflow runs."
+              : "Agents write memories here as they learn from workflow runs."
           }
           action={
             searchQuery

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ShieldCheck, Clock, CheckCircle2, XCircle, SkipForward, RefreshCw, MessageSquare, Loader2 } from "lucide-react";
+import { Clock, CheckCircle2, XCircle, SkipForward, RefreshCw, MessageSquare, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { EmptyState } from "@/components/shared/EmptyState";
@@ -225,9 +225,9 @@ export default function ApprovalsPage() {
 
       {items.length === 0 ? (
         <EmptyState
-          icon={ShieldCheck}
+          variant="tide"
           title="No approvals"
-          description="Workflow steps requiring human review will appear here."
+          description="Nothing waiting on you. Steps that need human sign-off surface here."
         />
       ) : (
         <div className="space-y-3">

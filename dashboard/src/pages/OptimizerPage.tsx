@@ -254,9 +254,9 @@ export default function OptimizerPage() {
       {/* Decisions */}
       {decisions.length === 0 ? (
         <EmptyState
-          icon={Gauge}
+          variant="castle"
           title="No optimizer decisions"
-          description="When the optimizer selects models for workflow steps, decisions will appear here."
+          description="When the optimizer picks models for workflow steps, its reasoning shows up here."
         />
       ) : (
         <div className="space-y-3">

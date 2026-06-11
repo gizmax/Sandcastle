@@ -9,6 +9,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { AuthGate } from "@/components/auth/AuthGate";
 import { usePageTracking } from "@/hooks/usePageTracking";
 import { lazyWithRetry } from "@/lib/lazyWithRetry";
+import { SandcastleRuin, DuneContours, BuildingLoader } from "@/components/brand";
 
 // Lazy-loaded page components for code splitting. lazyWithRetry recovers from a
 // stale-deploy chunk miss (open tab + new deploy = 404 on the old hashed chunk)
@@ -77,14 +78,20 @@ function LiteGuard({ children }: { children: React.ReactNode }) {
 
 function NotFound() {
   return (
-    <div className="flex flex-col items-center justify-center py-24 gap-4">
-      <h1 className="text-4xl font-bold text-foreground">404</h1>
-      <p className="text-muted">Page not found</p>
+    <div className="relative flex flex-col items-center justify-center gap-3 overflow-hidden py-24 text-center">
+      <DuneContours className="absolute inset-x-0 bottom-0 h-40 w-full text-foreground opacity-[0.05]" />
+      <SandcastleRuin title="A crumbled sandcastle" className="h-36 w-48 text-muted-foreground" />
+      <h1 className="font-display text-3xl font-bold tracking-tight text-foreground">
+        This castle washed away.
+      </h1>
+      <p className="max-w-sm text-sm text-muted">
+        404 - the page you're looking for isn't here. The tide got it.
+      </p>
       <Link
         to="/"
-        className="text-sm font-medium text-accent hover:text-accent/80 transition-colors"
+        className="relative mt-3 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground shadow-sm transition-all hover:bg-accent-hover hover:shadow-md"
       >
-        Back to Overview
+        Back to solid ground
       </Link>
     </div>
   );
@@ -120,7 +127,7 @@ export default function App() {
         <Suspense
           fallback={
             <div className="flex h-screen items-center justify-center">
-              <LoadingSpinner size="lg" />
+              <BuildingLoader />
             </div>
           }
         >
