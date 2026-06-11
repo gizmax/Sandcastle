@@ -1,0 +1,102 @@
+name: Release artifacts
+
+# Builds reproducible source archives for a tagged release, publishes SHA-256
+# checksums, and signs the checksum file with cosign keyless (Sigstore via
+# GitHub OIDC — no stored key or secret required). All outputs are attached to
+# the GitHub Release so users can verify their downloads (see SECURITY.md).
+
+on:
+  release:
+    types: [published]   # fire when a release is published from a tag
+  workflow_dispatch: {}  # allow manual runs for testing
+
+# Least privilege: read the repo, write release assets, and request an OIDC
+# token so cosign can sign without any long-lived secret.
+permissions:
+  contents: write   # upload assets to the release
+  id-token: write   # OIDC token for cosign keyless signing
+
+jobs:
+  release-artifacts:
+    runs-on: ubuntu-latest
+    steps:
+      # Full history + tags so `git archive` can resolve the release tag.
+      - name: Checkout
+        uses: actions/checkout@v4 # pin: v4
+        with:
+          fetch-depth: 0
+
+      # Resolve the tag to build. On a release event GITHUB_REF_NAME is the tag;
+      # on manual dispatch we fall back to the latest tag reachable from HEAD.
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "release" ]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            TAG="$(git describe --tags --abbrev=0)"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Building artifacts for tag: ${TAG}"
+
+      # Reproducible source archives straight from the tag's tree (no build
+      # artifacts, no working-tree cruft). Both formats share the same content.
+      - name: Build source archives
+        id: build
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.tag.outputs.tag }}"
+          PREFIX="sandcastle-${TAG}/"
+          TARBALL="sandcastle-${TAG}.tar.gz"
+          ZIP="sandcastle-${TAG}.zip"
+
+          git archive --format=tar.gz --prefix="${PREFIX}" -o "${TARBALL}" "${TAG}"
+          git archive --format=zip    --prefix="${PREFIX}" -o "${ZIP}"     "${TAG}"
+
+          echo "tarball=${TARBALL}" >> "$GITHUB_OUTPUT"
+          echo "zip=${ZIP}"         >> "$GITHUB_OUTPUT"
+          ls -l "${TARBALL}" "${ZIP}"
+
+      # One checksum file covering both archives (GNU coreutils format).
+      - name: Generate SHA256SUMS.txt
+        run: |
+          set -euo pipefail
+          sha256sum \
+            "${{ steps.build.outputs.tarball }}" \
+            "${{ steps.build.outputs.zip }}" \
+            > SHA256SUMS.txt
+          echo "----- SHA256SUMS.txt -----"
+          cat SHA256SUMS.txt
+
+      # Install cosign for keyless signing.
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3 # pin: v3
+
+      # Sign the checksum file with an ephemeral, OIDC-bound key. Produces a
+      # detached signature (.sig) and the signing certificate (.pem). No secret
+      # is stored anywhere — the trust root is the GitHub OIDC identity.
+      - name: Sign checksums (cosign keyless)
+        env:
+          COSIGN_YES: "true" # non-interactive consent for keyless flow
+        run: |
+          set -euo pipefail
+          cosign sign-blob \
+            --yes \
+            --output-signature SHA256SUMS.txt.sig \
+            --output-certificate SHA256SUMS.txt.pem \
+            SHA256SUMS.txt
+          ls -l SHA256SUMS.txt.sig SHA256SUMS.txt.pem
+
+      # Attach archives, checksums, and signature material to the release.
+      # softprops/action-gh-release no-ops gracefully on workflow_dispatch when
+      # there is no associated release event.
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2 # pin: v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          files: |
+            ${{ steps.build.outputs.tarball }}
+            ${{ steps.build.outputs.zip }}
+            SHA256SUMS.txt
+            SHA256SUMS.txt.sig
+            SHA256SUMS.txt.pem
