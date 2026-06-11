@@ -72,6 +72,7 @@
 - [Verified Templates (.sctpl)](#verified-templates-sctpl)
 - [Real-time Event Stream](#real-time-event-stream)
 - [Run Time Machine](#run-time-machine)
+- [Model Time Machine](#model-time-machine)
 - [Budget Guardrails](#budget-guardrails)
 - [Security](#security)
 - [A2A & AG-UI Protocols](#a2a--ag-ui-protocols)
@@ -1660,6 +1661,40 @@ curl -X POST http://localhost:8080/api/runs/{run_id}/fork \
     "changes": { "model": "opus", "prompt": "Score more conservatively..." }
   }'
 ```
+
+### Model Time Machine
+
+Test any model against your real workload, not benchmarks. The Time Machine takes the runs you actually executed - your prompts, your data, your costs - and answers the question every team asks: *"what would last month have looked like on a different model?"*
+
+```bash
+# Free, instant: price last month's recorded token volume on a local Llama 70B
+sandcastle timemachine --model nim/llama-3.1-70b --since 30d
+
+# Live replay: re-execute the recorded steps for real, score quality with an
+# LLM judge, and measure actual cost + latency - capped by an explicit budget
+sandcastle timemachine --model mistral/small --since 30d --live --budget 5.0
+```
+
+Two modes:
+
+- **Dry run (default)** - zero API calls. Recorded token volumes are priced against the target model's pricing table and extrapolated to a monthly figure. Free and instant.
+- **Live replay (`--live`)** - every recorded LLM step is re-executed on the target model. Old and new outputs are scored 0-10 by a configurable LLM judge (`TIMEMACHINE_JUDGE_MODEL`, default `haiku`), and real cost and latency are measured. A live replay **requires** `--budget`: the replay cost is estimated up front from the recorded token counts and the job refuses to start if the estimate exceeds the cap.
+
+The report breaks down quality, cost, and latency deltas per workflow and ends with a one-line verdict: `Switching to nim/llama-3.1-70b saves $312/mo at -2.1% quality.`
+
+Also available in the dashboard (**Operations → Time Machine**) and over the API:
+
+```bash
+# Start a job (dry-run by default; add "live": true + "budget_usd" for live)
+curl -X POST http://localhost:8080/api/timemachine \
+  -H "Content-Type: application/json" \
+  -d '{ "target_model": "nim/llama-3.1-70b", "since": "30d", "max_cassettes": 20 }'
+
+# Fetch the report
+curl http://localhost:8080/api/timemachine/{job_id}
+```
+
+Reports persist as JSON artifacts under `{data_dir}/timemachine/`.
 
 ---
 

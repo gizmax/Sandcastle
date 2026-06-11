@@ -37,6 +37,7 @@ const EvolutionPage = lazyWithRetry(() => import("@/pages/EvolutionPage"), "evol
 const SystemHealthPage = lazyWithRetry(() => import("@/pages/SystemHealthPage"), "system-health");
 const CompliancePage = lazyWithRetry(() => import("@/pages/CompliancePage"), "compliance");
 const MemoryPage = lazyWithRetry(() => import("@/pages/MemoryPage"), "memory");
+const TimeMachinePage = lazyWithRetry(() => import("@/pages/TimeMachinePage"), "time-machine");
 const Onboarding = lazyWithRetry(() => import("@/pages/Onboarding"), "onboarding");
 
 /** Wrap a lazy-loaded page in a per-route error boundary so a crash in one
@@ -159,6 +160,7 @@ export default function App() {
               <Route path="/system-health" element={<PageBoundary name="system-health"><SystemHealthPage /></PageBoundary>} />
               <Route path="/compliance" element={<LiteGuard><PageBoundary name="compliance"><CompliancePage /></PageBoundary></LiteGuard>} />
               <Route path="/memory" element={<LiteGuard><PageBoundary name="memory"><MemoryPage /></PageBoundary></LiteGuard>} />
+              <Route path="/time-machine" element={<LiteGuard><PageBoundary name="time-machine"><TimeMachinePage /></PageBoundary></LiteGuard>} />
               <Route path="*" element={<NotFound />} />
             </Route>
           </Routes>

@@ -8224,7 +8224,137 @@ const routes: MockRoute[] = [
       };
     },
   },
+  // --- Model Time Machine (counterfactual replay) ---
+  {
+    match: /^\/timemachine$/,
+    method: "POST",
+    handler: (_params, body) => {
+      const b = body as { target_model?: string; live?: boolean } | undefined;
+      mockTimeMachineLast = {
+        target_model: b?.target_model || "nim/llama-3.1-70b",
+        live: Boolean(b?.live),
+      };
+      return {
+        job_id: "tm-mock-0001",
+        status: "running",
+        mode: mockTimeMachineLast.live ? "live" : "dry_run",
+        target_model: mockTimeMachineLast.target_model,
+      };
+    },
+  },
+  {
+    match: /^\/timemachine$/,
+    handler: () => [
+      {
+        job_id: "tm-mock-0001",
+        status: "completed",
+        created_at: h(2),
+        completed_at: h(2),
+        mode: "dry_run",
+        target_model: "nim/llama-3.1-70b",
+        verdict:
+          "Switching to nim/llama-3.1-70b saves $312.40/mo (projected from recorded token volume). Run a live replay to measure quality.",
+        error: null,
+      },
+      {
+        job_id: "tm-mock-0002",
+        status: "completed",
+        created_at: d(3),
+        completed_at: d(3),
+        mode: "live",
+        target_model: "mistral/small",
+        verdict: "Switching to mistral/small saves $268.10/mo at -3.2% quality.",
+        error: null,
+      },
+    ],
+  },
+  {
+    match: /^\/timemachine\/([^/]+)$/,
+    handler: (params) => ({
+      job_id: params._1,
+      status: "completed",
+      params: {},
+      created_at: h(0.01),
+      completed_at: h(0),
+      error: null,
+      report: buildMockTimeMachineReport(
+        mockTimeMachineLast.target_model,
+        params._1 === "tm-mock-0002" ? true : mockTimeMachineLast.live
+      ),
+    }),
+  },
 ];
+
+let mockTimeMachineLast = { target_model: "nim/llama-3.1-70b", live: false };
+
+function buildMockTimeMachineReport(targetModel: string, live: boolean) {
+  const local = targetModel.startsWith("nim/") || targetModel.startsWith("omlx/") || targetModel === "ollama";
+  const ratio = local ? 0 : 0.22; // new cost as a fraction of original
+  const rows = [
+    { workflow: "lead-enrichment", runs: 9, steps: 34, original: 14.92, lat: 11.2 },
+    { workflow: "competitor-monitor", runs: 6, steps: 18, original: 7.41, lat: 8.6 },
+    { workflow: "seo-audit", runs: 5, steps: 15, original: 5.08, lat: 9.9 },
+  ];
+  const originalTotal = rows.reduce((acc, r) => acc + r.original, 0);
+  const newTotal = originalTotal * ratio;
+  const monthlyOriginal = originalTotal * (30 / 28);
+  const monthlySavings = monthlyOriginal * (1 - ratio);
+  return {
+    mode: live ? "live" : "dry_run",
+    target_model: targetModel,
+    judge_model: live ? "haiku" : null,
+    selection: {
+      runs: rows.reduce((acc, r) => acc + r.runs, 0),
+      steps: rows.reduce((acc, r) => acc + r.steps, 0),
+      workflows: rows.map((r) => r.workflow),
+      original_cost_usd: originalTotal,
+      window_days: 28,
+    },
+    cost: {
+      original_usd: originalTotal,
+      new_usd: newTotal,
+      delta_usd: newTotal - originalTotal,
+      delta_pct: (ratio - 1) * 100,
+    },
+    quality: live ? { old_avg: 8.4, new_avg: 8.1, delta_pct: -3.6 } : null,
+    latency: live
+      ? { old_avg_seconds: 10.4, new_avg_seconds: 6.1, delta_pct: -41.3 }
+      : null,
+    live: live
+      ? {
+          measured_cost_usd: newTotal + 0.31,
+          budget_usd: 5.0,
+          steps_replayed: 67,
+          steps_failed: 0,
+          truncated: false,
+        }
+      : null,
+    extrapolation: {
+      window_days: 28,
+      monthly_original_usd: monthlyOriginal,
+      monthly_projected_usd: monthlyOriginal * ratio,
+      monthly_savings_usd: monthlySavings,
+    },
+    per_workflow: rows.map((r) => ({
+      workflow: r.workflow,
+      runs: r.runs,
+      steps: r.steps,
+      original_cost_usd: r.original,
+      new_cost_usd: r.original * ratio,
+      cost_delta_usd: r.original * ratio - r.original,
+      cost_delta_pct: (ratio - 1) * 100,
+      quality_old: live ? 8.4 : null,
+      quality_new: live ? 8.1 : null,
+      quality_delta_pct: live ? -3.6 : null,
+      latency_old_seconds: live ? r.lat : null,
+      latency_new_seconds: live ? r.lat * 0.59 : null,
+      latency_delta_pct: live ? -41.0 : null,
+    })),
+    verdict: live
+      ? `Switching to ${targetModel} saves $${monthlySavings.toFixed(2)}/mo at -3.6% quality.`
+      : `Switching to ${targetModel} saves $${monthlySavings.toFixed(2)}/mo (projected from recorded token volume). Run a live replay to measure quality.`,
+  };
+}
 
 export function mockFetch(
   path: string,
