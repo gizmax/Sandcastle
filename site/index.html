@@ -237,6 +237,42 @@
     }
     .install-line button.copy:hover{ background:var(--amber); color:#1C1814; border-color:var(--amber); }
 
+    /* ============================================================
+       HERO FIGURE — a self-assembling workflow (paper-tuned)
+       ============================================================ */
+    .resolve-text{ display:flex; flex-direction:column; gap:clamp(20px,3.5vh,34px); align-items:flex-start; min-width:0; }
+    .hero-figure{
+      margin:0; position:relative; align-self:stretch;
+      border:1.5px solid var(--rule); border-radius:4px;
+      background:
+        radial-gradient(circle, rgba(28,24,20,.05) 1px, transparent 1px) 0 0/16px 16px,
+        var(--paper-2);
+      min-height:312px; overflow:hidden;
+    }
+    .hero-figure .hf-cap, .hero-figure .hf-foot{
+      position:absolute; left:0; right:0; z-index:2;
+      display:flex; justify-content:space-between; align-items:center;
+      padding:9px 14px; font-family:var(--mono); font-size:11px;
+      letter-spacing:.06em; text-transform:uppercase; color:var(--ink-faint);
+      background:color-mix(in srgb, var(--paper-2) 88%, transparent);
+    }
+    .hero-figure .hf-cap{ top:0; border-bottom:1.5px solid var(--hair); }
+    .hero-figure .hf-foot{ bottom:0; border-top:1.5px solid var(--hair); text-transform:none; }
+    .hero-figure .hf-engine{ display:inline-flex; align-items:center; gap:7px; color:var(--ink-soft); }
+    .hero-figure .hf-dot{ width:7px; height:7px; border-radius:50%; background:var(--ink-faint); transition:background .3s ease; }
+    .hero-figure.local .hf-dot{ background:var(--amber-ink); }
+    .hf-foot .hf-cost{ color:var(--amber-ink); font-weight:600; font-variant-numeric:tabular-nums; }
+    .hero-figure svg{ position:absolute; top:36px; bottom:34px; left:0; right:0; width:100%; height:calc(100% - 70px); }
+    .hf-edge{ fill:none; stroke:var(--hair); stroke-width:1.5; }
+    .hf-edge.lit{ stroke:color-mix(in srgb, var(--amber) 55%, var(--hair)); }
+    .hf-pulse{ fill:var(--amber); filter:drop-shadow(0 0 3px rgba(245,158,11,.5)); }
+    .hf-node rect{ fill:var(--paper); stroke:var(--rule); stroke-width:1.5; transition:stroke .35s ease, fill .35s ease; }
+    .hf-node.lit rect{ stroke:var(--amber-ink); fill:color-mix(in srgb, var(--amber) 10%, var(--paper)); }
+    .hf-node text{ font-family:var(--mono); font-size:10px; fill:var(--ink-faint); transition:fill .35s ease; }
+    .hf-node.lit text{ fill:var(--ink); }
+    @media (max-width:880px){ .hero-figure{ min-height:268px; } }
+    @media (prefers-reduced-motion: reduce){ .hf-pulse{ display:none; } }
+
     /* marquee strip of facts under hero */
     .factbar{
       border-top:1.5px solid var(--rule); border-bottom:1.5px solid var(--rule);
@@ -598,15 +634,27 @@
         </h1>
 
         <div class="resolve">
-          <p class="lede">
-            So we stopped choosing. <strong>Sandcastle</strong> is an open-source orchestrator for AI agents — define a workflow in one file, run it on any model, ship it anywhere on your own rules, and let it get sharper every run.
-          </p>
-          <div>
+          <div class="resolve-text">
+            <p class="lede">
+              So we stopped choosing. <strong>Sandcastle</strong> is an open-source orchestrator for AI agents — define a workflow in one file, run it on any model, ship it anywhere on your own rules, and let it get sharper every run.
+            </p>
             <span class="install-line" id="heroInstall" role="text">
               <span class="pmt">$</span><span>pip install sandcastle-ai</span>
               <button class="copy" data-copy="pip install sandcastle-ai" type="button" aria-label="Copy install command">Copy</button>
             </span>
           </div>
+
+          <figure class="hero-figure" id="heroFig" aria-label="Illustration: a workflow assembling, running, and switching models">
+            <div class="hf-cap">
+              <span>workflow · live</span>
+              <span class="hf-engine"><span class="hf-dot" aria-hidden="true"></span><span id="hfEngine">Claude</span></span>
+            </div>
+            <svg viewBox="0 0 300 268" preserveAspectRatio="xMidYMid meet" role="img" aria-hidden="true"></svg>
+            <div class="hf-foot">
+              <span id="hfRun">run #1,284</span>
+              <span class="hf-cost" id="hfCost">$0.00</span>
+            </div>
+          </figure>
         </div>
       </div>
 
@@ -1134,6 +1182,128 @@
         assemble(); visible = true; evaluate();
       }
       document.addEventListener("visibilitychange", evaluate);
+    })();
+
+    // ----------------------------------------------------------------
+    // Hero figure: a self-assembling workflow that runs and swaps models
+    // ----------------------------------------------------------------
+    (function(){
+      var fig = document.getElementById("heroFig");
+      if(!fig) return;
+      var svg = fig.querySelector("svg");
+      var engineEl = document.getElementById("hfEngine");
+      var runEl = document.getElementById("hfRun");
+      var costEl = document.getElementById("hfCost");
+      if(!svg || !engineEl) return;
+      var NS = "http://www.w3.org/2000/svg";
+      var W = 86, H = 26;
+      var nodes = [
+        { id:"describe", label:"describe", x:20,  y:8  },
+        { id:"plan",     label:"plan",     x:20,  y:86 },
+        { id:"search",   label:"search",   x:176, y:86 },
+        { id:"draft",    label:"draft",    x:98,  y:162 },
+        { id:"ship",     label:"ship",     x:98,  y:232 }
+      ];
+      var edges = [["describe","plan"],["describe","search"],["plan","draft"],["search","draft"],["draft","ship"]];
+      var byId = {}; nodes.forEach(function(n){ byId[n.id] = n; });
+      function cx(n){ return n.x + W/2; }
+
+      var edgeEls = [];
+      edges.forEach(function(e){
+        var a = byId[e[0]], b = byId[e[1]];
+        var x1 = cx(a), y1 = a.y + H, x2 = cx(b), y2 = b.y, my = (y1 + y2) / 2;
+        var p = document.createElementNS(NS, "path");
+        p.setAttribute("d", "M"+x1+" "+y1+" C "+x1+" "+my+" "+x2+" "+my+" "+x2+" "+y2);
+        p.setAttribute("class", "hf-edge");
+        svg.appendChild(p);
+        edgeEls.push({ path:p, to:e[1] });
+      });
+      var nodeEls = {};
+      nodes.forEach(function(n){
+        var g = document.createElementNS(NS, "g"); g.setAttribute("class", "hf-node");
+        var r = document.createElementNS(NS, "rect");
+        r.setAttribute("x", n.x); r.setAttribute("y", n.y);
+        r.setAttribute("width", W); r.setAttribute("height", H); r.setAttribute("rx", 4);
+        var t = document.createElementNS(NS, "text");
+        t.setAttribute("x", n.x + 11); t.setAttribute("y", n.y + 17); t.textContent = n.label;
+        g.appendChild(r); g.appendChild(t); svg.appendChild(g);
+        nodeEls[n.id] = g;
+      });
+      var pulse = document.createElementNS(NS, "circle");
+      pulse.setAttribute("r", 3.6); pulse.setAttribute("class", "hf-pulse"); pulse.style.opacity = "0";
+      svg.appendChild(pulse);
+
+      var ENGINES = ["Claude","Llama","local","Mistral"];
+      var runs = 1284, ei = 0;
+      var reduceMo = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+      function fmt(n){ return n.toLocaleString("en-US"); }
+      function setEngine(){
+        var name = ENGINES[ei % ENGINES.length];
+        engineEl.textContent = name;
+        var local = name === "local";
+        fig.classList.toggle("local", local);
+        if(costEl) costEl.textContent = local ? "$0.00" : ("$" + (0.01 + (ei % 5) * 0.011).toFixed(2));
+      }
+      function clearLit(){
+        Object.keys(nodeEls).forEach(function(k){ nodeEls[k].classList.remove("lit"); });
+        edgeEls.forEach(function(e){ e.path.classList.remove("lit"); });
+      }
+
+      if(reduceMo){
+        Object.keys(nodeEls).forEach(function(k){ nodeEls[k].classList.add("lit"); });
+        edgeEls.forEach(function(e){ e.path.classList.add("lit"); });
+        engineEl.textContent = "local"; fig.classList.add("local");
+        if(costEl) costEl.textContent = "$0.00";
+        if(runEl) runEl.textContent = "run #" + fmt(runs);
+        return;
+      }
+
+      var running = true, raf = null, timers = [];
+      function later(fn, ms){ var t = setTimeout(fn, ms); timers.push(t); return t; }
+      function clearTimers(){ timers.forEach(clearTimeout); timers = []; }
+
+      function animateEdge(idx, done){
+        if(idx >= edgeEls.length){ done(); return; }
+        var ed = edgeEls[idx], path = ed.path, len = path.getTotalLength();
+        var elapsed = 0, last = null, dur = 440;
+        ed.path.classList.add("lit");
+        pulse.style.opacity = "1";
+        function step(ts){
+          if(last === null) last = ts;
+          if(running) elapsed += ts - last;
+          last = ts;
+          var p = Math.min(1, elapsed / dur);
+          var pt = path.getPointAtLength(p * len);
+          pulse.setAttribute("cx", pt.x); pulse.setAttribute("cy", pt.y);
+          if(p < 1){ raf = requestAnimationFrame(step); }
+          else { nodeEls[ed.to].classList.add("lit"); animateEdge(idx + 1, done); }
+        }
+        raf = requestAnimationFrame(step);
+      }
+      function runOnce(){
+        clearLit(); pulse.style.opacity = "0";
+        nodeEls.describe.classList.add("lit");
+        setEngine();
+        if(runEl) runEl.textContent = "run #" + fmt(runs);
+        later(function(){
+          animateEdge(0, function(){
+            pulse.style.opacity = "0"; runs++; ei++;
+            later(runOnce, 1500);
+          });
+        }, 520);
+      }
+      function play(){ if(!running){ running = true; } }
+      function pause(){ running = false; }
+      function evaluate(v){ if(document.hidden || v === false){ pause(); } else { play(); } }
+
+      document.addEventListener("visibilitychange", function(){ evaluate(); });
+      if("IntersectionObserver" in window){
+        new IntersectionObserver(function(es){
+          es.forEach(function(en){ evaluate(en.isIntersecting); });
+        }, { threshold:.1 }).observe(fig);
+      }
+      runOnce();
     })();
   })();
   </script>
