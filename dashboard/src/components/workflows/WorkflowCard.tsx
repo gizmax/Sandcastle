@@ -1,7 +1,8 @@
 import { memo, useState } from "react";
-import { GitBranch, Play, Pencil, Eye, History, Check, Clock, CheckCircle, XCircle, Star, Layers } from "lucide-react";
+import { GitBranch, Play, Pencil, Eye, History, Check, Clock, Star, Layers } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DoctorBadge } from "./DoctorBadge";
+import { StatusLed } from "@/components/ui/StatusLed";
 
 /** Per-workflow runtime stats — populated by WorkflowList once the
  *  backend exposes a per-workflow stats endpoint. Cards render without
@@ -22,10 +23,10 @@ function deriveHealth(successRate: number): HealthLevel {
   return "failing";
 }
 
-const healthConfig: Record<HealthLevel, { dot: string; label: string; text: string }> = {
-  healthy:  { dot: "bg-success",  label: "Healthy",  text: "text-success" },
-  degraded: { dot: "bg-warning",  label: "Degraded", text: "text-warning" },
-  failing:  { dot: "bg-error",    label: "Failing",  text: "text-error" },
+const healthConfig: Record<HealthLevel, { label: string }> = {
+  healthy:  { label: "Healthy" },
+  degraded: { label: "Degraded" },
+  failing:  { label: "Failing" },
 };
 // --- End mock stats ---
 
@@ -129,14 +130,13 @@ export const WorkflowCard = memo(function WorkflowCard({
         </button>
       )}
 
-      {/* Health badge - top right, offset from checkbox */}
-      {hc && (
+      {/* Health light - top right, offset from checkbox */}
+      {health && hc && (
         <div className={cn(
-          "absolute top-3 flex items-center gap-1.5",
+          "absolute top-3 flex items-center",
           onSelect ? "right-10" : "right-3"
         )}>
-          <span className={cn("h-2 w-2 rounded-full", hc.dot)} />
-          <span className={cn("text-[10px] font-medium", hc.text)}>{hc.label}</span>
+          <StatusLed status={health} label={hc.label} />
         </div>
       )}
 
@@ -164,15 +164,7 @@ export const WorkflowCard = memo(function WorkflowCard({
       <div className="mb-3 flex items-center gap-1.5 text-xs text-muted">
         {stats && stats.lastRunStatus ? (
           <>
-            {stats.lastRunStatus === "completed" && (
-              <CheckCircle className="h-3 w-3 text-success" />
-            )}
-            {stats.lastRunStatus === "failed" && (
-              <XCircle className="h-3 w-3 text-error" />
-            )}
-            {stats.lastRunStatus === "running" && (
-              <Clock className="h-3 w-3 text-running" />
-            )}
+            <StatusLed status={stats.lastRunStatus} showLabel={false} />
             <span>
               Last run: {stats.lastRunAgo} -{" "}
               <span className={cn(
@@ -198,16 +190,7 @@ export const WorkflowCard = memo(function WorkflowCard({
           <>
             <span className="text-border">|</span>
             <span className="font-mono">v{version}</span>
-            {versionStatus && (
-              <span className={cn(
-                "rounded-full px-1.5 py-0.5 text-[10px] font-medium capitalize",
-                versionStatus === "production" ? "bg-success/15 text-success" :
-                versionStatus === "staging" ? "bg-warning/15 text-warning" :
-                "bg-muted/15 text-muted"
-              )}>
-                {versionStatus}
-              </span>
-            )}
+            {versionStatus && <StatusLed status={versionStatus} />}
           </>
         )}
         {totalVersions != null && totalVersions > 1 && (

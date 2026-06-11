@@ -12,6 +12,9 @@ import {
 import { api } from "@/api/client";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { StatusLed } from "@/components/ui/StatusLed";
+import { getLedConfig } from "@/lib/statusLed";
+import { Odometer } from "@/components/ui/Odometer";
 import { cn } from "@/lib/utils";
 
 // -- Types ------------------------------------------------------------------
@@ -58,29 +61,16 @@ interface ServiceCheck {
 
 // -- Helpers ----------------------------------------------------------------
 
-function statusDot(status: ServiceStatus) {
+function statusLabel(status: ServiceStatus): string {
   switch (status) {
     case "healthy":
-      return "bg-success";
+      return "Healthy";
     case "unhealthy":
-      return "bg-error animate-pulse";
+      return "Unhealthy";
     case "degraded":
-      return "bg-warning animate-pulse";
+      return "Degraded";
     case "unconfigured":
-      return "bg-muted";
-  }
-}
-
-function statusLabel(status: ServiceStatus) {
-  switch (status) {
-    case "healthy":
-      return { text: "Healthy", className: "text-success" };
-    case "unhealthy":
-      return { text: "Unhealthy", className: "text-error" };
-    case "degraded":
-      return { text: "Degraded", className: "text-warning" };
-    case "unconfigured":
-      return { text: "Not Configured", className: "text-muted" };
+      return "Not Configured";
   }
 }
 
@@ -263,17 +253,12 @@ export default function SystemHealthPage() {
         title="System Health"
         actions={
           <>
-            <span
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium",
-                overallStatus === "healthy" && "bg-success/15 border-success/30 text-success",
-                overallStatus === "degraded" && "bg-warning/15 border-warning/30 text-warning",
-                overallStatus === "unhealthy" && "bg-error/15 border-error/30 text-error"
-              )}
-            >
-              <span className={cn("h-1.5 w-1.5 rounded-full", statusDot(overallStatus))} />
-              {overallStatus === "healthy" ? "All Systems Operational" : overallStatus === "degraded" ? "Degraded" : "Issues Detected"}
-            </span>
+            {/* Overall status light (control-room indicator instead of a pill) */}
+            <StatusLed
+              status={overallStatus}
+              size="md"
+              label={overallStatus === "healthy" ? "All Systems Operational" : overallStatus === "degraded" ? "Degraded" : "Issues Detected"}
+            />
             <button
               onClick={() => void fetchData(true)}
               disabled={refreshing}
@@ -342,16 +327,10 @@ export default function SystemHealthPage() {
           <div className="space-y-2.5 p-4 sm:p-5">
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">Mode</span>
-              <span
-                className={cn(
-                  "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium",
-                  runtime?.mode === "local"
-                    ? "bg-accent/15 border border-accent/30 text-accent"
-                    : "bg-success/15 border border-success/30 text-success"
-                )}
-              >
-                {runtime?.mode === "local" ? "Local" : "Production"}
-              </span>
+              <StatusLed
+                status={runtime?.mode === "local" ? "local" : "production"}
+                label={runtime?.mode === "local" ? "Local" : "Production"}
+              />
             </div>
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">Sandbox Backend</span>
@@ -381,44 +360,47 @@ export default function SystemHealthPage() {
         </div>
       </div>
 
-      {/* Service Checks */}
+      {/* Service Checks: indicator board */}
       <div className="rounded-md border border-border bg-surface overflow-hidden">
-        <div className="px-4 py-2.5 border-b border-border">
+        <div className="px-4 py-2.5 border-b border-border flex items-center justify-between">
           <h2 className="panel-label text-muted-foreground">
             Service Checks
           </h2>
+          <span className="font-mono text-[10px] tracking-widest text-muted uppercase">
+            {serviceChecks.filter((c) => c.status === "healthy").length}/{serviceChecks.length} nominal
+          </span>
         </div>
         <div className="divide-y divide-border">
-          {serviceChecks.map((check) => {
-            const label = statusLabel(check.status);
-            return (
-              <div
-                key={check.name}
-                className="flex items-center gap-4 px-4 py-2.5 hover:bg-border/10 transition-colors"
+          {serviceChecks.map((check) => (
+            <div
+              key={check.name}
+              className="indicator-board-row flex items-center gap-4 px-4 py-2.5"
+            >
+              {/* Indicator light */}
+              <StatusLed status={check.status} showLabel={false} size="md" />
+
+              {/* Icon */}
+              <check.icon className="h-4 w-4 text-muted shrink-0" />
+
+              {/* Name */}
+              <span className="font-mono text-xs tracking-wide text-foreground min-w-[140px]">
+                {check.name}
+              </span>
+
+              {/* Detail */}
+              <span className="text-sm font-mono text-muted flex-1 truncate">
+                {check.detail}
+              </span>
+
+              {/* Status readout */}
+              <span
+                className="led-label text-[10px] shrink-0"
+                style={{ color: getLedConfig(check.status).color }}
               >
-                {/* Status dot */}
-                <span className={cn("h-2.5 w-2.5 rounded-full shrink-0", statusDot(check.status))} />
-
-                {/* Icon */}
-                <check.icon className="h-4 w-4 text-muted shrink-0" />
-
-                {/* Name */}
-                <span className="text-sm font-medium text-foreground min-w-[140px]">
-                  {check.name}
-                </span>
-
-                {/* Detail */}
-                <span className="text-sm font-mono text-muted flex-1 truncate">
-                  {check.detail}
-                </span>
-
-                {/* Status label */}
-                <span className={cn("text-xs font-medium shrink-0", label.className)}>
-                  {label.text}
-                </span>
-              </div>
-            );
-          })}
+                {statusLabel(check.status)}
+              </span>
+            </div>
+          ))}
         </div>
       </div>
 
@@ -428,25 +410,25 @@ export default function SystemHealthPage() {
           <div className="rounded-md border border-border bg-surface p-4">
             <p className="panel-label text-muted-foreground">Total Runs · Today</p>
             <p className="mt-1.5 font-display text-2xl sm:text-3xl font-bold tracking-tight leading-none text-foreground">
-              {quickStats.runs}
+              <Odometer value={quickStats.runs} />
             </p>
           </div>
           <div className="rounded-md border border-border bg-surface p-4">
             <p className="panel-label text-muted-foreground">Workflows</p>
             <p className="mt-1.5 font-display text-2xl sm:text-3xl font-bold tracking-tight leading-none text-foreground">
-              {quickStats.workflows}
+              <Odometer value={quickStats.workflows} />
             </p>
           </div>
           <div className="rounded-md border border-border bg-surface p-4">
             <p className="panel-label text-muted-foreground">Templates</p>
             <p className="mt-1.5 font-display text-2xl sm:text-3xl font-bold tracking-tight leading-none text-foreground">
-              {quickStats.templates}
+              <Odometer value={quickStats.templates} />
             </p>
           </div>
           <div className="rounded-md border border-border bg-surface p-4">
             <p className="panel-label text-muted-foreground">API Keys</p>
             <p className="mt-1.5 font-display text-2xl sm:text-3xl font-bold tracking-tight leading-none text-foreground">
-              {quickStats.apiKeys}
+              <Odometer value={quickStats.apiKeys} />
             </p>
           </div>
         </div>

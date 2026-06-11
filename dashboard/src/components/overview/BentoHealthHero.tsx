@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
-import { ArrowRight, CheckCircle2, DollarSign } from "lucide-react";
+import { ArrowRight, DollarSign } from "lucide-react";
 import { cn, formatCost } from "@/lib/utils";
+import { StatusLed } from "@/components/ui/StatusLed";
 import type { Insight, Severity } from "@/lib/insights";
 
 const SEVERITY_DOT: Record<Severity, string> = {
@@ -77,15 +78,11 @@ export function BentoHealthHero({
 
       {!loading && actionable.length === 0 && (
         <div className="flex items-center gap-2">
-          <span className={cn(
-            "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold",
-            score >= 80
-              ? "bg-success/10 border border-success/20 text-success"
-              : "bg-warning/10 border border-warning/20 text-warning",
-          )}>
-            <CheckCircle2 className="h-3.5 w-3.5" />
-            {score >= 80 ? "All systems healthy" : scoreLabel}
-          </span>
+          <StatusLed
+            status={score >= 80 ? "healthy" : "degraded"}
+            label={score >= 80 ? "All systems healthy" : scoreLabel}
+            size="md"
+          />
         </div>
       )}
 

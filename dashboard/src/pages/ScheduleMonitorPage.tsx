@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { api } from "@/api/client";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { StatusLed } from "@/components/ui/StatusLed";
 import { cronToHuman, getNextRuns } from "@/lib/cron";
 import { cn, formatRelativeTime } from "@/lib/utils";
 
@@ -35,13 +36,13 @@ interface ScheduleMonitorItem {
 function statusBadge(status: string) {
   switch (status) {
     case "active":
-      return { label: "Active", bg: "bg-success/10 border-success/30 text-success" };
+      return { label: "Active" };
     case "paused":
-      return { label: "Paused", bg: "bg-muted-foreground/10 border-border text-muted-foreground" };
+      return { label: "Paused" };
     case "failing":
-      return { label: "Failing", bg: "bg-error/10 border-error/30 text-error" };
+      return { label: "Failing" };
     default:
-      return { label: status, bg: "bg-border text-muted-foreground" };
+      return { label: status };
   }
 }
 
@@ -219,7 +220,8 @@ export default function ScheduleMonitorPage() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-5">
           {schedules.map((schedule) => {
-            const badge = statusBadge(schedule.status ?? (schedule.enabled ? "active" : "paused"));
+            const scheduleStatus = schedule.status ?? (schedule.enabled ? "active" : "paused");
+            const badge = statusBadge(scheduleStatus);
             const successPct = Math.round((schedule.success_rate ?? 0) * 100);
             const isToggling = togglingId === schedule.id;
             const isTriggering = triggeringId === schedule.id;
@@ -243,12 +245,7 @@ export default function ScheduleMonitorPage() {
                       {cronToHuman(schedule.cron_expression)}
                     </p>
                   </div>
-                  <span className={cn(
-                    "shrink-0 text-[10px] font-semibold rounded-full px-2.5 py-1 border",
-                    badge.bg
-                  )}>
-                    {badge.label}
-                  </span>
+                  <StatusLed status={scheduleStatus} label={badge.label} className="shrink-0" />
                 </div>
 
                 {/* Stats row */}

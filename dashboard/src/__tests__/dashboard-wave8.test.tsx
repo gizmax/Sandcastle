@@ -1349,20 +1349,20 @@ describe("RunStatusBadge", () => {
     expect(badge).toBeInTheDocument();
   });
 
-  it("applies sm size by default (uses px-2)", () => {
+  it("applies sm size by default (small LED)", () => {
     render(<RunStatusBadge status="completed" />);
-    const badge = screen.getByText("completed").closest("span.inline-flex");
+    const badge = screen.getByText("completed").closest("span[data-status]");
     expect(badge).toBeInTheDocument();
-    // sm size adds px-2 class
-    expect(badge!.className).toContain("px-2");
+    // sm size renders an h-2 light
+    expect(badge!.querySelector(".led")!.classList.contains("h-2")).toBe(true);
   });
 
-  it("applies md size when specified (uses px-3)", () => {
+  it("applies md size when specified (larger LED)", () => {
     render(<RunStatusBadge status="completed" size="md" />);
-    const badge = screen.getByText("completed").closest("span.inline-flex");
+    const badge = screen.getByText("completed").closest("span[data-status]");
     expect(badge).toBeInTheDocument();
-    // md size adds px-3 class
-    expect(badge!.className).toContain("px-3");
+    // md size renders an h-2.5 light
+    expect(badge!.querySelector(".led")!.classList.contains("h-2.5")).toBe(true);
   });
 
   it("renders all known statuses", () => {

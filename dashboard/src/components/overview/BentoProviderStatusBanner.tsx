@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Key, Wifi, X } from "lucide-react";
 import { api } from "@/api/client";
 import { cn } from "@/lib/utils";
+import { StatusLed } from "@/components/ui/StatusLed";
 import type { ProviderInfo } from "./bentoTypes";
 
 const PROVIDER_BANNER_DISMISSED_KEY = "sandcastle_provider_banner_dismissed";
@@ -70,21 +71,17 @@ export function BentoProviderStatusBanner() {
                 <span
                   key={p.id}
                   className={cn(
-                    "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium",
-                    isActive
-                      ? "bg-success/10 text-success"
-                      : "bg-muted text-muted-foreground",
+                    "inline-flex items-center gap-1.5 px-1 text-xs font-medium",
+                    isActive ? "text-success" : "text-muted-foreground",
                   )}
                 >
-                  <span
-                    className={cn(
-                      "h-1.5 w-1.5 rounded-full shrink-0",
-                      isActive ? "bg-success" : "bg-muted-foreground/40",
-                    )}
+                  <StatusLed
+                    status={isActive ? "healthy" : "unconfigured"}
+                    showLabel={false}
                   />
                   {p.name}
                   {p.status === "running" && p.latency_ms != null && (
-                    <span className="text-[10px] text-success/70">{p.latency_ms}ms</span>
+                    <span className="font-mono text-[10px] text-success/70">{p.latency_ms}ms</span>
                   )}
                 </span>
               );

@@ -1,5 +1,6 @@
+import type { CSSProperties } from "react";
 import { StepCard } from "@/components/runs/StepCard";
-import { STATUS_DOT_COLORS } from "@/lib/constants";
+import { getLedConfig } from "@/lib/statusLed";
 import { cn } from "@/lib/utils";
 
 interface Step {
@@ -40,9 +41,10 @@ export function StepTimeline({ steps, runId, onReplay, onFork }: StepTimelinePro
           <div className="flex flex-col items-center">
             <div
               className={cn(
-                "mt-4 h-3 w-3 rounded-full border-2 border-surface",
-                STATUS_DOT_COLORS[step.status] || "bg-muted"
+                "led mt-4 h-2.5 w-2.5 rounded-full",
+                `led--${getLedConfig(step.status).state}`
               )}
+              style={{ "--led-color": getLedConfig(step.status).color } as CSSProperties}
             />
             {i < steps.length - 1 && (
               <div className="w-px flex-1 bg-border" />
