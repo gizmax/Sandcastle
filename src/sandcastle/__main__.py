@@ -3591,6 +3591,9 @@ def _cmd_template_install(args: argparse.Namespace) -> None:
         for arcname, blob in cassettes.items():
             cassette_name = _sanitize_bundle_stem(Path(arcname).stem) + ".cassette.json"
             (target_dir / f"{stem}.{cassette_name}").write_bytes(blob)
+        # Keep the bundle itself too - the dashboard's "Replay proof locally"
+        # and the verification API re-verify from this exact archive.
+        (target_dir / f"{stem}.sctpl").write_bytes(bundle_path.read_bytes())
 
     print(f"{_color('Installed', _C.GREEN)}: {manifest['name']} v{manifest['version']}"
           f" -> {target_path}")

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { LayoutGrid, Network, Plus, Search, Star, Trash2, X, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
@@ -35,6 +35,7 @@ interface WorkflowInfo {
 
 export default function Workflows() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [workflows, setWorkflows] = useState<WorkflowInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -82,6 +83,27 @@ export default function Workflows() {
   useEffect(() => {
     void fetchWorkflows();
   }, [fetchWorkflows]);
+
+  // Deep link from the command palette: /workflows?run=<name> opens the run
+  // form for that workflow as soon as the list is loaded.
+  useEffect(() => {
+    const runParam = searchParams.get("run");
+    if (!runParam || workflows.length === 0) return;
+    const wf = workflows.find(
+      (w) =>
+        w.name === runParam ||
+        w.file_name?.replace(/\.ya?ml$/, "") === runParam
+    );
+    if (wf) setRunModal(wf);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("run");
+        return next;
+      },
+      { replace: true }
+    );
+  }, [workflows, searchParams, setSearchParams]);
 
   const handleRun = useCallback(
     async (input: Record<string, unknown>, callbackUrl?: string) => {

@@ -369,6 +369,72 @@ def read_bundle(path: str | Path) -> tuple[dict[str, Any], str, dict[str, bytes]
 
 
 # ---------------------------------------------------------------------------
+# Installed-bundle status
+# ---------------------------------------------------------------------------
+
+
+def bundle_for_template(file_name: str) -> Path | None:
+    """The sibling .sctpl bundle for an installed community template, if any.
+
+    ``sandcastle template install`` keeps the original bundle next to the
+    extracted workflow (``<stem>.yaml`` + ``<stem>.sctpl``), so the proof can be
+    replayed at any time. Returns the bundle path or None for plain templates.
+    """
+    from sandcastle.templates import _TEMPLATES_DIR
+
+    candidate = (_TEMPLATES_DIR / "community" / file_name).with_suffix(BUNDLE_SUFFIX)
+    return candidate if candidate.is_file() else None
+
+
+def bundle_status(path: str | Path) -> dict[str, Any]:
+    """Manifest info plus checksum validity for a bundle, without replaying.
+
+    Recomputes the SHA-256 of every payload member and compares it against the
+    manifest. This is the cheap half of verification - the replay proof itself
+    lives in :func:`verify_bundle`.
+
+    Raises:
+        BundleError: When the bundle is malformed or unsafe.
+    """
+    manifest, workflow_yaml, cassettes = read_bundle(path)
+
+    workflow_entry = {
+        "file": manifest["workflow"]["file"],
+        "sha256": manifest["workflow"]["sha256"],
+        "valid": _sha256_bytes(workflow_yaml.encode()) == manifest["workflow"]["sha256"],
+    }
+    cassette_entries = [
+        {
+            "file": entry["file"],
+            "sha256": entry["sha256"],
+            "valid": _sha256_bytes(cassettes[entry["file"]]) == entry["sha256"],
+            "step_count": entry.get("step_count"),
+            "recorded_cost_usd": entry.get("recorded_cost_usd"),
+        }
+        for entry in manifest["cassettes"]
+    ]
+
+    return {
+        "manifest": {
+            key: manifest.get(key)
+            for key in (
+                "name",
+                "version",
+                "description",
+                "author",
+                "license",
+                "sandcastle_version",
+                "created_at",
+            )
+        },
+        "workflow": workflow_entry,
+        "cassettes": cassette_entries,
+        "checksums_valid": workflow_entry["valid"]
+        and all(c["valid"] for c in cassette_entries),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Verify
 # ---------------------------------------------------------------------------
 

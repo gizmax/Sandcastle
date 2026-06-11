@@ -1506,6 +1506,28 @@ def _score_template_relevance(
     return overlap / len(query_words)
 
 
+def _template_to_dict(t: Any, relevance_score: float | None) -> dict[str, Any]:
+    """Serialize a TemplateInfo for the templates list endpoints.
+
+    ``proven`` is True when the template was installed from a verified .sctpl
+    bundle - the bundle archive sits next to the workflow YAML and carries the
+    replayable proof-of-execution.
+    """
+    from sandcastle.engine.bundle import bundle_for_template
+
+    return {
+        "name": t.name,
+        "description": t.description,
+        "tags": t.tags,
+        "step_count": t.step_count,
+        "input_schema": t.input_schema,
+        "category": t.category,
+        "source": t.source,
+        "relevance_score": relevance_score,
+        "proven": t.source == "community" and bundle_for_template(t.file_name) is not None,
+    }
+
+
 @router.get("/templates")
 async def list_templates(
     q: str | None = Query(None, description="Search query for templates"),
@@ -1524,21 +1546,7 @@ async def list_templates(
     templates = _list_templates()
 
     if not q or not q.strip():
-        return ApiResponse(
-            data=[
-                {
-                    "name": t.name,
-                    "description": t.description,
-                    "tags": t.tags,
-                    "step_count": t.step_count,
-                    "input_schema": t.input_schema,
-                    "category": t.category,
-                    "source": t.source,
-                    "relevance_score": None,
-                }
-                for t in templates
-            ]
-        )
+        return ApiResponse(data=[_template_to_dict(t, None) for t in templates])
 
     query = q.strip().lower()
 
@@ -1554,19 +1562,7 @@ async def list_templates(
 
     if exact_matches:
         return ApiResponse(
-            data=[
-                {
-                    "name": t.name,
-                    "description": t.description,
-                    "tags": t.tags,
-                    "step_count": t.step_count,
-                    "input_schema": t.input_schema,
-                    "category": t.category,
-                    "source": t.source,
-                    "relevance_score": score,
-                }
-                for t, score in exact_matches
-            ]
+            data=[_template_to_dict(t, score) for t, score in exact_matches]
         )
 
     # Phase 2: fuzzy word overlap matching
@@ -1587,21 +1583,7 @@ async def list_templates(
     # Sort by score descending
     scored.sort(key=lambda x: x[1], reverse=True)
 
-    return ApiResponse(
-        data=[
-            {
-                "name": t.name,
-                "description": t.description,
-                "tags": t.tags,
-                "step_count": t.step_count,
-                "input_schema": t.input_schema,
-                "category": t.category,
-                "source": t.source,
-                "relevance_score": score,
-            }
-            for t, score in scored
-        ]
-    )
+    return ApiResponse(data=[_template_to_dict(t, score) for t, score in scored])
 
 
 @router.get("/templates/{template_name}")
@@ -1622,6 +1604,8 @@ async def get_template(template_name: str) -> ApiResponse:
             ).model_dump(),
         ) from exc
 
+    from sandcastle.engine.bundle import bundle_for_template
+
     return ApiResponse(
         data={
             "name": info.name,
@@ -1633,6 +1617,113 @@ async def get_template(template_name: str) -> ApiResponse:
             "input_schema": info.input_schema,
             "category": info.category,
             "source": info.source,
+            "proven": info.source == "community"
+            and bundle_for_template(info.file_name) is not None,
+        }
+    )
+
+
+def _resolve_template_bundle(template_name: str) -> tuple[str, Any, Path]:
+    """Resolve a template and its installed .sctpl bundle, or raise 404."""
+    from sandcastle.engine.bundle import bundle_for_template
+    from sandcastle.templates import get_template as _get_template
+
+    try:
+        content, info = _get_template(template_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message=str(exc))
+            ).model_dump(),
+        ) from exc
+
+    bundle_path = (
+        bundle_for_template(info.file_name) if info.source == "community" else None
+    )
+    if bundle_path is None:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="NOT_FOUND",
+                    message=f"Template '{template_name}' was not installed from a "
+                    "verified .sctpl bundle",
+                )
+            ).model_dump(),
+        )
+    return content, info, bundle_path
+
+
+@router.get("/templates/{template_name}/verification")
+async def get_template_verification(template_name: str) -> ApiResponse:
+    """Verification status for a bundle-installed template.
+
+    Returns the bundle manifest (author, version, checksums) plus checksum
+    validity for every payload file, and whether the installed workflow YAML
+    still byte-matches the bundled one. Templates not installed from a .sctpl
+    bundle return ``{"proven": false}``.
+
+    Public endpoint - no authentication required.
+    """
+    from sandcastle.engine.bundle import BundleError, bundle_for_template, bundle_status
+    from sandcastle.templates import get_template as _get_template
+
+    try:
+        content, info = _get_template(template_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message=str(exc))
+            ).model_dump(),
+        ) from exc
+
+    bundle_path = (
+        bundle_for_template(info.file_name) if info.source == "community" else None
+    )
+    if bundle_path is None:
+        return ApiResponse(data={"proven": False})
+
+    try:
+        status = await asyncio.to_thread(bundle_status, bundle_path)
+    except BundleError as exc:
+        return ApiResponse(data={"proven": False, "error": str(exc)})
+
+    installed_sha = hashlib.sha256(content.encode()).hexdigest()
+    status["installed_workflow_matches"] = installed_sha == status["workflow"]["sha256"]
+    return ApiResponse(data={"proven": True, **status})
+
+
+@router.post("/templates/{template_name}/verify")
+async def verify_template_bundle(template_name: str) -> ApiResponse:
+    """Replay a bundle-installed template's proof-of-execution cassettes.
+
+    Runs the same strict replay as ``sandcastle template verify`` - checksums,
+    security scan, then every cassette replayed offline at $0 - and reports
+    PASS/FAIL per cassette. 404 when the template has no installed bundle.
+
+    Public endpoint - no authentication required.
+    """
+    from sandcastle.engine.bundle import verify_bundle
+
+    _content, _info, bundle_path = _resolve_template_bundle(template_name)
+
+    result = await asyncio.to_thread(verify_bundle, bundle_path)
+    return ApiResponse(
+        data={
+            "ok": result.ok,
+            "errors": result.errors,
+            "cassettes": [
+                {
+                    "file": c.file,
+                    "passed": c.passed,
+                    "detail": c.detail,
+                    "replay_hits": c.replay_hits,
+                    "replay_misses": c.replay_misses,
+                }
+                for c in result.cassette_results
+            ],
         }
     )
 

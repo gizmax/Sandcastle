@@ -1,11 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
+  Brain,
+  Dna,
+  FlaskConical,
+  Gauge,
   GitBranch,
+  Hammer,
   Key,
+  Layers,
   LayoutDashboard,
+  Moon,
+  Play,
   PlayCircle,
   Plug,
+  Rocket,
+  Scale,
   Search,
   Settings,
   ShieldCheck,
@@ -16,7 +26,9 @@ import {
   Clock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { fuzzyScore } from "@/lib/fuzzy";
 import { api } from "@/api/client";
+import { THEME_TOGGLE_EVENT } from "@/hooks/useTheme";
 import type { RecentItem } from "@/hooks/useRecentItems";
 
 /* ------------------------------------------------------------------ */
@@ -24,7 +36,7 @@ import type { RecentItem } from "@/hooks/useRecentItems";
 /* ------------------------------------------------------------------ */
 
 interface SearchResult {
-  type: "run" | "workflow" | "tool";
+  type: "run" | "workflow" | "run-workflow" | "tool";
   label: string;
   sub: string;
   link: string;
@@ -39,7 +51,10 @@ interface CommandItem {
   /** Extra query params to append */
   search?: string;
   icon: React.ElementType;
+  /** Side-effect command (e.g. theme toggle) - runs instead of navigation */
+  perform?: () => void;
 }
+
 
 interface CommandPaletteProps {
   open: boolean;
@@ -60,19 +75,38 @@ const ACTION_COMMANDS: CommandItem[] = [
   { category: "action", label: "/health", description: "Go to system health", link: "/system-health", icon: HeartPulse },
   { category: "action", label: "/dlq", description: "Go to dead letter queue", link: "/dead-letter", icon: Inbox },
   { category: "action", label: "/schedules", description: "Go to schedules", link: "/schedules", icon: Calendar },
+  { category: "action", label: "/templates", description: "Go to Template Hub", link: "/templates", icon: Layers },
+  {
+    category: "action",
+    label: "/theme",
+    description: "Toggle light/dark theme",
+    link: "",
+    icon: Moon,
+    perform: () => window.dispatchEvent(new Event(THEME_TOGGLE_EVENT)),
+  },
 ];
 
 const PAGE_ITEMS: CommandItem[] = [
   { category: "page", label: "Overview", description: "Dashboard overview", link: "/", icon: LayoutDashboard },
   { category: "page", label: "Runs", description: "All workflow runs", link: "/runs", icon: PlayCircle },
   { category: "page", label: "Workflows", description: "Manage workflows", link: "/workflows", icon: GitBranch },
+  { category: "page", label: "Workflow Builder", description: "Visual workflow builder", link: "/workflows/builder", icon: Hammer },
+  { category: "page", label: "Templates", description: "Template Hub", link: "/templates", icon: Layers },
   { category: "page", label: "Approvals", description: "Pending approvals", link: "/approvals", icon: ShieldCheck },
   { category: "page", label: "Integrations", description: "Connected tools", link: "/integrations", icon: Plug },
+  { category: "page", label: "Evaluations", description: "Eval suites and results", link: "/evaluations", icon: FlaskConical },
+  { category: "page", label: "AutoPilot", description: "Autonomous optimization", link: "/autopilot", icon: Rocket },
+  { category: "page", label: "Evolution", description: "Workflow evolution", link: "/evolution", icon: Dna },
+  { category: "page", label: "Violations", description: "Policy violations", link: "/violations", icon: AlertTriangle },
+  { category: "page", label: "Optimizer", description: "Cost optimizer", link: "/optimizer", icon: Gauge },
   { category: "page", label: "API Keys", description: "Manage API keys", link: "/api-keys", icon: Key },
   { category: "page", label: "Settings", description: "Application settings", link: "/settings", icon: Settings },
   { category: "page", label: "System Health", description: "Health overview", link: "/system-health", icon: HeartPulse },
   { category: "page", label: "Dead Letter", description: "Dead letter queue", link: "/dead-letter", icon: Inbox },
   { category: "page", label: "Schedules", description: "Scheduled workflows", link: "/schedules", icon: Calendar },
+  { category: "page", label: "Schedule Monitor", description: "Schedule health", link: "/schedule-monitor", icon: Clock },
+  { category: "page", label: "Compliance", description: "EU AI Act compliance", link: "/compliance", icon: Scale },
+  { category: "page", label: "Memory", description: "Agent memory", link: "/memory", icon: Brain },
 ];
 
 const CATEGORY_ORDER = ["action", "recent", "run", "workflow", "page"] as const;
@@ -102,6 +136,7 @@ function iconForRecent(item: RecentItem): React.ElementType {
 export function CommandPalette({ open, onClose, recentItems }: CommandPaletteProps) {
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
@@ -176,13 +211,21 @@ export function CommandPalette({ open, onClose, recentItems }: CommandPalettePro
             type: "workflow",
             label: w.name,
             sub: `${w.steps_count} steps - ${w.file_name}`,
-            link: "/workflows",
+            link: `/workflows/${encodeURIComponent(w.name)}`,
+          });
+          // Companion entry that opens the run form straight away
+          const stem = w.file_name.replace(/\.ya?ml$/, "");
+          items.push({
+            type: "run-workflow",
+            label: `Run ${w.name}`,
+            sub: "Open the run form",
+            link: `/workflows?run=${encodeURIComponent(stem)}`,
           });
         }
       }
     }
 
-    setApiResults(items.slice(0, 10));
+    setApiResults(items.slice(0, 12));
   }, []);
 
   // Build the flat item list based on query
@@ -212,11 +255,23 @@ export function CommandPalette({ open, onClose, recentItems }: CommandPalettePro
       return [...recent, ...PAGE_ITEMS];
     }
 
-    // Search mode: combine API results + page matches
-    const matchedPages = PAGE_ITEMS.filter(
-      (p) =>
-        p.label.toLowerCase().includes(lower) ||
-        p.description.toLowerCase().includes(lower)
+    // Search mode: combine API results + fuzzy page/action matches
+    const matchedPages = PAGE_ITEMS
+      .map((p) => ({
+        item: p,
+        score: Math.max(
+          fuzzyScore(lower, p.label),
+          p.description.toLowerCase().includes(lower) ? 1.5 : 0
+        ),
+      }))
+      .filter(({ score }) => score > 0)
+      .sort((a, b) => b.score - a.score)
+      .map(({ item }) => item);
+
+    const matchedActions = ACTION_COMMANDS.filter(
+      (a) =>
+        fuzzyScore(lower, a.label.slice(1)) > 0 ||
+        a.description.toLowerCase().includes(lower)
     );
 
     const runItems: CommandItem[] = apiResults
@@ -230,16 +285,16 @@ export function CommandPalette({ open, onClose, recentItems }: CommandPalettePro
       }));
 
     const workflowItems: CommandItem[] = apiResults
-      .filter((r) => r.type === "workflow")
+      .filter((r) => r.type === "workflow" || r.type === "run-workflow")
       .map((r) => ({
         category: "workflow" as const,
         label: r.label,
         description: r.sub,
         link: r.link,
-        icon: GitBranch,
+        icon: r.type === "run-workflow" ? Play : GitBranch,
       }));
 
-    return [...runItems, ...workflowItems, ...matchedPages];
+    return [...matchedActions, ...runItems, ...workflowItems, ...matchedPages];
   }, [query, recentItems, apiResults]);
 
   // Group items by category, preserving order
@@ -275,6 +330,11 @@ export function CommandPalette({ open, onClose, recentItems }: CommandPalettePro
   }, [activeIndex]);
 
   function handleSelect(item: CommandItem) {
+    if (item.perform) {
+      item.perform();
+      onClose();
+      return;
+    }
     const url = item.link + (item.search ?? "");
     navigate(url);
     onClose();
@@ -284,6 +344,25 @@ export function CommandPalette({ open, onClose, recentItems }: CommandPalettePro
     if (e.key === "Escape") {
       e.preventDefault();
       onClose();
+      return;
+    }
+    if (e.key === "Tab") {
+      // Focus trap: Tab cycles inside the palette instead of escaping it
+      const root = dialogRef.current;
+      if (!root) return;
+      const focusables = root.querySelectorAll<HTMLElement>(
+        'input, button, [tabindex]:not([tabindex="-1"])'
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
       return;
     }
     if (e.key === "ArrowDown") {
@@ -321,8 +400,11 @@ export function CommandPalette({ open, onClose, recentItems }: CommandPalettePro
       {/* Palette */}
       <div className="fixed inset-0 z-[61] flex items-start justify-center pt-[15vh] px-4">
         <div
+          ref={dialogRef}
           role="dialog"
+          aria-modal="true"
           aria-label="Command palette"
+          onKeyDown={handleKeyDown}
           className={cn(
             "w-full max-w-lg overflow-hidden rounded-xl border border-border bg-surface shadow-2xl",
             "animate-in fade-in slide-in-from-top-2 duration-150"
@@ -336,7 +418,6 @@ export function CommandPalette({ open, onClose, recentItems }: CommandPalettePro
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={handleKeyDown}
               placeholder='Search or type "/" for commands...'
               className={cn(
                 "h-12 flex-1 bg-transparent text-sm text-foreground outline-none",
