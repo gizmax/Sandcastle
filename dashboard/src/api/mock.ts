@@ -742,6 +742,93 @@ const MOCK_EVOLUTION_STATS = {
   total_iterations_run: 28,
 };
 
+// Night Shift (Overnight Self-Tune) mock data
+// nightSec(n) = unix seconds, n nights ago; nightDate(n) = matching ISO date
+const nightSec = (nightsAgo: number) => Math.floor(now.getTime() / 1000) - nightsAgo * 86400;
+const nightDate = (nightsAgo: number) =>
+  new Date(nightSec(nightsAgo) * 1000).toISOString().slice(0, 10);
+
+const MOCK_ADAPTERS = [
+  {
+    adapter_id: "mock-sonnet-3f2a91c4",
+    base_model: "sonnet",
+    metrics: { loss: 0.31, eval_score: 0.71 },
+    samples: 18,
+    lora_config: { r: 8, alpha: 16, lr: 0.0001, epochs: 3 },
+    dataset_hash: "9c4f1d2e7ab8350a6c1e9f2b4d8a7c3e5f0b1a2d4c6e8f0a1b3c5d7e9f1a3b5c",
+    parent_adapter_id: null,
+    created_at: nightSec(3),
+    served: false,
+  },
+  {
+    adapter_id: "mock-sonnet-8b1d22ef",
+    base_model: "sonnet",
+    metrics: { loss: 0.38, eval_score: 0.68 },
+    samples: 14,
+    lora_config: { r: 8, alpha: 16, lr: 0.0001, epochs: 3 },
+    dataset_hash: "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b",
+    parent_adapter_id: null,
+    created_at: nightSec(3) + 1800,
+    served: false,
+  },
+  {
+    adapter_id: "mock-sonnet-a77c01d2",
+    base_model: "sonnet",
+    metrics: { loss: 0.24, eval_score: 0.78 },
+    samples: 26,
+    lora_config: { r: 8, alpha: 16, lr: 0.0001, epochs: 3 },
+    dataset_hash: "7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f",
+    parent_adapter_id: "mock-sonnet-3f2a91c4",
+    created_at: nightSec(2),
+    served: false,
+  },
+  {
+    adapter_id: "mock-sonnet-c91e44ba",
+    base_model: "sonnet",
+    metrics: { loss: 0.19, eval_score: 0.84 },
+    samples: 34,
+    lora_config: { r: 8, alpha: 16, lr: 0.0001, epochs: 3 },
+    dataset_hash: "3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d",
+    parent_adapter_id: "mock-sonnet-a77c01d2",
+    created_at: nightSec(1),
+    served: true,
+  },
+];
+
+const MOCK_SELF_TUNE_NIGHTS = {
+  nights: [
+    {
+      night: nightDate(3),
+      mutations_tried: 3,
+      mutations_kept: 1,
+      adapters_produced: 2,
+      best_eval_score: 0.71,
+      best_delta: null,
+      adapter_ids: ["mock-sonnet-3f2a91c4", "mock-sonnet-8b1d22ef"],
+    },
+    {
+      night: nightDate(2),
+      mutations_tried: 2,
+      mutations_kept: 1,
+      adapters_produced: 1,
+      best_eval_score: 0.78,
+      best_delta: 0.07,
+      adapter_ids: ["mock-sonnet-a77c01d2"],
+    },
+    {
+      night: nightDate(1),
+      mutations_tried: 2,
+      mutations_kept: 1,
+      adapters_produced: 1,
+      best_eval_score: 0.84,
+      best_delta: 0.06,
+      adapter_ids: ["mock-sonnet-c91e44ba"],
+    },
+  ],
+  enabled: true,
+  total_adapters: 4,
+};
+
 const MOCK_VIOLATIONS = [
   {
     id: "vio-001",
@@ -7086,6 +7173,18 @@ const routes: MockRoute[] = [
       if (!evo) return null;
       return { ...evo, status: "cancelled" };
     },
+  },
+  // GET /adapters (Night Shift - trained LoRA adapters with lineage)
+  {
+    match: /^\/adapters$/,
+    method: "GET",
+    handler: () => MOCK_ADAPTERS,
+  },
+  // GET /self-tune/nights (Night Shift - nightly self-tune history)
+  {
+    match: /^\/self-tune\/nights$/,
+    method: "GET",
+    handler: () => MOCK_SELF_TUNE_NIGHTS,
   },
   {
     match: /^\/violations$/,

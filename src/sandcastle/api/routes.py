@@ -23,6 +23,7 @@ from sqlalchemy.orm import selectinload
 from sandcastle.api.auth import generate_api_key, get_tenant_id, hash_key, is_admin
 from sandcastle.api.rate_limit import execution_limiter
 from sandcastle.api.schemas import (
+    AdapterInfoResponse,
     AdvisorConfigureRequest,
     AdvisorConfigureResponse,
     AdvisorCostEstimateResponse,
@@ -97,6 +98,8 @@ from sandcastle.api.schemas import (
     ScheduleCreateRequest,
     ScheduleResponse,
     ScheduleUpdateRequest,
+    SelfTuneNightResponse,
+    SelfTuneNightsResponse,
     SettingsResponse,
     SettingsUpdateRequest,
     StatsResponse,
@@ -12988,5 +12991,123 @@ async def get_timemachine_job(job_id: str, req: Request) -> ApiResponse:
             completed_at=job.get("completed_at"),
             report=job.get("report"),
             error=job.get("error"),
+        )
+    )
+
+
+# ---------------------------------------------------------------------------
+# Night Shift (Overnight Self-Tune) endpoints
+# ---------------------------------------------------------------------------
+
+
+def _served_adapter_ids() -> set[str]:
+    """Adapter ids currently referenced by any saved workflow (``adapter/<id>``)."""
+    ids: set[str] = set()
+    workflows_dir = Path(settings.workflows_dir).resolve()
+    if not workflows_dir.exists():
+        return ids
+    for pattern in ("*.yaml", "*.yml"):
+        for path in workflows_dir.glob(pattern):
+            try:
+                text = path.read_text()
+            except OSError:
+                continue
+            ids.update(re.findall(r"adapter/([A-Za-z0-9._-]+)", text))
+    return ids
+
+
+@router.get("/adapters")
+async def list_adapters(req: Request) -> ApiResponse:
+    """List trained LoRA adapters with metadata + lineage, oldest first.
+
+    ``served`` marks adapters a saved workflow currently routes to.
+    Admin-only when auth is enabled.
+    """
+    _require_admin(req)
+    from sandcastle.engine.adapter_registry import AdapterRegistry
+
+    served = _served_adapter_ids()
+    adapters = [
+        AdapterInfoResponse(
+            adapter_id=meta["adapter_id"],
+            base_model=meta.get("base_model") or "",
+            metrics=meta.get("metrics") or {},
+            samples=int(meta.get("samples") or 0),
+            lora_config=meta.get("lora_config") or {},
+            dataset_hash=meta.get("dataset_hash"),
+            parent_adapter_id=meta.get("parent_adapter_id"),
+            created_at=float(meta.get("created_at") or 0.0),
+            served=meta["adapter_id"] in served,
+        )
+        for meta in AdapterRegistry().list()
+    ]
+    return ApiResponse(data=adapters)
+
+
+@router.get("/self-tune/nights")
+async def get_self_tune_nights(req: Request) -> ApiResponse:
+    """Overnight Self-Tune history aggregated by night (UTC date), oldest first.
+
+    Per night: finetune mutations tried/kept (from evolution iterations), adapters
+    produced (from the registry), best eval score, and the delta vs the previous
+    night's best. Admin-only when auth is enabled.
+    """
+    _require_admin(req)
+    from sandcastle.engine.adapter_registry import AdapterRegistry
+
+    # Finetune mutation attempts, grouped by the iteration's UTC date.
+    async with async_session() as session:
+        iter_stmt = select(EvolutionIteration.created_at, EvolutionIteration.status).where(
+            EvolutionIteration.mutation_type == "finetune"
+        )
+        rows = (await session.execute(iter_stmt)).all()
+    tried: dict[str, int] = {}
+    kept: dict[str, int] = {}
+    for created_at, status in rows:
+        if created_at is None:
+            continue
+        day = created_at.date().isoformat()
+        tried[day] = tried.get(day, 0) + 1
+        if status == "keep":
+            kept[day] = kept.get(day, 0) + 1
+
+    # Adapters produced per night, from the filesystem registry.
+    by_night: dict[str, list[dict]] = {}
+    all_adapters = AdapterRegistry().list()
+    for meta in all_adapters:
+        ts = float(meta.get("created_at") or 0.0)
+        day = datetime.fromtimestamp(ts, tz=timezone.utc).date().isoformat()
+        by_night.setdefault(day, []).append(meta)
+
+    nights: list[SelfTuneNightResponse] = []
+    prev_best: float | None = None
+    for day in sorted(set(by_night) | set(tried)):
+        produced = by_night.get(day, [])
+        scores = [
+            float(score)
+            for meta in produced
+            if (score := (meta.get("metrics") or {}).get("eval_score")) is not None
+        ]
+        best = max(scores) if scores else None
+        delta = best - prev_best if best is not None and prev_best is not None else None
+        nights.append(
+            SelfTuneNightResponse(
+                night=day,
+                mutations_tried=tried.get(day, 0),
+                mutations_kept=kept.get(day, 0),
+                adapters_produced=len(produced),
+                best_eval_score=best,
+                best_delta=delta,
+                adapter_ids=[meta["adapter_id"] for meta in produced],
+            )
+        )
+        if best is not None:
+            prev_best = best
+
+    return ApiResponse(
+        data=SelfTuneNightsResponse(
+            nights=nights,
+            enabled=settings.evolution_auto_finetune,
+            total_adapters=len(all_adapters),
         )
     )

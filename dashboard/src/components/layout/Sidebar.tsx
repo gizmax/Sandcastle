@@ -11,12 +11,11 @@ import {
   Gauge,
   GitBranch,
   HeartPulse,
-  History,
   Inbox,
   Key,
   Layers,
   LayoutDashboard,
-  Network,
+  MoonStar,
   Plug,
   PlayCircle,
   Settings,
@@ -81,10 +80,10 @@ const navSections: NavSection[] = [
       { to: "/evaluations", icon: ClipboardCheck, label: "Evaluations" },
       { to: "/autopilot", icon: FlaskConical, label: "AutoPilot" },
       { to: "/evolution", icon: Sparkles, label: "Evolution" },
+      { to: "/night-shift", icon: MoonStar, label: "Night Shift" },
       { to: "/violations", icon: ShieldAlert, label: "Violations" },
       { to: "/compliance", icon: Shield, label: "Compliance" },
       { to: "/optimizer", icon: Gauge, label: "Optimizer" },
-      { to: "/time-machine", icon: History, label: "Time Machine" },
       { to: "/schedules", icon: Calendar, label: "Schedules" },
       { to: "/schedule-monitor", icon: CalendarClock, label: "Schedule Monitor" },
       { to: "/dead-letter", icon: Inbox, label: "Dead Letter", badge: "dlq" },
@@ -95,7 +94,6 @@ const navSections: NavSection[] = [
     label: "SYSTEM",
     items: [
       { to: "/system-health", icon: HeartPulse, label: "System Health" },
-      { to: "/fleet", icon: Network, label: "Fleet" },
       { to: "/api-keys", icon: Key, label: "API Keys" },
       { to: "/settings", icon: Settings, label: "Settings" },
     ],
@@ -213,7 +211,7 @@ export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: Sid
                     className={({ isActive }) =>
                       cn(
                         "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium",
-                        "transition-settle",
+                        "transition-all duration-200",
                         isActive
                           ? "bg-accent/10 text-accent"
                           : "text-muted hover:bg-border/40 hover:text-foreground"
@@ -307,7 +305,7 @@ export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: Sid
                           className={({ isActive }) =>
                             cn(
                               "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium",
-                              "transition-settle",
+                              "transition-all duration-200",
                               isActive
                                 ? "bg-accent/10 text-accent"
                                 : "text-muted hover:bg-border/40 hover:text-foreground"

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import hashlib
+import json
 import logging
 import threading
 import time
@@ -525,6 +527,28 @@ def _workflow_to_yaml(workflow: Any, original_yaml: str) -> str:
         return original_yaml
 
 
+def _current_adapter_id(workflow_yaml: str) -> str | None:
+    """Adapter id the workflow is currently routed to, if any (lineage parent).
+
+    Looks at ``default_model`` and step models for an ``adapter/<id>`` reference.
+    Returns None when the workflow still runs on a base model.
+    """
+    try:
+        data = yaml.safe_load(workflow_yaml) or {}
+    except Exception:  # noqa: BLE001 - unparseable yaml -> no lineage
+        return None
+    if not isinstance(data, dict):
+        return None
+    candidates = [data.get("default_model")]
+    steps = data.get("steps")
+    if isinstance(steps, list):
+        candidates += [st.get("model") for st in steps if isinstance(st, dict)]
+    for model in candidates:
+        if isinstance(model, str) and model.startswith("adapter/"):
+            return model.removeprefix("adapter/")
+    return None
+
+
 async def mutate_finetune(
     workflow_yaml: str,
     eval_results: list[dict],
@@ -562,6 +586,12 @@ async def mutate_finetune(
     except Exception as exc:  # noqa: BLE001 - any trainer failure -> graceful discard
         return workflow_yaml, f"finetune training failed: {exc}"
 
+    # Lineage: if the workflow is already routed to an adapter, that adapter is the
+    # parent of the one we just trained (parent -> child chain across nights).
+    dataset_hash = hashlib.sha256(
+        json.dumps(pairs, sort_keys=True, default=str).encode()
+    ).hexdigest()
+
     AdapterRegistry().register(
         adapter_id=result.adapter_id,
         base_model=result.base_model,
@@ -569,6 +599,8 @@ async def mutate_finetune(
         samples=result.samples,
         lora_config=result.lora_config,
         created_at=time.time(),
+        dataset_hash=dataset_hash,
+        parent_adapter_id=_current_adapter_id(workflow_yaml),
     )
 
     adapter_model = f"adapter/{result.adapter_id}"
