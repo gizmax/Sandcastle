@@ -452,6 +452,10 @@ class RunStatusResponse(BaseModel):
     sub_runs: list[dict[str, Any]] | None = None
     risk_level: str = "minimal"
     token_report: dict[str, Any] | None = None
+    # Black box compliance mode: True when the run's cassette carries a keyed
+    # chain signature that verifies; audit_chain_head is the hash-chain head.
+    signed: bool = False
+    audit_chain_head: str | None = None
 
 
 class StepStatusResponse(BaseModel):

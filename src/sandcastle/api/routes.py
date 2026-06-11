@@ -5416,6 +5416,19 @@ async def get_run(run_id: str, req: Request) -> ApiResponse:
         # Return outputs without the internal metadata key
         outputs = {k: v for k, v in outputs.items() if k != "_token_report"}
 
+    # Black box compliance mode: attest the run's signed cassette (if present)
+    signed = False
+    audit_chain_head: str | None = None
+    try:
+        from sandcastle.engine.cassette import default_cassette_path, read_attestation
+
+        attestation = read_attestation(default_cassette_path(str(run.id)))
+        if attestation is not None:
+            signed = attestation["signed"]
+            audit_chain_head = attestation["chain_head"]
+    except Exception:  # pragma: no cover - attestation must never break get_run
+        logger.warning("Failed to read cassette attestation for run %s", run.id, exc_info=True)
+
     return ApiResponse(
         data=RunStatusResponse(
             run_id=str(run.id),
@@ -5447,6 +5460,8 @@ async def get_run(run_id: str, req: Request) -> ApiResponse:
             else None,
             risk_level=run.risk_level or "minimal",
             token_report=token_report,
+            signed=signed,
+            audit_chain_head=audit_chain_head,
         )
     )
 
@@ -12305,7 +12320,7 @@ async def get_annex_iv(name: str, req: Request) -> ApiResponse:
 async def get_compliance_status() -> ApiResponse:
     """Return the current compliance mode status and active features."""
     mode = settings.compliance_mode or ""
-    active = mode == "eu_ai_act"
+    active = mode in ("eu_ai_act", "black_box")
 
     features = {
         "audit_trail": True,  # Always enabled - tamper-evident hash chain
@@ -12313,6 +12328,8 @@ async def get_compliance_status() -> ApiResponse:
         "privacy_router": settings.privacy_enabled,
         "emergency_stop": True,  # Always available
         "input_prompt_logging": True,  # Always captured in RunStep.input_prompt
+        # Black box mode: every run recorded to a signed cassette
+        "signed_cassettes": mode == "black_box" and bool(settings.audit_key),
     }
 
     return ApiResponse(

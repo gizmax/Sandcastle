@@ -62,6 +62,7 @@
 - [Cost Estimation API](#cost-estimation-api)
 - [EU AI Act Compliance](#eu-ai-act-compliance)
 - [Tamper-Evident Audit Trail](#tamper-evident-audit-trail)
+- [Black Box Flight Recorder](#black-box-flight-recorder)
 - [OpenTelemetry](#opentelemetry)
 - [Agent Memory](#agent-memory)
 - [Evaluations](#evaluations)
@@ -1303,6 +1304,56 @@ Every significant event in Sandcastle is appended to a tamper-evident audit log.
 curl http://localhost:8080/api/audit/verify/run_abc123
 # Returns: { "valid": true, "chain_length": 12, "broken_at": null }
 ```
+
+---
+
+## Black Box Flight Recorder
+
+A flight recorder for AI agents: every run becomes a signed, tamper-evident, replayable audit
+artifact. Built for teams that need to show exactly what their AI did, with cryptographic proof
+that the record has not been altered since the run - the kind of traceable, replayable record
+the EU AI Act expects from production AI systems.
+
+Each recorded step is appended to a hash chain (`record_hash` = SHA-256 over the canonical
+record + `prev_hash`), and the chain head is signed with your audit key (HMAC-SHA256). Editing,
+removing, or reordering a single record breaks every hash after it - and verification points to
+the exact record that changed. The same file is a deterministic cassette, so any audited run
+can be replayed offline, byte-for-byte, at zero cost.
+
+```bash
+# .env
+COMPLIANCE_MODE=black_box        # enable the flight recorder
+DATA_RESIDENCY=local             # required: the audit trail never leaves your infra
+SANDCASTLE_AUDIT_KEY=<secret>    # signs every chain head
+```
+
+With `COMPLIANCE_MODE=black_box`, Sandcastle enforces at runtime:
+
+- **Every run is recorded** - a signed cassette is written for each run, automatically
+- **Every chain head is signed** - runs refuse to start without an audit key
+- **Local data residency** - runs refuse to start unless `DATA_RESIDENCY=local`
+- **Attested run API** - `GET /api/runs/{id}` returns `signed: true` plus the chain head hash
+
+Verify any run or cassette file offline:
+
+```bash
+sandcastle audit verify <run-id>            # resolves the run's cassette under the data dir
+sandcastle audit verify run.cassette.json   # or verify a file directly
+# PASS - hash chain intact, every record verifies
+# FAIL - first broken record: chain index 2 (record was modified)
+```
+
+Or from Python:
+
+```python
+from sandcastle.engine.cassette import verify_cassette
+
+result = verify_cassette("run.cassette.json")
+print(result.status, result.chain_head, result.first_broken_index)
+```
+
+Signatures embed their algorithm (`hmac-sha256` today), so asymmetric backends like Ed25519
+can be added without invalidating existing cassettes.
 
 ---
 

@@ -4,7 +4,7 @@ import logging
 import os
 from pathlib import Path
 
-from pydantic import computed_field, field_validator
+from pydantic import AliasChoices, Field, computed_field, field_validator
 from pydantic_settings import BaseSettings
 
 from sandcastle.engine.spark import get_spark_info
@@ -183,8 +183,21 @@ class Settings(BaseSettings):
     privacy_entities: str = "email,phone,ssn,credit_card"  # comma-separated entity types
     privacy_apply_to: str = "outputs,webhooks"  # comma-separated apply_to targets
 
-    # Compliance mode: "" = disabled, "eu_ai_act" = EU AI Act enforcement
+    # Compliance mode:
+    #   ""          - disabled
+    #   "eu_ai_act" - EU AI Act enforcement (high-risk approval gates, etc.)
+    #   "black_box" - flight-recorder mode: every run is recorded to a signed,
+    #                 tamper-evident cassette; requires data_residency=local and
+    #                 a configured audit_key, and run responses expose the
+    #                 signed chain head. Verify with `sandcastle audit verify`.
     compliance_mode: str = ""
+
+    # Secret key for signing audit chains (HMAC-SHA256). Set via the
+    # SANDCASTLE_AUDIT_KEY (or AUDIT_KEY) env var - never hardcode it.
+    audit_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("SANDCASTLE_AUDIT_KEY", "AUDIT_KEY", "audit_key"),
+    )
 
     # Data residency: "" = no restriction, "eu" = EU only, "local" = local/on-prem only
     data_residency: str = ""  # "", "eu", "local"
@@ -530,7 +543,7 @@ class Settings(BaseSettings):
     _SENSITIVE_FIELDS: frozenset[str] = frozenset({
         "anthropic_api_key", "e2b_api_key", "openai_api_key",
         "openrouter_api_key", "minimax_api_key", "mistral_api_key", "sentry_dsn",
-        "admin_api_key", "webhook_secret", "credential_encryption_key",
+        "admin_api_key", "webhook_secret", "credential_encryption_key", "audit_key",
         "aws_access_key_id", "aws_secret_access_key",
         "database_url", "redis_url", "license_key",
         "tool_slack_bot_token", "tool_jira_api_token",
