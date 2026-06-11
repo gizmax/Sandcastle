@@ -65,6 +65,8 @@ from sandcastle.api.schemas import (
     ForkRequest,
     GenerateChatRequest,
     GenerateWorkflowResponse,
+    HealAttemptResponse,
+    HealerRunSummaryResponse,
     HealthResponse,
     HubRateRequest,
     HubSubmissionResponse,
@@ -147,6 +149,7 @@ from sandcastle.models.db import (
     ExperimentStatus,
     GoldenCase,
     GoldenDataset,
+    HealAttempt,
     HubSubmission,
     PolicyViolation,
     RoutingDecision,
@@ -7453,6 +7456,75 @@ async def resolve_dead_letter(
             resolved_at=item.resolved_at,
             resolved_by=item.resolved_by,
         )
+    )
+
+
+# --- Self-Healing Workflows ---
+
+
+@router.post("/healer/run")
+async def trigger_healer_run(
+    request: Request,
+    lookback_hours: int | None = Query(
+        None, ge=1, le=8760, description="Override the configured lookback window"
+    ),
+) -> ApiResponse:
+    """Trigger a self-healing pass on demand. Admin-only when auth is enabled.
+
+    Works regardless of healer_enabled (which only gates the nightly pass) -
+    triggering manually is an explicit operator action.
+    """
+    _require_admin(request)
+    from sandcastle.engine.healer import run_healer_pass
+
+    summary = await run_healer_pass(lookback_hours=lookback_hours)
+    return ApiResponse(data=HealerRunSummaryResponse(**summary))
+
+
+@router.get("/healer/activity")
+async def list_healer_activity(
+    request: Request,
+    workflow_name: str | None = Query(None, description="Filter by workflow"),
+    status: str | None = Query(None, description="Filter by attempt status"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+) -> ApiResponse:
+    """List recent self-healing attempts (diagnosis, status, workflow, version)."""
+    _require_admin(request)
+    async with async_session() as session:
+        base = select(HealAttempt)
+        count_base = select(func.count(HealAttempt.id))
+        if workflow_name:
+            base = base.where(HealAttempt.workflow_name == workflow_name)
+            count_base = count_base.where(HealAttempt.workflow_name == workflow_name)
+        if status:
+            base = base.where(HealAttempt.status == status)
+            count_base = count_base.where(HealAttempt.status == status)
+        total = await session.scalar(count_base)
+        stmt = base.order_by(HealAttempt.created_at.desc()).offset(offset).limit(limit)
+        attempts = (await session.execute(stmt)).scalars().all()
+
+    data = [
+        HealAttemptResponse(
+            id=str(a.id),
+            dead_letter_id=str(a.dead_letter_id),
+            workflow_name=a.workflow_name,
+            step_id=a.step_id,
+            diagnosis=a.diagnosis,
+            confidence=a.confidence,
+            diff=a.diff,
+            from_version=a.from_version,
+            to_version=a.to_version,
+            status=a.status,
+            approval_id=str(a.approval_id) if a.approval_id else None,
+            applied_at=a.applied_at,
+            created_at=a.created_at,
+        )
+        for a in attempts
+    ]
+    return ApiResponse(
+        data=data,
+        meta=PaginationMeta(total=total or 0, limit=limit, offset=offset),
     )
 
 
