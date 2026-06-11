@@ -54,8 +54,9 @@ class Settings(BaseSettings):
 
     # Overnight Self-Tune: the evolution loop may add a LoRA fine-tune mutation that
     # trains a local adapter on a workflow's own eval data and A/B-promotes it. Off by
-    # default; the trainer is a deterministic mock unless trainer_backend="gpu" (which
-    # needs torch/peft + a GPU and is a stub today). See engine/training/.
+    # default; the trainer is a deterministic mock unless trainer_backend="gpu" (real
+    # SFT - needs the [training] extras + a CUDA GPU, e.g. a DGX Spark). See
+    # engine/training/ and docs/overnight-self-tune-spark.md.
     evolution_auto_finetune: bool = False
     evolution_finetune_min_samples: int = 10
     trainer_backend: str = "mock"  # "mock" | "gpu"
@@ -63,6 +64,19 @@ class Settings(BaseSettings):
     lora_alpha: int = 16
     lora_lr: float = 1e-4
     lora_epochs: int = 3
+    lora_dropout: float = 0.05
+    lora_max_steps: int = 0  # 0 = no step cap (epochs decide)
+    lora_seed: int = 42
+    lora_batch_size: int = 1
+    lora_grad_accum: int = 8
+    lora_max_seq_len: int = 2048
+    # HF model the GPU trainer actually fine-tunes (the adapter must be served over the
+    # same base by vLLM/NIM). Default is small enough for bf16 LoRA on a 128 GB Spark;
+    # for 70B-class bases set lora_quantize="4bit"/"8bit" (needs bitsandbytes with
+    # CUDA aarch64 wheels - not guaranteed on DGX OS, hence opt-in).
+    lora_base_model_id: str = "Qwen/Qwen2.5-7B-Instruct"
+    lora_quantize: str = "none"  # "none" | "8bit" | "4bit"
+    lora_output_dir: str = ""  # empty = the adapter registry dir (~/.sandcastle/adapters)
 
     # E2B custom template (pre-built sandbox with SDK installed)
     e2b_template: str = ""  # e.g. "sandcastle-runner"

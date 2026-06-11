@@ -28,7 +28,7 @@ class Trainer(Protocol):
 
 
 def get_trainer(backend: str | None = None) -> Trainer:
-    """Return the configured trainer: ``"mock"`` (default) or ``"gpu"`` (stub).
+    """Return the configured trainer: ``"mock"`` (default) or ``"gpu"`` (real LoRA SFT).
 
     The backend defaults to ``settings.trainer_backend`` so the whole Self-Tune
     loop runs deterministically (mock) unless a real GPU trainer is requested.
