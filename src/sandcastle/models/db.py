@@ -876,6 +876,7 @@ class HealAttempt(Base):
         Index("ix_heal_attempts_dead_letter_id", "dead_letter_id"),
         Index("ix_heal_attempts_workflow_name", "workflow_name"),
         Index("ix_heal_attempts_status", "status"),
+        Index("ix_heal_attempts_approval_id", "approval_id"),
         CheckConstraint(
             "confidence >= 0 AND confidence <= 1", name="ck_heal_attempts_confidence_range"
         ),
