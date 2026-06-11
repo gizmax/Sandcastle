@@ -7,11 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-06-11 - "Build Once, Run Anywhere"
+
+Describe what you want in plain English and Sandcastle builds the workflow. Run it on any model — Claude, GPT, Mistral, a local model on your own box — and move it between them with one line. Deploy it your way: cloud, your server, fully air-gapped, EU-only. And it gets better over time, on its own. Build any agent once; run it on any model, anywhere; watch it improve.
+
+This release rebuilds the experience around that loop and adds the machinery behind it.
+
 ### Added
-- **Verified template bundles (`.sctpl`)**: every shared template can now carry a replayable proof it works. `sandcastle pack` zips a workflow with its recorded cassettes and a SHA-256-checksummed manifest; `sandcastle template verify` replays the proof locally in strict mode - offline, $0, provider never called - and reports PASS/FAIL per cassette. A tampered cassette breaks the checksums; a tampered workflow breaks the replay.
-- **`sandcastle template install <bundle-or-url>`**: verifies first (a failing bundle does not install without `--force`), supports https sources with `--sha256` pinning, and lands templates where the Lite wizard and dashboard surface them.
-- **`sandcastle template search`**: queries a static verified-template index (`TEMPLATE_INDEX_URL`, spec + starter index in `hub/template-index.json`).
-- Example verified bundle at `examples/templates/text-summarizer-1.0.0.sctpl`, reproducibly built offline by `scripts/build_example_bundle.py`. Format documentation in `docs/verified-templates.md`.
+- **Omnibox** — "What should your agent do?" The Overview now leads with one input: describe a task in plain English, Sandcastle generates the workflow, you run it. Also reachable from ⌘K.
+- **3-verb navigation + density tiers** — the sidebar collapses to **Build / Run / Improve** (plus a quiet Operate) with a 3-tier density control (**Essentials / Standard / Everything**) replacing the old binary Lite/Full toggle. Essentials is the old Lite; legacy settings migrate automatically.
+- **Tabbed Settings hub** — keys, providers, integrations, and advanced config unified under `/settings` (old `/api-keys`, `/integrations`, `/providers` redirect in).
+- **Self-explanatory Workflow Builder** — every step type has a hover card (what it does, when to use it, an example, cost note), config fields have inline help, a plain-English summary of the step, and live validation on the canvas.
+- **Black Box** — a tamper-evident, signed hash-chain over every recorded run, plus a `black_box` compliance mode and `sandcastle audit verify`. A replayable, verifiable audit trail for the EU AI Act era.
+- **The Architect** — generate → run → judge → refine, until the workflow actually works, then ship it with a recorded cassette as a Proven template.
+- **Self-Healing Workflows** — dead-letter failures get an LLM diagnosis, a patched workflow version behind an approval gate, and regression tracking. Off by default.
+- **Model Time Machine** — replay your real recorded workload against a different model and get a quality / cost / latency delta. Dry-run pricing is free; live replay requires an explicit budget.
+- **Sandcastle Mesh** — register multiple machines and route steps by capability (`requires: [gpu, browser]`). A "Fleet" view shows node health. Off by default.
+- **Night Shift** dashboard — what your agent learned overnight: adapter lineage, nightly eval deltas, served-adapter view.
+- **Mission Control** — a full-screen live run theater at `/runs/:id/live`: the DAG lights up as it executes, with live cost and a thought stream.
+- **Real GPU LoRA trainer** for Overnight Self-Tune (`[training]` extra; GPU-gated, dormant without one).
+- **Verified template bundles (`.sctpl`)**: every shared template can carry a replayable proof it works. `sandcastle pack` zips a workflow with its recorded cassettes and a SHA-256-checksummed manifest; `sandcastle template verify` replays the proof locally in strict mode — offline, $0 — and reports PASS/FAIL per cassette. `sandcastle template install` verifies before installing (https sources support `--sha256` pinning); `sandcastle template search` queries a static index.
+- **`build` / `new` CLI aliases** for `generate`, with the description as a positional argument (`sandcastle build "summarize my tickets"`), mirroring the omnibox.
+- **`SECURITY.md`** with a coordinated-disclosure policy, an antivirus false-positive explanation, and download-verification steps; a signed-release workflow that publishes `SHA256SUMS.txt` + cosign keyless signatures, and `scripts/verify-release.sh`.
+
+### Changed
+- **New visual identity** — a warm "Sand & Ink" palette, instrument-panel layout with hairline rules, control-room status lights replacing pill badges, illustrated empty states, and a settle-based motion system.
+- **New marketing site** — an editorial "Manifesto" homepage and redesigned pricing, security, EU AI Act, Community Hub, and What's New pages.
+- README now leads with sovereignty and local-first positioning.
+- **LLM/standard steps pin a low sampling temperature** (`step_temperature`, default 0.2, per-step override). Some OpenAI-compatible endpoints default to 1.0 and produce garbled output; this makes step output deterministic across providers.
+
+### Fixed
+- `POST /generate` no longer hard-requires `ANTHROPIC_API_KEY` — it accepts any configured advisor provider (Mistral, OpenAI, Ollama, local…) and returns a clear `NO_PROVIDER` 400 only when none is usable. The omnibox proactively warns and disables generation when no provider is connected.
+- An empty model response is now a **failed** step with a clear message, instead of a silent "completed" run with no output.
+- Code steps that use blocked patterns get an actionable error explaining the sandbox's constraints, and the generator is told those constraints so it emits runnable code.
+
+### Security
+- Centralized the test suite's attack-string fixtures into a single runtime-assembled module, removing the exact literal signatures that triggered heuristic antivirus false positives — with zero loss of test coverage.
 
 ## [0.33.0] - 2026-06-04 - "Your Box, Your Brains"
 
