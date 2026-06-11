@@ -43,6 +43,7 @@
 - [Why Sandcastle?](#why-sandcastle)
 - [Start Local. Scale When Ready.](#start-local-scale-when-ready)
 - [⚡ Spark Mode — local AI on NVIDIA DGX Spark](#-spark-mode--local-ai-on-nvidia-dgx-spark)
+- [🕸️ Sandcastle Mesh — one workflow, your whole fleet](#%EF%B8%8F-sandcastle-mesh--one-workflow-your-whole-fleet)
 - [Quickstart](#quickstart)
 - [MCP Integration](#mcp-integration)
 - [Features](#features)
@@ -248,6 +249,68 @@ served by your local vLLM/Ollama/NIM at $0/run. See
 > Spark Mode auto-configures Sandcastle for NVIDIA DGX Spark and local NVIDIA GPU inference. It is
 > **not** an official NVIDIA certification or endorsement. "NVIDIA", "DGX", and "DGX Spark" are
 > trademarks of NVIDIA Corporation, used here only to describe compatibility.
+
+---
+
+## 🕸️ Sandcastle Mesh — one workflow, your whole fleet
+
+Your machines have different superpowers. Sandcastle Mesh turns them into **one orchestration
+mesh**: a DGX Spark runs the GPU steps, a Mac mini runs the browser steps, and any spare box runs
+the code steps — all inside a single workflow.
+
+```
+┌─────────────┐      requires: [gpu]      ┌─────────────┐
+│ Coordinator │ ────────────────────────▶ │  DGX Spark  │  gpu · spark · code
+│  (any box)  │      requires: [browser]  ├─────────────┤
+│   runs the  │ ────────────────────────▶ │  Mac mini   │  browser · code
+│   workflow  │      (no requires)        ├─────────────┤
+│             │ ──── runs locally ──────  │  any server │  docker · code
+└─────────────┘                           └─────────────┘
+```
+
+Joining a machine is one command — it registers itself, auto-detects its capabilities
+(DGX Spark → `gpu`+`spark`, Playwright → `browser`, Docker socket → `docker`, always `code`)
+and heartbeats every 15 seconds:
+
+```bash
+# On the coordinator
+MESH_ENABLED=true MESH_TOKEN=<shared-secret> sandcastle serve
+
+# On each machine you want in the mesh
+sandcastle node join http://coordinator:8080 --token <shared-secret>
+```
+
+Steps declare what they need; the dispatcher does the rest. Local execution is always preferred
+when the local machine qualifies, and steps without `requires` behave exactly as before:
+
+```yaml
+steps:
+  - id: scrape
+    type: browser
+    requires: [browser]        # routed to the Mac mini
+    browser_config:
+      start_url: "https://example.com"
+
+  - id: analyze
+    type: llm
+    requires: [gpu]            # routed to the Spark
+    prompt: "Analyze {steps.scrape.output}"
+
+  - id: summarize
+    prompt: "Summarize {steps.analyze.output}"   # no requires - runs locally
+```
+
+The dashboard's **Fleet** page shows every node, its capability chips, heartbeat age and a live
+status dot. Nodes are declared dead after 3 missed heartbeats, and unsatisfiable `requires` fail
+fast with the full picture: which nodes exist, what they can do, and the exact join command to fix
+it. All mesh traffic is authenticated with a shared `MESH_TOKEN` (constant-time comparison) — a
+node never executes a step for an unauthenticated caller.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `MESH_ENABLED` | `false` | Master switch for the mesh planes |
+| `MESH_TOKEN` | — | Shared secret for register/heartbeat/execute |
+| `MESH_HEARTBEAT_SECONDS` | `15` | Heartbeat interval (dead after 3 missed) |
 
 ---
 

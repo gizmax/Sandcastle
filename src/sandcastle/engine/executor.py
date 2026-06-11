@@ -7613,6 +7613,32 @@ async def _prepare_and_run_step(
                 async with context._lock:
                     context.step_outputs[step_id] = None
 
+    # --- Sandcastle Mesh: capability-based routing (requires: [gpu, ...]) ---
+    # Steps without `requires` take the exact same local path as always.
+    if getattr(step, "requires", None):
+        from sandcastle.engine.mesh import (
+            MeshRoutingError,
+            execute_step_remote,
+            resolve_route,
+        )
+
+        try:
+            _mesh_target = await resolve_route(step)
+        except MeshRoutingError as mesh_exc:
+            await _handle_step_result(
+                StepResult(step_id=step.id, status="failed", error=str(mesh_exc))
+            )
+            return
+        if _mesh_target is not None:
+            logger.info(
+                "Mesh: executing step '%s' on node '%s' (%s)",
+                step.id, _mesh_target.get("name"), _mesh_target.get("base_url"),
+            )
+            result = await execute_step_remote(_mesh_target, step, context)
+            await _handle_step_result(result, model=step.model)
+            return
+        # _mesh_target is None: local machine satisfies `requires` - fall through.
+
     # --- Helper to dispatch hybrid step types ---
     _HYBRID_TYPES = {
         "llm", "http", "code", "condition", "classify", "loop",

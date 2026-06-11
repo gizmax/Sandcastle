@@ -16,6 +16,7 @@ import {
   Key,
   Layers,
   LayoutDashboard,
+  Network,
   Plug,
   PlayCircle,
   Settings,
@@ -94,6 +95,7 @@ const navSections: NavSection[] = [
     label: "SYSTEM",
     items: [
       { to: "/system-health", icon: HeartPulse, label: "System Health" },
+      { to: "/fleet", icon: Network, label: "Fleet" },
       { to: "/api-keys", icon: Key, label: "API Keys" },
       { to: "/settings", icon: Settings, label: "Settings" },
     ],

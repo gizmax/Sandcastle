@@ -20,6 +20,7 @@ from sandcastle.api.agent_webhooks import router as agent_webhooks_router
 from sandcastle.api.agui import agui_router
 from sandcastle.api.auth import auth_middleware
 from sandcastle.api.environments_admin import router as environments_admin_router
+from sandcastle.api.mesh import router as mesh_router
 from sandcastle.api.routes import router
 from sandcastle.api.security_headers import security_headers_middleware
 from sandcastle.config import Settings, settings
@@ -483,6 +484,9 @@ app.include_router(agui_router, prefix="/api/agui")
 # Anthropic Managed Agents webhook receiver (root level - /agent-webhooks/anthropic)
 app.include_router(agent_webhooks_router)
 app.include_router(environments_admin_router)
+
+# Sandcastle Mesh: node registry + routed step execution (/api/mesh/*)
+app.include_router(mesh_router)
 
 # ---------------------------------------------------------------------------
 # Dashboard static files (served from the same port)

@@ -35,6 +35,7 @@ const IntegrationsPage = lazyWithRetry(() => import("@/pages/IntegrationsPage"),
 const EvaluationsPage = lazyWithRetry(() => import("@/pages/EvaluationsPage"), "evaluations");
 const EvolutionPage = lazyWithRetry(() => import("@/pages/EvolutionPage"), "evolution");
 const SystemHealthPage = lazyWithRetry(() => import("@/pages/SystemHealthPage"), "system-health");
+const FleetPage = lazyWithRetry(() => import("@/pages/FleetPage"), "fleet");
 const CompliancePage = lazyWithRetry(() => import("@/pages/CompliancePage"), "compliance");
 const MemoryPage = lazyWithRetry(() => import("@/pages/MemoryPage"), "memory");
 const TimeMachinePage = lazyWithRetry(() => import("@/pages/TimeMachinePage"), "time-machine");
@@ -158,6 +159,7 @@ export default function App() {
               <Route path="/api-keys" element={<LiteGuard><PageBoundary name="api-keys"><ApiKeysPage /></PageBoundary></LiteGuard>} />
               <Route path="/settings" element={<PageBoundary name="settings"><SettingsPage /></PageBoundary>} />
               <Route path="/system-health" element={<PageBoundary name="system-health"><SystemHealthPage /></PageBoundary>} />
+              <Route path="/fleet" element={<PageBoundary name="fleet"><FleetPage /></PageBoundary>} />
               <Route path="/compliance" element={<LiteGuard><PageBoundary name="compliance"><CompliancePage /></PageBoundary></LiteGuard>} />
               <Route path="/memory" element={<LiteGuard><PageBoundary name="memory"><MemoryPage /></PageBoundary></LiteGuard>} />
               <Route path="/time-machine" element={<LiteGuard><PageBoundary name="time-machine"><TimeMachinePage /></PageBoundary></LiteGuard>} />
