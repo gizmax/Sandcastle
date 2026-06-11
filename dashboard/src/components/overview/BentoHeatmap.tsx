@@ -94,7 +94,7 @@ export function BentoHeatmap({ cells }: { cells: HeatmapCell[] }) {
     <div
       className={cn(
         "bg-surface rounded-2xl shadow-sm border border-border",
-        "hover:border-accent/30 transition-all duration-300",
+        "hover:border-accent/30 transition-settle",
         "p-6",
       )}
     >

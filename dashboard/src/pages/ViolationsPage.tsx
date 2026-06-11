@@ -147,7 +147,7 @@ export default function ViolationsPage() {
             onClick={() => setFilter(f.key)}
             aria-pressed={filter === f.key}
             className={cn(
-              "rounded-md px-3 py-1.5 text-sm font-medium transition-all duration-200",
+              "rounded-md px-3 py-1.5 text-sm font-medium transition-settle",
               filter === f.key
                 ? "bg-surface text-foreground shadow-sm"
                 : "text-muted hover:text-foreground"

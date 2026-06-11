@@ -208,7 +208,7 @@ export default function Runs() {
   }, [filteredRuns]);
 
   return (
-    <div className="space-y-4 sm:space-y-5">
+    <div className="space-y-4 sm:space-y-5 settle-stagger">
       <PageHeader
         eyebrow="Operations · Run History"
         title="Runs"
@@ -241,7 +241,7 @@ export default function Runs() {
               }}
               aria-pressed={statusFilter === s}
               className={cn(
-                "rounded-lg px-3 py-1.5 text-xs font-medium capitalize transition-all duration-200",
+                "rounded-lg px-3 py-1.5 text-xs font-medium capitalize transition-settle",
                 statusFilter === s
                   ? "bg-accent text-accent-foreground shadow-sm"
                   : "bg-border/40 text-muted hover:bg-border hover:text-foreground"
@@ -384,7 +384,7 @@ export default function Runs() {
                   key={sf.id}
                   className={cn(
                     "group relative inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs",
-                    "border cursor-pointer transition-all duration-200",
+                    "border cursor-pointer transition-settle",
                     isActive
                       ? "bg-accent/15 border-accent text-accent glow-accent"
                       : "bg-surface border-border text-foreground hover:border-accent/30 hover:bg-accent/5"
@@ -419,7 +419,7 @@ export default function Runs() {
               onClick={() => applyQuickFilter({ status: "failed" })}
               className={cn(
                 "rounded-full border border-border bg-surface px-3 py-1 text-xs",
-                "text-foreground hover:border-accent/30 hover:bg-accent/5 transition-all duration-200"
+                "text-foreground hover:border-accent/30 hover:bg-accent/5 transition-settle"
               )}
             >
               Failed Today
@@ -428,7 +428,7 @@ export default function Runs() {
               onClick={() => applyQuickFilter({ status: "running" })}
               className={cn(
                 "rounded-full border border-border bg-surface px-3 py-1 text-xs",
-                "text-foreground hover:border-accent/30 hover:bg-accent/5 transition-all duration-200"
+                "text-foreground hover:border-accent/30 hover:bg-accent/5 transition-settle"
               )}
             >
               Running Now
@@ -437,7 +437,7 @@ export default function Runs() {
               onClick={() => applyQuickFilter({ status: "completed" })}
               className={cn(
                 "rounded-full border border-border bg-surface px-3 py-1 text-xs",
-                "text-foreground hover:border-accent/30 hover:bg-accent/5 transition-all duration-200"
+                "text-foreground hover:border-accent/30 hover:bg-accent/5 transition-settle"
               )}
             >
               Expensive Runs

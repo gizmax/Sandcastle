@@ -44,7 +44,7 @@ export function TemplateCard({ template, isSelected, onClick }: TemplateCardProp
       type="button"
       onClick={onClick}
       className={cn(
-        "group rounded-xl border p-4 text-left transition-all duration-200",
+        "group rounded-xl border p-4 text-left transition-settle",
         isSelected
           ? "border-accent ring-2 ring-accent/20 bg-accent/5"
           : `border-border bg-surface hover:shadow-md hover:bg-surface hover:${accentBorder}`

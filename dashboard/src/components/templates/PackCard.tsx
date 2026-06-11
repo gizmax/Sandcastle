@@ -22,9 +22,9 @@ export function PackCard({ pack, count, onClick, onInstall }: PackCardProps) {
       type="button"
       onClick={onClick}
       className={cn(
-        "group rounded-xl border p-5 text-left transition-all duration-200",
+        "group rounded-xl border p-5 text-left transition-settle",
         "border-border bg-surface hover:shadow-md",
-        "hover:scale-[1.02]",
+        "hover:-translate-y-px",
         `hover:${pack.color.border}`
       )}
     >
@@ -74,7 +74,7 @@ export function PackCard({ pack, count, onClick, onInstall }: PackCardProps) {
                 "flex items-center gap-1 rounded-md border border-border px-2 py-1",
                 "text-[11px] font-medium text-muted-foreground",
                 "hover:text-foreground hover:border-accent/40 hover:bg-accent/5",
-                "transition-all duration-150"
+                "transition-settle"
               )}
             >
               <Download className="h-3 w-3" />

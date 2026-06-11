@@ -100,10 +100,11 @@ describe("StatsCards", () => {
     render(
       <StatsCards totalRuns={0} successRate={0} totalCost={0} avgDuration={0} />
     );
-    expect(screen.getByText("0")).toBeInTheDocument();
-    expect(screen.getByText("0%")).toBeInTheDocument();
-    expect(screen.getByText("$0.00")).toBeInTheDocument();
-    expect(screen.getByText("0s")).toBeInTheDocument();
+    // Odometer renders the value twice (invisible width reserver + overlay)
+    expect(screen.getAllByText("0")[0]).toBeInTheDocument();
+    expect(screen.getAllByText("0%")[0]).toBeInTheDocument();
+    expect(screen.getAllByText("$0.00")[0]).toBeInTheDocument();
+    expect(screen.getAllByText("0s")[0]).toBeInTheDocument();
   });
 
   it("handles NaN success rate gracefully (displays 0%)", () => {
@@ -111,7 +112,7 @@ describe("StatsCards", () => {
       <StatsCards totalRuns={0} successRate={NaN} totalCost={0} avgDuration={0} />
     );
     // After the bug fix, NaN should show as 0%
-    expect(screen.getByText("0%")).toBeInTheDocument();
+    expect(screen.getAllByText("0%")[0]).toBeInTheDocument();
   });
 
   it("handles Infinity cost gracefully", () => {
@@ -119,7 +120,7 @@ describe("StatsCards", () => {
       <StatsCards totalRuns={0} successRate={0} totalCost={Infinity} avgDuration={0} />
     );
     // formatCost handles non-finite -> "$0.00"
-    expect(screen.getByText("$0.00")).toBeInTheDocument();
+    expect(screen.getAllByText("$0.00")[0]).toBeInTheDocument();
   });
 
   it("handles NaN duration gracefully", () => {
@@ -127,14 +128,14 @@ describe("StatsCards", () => {
       <StatsCards totalRuns={0} successRate={0} totalCost={0} avgDuration={NaN} />
     );
     // formatDuration handles non-finite -> "0s"
-    expect(screen.getByText("0s")).toBeInTheDocument();
+    expect(screen.getAllByText("0s")[0]).toBeInTheDocument();
   });
 
   it("handles negative duration gracefully", () => {
     render(
       <StatsCards totalRuns={0} successRate={0} totalCost={0} avgDuration={-10} />
     );
-    expect(screen.getByText("0s")).toBeInTheDocument();
+    expect(screen.getAllByText("0s")[0]).toBeInTheDocument();
   });
 
   it("renders 100% success rate", () => {
@@ -588,7 +589,7 @@ describe("RunsTable", () => {
         onPageChange={vi.fn()}
       />
     );
-    expect(screen.getByText("$0.00")).toBeInTheDocument();
+    expect(screen.getAllByText("$0.00")[0]).toBeInTheDocument();
   });
 
   it("has proper aria-label on table", () => {

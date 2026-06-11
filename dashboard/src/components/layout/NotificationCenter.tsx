@@ -75,7 +75,7 @@ export function NotificationCenter({
         aria-haspopup="true"
         className={cn(
           "relative flex h-9 w-9 items-center justify-center rounded-lg",
-          "hover:bg-border/50 transition-all duration-200",
+          "hover:bg-border/50 transition-settle",
           "text-muted hover:text-foreground",
         )}
       >

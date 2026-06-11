@@ -120,7 +120,7 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
             type="button"
             onClick={() => setFrequency(f.value)}
             className={cn(
-              "rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all duration-200",
+              "rounded-lg px-2.5 py-1.5 text-xs font-medium transition-settle",
               frequency === f.value
                 ? "bg-accent text-accent-foreground shadow-sm"
                 : "bg-surface border border-border text-muted hover:text-foreground hover:border-accent/30"
@@ -239,7 +239,7 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
                     }
                   }}
                   className={cn(
-                    "rounded-lg px-3 py-1.5 text-xs font-medium transition-all duration-200",
+                    "rounded-lg px-3 py-1.5 text-xs font-medium transition-settle",
                     active
                       ? "bg-accent text-accent-foreground shadow-sm"
                       : "bg-surface border border-border text-muted hover:text-foreground hover:border-accent/30"
@@ -298,7 +298,7 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
                     }
                   }}
                   className={cn(
-                    "rounded-lg py-1.5 text-xs font-medium transition-all duration-200",
+                    "rounded-lg py-1.5 text-xs font-medium transition-settle",
                     active
                       ? "bg-accent text-accent-foreground shadow-sm"
                       : "bg-surface border border-border text-muted hover:text-foreground hover:border-accent/30"

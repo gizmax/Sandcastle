@@ -382,7 +382,7 @@ export function StepFlamegraph({ steps }: StepFlamegraphProps) {
               key={`${bar.step.step_id}-${bar.step.parallel_index ?? 0}-${idx}`}
               className={cn(
                 "absolute flex items-center justify-between rounded-md cursor-pointer",
-                "transition-all duration-200",
+                "transition-settle",
                 isHovered && "brightness-125 shadow-md z-10",
                 isDimmed && "opacity-50"
               )}

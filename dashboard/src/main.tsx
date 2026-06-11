@@ -8,6 +8,8 @@ import "./index.css";
 import "./styles/panels.css";
 import "./styles/status-lights.css";
 import "./styles/brand.css";
+// Motion identity: settle easing, odometers, live-surface kit (PR: visual-motion)
+import "./styles/motion.css";
 import App from "./App.tsx";
 
 // Apply the theme immediately to prevent a flash. Dark-first: a stored preference

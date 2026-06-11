@@ -195,6 +195,15 @@ export function TerminalLog({ logs, stepName, status, isLive = false }: Terminal
   const searchInputRef = useRef<HTMLInputElement>(null);
   const prevLogLength = useRef(logs.length);
 
+  // "Data flowing" indicator: true while new log data arrived in the last ~2s.
+  const [flowing, setFlowing] = useState(false);
+  useEffect(() => {
+    if (!isLive || logs.length === 0) return;
+    setFlowing(true);
+    const timer = setTimeout(() => setFlowing(false), 2000);
+    return () => clearTimeout(timer);
+  }, [logs, isLive]);
+
   const lines = useMemo(() => logs.split("\n"), [logs]);
   const lineTypes = useMemo(() => lines.map(classifyLine), [lines]);
 
@@ -295,7 +304,8 @@ export function TerminalLog({ logs, stepName, status, isLive = false }: Terminal
       data-terminal-log
       className={cn(
         "rounded-lg border border-gray-800 overflow-hidden",
-        expanded ? "fixed inset-4 z-50" : ""
+        expanded ? "fixed inset-4 z-50" : "relative",
+        isLive && status === "running" && flowing && "surface-flowing"
       )}
     >
       {/* Top bar */}
@@ -442,6 +452,7 @@ export function TerminalLog({ logs, stepName, status, isLive = false }: Terminal
         ref={scrollRef}
         className={cn(
           "bg-[#1a1a2e] overflow-y-auto overflow-x-auto font-mono text-xs leading-relaxed",
+          "surface-live surface-live-dark",
           expanded ? "h-full" : "max-h-[400px]"
         )}
         onScroll={() => {
@@ -487,6 +498,11 @@ export function TerminalLog({ logs, stepName, status, isLive = false }: Terminal
             })}
           </tbody>
         </table>
+        {isLive && status === "running" && (
+          <div className="pl-[52px] pb-1" aria-hidden="true">
+            <span className="surface-live-cursor">▊</span>
+          </div>
+        )}
       </div>
 
       {/* Fullscreen backdrop */}

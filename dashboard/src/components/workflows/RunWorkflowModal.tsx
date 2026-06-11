@@ -357,7 +357,7 @@ export function RunWorkflowModal({ open, workflowName, inputSchema, onClose, onR
                 type="submit"
                 className={cn(
                   "flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground",
-                  "hover:bg-accent-hover transition-all duration-200 shadow-sm hover:shadow-md"
+                  "hover:bg-accent-hover transition-settle shadow-sm hover:shadow-md"
                 )}
               >
                 <Play className="h-3.5 w-3.5" />

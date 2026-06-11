@@ -51,7 +51,7 @@ export default function OverviewBento() {
 
   if (isEmpty) {
     return (
-      <div className="space-y-4 sm:space-y-5">
+      <div className="space-y-4 sm:space-y-5 settle-stagger">
         <PageHeader eyebrow="Sandcastle · Command Deck" title="Overview" />
 
         <SectionErrorBoundary section="health">
@@ -78,7 +78,7 @@ export default function OverviewBento() {
   }
 
   return (
-    <div className="space-y-4 sm:space-y-5">
+    <div className="space-y-4 sm:space-y-5 settle-stagger">
       <PageHeader eyebrow="Sandcastle · Command Deck" title="Overview" />
 
       {!d.recDismissed && (d.advisorRecs.length > 0 || (d.topRecommendation && d.showProviderCosts)) && (

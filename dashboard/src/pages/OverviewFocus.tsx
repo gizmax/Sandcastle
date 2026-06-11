@@ -151,7 +151,7 @@ function FocusStatCard({
   return (
     <div className={cn(
       "bg-surface rounded-2xl shadow-sm border border-border",
-      "hover:border-accent/30 transition-all duration-300",
+      "hover:border-accent/30 transition-settle",
       "p-5 flex flex-col gap-3"
     )}>
       <div className="flex items-start justify-between">
@@ -191,7 +191,7 @@ function FocusCostBar({ spent, projected }: CostBarProps) {
   return (
     <div className={cn(
       "bg-surface rounded-2xl shadow-sm border border-border",
-      "hover:border-accent/30 transition-all duration-300",
+      "hover:border-accent/30 transition-settle",
       "p-5"
     )}>
       <div className="flex items-center gap-2 mb-3">
@@ -247,7 +247,7 @@ function FocusRecentRuns({ runs }: { runs: RunItem[] }) {
   return (
     <div className={cn(
       "bg-surface rounded-2xl shadow-sm border border-border",
-      "hover:border-accent/30 transition-all duration-300",
+      "hover:border-accent/30 transition-settle",
       "overflow-hidden"
     )}>
       <div className="flex items-center justify-between px-5 py-4 border-b border-border">
@@ -398,7 +398,7 @@ export default function OverviewFocus({
       {/* Section 1: Compact hero with inline CTA - PRIMARY ACTION ABOVE FOLD */}
       <div className={cn(
         "bg-surface rounded-2xl shadow-sm border border-border",
-        "hover:border-accent/30 transition-all duration-300",
+        "hover:border-accent/30 transition-settle",
         "p-5"
       )}>
         <div className="flex items-center justify-between gap-4">
@@ -446,7 +446,7 @@ export default function OverviewFocus({
               className={cn(
                 "flex items-center gap-2 rounded-xl px-4 py-2",
                 "bg-accent text-accent-foreground font-semibold text-sm",
-                "hover:bg-accent-hover transition-all duration-200 active:scale-[0.98]",
+                "hover:bg-accent-hover transition-settle active:scale-[0.98]",
                 "whitespace-nowrap"
               )}
             >
@@ -461,7 +461,7 @@ export default function OverviewFocus({
       {!advisor.loading && actionableInsights.length > 0 && (
         <div className={cn(
           "bg-surface rounded-2xl shadow-sm border border-border",
-          "hover:border-accent/30 transition-all duration-300",
+          "hover:border-accent/30 transition-settle",
           "overflow-hidden"
         )}>
           <div className="px-5 py-4 border-b border-border flex items-center gap-2">

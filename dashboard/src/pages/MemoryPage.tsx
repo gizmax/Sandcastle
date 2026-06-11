@@ -300,7 +300,7 @@ export default function MemoryPage() {
                 key={mem.id}
                 className={cn(
                   "rounded-xl border border-border bg-surface p-4 sm:p-5",
-                  "transition-all duration-200 hover:border-accent/30",
+                  "transition-settle hover:border-accent/30",
                   isDeleting && "opacity-50",
                 )}
               >

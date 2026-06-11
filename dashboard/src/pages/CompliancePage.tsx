@@ -283,7 +283,7 @@ export default function CompliancePage() {
             className={cn(
               "inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium",
               "border border-border text-foreground bg-transparent",
-              "transition-all duration-200 hover:bg-surface hover:border-border/80 hover:shadow-sm",
+              "transition-settle hover:bg-surface hover:border-border/80 hover:shadow-sm",
               "active:scale-[0.98]"
             )}
           >
@@ -295,7 +295,7 @@ export default function CompliancePage() {
             className={cn(
               "inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium",
               "border border-border text-foreground bg-transparent",
-              "transition-all duration-200 hover:bg-surface hover:border-border/80 hover:shadow-sm",
+              "transition-settle hover:bg-surface hover:border-border/80 hover:shadow-sm",
               "active:scale-[0.98]"
             )}
           >
@@ -307,7 +307,7 @@ export default function CompliancePage() {
             className={cn(
               "inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium",
               "bg-error text-white border border-error",
-              "transition-all duration-200 hover:bg-error/90 hover:shadow-md",
+              "transition-settle hover:bg-error/90 hover:shadow-md",
               "active:scale-[0.98]"
             )}
           >

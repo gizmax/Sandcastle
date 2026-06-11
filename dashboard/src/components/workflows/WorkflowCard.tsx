@@ -90,8 +90,8 @@ export const WorkflowCard = memo(function WorkflowCard({
     <div
       className={cn(
         "group/card relative rounded-xl border border-border bg-surface p-5 shadow-sm",
-        "transition-all duration-200",
-        "hover:shadow-md hover:border-accent/40 hover:-translate-y-0.5",
+        "transition-settle",
+        "hover:shadow-md hover:border-accent/40 hover:-translate-y-px",
         selected && "border-accent ring-2 ring-accent/20"
       )}
     >
@@ -102,7 +102,7 @@ export const WorkflowCard = memo(function WorkflowCard({
           onClick={handlePinClick}
           aria-label={pinned ? `Unpin ${name}` : `Pin ${name}`}
           className={cn(
-            "absolute left-3 top-3 flex h-5 w-5 items-center justify-center rounded transition-all duration-200",
+            "absolute left-3 top-3 flex h-5 w-5 items-center justify-center rounded transition-settle",
             pinned
               ? "text-accent"
               : "text-muted opacity-0 group-hover/card:opacity-100 hover:opacity-100 hover:text-accent/70"
@@ -223,7 +223,7 @@ export const WorkflowCard = memo(function WorkflowCard({
           onClick={onRun}
           className={cn(
             "flex items-center gap-1.5 rounded-lg bg-accent px-2.5 py-1.5 text-xs font-medium text-accent-foreground",
-            "hover:bg-accent-hover transition-all duration-200 shadow-sm"
+            "hover:bg-accent-hover transition-settle shadow-sm"
           )}
         >
           <Play className="h-3 w-3" />

@@ -221,7 +221,7 @@ export function Header({
           className={cn(
             "ml-auto hidden h-9 w-full max-w-sm items-center gap-2 rounded-lg border border-border bg-background px-3 text-sm sm:flex lg:ml-8",
             "text-muted-foreground/50 hover:border-accent/30 hover:text-muted-foreground",
-            "transition-all duration-200"
+            "transition-settle"
           )}
         >
           <Search className="h-4 w-4 shrink-0" />

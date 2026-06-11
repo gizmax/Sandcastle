@@ -209,7 +209,7 @@ export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: Sid
                     className={({ isActive }) =>
                       cn(
                         "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium",
-                        "transition-all duration-200",
+                        "transition-settle",
                         isActive
                           ? "bg-accent/10 text-accent"
                           : "text-muted hover:bg-border/40 hover:text-foreground"
@@ -303,7 +303,7 @@ export function Sidebar({ open, onClose, dlqCount = 0, approvalsCount = 0 }: Sid
                           className={({ isActive }) =>
                             cn(
                               "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium",
-                              "transition-all duration-200",
+                              "transition-settle",
                               isActive
                                 ? "bg-accent/10 text-accent"
                                 : "text-muted hover:bg-border/40 hover:text-foreground"

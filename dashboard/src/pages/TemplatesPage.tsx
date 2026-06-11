@@ -768,7 +768,7 @@ export default function TemplatesPage() {
                 key={tab.id}
                 onClick={() => setView(tab.id)}
                 className={cn(
-                  "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-all duration-150",
+                  "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-settle",
                   isActive
                     ? "bg-surface text-foreground shadow-sm"
                     : "text-muted hover:text-foreground"
@@ -924,7 +924,7 @@ export default function TemplatesPage() {
                   onClick={() => setCommunityCollection(col.id)}
                   className={cn(
                     "flex-shrink-0 w-48 rounded-xl border border-border bg-surface p-4 text-left",
-                    "transition-all duration-200 hover:shadow-md hover:border-accent/30"
+                    "transition-settle hover:shadow-md hover:border-accent/30"
                   )}
                 >
                   <span className="text-lg leading-none">{col.icon === "target" ? "\uD83C\uDFAF" : col.icon === "pen-tool" ? "\u270D\uFE0F" : col.icon === "terminal" ? "\uD83D\uDCBB" : col.icon === "headphones" ? "\uD83C\uDFA7" : col.icon === "users" ? "\uD83D\uDC65" : "\uD83D\uDCE6"}</span>
@@ -1497,7 +1497,7 @@ function HeroPack({
             className={cn(
               "flex items-center gap-2 rounded-lg bg-accent px-4 py-2.5",
               "text-sm font-medium text-accent-foreground",
-              "hover:bg-accent-hover transition-all duration-200 shadow-sm"
+              "hover:bg-accent-hover transition-settle shadow-sm"
             )}
           >
             <Download className="h-4 w-4" />
@@ -1708,7 +1708,7 @@ function PackDetailView({
               className={cn(
                 "flex items-center gap-2 rounded-lg bg-accent px-4 py-2",
                 "text-sm font-medium text-accent-foreground",
-                "hover:bg-accent-hover transition-all duration-200 shadow-sm",
+                "hover:bg-accent-hover transition-settle shadow-sm",
                 selectedCount === 0 && "opacity-50 cursor-not-allowed"
               )}
             >
@@ -1830,7 +1830,7 @@ function PackDetailView({
               className={cn(
                 "flex items-center gap-2 rounded-lg bg-accent px-4 py-2",
                 "text-sm font-medium text-accent-foreground",
-                "hover:bg-accent-hover transition-all duration-200 shadow-sm",
+                "hover:bg-accent-hover transition-settle shadow-sm",
                 selectedCount === 0 && "opacity-50 cursor-not-allowed"
               )}
             >

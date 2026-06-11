@@ -26,7 +26,7 @@ export function ProgressBar({ steps, currentStep }: ProgressBarProps) {
               <div className="flex flex-col items-center gap-1.5">
                 <div
                   className={cn(
-                    "flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold transition-all duration-300",
+                    "flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold transition-settle",
                     isCompleted && "bg-accent text-accent-foreground scale-in-bounce",
                     isCurrent && "bg-accent text-accent-foreground glow-accent ring-2 ring-accent/30 step-indicator-pulse",
                     isFuture && "bg-border text-muted"

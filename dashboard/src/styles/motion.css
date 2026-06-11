@@ -1,0 +1,158 @@
+/* ──── Sandcastle motion identity ────
+   Brand metaphor: sand settling — fast arrival, soft damped landing.
+   One easing, one duration scale, used everywhere. Keep in sync with
+   src/lib/motion.ts (JS mirror of these tokens). */
+
+:root {
+  /* Snappy-out, softly damped. Fast attack, long gentle settle. */
+  --ease-settle: cubic-bezier(0.22, 1, 0.36, 1);
+  /* Symmetric variant for elements that both leave and arrive (drawers, toggles). */
+  --ease-settle-inout: cubic-bezier(0.65, 0, 0.35, 1);
+
+  --motion-fast: 120ms;  /* hovers, presses, color shifts */
+  --motion-base: 180ms;  /* most UI state changes, entrances */
+  --motion-slow: 320ms;  /* drawers, modals, large surfaces */
+
+  /* Make Tailwind's transition-* utilities settle by default
+     (overrides the @theme defaults from the framework layer). */
+  --default-transition-timing-function: var(--ease-settle);
+  --default-transition-duration: var(--motion-base);
+}
+
+/* ──── Tokenized transition recipe ────
+   Replacement for ad-hoc `transition-all duration-200` sprinkles.
+   Property allowlist: never animate layout (width/height/margin). */
+.transition-settle {
+  transition-property: color, background-color, border-color, box-shadow,
+    opacity, transform, filter;
+  transition-duration: var(--motion-base);
+  transition-timing-function: var(--ease-settle);
+}
+
+/* Buttons: retune the global micro-interaction (defined in index.css)
+   onto the shared scale. Loaded after index.css, so this wins. */
+button, [role="button"], .btn {
+  transition: transform var(--motion-fast) var(--ease-settle),
+              box-shadow var(--motion-fast) var(--ease-settle),
+              background-color var(--motion-fast) var(--ease-settle),
+              border-color var(--motion-fast) var(--ease-settle),
+              color var(--motion-fast) var(--ease-settle),
+              opacity var(--motion-fast) var(--ease-settle);
+}
+
+/* Card hovers: settle easing, max 1px lift (no floaty cards). */
+.card-hover-lift {
+  transition: transform var(--motion-base) var(--ease-settle),
+              box-shadow var(--motion-base) var(--ease-settle);
+}
+.card-hover-lift:hover {
+  transform: translateY(-1px);
+}
+.card-hover-glow {
+  transition: box-shadow var(--motion-base) var(--ease-settle),
+              border-color var(--motion-base) var(--ease-settle);
+}
+
+/* ──── Entry choreography: "settle" ────
+   Page-level content entrance: 6px rise + fade with a soft landing.
+   Use .settle-enter on a single block, .settle-stagger on a container
+   whose direct children are top-level sections (NOT table rows). */
+
+@keyframes settle-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.settle-enter {
+  animation: settle-in var(--motion-base) var(--ease-settle) both;
+}
+
+.settle-stagger > * {
+  animation: settle-in var(--motion-base) var(--ease-settle) both;
+}
+/* Stagger siblings by 30ms, capped at 6 steps — later sections land together. */
+.settle-stagger > *:nth-child(1) { animation-delay: 0ms; }
+.settle-stagger > *:nth-child(2) { animation-delay: 30ms; }
+.settle-stagger > *:nth-child(3) { animation-delay: 60ms; }
+.settle-stagger > *:nth-child(4) { animation-delay: 90ms; }
+.settle-stagger > *:nth-child(5) { animation-delay: 120ms; }
+.settle-stagger > *:nth-child(n+6) { animation-delay: 150ms; }
+
+/* ──── Live-surface kit ────
+   For streaming surfaces (run logs, event feeds): a whisper of CRT.
+   .surface-live      → scanline texture on the log/stream body
+   .surface-flowing   → amber top-edge shimmer while data arrives
+                        (toggle on the relative/overflow-hidden wrapper
+                        when events landed in the last ~2s)
+   .surface-live-cursor → blinking block cursor for "stream alive" */
+
+.surface-live {
+  background-image: repeating-linear-gradient(
+    0deg,
+    rgba(28, 24, 20, 0.025) 0px,
+    rgba(28, 24, 20, 0.025) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+}
+.dark .surface-live,
+/* TerminalLog body is dark in both themes — same texture weight */
+.surface-live.surface-live-dark {
+  background-image: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.10) 0px,
+    rgba(0, 0, 0, 0.10) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+}
+
+@keyframes cursor-blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0; }
+}
+.surface-live-cursor {
+  display: inline-block;
+  color: var(--color-accent);
+  animation: cursor-blink 1.06s steps(1, end) infinite;
+  user-select: none;
+}
+
+@keyframes data-flow-shimmer {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(350%); }
+}
+.surface-flowing::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 2px;
+  width: 30%;
+  background: linear-gradient(90deg, transparent, var(--color-accent), transparent);
+  opacity: 0.7;
+  animation: data-flow-shimmer 1.4s var(--ease-settle-inout) infinite;
+  pointer-events: none;
+}
+
+/* ──── Reduced motion ────
+   Follows the exclusion-list pattern from index.css. The global
+   `*` rule there already clamps durations; this makes intent explicit:
+   entrances just appear, the cursor holds steady, surfaces go static. */
+@media (prefers-reduced-motion: reduce) {
+  .settle-enter,
+  .settle-stagger > *,
+  .surface-live-cursor,
+  .surface-flowing::after {
+    animation: none !important;
+  }
+  .surface-flowing::after {
+    content: none;
+  }
+  .surface-live-cursor {
+    opacity: 1;
+  }
+  .card-hover-lift:hover {
+    transform: none;
+  }
+}

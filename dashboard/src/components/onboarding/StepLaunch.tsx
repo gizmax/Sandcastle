@@ -108,7 +108,7 @@ export function StepLaunch({
           disabled={!template || launching}
           className={cn(
             "w-full inline-flex items-center justify-center gap-2 rounded-xl bg-accent px-6 py-3 text-sm font-medium text-accent-foreground btn-shimmer",
-            "hover:bg-accent-hover transition-all duration-200 shadow-sm hover:shadow-md",
+            "hover:bg-accent-hover transition-settle shadow-sm hover:shadow-md",
             "disabled:opacity-60 disabled:cursor-not-allowed"
           )}
         >

@@ -462,7 +462,7 @@ export function BatchRunModal({ open, workflowName, fileName, onClose }: BatchRu
                 disabled={cancelling}
                 className={cn(
                   "flex items-center gap-2 rounded-lg border border-error/30 px-4 py-2 text-sm font-medium text-error",
-                  "hover:bg-error/10 transition-all duration-200",
+                  "hover:bg-error/10 transition-settle",
                   "disabled:opacity-50 disabled:cursor-not-allowed"
                 )}
               >
@@ -481,7 +481,7 @@ export function BatchRunModal({ open, workflowName, fileName, onClose }: BatchRu
                 disabled={starting}
                 className={cn(
                   "flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground",
-                  "hover:bg-accent-hover transition-all duration-200 shadow-sm hover:shadow-md",
+                  "hover:bg-accent-hover transition-settle shadow-sm hover:shadow-md",
                   "disabled:opacity-50 disabled:cursor-not-allowed"
                 )}
               >

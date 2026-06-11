@@ -1210,7 +1210,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
       <div className="flex flex-1 min-w-0">
         {/* Canvas */}
         <div className={cn(
-          "flex-1 min-w-0 pt-8 lg:pt-0 transition-all duration-300",
+          "flex-1 min-w-0 pt-8 lg:pt-0 transition-settle",
           generateModalOpen ? "lg:w-[60%]" : "w-full"
         )}>
           <ErrorBoundary name="WorkflowBuilder-ReactFlow">
@@ -1286,7 +1286,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
             onClick={() => onRun(yaml)}
             className={cn(
               "flex items-center gap-1.5 rounded-lg bg-accent px-2 sm:px-3 py-1.5 text-xs font-medium text-accent-foreground",
-              "hover:bg-accent-hover transition-all duration-200 shadow-sm"
+              "hover:bg-accent-hover transition-settle shadow-sm"
             )}
           >
             <Play className="h-3.5 w-3.5" />
@@ -1331,7 +1331,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
                   }}
                   className={cn(
                     "rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground",
-                    "hover:bg-accent-hover transition-all duration-200 shadow-sm"
+                    "hover:bg-accent-hover transition-settle shadow-sm"
                   )}
                 >
                   Replace

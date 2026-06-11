@@ -146,7 +146,7 @@ export function TemplateBrowser({ open, onClose, onSelect }: TemplateBrowserProp
                       setSelectedName(selectedName === t.name ? null : t.name)
                     }
                     className={cn(
-                      "rounded-lg border p-4 text-left transition-all duration-150",
+                      "rounded-lg border p-4 text-left transition-settle",
                       selectedName === t.name
                         ? "border-accent ring-2 ring-accent/20 bg-accent/5"
                         : "border-border hover:bg-border/40"
@@ -197,7 +197,7 @@ export function TemplateBrowser({ open, onClose, onSelect }: TemplateBrowserProp
               disabled={!selectedName || fetching}
               className={cn(
                 "flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground",
-                "hover:bg-accent-hover transition-all duration-200 shadow-sm",
+                "hover:bg-accent-hover transition-settle shadow-sm",
                 (!selectedName || fetching) && "opacity-50 cursor-not-allowed"
               )}
             >

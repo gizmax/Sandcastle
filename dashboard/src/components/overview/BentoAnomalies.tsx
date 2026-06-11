@@ -9,7 +9,7 @@ export function BentoAnomalies({ anomalies }: { anomalies: AnomalyItem[] }) {
   return (
     <div className={cn(
       "bg-surface rounded-2xl shadow-sm border border-border",
-      "hover:border-accent/30 transition-all duration-300",
+      "hover:border-accent/30 transition-settle",
       "p-6 flex flex-col gap-3",
     )}>
       <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">

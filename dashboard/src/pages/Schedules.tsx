@@ -152,7 +152,7 @@ export default function Schedules() {
           aria-label="New schedule"
           className={cn(
             "flex items-center gap-2 rounded-lg bg-accent px-3 sm:px-4 py-2 text-sm font-medium text-accent-foreground",
-            "hover:bg-accent-hover transition-all duration-200",
+            "hover:bg-accent-hover transition-settle",
             "shadow-sm hover:shadow-md"
           )}
         >

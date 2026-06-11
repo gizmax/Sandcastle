@@ -52,7 +52,7 @@ export function StepConfigureInputs({
   const inputClass = cn(
     "h-9 w-full rounded-lg border border-border bg-background px-3 text-sm",
     "focus-visible:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
-    "transition-all duration-200"
+    "transition-settle"
   );
 
   return (
@@ -156,7 +156,7 @@ export function StepConfigureInputs({
                     className={cn(
                       "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm resize-y",
                       "focus-visible:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
-                      "transition-all duration-200"
+                      "transition-settle"
                     )}
                   />
                 ) : isNumber ? (
@@ -213,7 +213,7 @@ export function StepConfigureInputs({
           title={missingRequired ? "Fill the required fields first" : undefined}
           className={cn(
             "inline-flex items-center gap-2 rounded-lg bg-accent px-5 py-2 text-sm font-medium text-accent-foreground",
-            "hover:bg-accent-hover transition-all duration-200 shadow-sm",
+            "hover:bg-accent-hover transition-settle shadow-sm",
             "disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-accent"
           )}
         >

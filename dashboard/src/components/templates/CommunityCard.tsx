@@ -66,7 +66,7 @@ export function CommunityCard({ template, installed, onInstall, onPreview }: Com
     <div
       className={cn(
         "group rounded-xl border border-border bg-surface p-4 text-left",
-        "transition-all duration-200 hover:shadow-md hover:border-accent/30"
+        "transition-settle hover:shadow-md hover:border-accent/30"
       )}
     >
       {/* Top row: category dot + source badge */}
@@ -215,7 +215,7 @@ export function CommunityCard({ template, installed, onInstall, onPreview }: Com
           }}
           className={cn(
             "flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5",
-            "text-xs font-medium transition-all duration-200 shadow-sm",
+            "text-xs font-medium transition-settle shadow-sm",
             installed
               ? "border border-success/30 text-success hover:bg-success/10 bg-transparent"
               : "bg-accent text-accent-foreground hover:bg-accent-hover"

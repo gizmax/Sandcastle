@@ -35,7 +35,7 @@ export function BentoProviderCosts({
   return (
     <div className={cn(
       "rounded-2xl border border-border bg-surface shadow-sm",
-      "hover:border-accent/30 transition-all duration-300",
+      "hover:border-accent/30 transition-settle",
       "p-5 flex flex-col gap-3",
     )}>
       <div className="flex items-center justify-between">
@@ -99,7 +99,7 @@ export function BentoSavingsOpportunities({ savings }: { savings: ProviderSaving
   return (
     <div className={cn(
       "rounded-2xl border border-border bg-surface shadow-sm",
-      "hover:border-accent/30 transition-all duration-300",
+      "hover:border-accent/30 transition-settle",
       "p-5 flex flex-col gap-3",
     )}>
       <h3 className="panel-label text-muted-foreground">Savings Opportunities</h3>

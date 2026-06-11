@@ -11,6 +11,7 @@ import { RiskLevelBadge } from "@/components/runs/RiskLevelBadge";
 import { AnomalyBadge } from "@/components/shared/AnomalyBadge";
 import { StepTimeline } from "@/components/runs/StepTimeline";
 import { LiveStream } from "@/components/runs/LiveStream";
+import { Odometer } from "@/components/ui/Odometer";
 import { RunTree } from "@/components/runs/RunTree";
 import { ReplayForkModal } from "@/components/runs/ReplayForkModal";
 import { PipelineViz } from "@/components/runs/PipelineViz";
@@ -508,7 +509,7 @@ export default function RunDetailPage() {
         : null;
 
   return (
-    <div className="space-y-4 sm:space-y-6">
+    <div className="space-y-4 sm:space-y-6 settle-stagger">
       <Breadcrumb items={[
         { label: "Overview", href: "/" },
         { label: "Runs", href: "/runs" },
@@ -621,7 +622,7 @@ export default function RunDetailPage() {
           )}
           <div>
             <span className="text-xs font-medium text-muted-foreground">Cost</span>
-            <p>{formatCost(run.total_cost_usd)}</p>
+            <p><Odometer value={run.total_cost_usd} format={formatCost} /></p>
           </div>
         </div>
 
@@ -750,7 +751,7 @@ export default function RunDetailPage() {
                 <button
                   onClick={() => setVizMode("pipeline")}
                   className={cn(
-                    "rounded-md px-2.5 py-1 text-[11px] font-medium transition-all duration-200",
+                    "rounded-md px-2.5 py-1 text-[11px] font-medium transition-settle",
                     vizMode === "pipeline"
                       ? "bg-accent text-accent-foreground shadow-sm"
                       : "text-muted hover:text-foreground"
@@ -761,7 +762,7 @@ export default function RunDetailPage() {
                 <button
                   onClick={() => setVizMode("flamegraph")}
                   className={cn(
-                    "rounded-md px-2.5 py-1 text-[11px] font-medium transition-all duration-200",
+                    "rounded-md px-2.5 py-1 text-[11px] font-medium transition-settle",
                     vizMode === "flamegraph"
                       ? "bg-accent text-accent-foreground shadow-sm"
                       : "text-muted hover:text-foreground"

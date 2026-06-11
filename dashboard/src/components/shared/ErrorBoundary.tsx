@@ -93,7 +93,7 @@ export class ErrorBoundary extends Component<Props, State> {
             </div>
             <button
               onClick={this.handleHardReload}
-              className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:bg-accent-hover transition-all duration-200"
+              className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:bg-accent-hover transition-settle"
             >
               <RotateCcw className="w-4 h-4" />
               Reload
@@ -131,7 +131,7 @@ export class ErrorBoundary extends Component<Props, State> {
           </div>
           <button
             onClick={this.handleReset}
-            className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:bg-accent-hover transition-all duration-200"
+            className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:bg-accent-hover transition-settle"
           >
             <RotateCcw className="w-4 h-4" />
             Try Again
