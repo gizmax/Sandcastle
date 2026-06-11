@@ -43,6 +43,8 @@ from sandcastle.engine.sandshore import (
     pool_stats,
 )
 
+from tests import _payloads as payloads
+
 
 # ===========================================================================
 # 1. Local backend - environment variable leakage
@@ -190,11 +192,11 @@ class TestRunnerFileValidation:
 
     def test_rejects_path_traversal(self):
         with pytest.raises(ValueError, match="Invalid runner file path"):
-            _validate_runner_file("../etc/passwd")
+            _validate_runner_file(payloads.PATH_TRAVERSAL_1)
 
     def test_rejects_absolute_path(self):
         with pytest.raises(ValueError, match="Invalid runner file path"):
-            _validate_runner_file("/etc/passwd")
+            _validate_runner_file(payloads.ETC_PASSWD)
 
     def test_rejects_double_dot_anywhere(self):
         with pytest.raises(ValueError, match="Invalid runner file path"):

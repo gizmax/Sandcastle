@@ -27,6 +27,8 @@ from sandcastle.api.security_headers import (
 )
 from sandcastle.config import Settings
 
+from tests import _payloads as payloads
+
 
 # =====================================================================
 # Helpers
@@ -1052,7 +1054,7 @@ class TestSPAFallbackSafety:
         from pathlib import Path
 
         dashboard_dir = Path("/app/dashboard/dist")
-        path = "../../etc/passwd"
+        path = payloads.PATH_TRAVERSAL
         file = (dashboard_dir / path).resolve()
         assert not file.is_relative_to(dashboard_dir)
 

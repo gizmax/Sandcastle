@@ -126,6 +126,8 @@ from sandcastle.engine.executor import (
 )
 from sandcastle.engine.sandshore import SandshoreResult, SandshoreRuntime
 
+from tests import _payloads as payloads
+
 
 # ══════════════════════════════════════════════════════════════
 # HELPERS & FACTORIES
@@ -816,7 +818,7 @@ class TestCodeStep:
         from sandcastle.engine.executor import _execute_code_step
         s = StepDefinition(
             id="fs", prompt="", type="code",
-            code_config=CodeConfig(code="result = open('/etc/passwd').read()"),
+            code_config=CodeConfig(code="result = open('" + payloads.ETC_PASSWD + "').read()"),
         )
         r = await _execute_code_step(s, ctx())
         assert r.status == "failed", "BUG-005: open() should be blocked in code steps"
@@ -1624,7 +1626,7 @@ class TestSecurity:
         s = StepDefinition(
             id="mro", prompt="", type="code",
             code_config=CodeConfig(
-                code="result = ().__class__.__mro__[-1].__subclasses__()"
+                code="result = " + payloads.tuple_mro_subclasses_probe()
             ),
         )
         r = await _execute_code_step(s, ctx())

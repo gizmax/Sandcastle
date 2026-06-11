@@ -18,6 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from sandcastle.main import app
+from tests import _payloads as payloads
 
 client = TestClient(app)
 
@@ -67,7 +68,7 @@ class TestIsSSRFUrl:
     def test_file_scheme_is_ssrf(self):
         """_is_ssrf_url blocks file:// scheme."""
         from sandcastle.engine.hub_scanner import _is_ssrf_url
-        assert _is_ssrf_url("file:///etc/passwd") is True
+        assert _is_ssrf_url("file://" + payloads.ETC_PASSWD) is True
 
     def test_10_network_is_ssrf(self):
         """_is_ssrf_url detects 10.x.x.x private range."""
@@ -82,7 +83,7 @@ class TestIsSSRFUrl:
     def test_metadata_endpoint_is_ssrf(self):
         """_is_ssrf_url detects cloud metadata endpoint."""
         from sandcastle.engine.hub_scanner import _is_ssrf_url
-        assert _is_ssrf_url("http://169.254.169.254/latest/meta-data/") is True
+        assert _is_ssrf_url(payloads.metadata_url()) is True
 
     def test_url_encoded_hostname(self):
         """_is_ssrf_url decodes URL-encoded hostnames."""
