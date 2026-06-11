@@ -219,6 +219,33 @@ class WorkflowGenerateRequest(BaseModel):
     )
 
 
+class ArchitectRequest(BaseModel):
+    """Request to start an Architect session (generate -> run -> evaluate -> refine)."""
+
+    description: str = Field(
+        ...,
+        description="Natural language description of the workflow to build and prove",
+        min_length=1,
+        max_length=10000,
+    )
+    test_input: dict | None = Field(
+        None,
+        description="Inputs for the proof run (derived from the input schema if omitted)",
+    )
+    budget_usd: float | None = Field(
+        None, gt=0, le=1000,
+        description="Live-run spend cap (default: architect_budget_usd)",
+    )
+    max_iterations: int | None = Field(
+        None, ge=1, le=10,
+        description="Loop bound (default: architect_max_iterations)",
+    )
+    score_threshold: float | None = Field(
+        None, ge=0.0, le=1.0,
+        description="Minimum judge score (default: architect_score_threshold)",
+    )
+
+
 class GenerateChatMessage(BaseModel):
     """A single message in a chat-based generation conversation."""
 

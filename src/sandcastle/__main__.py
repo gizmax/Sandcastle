@@ -3697,6 +3697,79 @@ def _cmd_template(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# The Architect - NL description -> proven workflow template
+# ---------------------------------------------------------------------------
+
+
+def _cmd_architect(args: argparse.Namespace) -> None:
+    """Run the Architect loop synchronously: generate -> run -> evaluate -> refine.
+
+    Prints per-iteration progress; on success exits 0 with the bundle path of
+    the freshly proven template. Exits 2 when the loop ends without a proof.
+    """
+    import asyncio
+
+    from sandcastle.engine.architect import design_workflow
+
+    if args.budget is not None and args.budget <= 0:
+        print("Error: --budget must be positive.", file=sys.stderr)
+        sys.exit(1)
+
+    test_input: dict[str, Any] = {}
+    if args.input_file:
+        test_input = _load_input_file(args.input_file)
+    test_input.update(_parse_input_pairs(args.input))
+
+    def _progress(msg: str) -> None:
+        print(_color(f"  {msg}", _C.CYAN))
+
+    print(_color(f"The Architect: {args.description!r}", _C.BOLD))
+    try:
+        result = asyncio.run(
+            design_workflow(
+                args.description,
+                test_input=test_input or None,
+                budget_usd=args.budget,
+                max_iterations=args.max_iterations,
+                score_threshold=args.threshold,
+                output_dir=args.output,
+                install=not args.no_install,
+                progress=_progress,
+            )
+        )
+    except Exception as exc:
+        print(_format_cli_error(exc), file=sys.stderr)
+        sys.exit(1)
+
+    if getattr(args, "json", False):
+        print(json.dumps(result.to_dict(), indent=2, default=str))
+    else:
+        for it in result.iterations:
+            score = "-" if it.judge_score is None else f"{it.judge_score:.2f}"
+            line = (
+                f"  iteration {it.iteration}: {it.run_status or 'not run'}"
+                f"  cost ${it.run_cost_usd:.4f}  score {score}"
+            )
+            print(line)
+            for failure in it.hard_check_failures:
+                print(_color(f"    ! {failure}", _C.YELLOW))
+        print(f"  total live-run cost: ${result.total_cost_usd:.4f}")
+
+    if result.proven:
+        print(_color(f"PROVEN  {result.template_name}", _C.GREEN))
+        print(f"  Bundle: {result.bundle_path}")
+        if result.installed_path:
+            print(f"  Installed: {result.installed_path}")
+            print(f"  Run it: sandcastle run --local {result.installed_path}")
+        return
+
+    print(_color(f"NOT PROVEN ({result.status})", _C.RED), file=sys.stderr)
+    if result.error:
+        print(_color(f"  {result.error}", _C.RED), file=sys.stderr)
+    sys.exit(2)
+
+
+# ---------------------------------------------------------------------------
 # API helpers (shared by new command groups)
 # ---------------------------------------------------------------------------
 
@@ -5642,6 +5715,42 @@ def _build_parser() -> argparse.ArgumentParser:
     t_search.add_argument("query", help="Search query")
     t_search.add_argument("--json", action="store_true", help="JSON output")
 
+    # --- architect ---
+    p_architect = subparsers.add_parser(
+        "architect",
+        help="Turn a description into a proven workflow (generate -> run -> refine loop)",
+    )
+    p_architect.add_argument(
+        "description", help="Natural language description of the workflow to build"
+    )
+    p_architect.add_argument(
+        "--input", "-i", action="append",
+        help="Test input key=value for the proof run (repeatable)",
+    )
+    p_architect.add_argument(
+        "--input-file", "-f", help="JSON file with the test inputs for the proof run"
+    )
+    p_architect.add_argument(
+        "--budget", type=float, default=None,
+        help="Live-run spend cap in USD (default: architect_budget_usd)",
+    )
+    p_architect.add_argument(
+        "--max-iterations", type=int, default=None,
+        help="Loop bound (default: architect_max_iterations)",
+    )
+    p_architect.add_argument(
+        "--threshold", type=float, default=None,
+        help="Minimum judge score 0-1 (default: architect_score_threshold)",
+    )
+    p_architect.add_argument(
+        "--output", "-o", default=None, help="Directory for the .sctpl bundle"
+    )
+    p_architect.add_argument(
+        "--no-install", action="store_true",
+        help="Do not install the proven template into the community templates dir",
+    )
+    p_architect.add_argument("--json", action="store_true", help="JSON output")
+
     # --- describe ---
     p_describe = subparsers.add_parser(
         "describe", help="Print workflow summary with responsibilities"
@@ -5870,6 +5979,7 @@ def main() -> None:
         "hub": _cmd_hub,
         "pack": _cmd_pack,
         "template": _cmd_template,
+        "architect": _cmd_architect,
         "keys": _cmd_keys,
         "dlq": _cmd_dlq,
         "violations": _cmd_violations,
