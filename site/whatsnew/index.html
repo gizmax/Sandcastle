@@ -497,7 +497,7 @@
       <a class="brand" href="/" aria-label="Sandcastle home">
         <span class="glyph" aria-hidden="true">🏰</span>
         <span>Sandcastle</span>
-        <span class="tm">v0.33.0</span>
+        <span class="tm">v0.40.0</span>
       </a>
       <nav class="primary" aria-label="Primary">
         <a class="muted" href="/pricing/">Pricing</a>
@@ -530,9 +530,9 @@
           <aside class="latest-stamp" aria-label="Latest release">
             <div class="ls-cap"><span>Latest release</span><span class="dot" aria-hidden="true"></span></div>
             <div class="ls-body">
-              <span class="ls-ver">v0.33.0</span>
-              <div class="ls-name">Your Box, Your Brains</div>
-              <div class="ls-meta"><span>June&nbsp;4,&nbsp;2026</span><span><a href="#v0-33-0">Read&nbsp;↓</a></span></div>
+              <span class="ls-ver">v0.40.0</span>
+              <div class="ls-name">Build Once, Run Anywhere</div>
+              <div class="ls-meta"><span>June&nbsp;11,&nbsp;2026</span><span><a href="#v0-40-0">Read&nbsp;↓</a></span></div>
             </div>
           </aside>
         </div>
@@ -545,12 +545,132 @@
     <section class="log" aria-label="Release log">
       <div class="wrap">
 
+        <!-- ===================== v0.40.0 ===================== -->
+        <article class="entry is-latest reveal" id="v0-40-0" aria-labelledby="t-0400">
+          <div class="entry-margin">
+            <span class="ver">v0.40.0</span>
+            <span class="ver-date">June 11, 2026</span>
+            <span class="ver-tag">★ Latest</span>
+            <div class="ver-rule" aria-hidden="true"></div>
+          </div>
+          <div class="entry-body">
+            <h2 class="entry-title" id="t-0400">Build Once, Run Anywhere</h2>
+            <p class="entry-lede">
+              Describe what you want in plain English and Sandcastle builds the workflow. Run it on any model — Claude, GPT, Mistral, a local model on your own box — and move it between them with one line. Deploy it your way: cloud, your server, fully air-gapped, EU-only. And it gets better over time, on its own. This release rebuilds the whole experience around that loop — a new <span class="ic">Omnibox</span>, a three-verb navigation, a self-explanatory builder, a fresh look — and adds the machinery behind it: a signed Black&nbsp;Box audit trail, an Architect that writes workflows until they actually work, self-healing, a Model Time&nbsp;Machine, and a private Mesh across your own machines. The biggest drop yet.
+            </p>
+
+            <ul class="feats">
+              <li class="feat">
+                <span class="feat-chip headline">feat · headline</span>
+                <div class="feat-text">
+                  <h3>The Omnibox — describe it, ship it</h3>
+                  <p>The dashboard now opens with one input: <em>"What should your agent do?"</em> Write a task in plain English, Sandcastle generates the workflow, you run it. Also one keystroke away with <code>⌘K</code>. The shortest path from an idea to a running agent.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat · dashboard</span>
+                <div class="feat-text">
+                  <h3>Three verbs, not thirty doors</h3>
+                  <p>Navigation collapses to <strong>Build / Run / Improve</strong> (plus a quiet Operate) with a three-tier density control — Essentials / Standard / Everything — replacing the old binary Lite/Full toggle. Simple at the top, the full depth one click down.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>The Black Box — a flight recorder for agents</h3>
+                  <p>A tamper-evident, signed hash-chain over every recorded run, a <code>black_box</code> compliance mode, and <code>sandcastle audit verify</code>. A replayable, verifiable audit trail — built for the EU&nbsp;AI&nbsp;Act era.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>The Architect — generate until it works</h3>
+                  <p>Generate → run → judge → refine, in a loop, until the workflow actually passes — then ship it with a recorded cassette as a <strong>Proven</strong> template. Describe a result tonight, wake up to a verified workflow.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Self-Healing Workflows</h3>
+                  <p>A failed run gets an LLM diagnosis, a patched workflow version behind an approval gate, and regression tracking — so the same break doesn't happen twice. Workflows that fix themselves overnight.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Model Time Machine</h3>
+                  <p>New model dropped? Replay your <em>real</em> recorded workload against it and get a quality / cost / latency delta — decide on data, not benchmarks. Dry-run pricing is free; live replay runs under a hard budget.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat</span>
+                <div class="feat-text">
+                  <h3>Sandcastle Mesh — your own private cloud</h3>
+                  <p>Register multiple machines and route steps by capability — <code>requires: [gpu, browser]</code> — across your own hardware. A Fleet view shows node health. GPU steps to the box with the GPU, browser steps to the box with the browser.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat · dashboard</span>
+                <div class="feat-text">
+                  <h3>Night Shift &amp; Mission Control</h3>
+                  <p><strong>Night Shift</strong> shows what your agent learned overnight — adapter lineage, nightly eval deltas. <strong>Mission Control</strong> is a full-screen live run theater: the DAG lights up as it executes, with live cost and a thought stream.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat · templates</span>
+                <div class="feat-text">
+                  <h3>Verified template bundles</h3>
+                  <p>Every shared template can carry a replayable proof it works. <code>sandcastle template verify</code> replays the bundled cassettes offline, $0, and reports PASS/FAIL — check it works locally before running anything live. No more "trust me" YAML.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">feat · builder</span>
+                <div class="feat-text">
+                  <h3>A builder that explains itself</h3>
+                  <p>Every step type now has a hover card — what it does, when to use it, an example, a cost note — plus inline field help, a plain-English summary of each step, and live validation on the canvas. Build complex workflows without reading the docs.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-docs">design</span>
+                <div class="feat-text">
+                  <h3>A new look — and a new site</h3>
+                  <p>A warm "Sand &amp; Ink" identity: instrument-panel layout, control-room status lights, illustrated empty states, and a settle-based motion system. The marketing site got an editorial Manifesto rebuild end to end.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-fix">fix</span>
+                <div class="feat-text">
+                  <h3>No more garbled steps</h3>
+                  <p>LLM steps now pin a low temperature, so output stays deterministic across providers — some endpoints default to 1.0 and produce garbage. An empty model response now <strong>fails</strong> with a clear message instead of a silent "completed". And <code>/generate</code> works with any configured provider, not just one — it tells you up front when none is connected.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-fix">fix · security</span>
+                <div class="feat-text">
+                  <h3>Signed releases &amp; a security policy</h3>
+                  <p>A <code>SECURITY.md</code> with coordinated disclosure, and releases now ship <code>SHA256SUMS</code> with keyless cosign signatures — verify what you downloaded is what we published.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip">milestone</span>
+                <div class="feat-text">
+                  <div class="stat-strip">
+                    <div class="s"><b>21</b><span>Branches integrated</span></div>
+                    <div class="s"><b>17.9k</b><span>Tests green (py + web)</span></div>
+                    <div class="s"><b>8</b><span>New features shipped</span></div>
+                    <div class="s"><b>1</b><span>Workflow, any model, anywhere</span></div>
+                  </div>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </article>
+
         <!-- ===================== v0.33.0 ===================== -->
-        <article class="entry is-latest reveal" id="v0-33-0" aria-labelledby="t-0330">
+        <article class="entry reveal" id="v0-33-0" aria-labelledby="t-0330">
           <div class="entry-margin">
             <span class="ver">v0.33.0</span>
             <span class="ver-date">June 4, 2026</span>
-            <span class="ver-tag">★ Latest</span>
             <div class="ver-rule" aria-hidden="true"></div>
           </div>
           <div class="entry-body">
