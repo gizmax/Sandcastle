@@ -1,35 +1,41 @@
 # Sandcastle
 
-**Your box. Your brains. Your data.** Sandcastle is sovereign agent infrastructure: an open-source, production-ready workflow orchestrator that runs AI agents entirely on hardware you control - local models at $0/run, hard data-residency enforcement, and a tamper-evident audit trail. When you want the cloud, it's there too: 7 AI providers with auto-failover, 22 step types including Claude Managed Agents, 15 agent templates, 4 OCR engines, EU AI Act compliance features, and a full-featured dashboard. Define workflows in YAML or let AI design them for you. European-built.
+**Build once. Run anywhere.** Sandcastle is an open-source, production-ready orchestrator for AI agents. **Describe a workflow in plain English and it builds it** (or write the YAML yourself); run it on **any model** — Claude, GPT, Mistral, or a local model on your own box — and move between them with one line; deploy it **your way** — cloud, your own server, fully air-gapped, or EU-only; and it **gets better over time**, on its own. Local models run at `$0/run` with hard data-residency enforcement and a tamper-evident audit trail; the cloud is there too, with 7 providers and auto-failover, 22 step types, verified templates, and a full dashboard. Sovereign by default. European-built.
 
-[![PyPI](https://img.shields.io/badge/PyPI-v0.33.0-blue?style=flat-square)](https://pypi.org/project/sandcastle-ai/0.33.0/)
+[![PyPI](https://img.shields.io/badge/PyPI-v0.40.0-blue?style=flat-square)](https://pypi.org/project/sandcastle-ai/0.40.0/)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-15000%2B%20passing-brightgreen?style=flat-square)](https://github.com/gizmax/Sandcastle/actions)
+[![Tests](https://img.shields.io/badge/tests-17900%2B%20passing-brightgreen?style=flat-square)](https://github.com/gizmax/Sandcastle/actions)
 [![EU AI Act](https://img.shields.io/badge/EU%20AI%20Act-Compliant-009639?style=flat-square)](https://sandcastle-ai.eu/eu-ai-act/)
 [![Website](https://img.shields.io/badge/Website-sandcastle--ai.eu-blue?style=flat-square)](https://sandcastle-ai.eu)
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Dashboard-F59E0B?style=flat-square)](https://gizmax.github.io/Sandcastle/)
 
-> **v0.33.0 — "Your Box, Your Brains"** The cloud was always someone else's computer. This release is yours.
+> **v0.40.0 — "Build Once, Run Anywhere"** Describe what you want in plain English and Sandcastle builds the workflow. Run it on any model. Deploy it your way. And it gets better over time, on its own.
 >
-> NVIDIA put a Grace-Blackwell supercomputer and 128GB of unified memory on a desk. Most teams will run a demo and screenshot the tokens-per-second. We made Sandcastle treat it like home.
+> This release rebuilds the whole experience around that loop — and adds the machinery behind it:
 >
-> - **Spark Mode, zero flags.** Sandcastle auto-detects an NVIDIA DGX Spark and flips to local-first defaults on its own. A startup banner, a dashboard badge, and `GET /api/runtime` all say the same thing: you're running on your own silicon.
-> - **Local inference, first-class.** A new `nim/*` provider (NVIDIA NIM, OpenAI-compatible) joins `ollama` and `oMLX` - every one at `region=local`, `$0.00/run`, data-stays-on-box. On a Spark, the default model auto-routes to the local NIM. No token meter. No egress.
-> - **Overnight Self-Tune.** The evolution loop can train a task-specific LoRA adapter on a workflow's *own* eval data and route to it. The box doesn't just run your task - it gets better at it, on your data, for $0.
-> - **Also:** deterministic cassettes (+ strict mode), shareable run permalinks with a 30-day TTL, `sandcastle run --local`, a growing Template Hub, the 2026-06 model wave (GPT Image 2, Gemini 3.5, GPT-5.2), and a hardening sweep (browser-step SSRF guard, share-token TTL, NIM model-id validation, a sync run endpoint that no longer lies "completed", and a `sandbox_exec` fix for browser dom/computer-use/lightpanda).
+> - **The Omnibox.** The dashboard opens with one input: *"What should your agent do?"* Describe a task, Sandcastle generates the workflow, you run it (also one keystroke away with `⌘K`).
+> - **The Black Box.** A tamper-evident, signed hash-chain over every recorded run, a `black_box` compliance mode, and `sandcastle audit verify` — a replayable, verifiable audit trail for the EU AI Act era.
+> - **The Architect.** Generate → run → judge → refine until the workflow actually works, then ship it with a recorded cassette as a **Proven** template.
+> - **Self-Healing Workflows, the Model Time Machine, and Sandcastle Mesh.** Failed runs diagnose and patch themselves behind an approval gate; replay your *real* workload against a new model for a quality/cost/latency delta; route steps by capability (`requires: [gpu, browser]`) across your own machines.
+> - **A self-explanatory builder, Night Shift, Mission Control,** and **verified template bundles (`.sctpl`)** with replayable proofs.
+> - **A new "Sand & Ink" look,** a three-verb navigation, and a determinism fix so LLM steps no longer garble across providers.
 >
-> <sub>NVIDIA, DGX, and DGX Spark are trademarks of NVIDIA Corporation.</sub>
+> PyPI: `pip install -U sandcastle-ai`. &nbsp; Full notes: [CHANGELOG.md](CHANGELOG.md) · [Releases](https://github.com/gizmax/Sandcastle/releases)
 >
-> PyPI: `pip install sandcastle-ai==0.33.0`.
->
-> Previous: **v0.32.0 - "Claude Agents Deep Integration"** (May 16, 2026): Memory Stores, Multiagent, Outcomes, Webhooks, Skills Publisher, Trajectory Replay, Agent SDK runtime, Computer Use, MCP Elicitation, Live Agent Reasoning panel.
+> Previous: **v0.33.0 — "Your Box, Your Brains"** (June 4, 2026): auto-detected Spark Mode, first-class local `nim/*` inference at $0/run, and Overnight Self-Tune (LoRA) on your own data.
 >
 
 <p align="center">
   <a href="https://gizmax.github.io/Sandcastle/">
-    <img src="docs/screenshots/overview.png" alt="Sandcastle Dashboard" width="720" />
+    <img src="docs/screenshots/overview.png" alt="Sandcastle dashboard — Overview with the Omnibox" width="820" />
   </a>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/overview-dark.png" alt="Overview, dark mode" width="270" />
+  <img src="docs/screenshots/builder.png" alt="Workflow Builder with hover help" width="270" />
+  <img src="docs/screenshots/run-detail.png" alt="Run detail" width="270" />
 </p>
 
 <p align="center">
