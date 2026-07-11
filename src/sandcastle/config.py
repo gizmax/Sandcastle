@@ -111,6 +111,11 @@ class Settings(BaseSettings):
     # Max concurrent sandboxes (prevents rate limiting)
     max_concurrent_sandboxes: int = 5
 
+    # Allow non-admin tenants to run in-process "code" steps. Off by default so
+    # multi-tenant deployments stay safe; single-tenant self-hosted operators who
+    # intentionally use code steps can opt in via CODE_STEPS_ALLOW_UNTRUSTED=true.
+    code_steps_allow_untrusted: bool = False
+
     # Database (empty = local SQLite mode)
     database_url: str = ""
 

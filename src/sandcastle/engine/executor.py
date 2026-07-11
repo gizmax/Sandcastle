@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import collections
 import copy
@@ -2858,7 +2859,17 @@ async def _execute_http_step(
         # Don't pass depends_on for URL - auto-inject is for prompts, not URLs
         url = resolve_templates(cfg.url, context).strip()
 
-        # SSRF prevention for HTTP steps - block private/internal networks
+        # SSRF prevention for HTTP steps - block private/internal networks.
+        # Reuse the webhook dispatcher's blocked-range list (IPv4-mapped, CGNAT,
+        # ULA, loopback, ...) so the ranges stay defined in one place.
+        # TODO(ssrf): this validates the resolved IPs but hands the *hostname* to
+        # httpx, which re-resolves at connect time. A TTL=0 rebind between this
+        # check and httpx's own resolution is therefore still theoretically
+        # possible. Closing that fully needs a custom httpx transport that pins and
+        # dials the validated address; that (and fail-closing on gaierror, which
+        # would change behavior for mocked-transport callers) is intentionally
+        # deferred. Redirects are blocked below to limit the remaining surface,
+        # mirroring the webhook dispatcher's accepted mitigation.
         try:
             import ipaddress as _ipaddress
             import socket as _socket
@@ -2887,7 +2898,7 @@ async def _execute_http_step(
                                     duration_seconds=time.monotonic() - started_at,
                                 )
                 except _socket.gaierror:
-                    pass  # DNS resolution failure - let httpx handle it naturally
+                    pass  # DNS resolution failure - let httpx surface it naturally
         except ImportError:
             pass
 
@@ -2988,7 +2999,11 @@ async def _execute_http_step(
             len(body) if body else 0, len(url),
         )
 
-        async with httpx.AsyncClient(timeout=step.timeout) as client:
+        async with httpx.AsyncClient(
+            timeout=step.timeout,
+            follow_redirects=False,
+            max_redirects=0,
+        ) as client:
             resp = await client.request(
                 method=cfg.method.upper(),
                 url=url,
@@ -3004,6 +3019,11 @@ async def _execute_http_step(
         # Try to parse as JSON
         try:
             output = resp.json()
+            # Expose status_code without changing the existing output shape so that
+            # {steps.X.output} and {steps.X.output.field} references keep working.
+            # setdefault avoids clobbering a real "status_code" field from the API.
+            if isinstance(output, dict):
+                output.setdefault("status_code", resp.status_code)
         except Exception:
             raw_text = resp.text
             truncated = len(raw_text) > 5000
@@ -3019,6 +3039,19 @@ async def _execute_http_step(
 
         duration = time.monotonic() - started_at
         call_cost = cfg.cost_per_call if cfg.cost_per_call else 0.0
+        # Surface HTTP errors as failed steps so retry.on_failure triggers and
+        # downstream steps don't consume an error body as valid data. Set
+        # fail_on_error: false on the step to keep the legacy pass-through behavior.
+        if cfg.fail_on_error and resp.status_code >= 400:
+            reason = resp.reason_phrase or "request failed"
+            return StepResult(
+                step_id=step.id,
+                output=output,
+                cost_usd=call_cost,
+                duration_seconds=duration,
+                status="failed",
+                error=f"HTTP {resp.status_code}: {reason}",
+            )
         return StepResult(
             step_id=step.id,
             output=output,
@@ -3187,6 +3220,47 @@ _CODE_STEP_BLOCKED_PATTERNS = re.compile(
     r"__reduce__|__reduce_ex__|pickle",
     re.IGNORECASE,
 )
+
+# A str.format / format_map field that reaches a dunder via attribute access,
+# e.g. "{0.__globals__[settings]}".format(fn). The dunder lives inside a string
+# literal so the plain blocklist above never sees it; _validate_code_step_ast
+# inspects string constants for this pattern instead. Plain formatting such as
+# "{}|{:.2f}".format(a, b) is intentionally NOT matched (no ".__" inside braces).
+_FORMAT_DUNDER_FIELD = re.compile(r"\{[^{}]*\.__\w")
+
+
+def _validate_code_step_ast(code: str) -> str | None:
+    """Structurally validate code-step source before exec.
+
+    Returns an error string if the code should be rejected, else None. This
+    complements the regex blocklist (belt and suspenders) by rejecting whole
+    categories of escape vectors that text scanning misses:
+    - any import statement (Import / ImportFrom)
+    - any attribute access whose name is a dunder (starts and ends with __),
+      which covers __globals__, __class__, __subclasses__, etc. regardless of
+      how the string is spelled in source (this also covers f-strings, whose
+      dunder access compiles to real Attribute nodes)
+    - any string literal containing a ``str.format`` field that traverses into a
+      dunder (e.g. ``"{0.__globals__[settings]}"``), which the plain blocklist
+      cannot see because the dunder is hidden inside the literal. Ordinary
+      formatting like ``"{}|{:.2f}".format(a, b)`` is allowed.
+    Normal attribute access (e.g. obj.value) and plain ``.format`` are allowed.
+    """
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as exc:
+        return f"Code step has a syntax error: {exc}"
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            return "Code step uses 'import', which is not allowed in the restricted sandbox"
+        if isinstance(node, ast.Attribute):
+            attr = node.attr
+            if len(attr) > 4 and attr.startswith("__") and attr.endswith("__"):
+                return f"Code step accesses blocked dunder attribute '{attr}'"
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if _FORMAT_DUNDER_FIELD.search(node.value):
+                return "Code step uses a format string that traverses a dunder attribute"
+    return None
 
 
 def _resolve_params_deep(obj: Any, context: RunContext) -> Any:
@@ -4866,42 +4940,33 @@ async def _execute_code_step(
                 duration_seconds=time.monotonic() - started_at,
             )
 
+        # Guard: structural AST validation (belt and suspenders with the regex
+        # blocklist). Rejects imports and dunder-attribute traversal that text
+        # scanning can miss. The fully robust isolation is the out-of-process
+        # sandbox backend; this in-process path is admin-gated (fix A) plus these
+        # mitigations.
+        ast_error = _validate_code_step_ast(code)
+        if ast_error:
+            return StepResult(
+                step_id=step.id,
+                status="failed",
+                error=ast_error,
+                duration_seconds=time.monotonic() - started_at,
+            )
+
         # Inject context: _input and _steps
         # NOTE: 'type' is intentionally excluded - it provides access to
         # __subclasses__() which can be used for sandbox escape.
         import base64 as _b64_mod
 
-        # Safe file reader: only allows reading from uploads / data directory
+        # Build the file helpers in a dedicated module whose __globals__ holds no
+        # application secrets, so a format-string traversal through these helpers
+        # cannot reach settings / async_session (see code_sandbox_helpers.py).
         from sandcastle.config import settings as _code_settings
+        from sandcastle.engine.code_sandbox_helpers import make_code_sandbox_helpers
 
         _code_data_dir = Path(_code_settings.data_dir).resolve()
-
-        def _read_file_b64(file_path: str) -> str:
-            """Read a file from disk and return its base64-encoded content."""
-            p = Path(file_path).resolve()
-            if not p.is_relative_to(_code_data_dir):
-                raise PermissionError(f"Access denied: {file_path} is outside data directory")
-            if not p.exists():
-                raise FileNotFoundError(f"File not found: {file_path}")
-            return _b64_mod.b64encode(p.read_bytes()).decode("ascii")
-
-        def _save_file_b64(file_path: str, dest_name: str) -> str:
-            """Read a file, base64-encode it, save to a temp file, return the temp path.
-
-            Use this instead of read_file_b64 when the base64 would be too large
-            to store in the workflow context (>5MB). The returned path can be used
-            with {file:/path} syntax in HTTP step bodies for lazy loading.
-            """
-            p = Path(file_path).resolve()
-            if not p.is_relative_to(_code_data_dir):
-                raise PermissionError(f"Access denied: {file_path} is outside data directory")
-            if not p.exists():
-                raise FileNotFoundError(f"File not found: {file_path}")
-            b64_data = _b64_mod.b64encode(p.read_bytes()).decode("ascii")
-            dest = _code_data_dir / "tmp" / dest_name
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(b64_data)
-            return f"@file:{dest}"
+        _read_file_b64, _save_file_b64 = make_code_sandbox_helpers(_code_data_dir)
 
         exec_globals: dict[str, Any] = {
             "__builtins__": {
@@ -4943,18 +5008,15 @@ async def _execute_code_step(
         # Run exec() in a thread with a timeout to prevent infinite loops/DoS.
         # The step-level timeout (default 300s) applies here, but we cap code
         # steps at 30s since they should be fast data transformations.
-        # NOTE: Python threads cannot be forcefully killed. The timeout only
-        # unblocks the caller; the worker thread keeps running. We use a
-        # threading.Event to signal cancellation and check it in a custom
-        # builtins range() wrapper, providing cooperative cancellation for
-        # loops. Truly uncooperative code (e.g. tight C-extension loops)
-        # will leak the thread, but the daemon thread pool ensures it won't
-        # block process exit.
+        # NOTE: Python threads cannot be forcefully killed. There is no
+        # cooperative cancellation here - the timeout only unblocks the caller,
+        # while the exec() worker thread keeps running to completion in the
+        # background. We abandon the pool (shutdown(wait=False)) so a runaway
+        # thread does not block returning the failed result; the leaked thread
+        # dies with the process on exit.
         import concurrent.futures
-        import threading
 
         _CODE_STEP_TIMEOUT = min(step.timeout, 30)
-        _cancel_event = threading.Event()
 
         def _run_code():
             exec(code, exec_globals)  # noqa: S102
@@ -4965,7 +5027,6 @@ async def _execute_code_step(
             try:
                 future.result(timeout=_CODE_STEP_TIMEOUT)
             except concurrent.futures.TimeoutError:
-                _cancel_event.set()
                 # Abandon the thread pool without waiting for it to finish;
                 # shutdown(wait=False) lets the daemon thread die with the process.
                 pool.shutdown(wait=False)
@@ -5338,9 +5399,40 @@ async def _execute_loop_step(
                 child_context.step_results[sub_step_id] = sub_result
                 total_cost += sub_result.cost_usd
 
-            # Sync child costs back to parent so budget checks see ongoing costs
-            context.costs.extend(child_context.costs)
-            child_context.costs.clear()
+            # Mid-loop budget enforcement. execute_step_with_retry returns cost in
+            # the StepResult but does not append to context.costs (that happens once
+            # via _handle_step_result when this loop step completes). So we project
+            # the parent's accumulated cost plus this loop's running total and abort
+            # as soon as the budget is exceeded, instead of overshooting until the
+            # whole loop finishes. We must not append to context.costs here or the
+            # loop cost would be double-counted when the loop StepResult is handled.
+            if context.max_cost_usd is not None and context.max_cost_usd > 0:
+                projected = context.total_cost + total_cost
+                if projected >= context.max_cost_usd:
+                    logger.warning(
+                        "Loop step '%s' aborted at iteration %d: projected cost "
+                        "$%.4f reached budget $%.4f",
+                        step.id, i, projected, context.max_cost_usd,
+                    )
+                    results.append(
+                        child_context.step_outputs.get(cfg.step_ids[-1])
+                        if cfg.step_ids else item
+                    )
+                    return StepResult(
+                        step_id=step.id,
+                        output={
+                            "status": "budget_exceeded",
+                            "completed_iterations": i + 1,
+                            "results": results,
+                        },
+                        cost_usd=total_cost,
+                        duration_seconds=time.monotonic() - started_at,
+                        status="failed",
+                        error=(
+                            f"Loop aborted: budget ${context.max_cost_usd:.4f} "
+                            f"exceeded after {i + 1} iteration(s)"
+                        ),
+                    )
 
             # Collect last sub-step output as the loop iteration result
             last_step = cfg.step_ids[-1] if cfg.step_ids else None
@@ -5440,8 +5532,11 @@ async def _execute_race_step(
             for i, branch in enumerate(cfg.branches)
         }
         pending = set(tasks.keys())
-        winning_output = None
-        fallback_output = None  # best non-validated result as fallback
+        # Distinct sentinel so a branch that legitimately produces None is still
+        # recognized as a winner (rather than being treated as "no winner yet").
+        _UNSET = object()
+        winning_output: Any = _UNSET
+        fallback_output: Any = _UNSET  # best non-validated result as fallback
 
         while pending:
             done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
@@ -5470,13 +5565,13 @@ async def _execute_race_step(
                             winning_output = result["output"]
                     except Exception:
                         pass
-                    if fallback_output is None:
+                    if fallback_output is _UNSET:
                         fallback_output = result["output"]
                 else:
                     # No validator - take first non-error result
                     winning_output = result["output"]
 
-            if winning_output is not None:
+            if winning_output is not _UNSET:
                 # Cancel remaining tasks
                 for t in pending:
                     t.cancel()
@@ -5489,11 +5584,11 @@ async def _execute_race_step(
         # Accumulate costs from ALL branches (winners, losers, and cancelled)
         total_cost = sum(branch_costs.values())
 
-        if winning_output is None:
+        if winning_output is _UNSET:
             winning_output = fallback_output
 
         duration = time.monotonic() - started_at
-        if winning_output is None:
+        if winning_output is _UNSET:
             return StepResult(
                 step_id=step.id,
                 status="failed",
@@ -7744,6 +7839,8 @@ async def _prepare_and_run_step(
     # --- Fan-out (parallel_over) - must come BEFORE type dispatch ---
     # so that hybrid types (llm, http, etc.) also get per-item contexts.
     if step.parallel_over:
+        import time
+
         # Strip {braces} - parallel_over may come from YAML as "{steps.x.output.y}"
         fan_out_path = step.parallel_over.strip("{}")
         items = resolve_variable(fan_out_path, context)
@@ -7781,6 +7878,9 @@ async def _prepare_and_run_step(
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         fan_out_items: list = []
+        fan_out_cost = 0.0
+        fan_out_failed = 0
+        fan_out_started = time.monotonic()
         for i, result in enumerate(results):
             if isinstance(result, Exception):
                 logger.warning(
@@ -7800,7 +7900,9 @@ async def _prepare_and_run_step(
                 )
             async with context._lock:
                 context.costs.append(result.cost_usd)
+            fan_out_cost += result.cost_usd
             if result.status == "failed":
+                fan_out_failed += 1
                 on_fail = step.retry.on_failure if step.retry else "abort"
                 if use_dead_letter:
                     dlq_ok = await _send_to_dead_letter(
@@ -7820,8 +7922,34 @@ async def _prepare_and_run_step(
                     fan_out_items.append(None)
             else:
                 fan_out_items.append(result.output)
+
+        # Persist an aggregate run step and record a step result, mirroring the
+        # single-step _handle_step_result path. Without this there is no run-step
+        # row for the fan-out step and downstream steps.X.status references
+        # resolve wrong.
+        aggregate_status = "completed"
+        aggregate = StepResult(
+            step_id=step_id,
+            output=fan_out_items,
+            cost_usd=fan_out_cost,
+            duration_seconds=time.monotonic() - fan_out_started,
+            status=aggregate_status,
+        )
         async with context._lock:
             context.step_outputs[step_id] = fan_out_items
+            context.step_results[step_id] = aggregate
+        await _save_run_step(
+            run_id=context.run_id,
+            step_id=step_id,
+            status=aggregate_status,
+            output=fan_out_items,
+            cost_usd=fan_out_cost,
+            duration_seconds=aggregate.duration_seconds,
+            error=(
+                f"{fan_out_failed} of {len(results)} items failed"
+                if fan_out_failed else None
+            ),
+        )
         return
 
     # --- Hybrid step types (single execution, no parallel_over) ---

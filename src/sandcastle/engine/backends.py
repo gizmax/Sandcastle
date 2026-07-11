@@ -227,22 +227,6 @@ class E2BBackend:
                 )
                 _, npm_handle = await asyncio.gather(upload_coro, npm_coro)
 
-                # Upload tool connector files into /home/user/tools/
-                if tool_files:
-                    for fname in tool_files:
-                        _validate_tool_filename(fname)
-                    await sandbox.commands.run("mkdir -p /home/user/tools", timeout=5)
-                    tool_uploads = [
-                        sandbox.files.write(f"/home/user/tools/{fname}", content)
-                        for fname, content in tool_files.items()
-                    ]
-                    if tool_uploads:
-                        await asyncio.gather(*tool_uploads)
-                        logger.info(
-                            "Uploaded %d tool files to sandbox",
-                            len(tool_uploads),
-                        )
-
                 # Wait for npm to finish using event-based polling with a
                 # hard deadline instead of a naive sleep loop.
                 try:
@@ -267,6 +251,26 @@ class E2BBackend:
                         )
                 except Exception as exc:
                     logger.warning("npm install error: %s", exc)
+
+            # Upload tool connector files into /home/user/tools/. This runs
+            # regardless of whether a prebaked template is used: a custom template
+            # ships the runner + SDK, but tool connectors are workflow-specific and
+            # must always be written into the sandbox or the runner hits
+            # "module not found" at runtime.
+            if tool_files:
+                for fname in tool_files:
+                    _validate_tool_filename(fname)
+                await sandbox.commands.run("mkdir -p /home/user/tools", timeout=5)
+                tool_uploads = [
+                    sandbox.files.write(f"/home/user/tools/{fname}", content)
+                    for fname, content in tool_files.items()
+                ]
+                if tool_uploads:
+                    await asyncio.gather(*tool_uploads)
+                    logger.info(
+                        "Uploaded %d tool files to sandbox",
+                        len(tool_uploads),
+                    )
 
             handle = await sandbox.commands.run(
                 f"node /home/user/{runner_file}",

@@ -1278,6 +1278,14 @@ def _cmd_run(args: argparse.Namespace) -> None:
         _run_local(workflow_name, input_data, args.max_cost, record=record, replay=replay)
         return
 
+    # A .yaml/.yml argument that does not exist is almost certainly a mistyped file
+    # path, not a remote workflow name. Fail clearly instead of sending the literal
+    # filename to the server and surfacing a generic 404.
+    _wf_path = Path(args.workflow)
+    if _wf_path.suffix in (".yaml", ".yml") and not _wf_path.exists():
+        print(f"Error: file not found: {args.workflow}", file=sys.stderr)
+        sys.exit(1)
+
     client = _get_client(args)
 
     # Build input data
@@ -4184,6 +4192,34 @@ def _cmd_violations(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _parse_ollama_target(raw: str | None) -> tuple[str, int]:
+    """Parse an OLLAMA_HOST value into a (host, port) tuple for a socket probe.
+
+    Accepts values with or without a scheme, e.g. "http://host.docker.internal:11434",
+    "host.docker.internal:11434", or "host.docker.internal". Defaults to
+    localhost:11434 when unset or unparseable.
+    """
+    if not raw or not raw.strip():
+        return ("localhost", 11434)
+    value = raw.strip()
+    # Strip any scheme (http://, https://) so we are left with host[:port][/path].
+    if "://" in value:
+        value = value.split("://", 1)[1]
+    # Drop any path/query component.
+    value = value.split("/", 1)[0]
+    host = value
+    port = 11434
+    if ":" in value:
+        host, _, port_str = value.rpartition(":")
+        try:
+            port = int(port_str)
+        except ValueError:
+            host, port = value, 11434
+    if not host:
+        host = "localhost"
+    return (host, port)
+
+
 def _cmd_providers(args: argparse.Namespace) -> None:  # noqa: ARG001
     """List configured AI providers and their status."""
     from sandcastle.engine.generator import _PROVIDER_CONFIGS
@@ -4210,10 +4246,16 @@ def _cmd_providers(args: argparse.Namespace) -> None:  # noqa: ARG001
 
         # Determine configured status
         if not key_env:
-            # Ollama - check if running (best-effort socket probe)
+            # Ollama - check if running (best-effort socket probe).
+            # Respect OLLAMA_HOST / settings.ollama_host so Docker/Spark users who
+            # point at host.docker.internal are probed at the right target.
             import socket
+
+            from sandcastle.config import settings as _ollama_settings
+            _ollama_raw = os.environ.get("OLLAMA_HOST") or _ollama_settings.ollama_host
+            _ollama_host, _ollama_port = _parse_ollama_target(_ollama_raw)
             try:
-                s = socket.create_connection(("localhost", 11434), timeout=1)
+                s = socket.create_connection((_ollama_host, _ollama_port), timeout=1)
                 s.close()
                 configured = True
                 status_label = "Running"

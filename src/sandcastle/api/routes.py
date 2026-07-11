@@ -5094,7 +5094,7 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
             run_id=run_id,
             storage=storage,
             max_cost_usd=budget,
-            admin_trusted=True,
+            admin_trusted=is_admin(req) or settings.code_steps_allow_untrusted,
             tenant_id=tenant_id,
         )
     except Exception as exc:
@@ -5357,7 +5357,12 @@ async def run_workflow_async(request: WorkflowRunRequest, req: Request) -> ApiRe
 
     # Enqueue the job - clean up orphan run on failure
     try:
-        await enqueue_workflow(yaml_content, request.input, run_id, admin_trusted=True)
+        await enqueue_workflow(
+            yaml_content,
+            request.input,
+            run_id,
+            admin_trusted=is_admin(req) or settings.code_steps_allow_untrusted,
+        )
     except Exception as e:
         # Mark the run as failed so it doesn't stay stuck as "queued"
         try:

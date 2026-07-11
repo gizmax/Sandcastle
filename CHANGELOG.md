@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.40.2] - 2026-07-11 - "Hardened Steps"
+
+Security and correctness patch from a full audit sweep (engine, API, CLI, sandbox, deps). No new
+features; existing behavior is preserved except where it was unsafe or wrong.
+
+### Security
+- In-process `code` steps are now gated to admin callers by default. The main run endpoints no
+  longer pass `admin_trusted=True` unconditionally; a normal tenant can no longer execute
+  in-process code steps unless the caller is admin or the operator opts in via
+  `CODE_STEPS_ALLOW_UNTRUSTED=true`.
+- Hardened the in-process code-step sandbox against blocklist bypass: the file helpers moved to a
+  dedicated module whose namespace holds no secrets (closes the `str.format`/`__globals__`
+  traversal to `settings`), and an AST validation pass rejects `import`, dunder-attribute access,
+  and format strings that traverse a dunder attribute (ordinary `str.format` such as
+  `"{}|{:.2f}".format(a, b)` keeps working). The out-of-process sandbox backend remains the fully
+  robust isolation.
+- Fixed a path-traversal write in the code-step `save_file_b64` helper: the destination is now
+  resolved and confined to the data `tmp` directory.
+- The Memory MCP server now fails closed over `streamable-http`: it requires `MEMORY_MCP_TOKEN`
+  (enforced by a constant-time bearer check) and refuses to start unauthenticated outside local
+  mode. The stdio transport is unchanged.
+- HTTP steps block redirects and reuse the webhook dispatcher's blocked-network ranges for the
+  SSRF pre-flight check.
+- Raised dependency floors past known CVEs: `jinja2>=3.1.6` (report extra) and
+  `python-multipart>=0.0.18`.
+
+### Fixed
+- HTTP steps now fail on 4xx/5xx responses by default (set `fail_on_error: false` to keep the
+  legacy pass-through), so `retry.on_failure` triggers and downstream steps no longer consume an
+  error body as valid data. The response `status_code` is now exposed on JSON dict outputs.
+- Loop steps enforce the run budget mid-loop instead of only after every iteration completes,
+  preventing large overshoots of `max_cost_usd`.
+- Fan-out (`parallel_over`) steps now persist an aggregate run-step record and set
+  `step_results`, so their status is queryable and downstream `steps.X.status` references resolve.
+- Race steps can now select a branch whose winning output is legitimately `None` instead of
+  reporting "all branches failed".
+- E2B custom (prebaked) templates no longer drop workflow tool-connector files; `tool_files` are
+  uploaded regardless of whether a template is set.
+- `sandcastle providers` probes Ollama at `OLLAMA_HOST` instead of a hardcoded
+  `localhost:11434`, so Docker/Spark users see accurate status.
+- `sandcastle run <missing>.yaml` reports a clear "file not found" error instead of sending the
+  filename to the server and surfacing a generic 404.
+- Removed a misleading code-step cancellation comment and the dead cancellation event; the
+  in-process timeout behavior is now documented accurately.
+- Fixed `.env.example`: replaced the dead `SANDSTORM_URL` (wrong port) with `SANDCASTLE_URL`
+  (`http://localhost:8080`) and moved `E2B_API_KEY` into a backend-conditional section.
+
 ## [0.40.1] - 2026-07-11 - "Docker on Your Box"
 
 Patch release for teams installing Sandcastle through Docker Compose and for NVIDIA DGX Spark

@@ -57,3 +57,50 @@ def test_run_local_resolves_builtin_template_name(tmp_path, capsys):
         assert exc.code in (0, 2), f"unexpected exit code {exc.code}"
     combined = capsys.readouterr()
     assert "not found" not in (combined.out + combined.err)
+
+
+# ---------------------------------------------------------------------------
+# Audit sweep 0.40.2 - CLI regression tests
+# ---------------------------------------------------------------------------
+
+
+def test_run_missing_yaml_reports_file_not_found(capsys):
+    """Fix 7: a missing .yaml arg on the remote path fails clearly, not as a 404."""
+    import argparse
+
+    from sandcastle.__main__ import _cmd_run
+
+    args = argparse.Namespace(
+        workflow="/nonexistent/does_not_exist.yaml",
+        max_cost=None,
+        local=False,
+        record=None,
+        replay=None,
+    )
+    with pytest.raises(SystemExit) as exc_info:
+        _cmd_run(args)
+    assert exc_info.value.code == 1
+    assert "file not found" in capsys.readouterr().err
+
+
+def test_parse_ollama_target_defaults():
+    """Fix 6: unset OLLAMA_HOST falls back to localhost:11434."""
+    from sandcastle.__main__ import _parse_ollama_target
+
+    assert _parse_ollama_target(None) == ("localhost", 11434)
+    assert _parse_ollama_target("") == ("localhost", 11434)
+
+
+def test_parse_ollama_target_respects_docker_host():
+    """Fix 6: OLLAMA_HOST with scheme and port is parsed into host/port."""
+    from sandcastle.__main__ import _parse_ollama_target
+
+    assert _parse_ollama_target("http://host.docker.internal:11434") == (
+        "host.docker.internal",
+        11434,
+    )
+    assert _parse_ollama_target("host.docker.internal:9999") == (
+        "host.docker.internal",
+        9999,
+    )
+    assert _parse_ollama_target("http://myhost") == ("myhost", 11434)

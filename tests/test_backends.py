@@ -136,6 +136,52 @@ class TestE2BBackend:
             assert len(events) == 1
             assert events[0].event == "result"
 
+    @pytest.mark.asyncio
+    async def test_tool_files_uploaded_with_custom_template(self):
+        """Tool connector files must be uploaded even when a prebaked template is set.
+
+        Wave-2 fix F: the tool_files upload used to be nested under
+        `if not self._template:`, so a custom template silently dropped the
+        connector files and the runner hit "module not found" at runtime.
+        """
+        backend = E2BBackend(
+            e2b_api_key="key",
+            template="sandcastle-runner",
+            execution_grace_period=0.0,
+        )
+
+        mock_sandbox = AsyncMock()
+        mock_handle = MagicMock()
+        mock_handle.exit_code = 0
+        mock_sandbox.commands.run = AsyncMock(return_value=mock_handle)
+        mock_sandbox.files.write = AsyncMock()
+        mock_sandbox.kill = AsyncMock()
+
+        tool_files = {
+            "slack.mjs": "export const send = () => {}",
+            "http.mjs": "export const get = () => {}",
+        }
+
+        with patch("e2b.AsyncSandbox") as mock_cls:
+            mock_cls.create = AsyncMock(return_value=mock_sandbox)
+            events = []
+            async for event in backend.start(
+                runner_file="runner.mjs",
+                envs={"SANDCASTLE_REQUEST": "{}"},
+                use_claude_runner=True,
+                timeout=0,
+                tool_files=tool_files,
+            ):
+                events.append(event)
+
+        # The custom template was used (no runner upload / npm install), but the
+        # tool connector files were still written into /home/user/tools/.
+        written = {
+            call_obj.args[0] for call_obj in mock_sandbox.files.write.call_args_list
+        }
+        assert "/home/user/tools/slack.mjs" in written
+        assert "/home/user/tools/http.mjs" in written
+
 
 # ---------------------------------------------------------------------------
 # Docker Backend
