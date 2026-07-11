@@ -571,7 +571,8 @@ class TestHttpStepExecutor:
             result = await _execute_http_step(step, context)
 
         assert result.status == "completed"
-        assert result.output == {"data": "test"}
+        # status_code is now attached to dict responses for downstream debugging.
+        assert result.output == {"data": "test", "status_code": 200}
         assert result.cost_usd == 0.0
         mock_client.request.assert_called_once()
         call_args = mock_client.request.call_args
@@ -588,6 +589,7 @@ class TestHttpStepExecutor:
     async def test_http_with_auth(self, context):
         mock_response = MagicMock()
         mock_response.json.return_value = {"ok": True}
+        mock_response.status_code = 200
 
         with patch("httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()

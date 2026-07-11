@@ -33,8 +33,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hmac
 import json
 import logging
+import os
 import re
 import sys
 from typing import Any, Awaitable, Callable
@@ -615,6 +617,46 @@ def create_memory_mcp_server() -> Any:
 # ---------------------------------------------------------------------------
 
 
+class _BearerAuthMiddleware:
+    """Pure-ASGI middleware enforcing a static bearer token on HTTP requests.
+
+    The Memory MCP tools take a caller-supplied ``user_id``, so an unauthenticated
+    streamable-http transport would allow cross-tenant read/write/delete. This
+    middleware rejects any request missing a valid ``Authorization: Bearer`` header
+    with a 401 before it reaches the MCP handlers.
+    """
+
+    def __init__(self, app: Any, token: str) -> None:
+        self.app = app
+        self._expected = f"Bearer {token}".encode("latin-1")
+
+    async def __call__(self, scope: dict, receive: Callable, send: Callable) -> None:
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+        headers = dict(scope.get("headers") or [])
+        provided = headers.get(b"authorization", b"")
+        if not hmac.compare_digest(provided, self._expected):
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 401,
+                    "headers": [
+                        (b"content-type", b"application/json"),
+                        (b"www-authenticate", b"Bearer"),
+                    ],
+                }
+            )
+            await send(
+                {
+                    "type": "http.response.body",
+                    "body": b'{"error":"unauthorized"}',
+                }
+            )
+            return
+        await self.app(scope, receive, send)
+
+
 def serve(transport: str = "stdio", port: int = 8765) -> None:
     """Start the Memory MCP server on the requested transport."""
     if transport not in {"stdio", "streamable-http"}:
@@ -623,13 +665,50 @@ def serve(transport: str = "stdio", port: int = 8765) -> None:
         )
     server = create_memory_mcp_server()
     if transport == "stdio":
+        # stdio is not network-exposed; no auth needed.
         server.run(transport="stdio")
+        return
+
+    # streamable-http is network-exposed and the tools trust a caller-supplied
+    # user_id, so we fail closed unless a bearer token is configured.
+    token = (os.environ.get("MEMORY_MCP_TOKEN") or "").strip()
+    if not token:
+        from sandcastle.config import settings as _settings
+
+        if not _settings.is_local_mode:
+            raise MemoryMCPError(
+                "Refusing to start the Memory MCP over streamable-http without "
+                "authentication. Set MEMORY_MCP_TOKEN to a secret bearer token so "
+                "callers must send 'Authorization: Bearer <token>', or use the stdio "
+                "transport. This fails closed to prevent cross-tenant memory access.",
+                code="auth_required",
+            )
+        logger.warning(
+            "Memory MCP streamable-http started WITHOUT MEMORY_MCP_TOKEN. This is "
+            "allowed only because the server is in local mode; anyone who can reach "
+            "the port can read/write/delete any user's memories. Set MEMORY_MCP_TOKEN "
+            "before exposing this beyond localhost."
+        )
+
+    # FastMCP reads the port from its settings object.
+    try:
+        server.settings.port = int(port)
+    except Exception:  # pragma: no cover - defensive
+        pass
+
+    if token:
+        # Wrap the streamable-http ASGI app with bearer enforcement and run it
+        # ourselves, since FastMCP.run has no per-request auth hook.
+        import uvicorn
+
+        app = _BearerAuthMiddleware(server.streamable_http_app(), token)
+        uvicorn.run(
+            app,
+            host=server.settings.host,
+            port=int(port),
+            log_level=str(server.settings.log_level).lower(),
+        )
     else:
-        # FastMCP reads the port from its settings object.
-        try:
-            server.settings.port = int(port)
-        except Exception:  # pragma: no cover - defensive
-            pass
         server.run(transport="streamable-http")
 
 

@@ -701,8 +701,8 @@ class TestHttpTruncation:
             result = await _execute_http_step(step, ctx)
 
         assert result.status == "completed"
-        # JSON responses are returned as-is, no truncation
-        assert result.output == {"data": "x" * 10000}
+        # JSON responses are returned as-is (plus an attached status_code), no truncation
+        assert result.output == {"data": "x" * 10000, "status_code": 200}
         assert "_truncated" not in result.output
 
 

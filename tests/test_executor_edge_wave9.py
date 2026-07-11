@@ -2400,3 +2400,167 @@ class TestBrowserUrlValidation:
         from sandcastle.engine.executor import _validate_browser_url
         result = _validate_browser_url("  https://example.com  ")
         assert result == "https://example.com"
+
+
+# ================================================================
+# AUDIT SWEEP 0.40.2 - regression tests
+# ================================================================
+
+class TestHttpStepFailOnError:
+    """Fix 1: HTTP step must fail on 4xx/5xx unless fail_on_error is False."""
+
+    def _mock_client(self, status_code: int, json_body):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = json_body
+        mock_resp.status_code = status_code
+        mock_resp.reason_phrase = "Internal Server Error"
+        mock_resp.text = json.dumps(json_body)
+        mock_client = AsyncMock()
+        mock_client.request = AsyncMock(return_value=mock_resp)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        return mock_client
+
+    @pytest.mark.asyncio
+    async def test_http_500_fails_by_default(self):
+        from sandcastle.engine.executor import _execute_http_step
+
+        s = step(
+            id="http_err",
+            type="http",
+            http_config=HttpConfig(url="https://api.example.com/x", method="GET"),
+        )
+        c = ctx()
+        with patch("httpx.AsyncClient", return_value=self._mock_client(500, {"error": "boom"})):
+            result = await _execute_http_step(s, c)
+
+        assert result.status == "failed"
+        assert "HTTP 500" in result.error
+        # status_code must still be exposed in the output for debugging
+        assert result.output["status_code"] == 500
+
+    @pytest.mark.asyncio
+    async def test_http_500_completed_when_fail_on_error_false(self):
+        from sandcastle.engine.executor import _execute_http_step
+
+        s = step(
+            id="http_ok",
+            type="http",
+            http_config=HttpConfig(
+                url="https://api.example.com/x", method="GET", fail_on_error=False
+            ),
+        )
+        c = ctx()
+        with patch("httpx.AsyncClient", return_value=self._mock_client(500, {"error": "boom"})):
+            result = await _execute_http_step(s, c)
+
+        assert result.status == "completed"
+        assert result.output["status_code"] == 500
+
+    @pytest.mark.asyncio
+    async def test_http_200_includes_status_code(self):
+        from sandcastle.engine.executor import _execute_http_step
+
+        s = step(
+            id="http_2xx",
+            type="http",
+            http_config=HttpConfig(url="https://api.example.com/x", method="GET"),
+        )
+        c = ctx()
+        with patch("httpx.AsyncClient", return_value=self._mock_client(200, {"data": 1})):
+            result = await _execute_http_step(s, c)
+
+        assert result.status == "completed"
+        assert result.output["data"] == 1
+        assert result.output["status_code"] == 200
+
+
+class TestHttpStepSsrfBlockedNetwork:
+    """Fix 3: HTTP step rejects URLs resolving to private/loopback ranges."""
+
+    @pytest.mark.asyncio
+    async def test_loopback_ip_rejected(self):
+        from sandcastle.engine.executor import _execute_http_step
+
+        s = step(
+            id="http_ssrf",
+            type="http",
+            http_config=HttpConfig(url="http://127.0.0.1:8000/admin", method="GET"),
+        )
+        c = ctx()
+        result = await _execute_http_step(s, c)
+
+        assert result.status == "failed"
+        assert "blocked network" in result.error
+
+
+class TestSaveFileB64Traversal:
+    """Fix 2: save_file_b64 destination must be confined to the tmp directory."""
+
+    @pytest.mark.asyncio
+    async def test_traversal_dest_blocked(self, tmp_path, monkeypatch):
+        from sandcastle.config import settings
+        from sandcastle.engine.executor import _execute_code_step
+
+        monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+        src = tmp_path / "src.txt"
+        src.write_text("payload")
+
+        code = f"result = save_file_b64({str(src)!r}, '../../escape.txt')"
+        s = step(id="cs_bad", type="code", code_config=CodeConfig(code=code))
+        c = ctx()
+        result = await _execute_code_step(s, c)
+
+        assert result.status == "failed"
+        assert "escapes the tmp directory" in result.error
+        assert not (tmp_path.parent / "escape.txt").exists()
+
+    @pytest.mark.asyncio
+    async def test_normal_dest_allowed(self, tmp_path, monkeypatch):
+        from sandcastle.config import settings
+        from sandcastle.engine.executor import _execute_code_step
+
+        monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+        src = tmp_path / "src.txt"
+        src.write_text("payload")
+
+        code = f"result = save_file_b64({str(src)!r}, 'out.txt')"
+        s = step(id="cs_ok", type="code", code_config=CodeConfig(code=code))
+        c = ctx()
+        result = await _execute_code_step(s, c)
+
+        assert result.status == "completed"
+        assert result.output.startswith("@file:")
+        assert (tmp_path / "tmp" / "out.txt").exists()
+
+
+class TestRaceNoneWinner:
+    """Fix 8: a branch that legitimately returns None must win the race."""
+
+    @pytest.mark.asyncio
+    async def test_none_output_wins_race(self):
+        from sandcastle.engine import executor as _executor
+        from sandcastle.engine.executor import _execute_race_step
+
+        wf = make_workflow([
+            step(id="b_none", prompt="branch that returns None"),
+            step(id="race_none", type="race", race_config=RaceConfig(
+                branches=[["b_none"]],
+            )),
+        ])
+        c = ctx()
+        sandbox = MagicMock()
+        storage = MagicMock()
+        storage.read = AsyncMock(return_value=None)
+
+        async def _fake_retry(sub_step, branch_ctx, *_args, **_kwargs):
+            # A branch step that legitimately produces a None output.
+            return StepResult(step_id=sub_step.id, status="completed", output=None)
+
+        with patch.object(_executor, "execute_step_with_retry", side_effect=_fake_retry):
+            result = await _execute_race_step(
+                wf.get_step("race_none"), c, sandbox, storage, wf, 0,
+            )
+
+        assert result.status == "completed"
+        assert result.output is None

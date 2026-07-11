@@ -282,6 +282,102 @@ class TestCLI:
         mocked.assert_called_once()
 
 
+class TestStreamableHttpAuth:
+    """streamable-http must fail closed without MEMORY_MCP_TOKEN (wave 2 fix C)."""
+
+    def test_stdio_unaffected_by_missing_token(self, monkeypatch) -> None:
+        """stdio transport starts regardless of token (not network-exposed)."""
+        monkeypatch.delenv("MEMORY_MCP_TOKEN", raising=False)
+        fake_server = MagicMock()
+        with patch.object(mms, "create_memory_mcp_server", return_value=fake_server):
+            mms.serve(transport="stdio")
+        fake_server.run.assert_called_once_with(transport="stdio")
+
+    def test_streamable_http_refuses_without_token_in_non_local_mode(
+        self, monkeypatch
+    ) -> None:
+        """No token + non-local mode => refuse to start (fail closed)."""
+        monkeypatch.delenv("MEMORY_MCP_TOKEN", raising=False)
+        fake_server = MagicMock()
+        from sandcastle.config import settings as _settings
+
+        monkeypatch.setattr(
+            type(_settings), "is_local_mode",
+            property(lambda self: False), raising=False,
+        )
+        with patch.object(mms, "create_memory_mcp_server", return_value=fake_server):
+            with pytest.raises(mms.MemoryMCPError) as exc_info:
+                mms.serve(transport="streamable-http")
+        assert "MEMORY_MCP_TOKEN" in str(exc_info.value)
+        fake_server.run.assert_not_called()
+
+    def test_streamable_http_allowed_without_token_in_local_mode(
+        self, monkeypatch
+    ) -> None:
+        """No token + local mode => allowed with a warning (dev convenience)."""
+        monkeypatch.delenv("MEMORY_MCP_TOKEN", raising=False)
+        fake_server = MagicMock()
+        from sandcastle.config import settings as _settings
+
+        monkeypatch.setattr(
+            type(_settings), "is_local_mode",
+            property(lambda self: True), raising=False,
+        )
+        with patch.object(mms, "create_memory_mcp_server", return_value=fake_server):
+            mms.serve(transport="streamable-http")
+        fake_server.run.assert_called_once_with(transport="streamable-http")
+
+    def test_streamable_http_with_token_wraps_with_auth(self, monkeypatch) -> None:
+        """A token => run our own uvicorn with the bearer-auth ASGI wrapper."""
+        monkeypatch.setenv("MEMORY_MCP_TOKEN", "s3cret")
+        fake_server = MagicMock()
+        fake_app = MagicMock()
+        fake_server.streamable_http_app.return_value = fake_app
+        fake_server.settings.host = "127.0.0.1"
+        fake_server.settings.log_level = "INFO"
+        fake_uvicorn = MagicMock()
+        with (
+            patch.object(mms, "create_memory_mcp_server", return_value=fake_server),
+            patch.dict("sys.modules", {"uvicorn": fake_uvicorn}),
+        ):
+            mms.serve(transport="streamable-http", port=9911)
+        # FastMCP.run must NOT be used (no per-request auth there).
+        fake_server.run.assert_not_called()
+        fake_uvicorn.run.assert_called_once()
+        wrapped_app = fake_uvicorn.run.call_args.args[0]
+        assert isinstance(wrapped_app, mms._BearerAuthMiddleware)
+
+    def test_bearer_middleware_rejects_missing_header(self) -> None:
+        """The ASGI wrapper 401s a request with no Authorization header."""
+        mw = mms._BearerAuthMiddleware(AsyncMock(), "tok")
+        sent = []
+
+        async def _send(msg):
+            sent.append(msg)
+
+        async def _receive():
+            return {"type": "http.request"}
+
+        scope = {"type": "http", "headers": []}
+        asyncio.run(mw(scope, _receive, _send))
+        assert sent[0]["status"] == 401
+
+    def test_bearer_middleware_allows_valid_token(self) -> None:
+        """The ASGI wrapper forwards a request with a matching bearer token."""
+        inner = AsyncMock()
+        mw = mms._BearerAuthMiddleware(inner, "tok")
+
+        async def _send(msg):
+            pass
+
+        async def _receive():
+            return {"type": "http.request"}
+
+        scope = {"type": "http", "headers": [(b"authorization", b"Bearer tok")]}
+        asyncio.run(mw(scope, _receive, _send))
+        inner.assert_awaited_once()
+
+
 # ---------------------------------------------------------------------------
 # FastMCP wiring smoke test
 # ---------------------------------------------------------------------------

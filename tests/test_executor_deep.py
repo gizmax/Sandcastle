@@ -667,7 +667,7 @@ class TestHttpStep:
             result = await _execute_http_step(s, c)
 
         assert result.status == "completed"
-        assert result.output == {"status": "ok"}
+        assert result.output == {"status": "ok", "status_code": 200}
         assert result.cost_usd == 0.0
 
     @pytest.mark.asyncio

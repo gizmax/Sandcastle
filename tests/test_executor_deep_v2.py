@@ -1120,6 +1120,59 @@ steps:
             f"BUG-008: Expected 10 fan-out outputs, got {len(outputs)}"
         )
 
+    @pytest.mark.asyncio
+    async def test_fan_out_persists_run_step_and_step_result(self):
+        """Fan-out step must persist an aggregate run step and set step_results.
+
+        Wave-2 fix E: the parallel_over path previously wrote step_outputs and
+        costs but never called _save_run_step nor set context.step_results, so
+        downstream steps.X.status references resolved wrong and no run-step row
+        existed for the fan-out step.
+        """
+        from sandcastle.engine.dag import WorkflowDefinition
+        from sandcastle.engine.executor import _prepare_and_run_step
+
+        s = StepDefinition(
+            id="process",
+            type="standard",
+            prompt="Process {input._item}",
+            parallel_over="{input.items}",
+        )
+        wf = MagicMock(spec=WorkflowDefinition)
+        wf.get_step.return_value = s
+        wf.on_failure = None
+
+        c = ctx(input={"items": [1, 2, 3]}, costs=[])
+
+        async def _fake_run(*args, **kwargs):
+            return StepResult(
+                step_id="process", output="ok", cost_usd=0.5, status="completed"
+            )
+
+        save_mock = AsyncMock()
+        with (
+            patch("sandcastle.engine.executor.execute_step_with_retry", new=_fake_run),
+            patch("sandcastle.engine.executor._save_run_step", new=save_mock),
+        ):
+            await _prepare_and_run_step(
+                "process", wf, c, MagicMock(), storage(), [], None, 0,
+            )
+
+        # Aggregate step result recorded with completed status.
+        assert "process" in c.step_results
+        assert c.step_results["process"].status == "completed"
+        assert c.step_outputs["process"] == ["ok", "ok", "ok"]
+        # A run-step row was persisted for the aggregate fan-out step.
+        persisted_statuses = [
+            call_obj.kwargs.get("status") for call_obj in save_mock.call_args_list
+        ]
+        assert "completed" in persisted_statuses
+        # The persisted step id matches the fan-out step.
+        persisted_ids = [
+            call_obj.kwargs.get("step_id") for call_obj in save_mock.call_args_list
+        ]
+        assert "process" in persisted_ids
+
 
 # ══════════════════════════════════════════════════════════════
 # PASS 13 – TIMING & PERFORMANCE

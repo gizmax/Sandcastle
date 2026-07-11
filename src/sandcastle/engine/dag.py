@@ -153,6 +153,7 @@ class HttpConfig:
     auth: str | None = None  # "bearer:{token}" or env var ref
     value_map: dict[str, dict[str, str]] | None = None  # Post-resolution value mapping
     cost_per_call: float = 0.0  # Declared cost per API call (e.g. $0.02 for Imagen)
+    fail_on_error: bool = True  # Treat HTTP >= 400 as a failed step (set False to keep legacy pass-through)
 
 
 @dataclass
@@ -1030,6 +1031,7 @@ def _parse_http_config(data: dict | None) -> HttpConfig | None:
         auth=data.get("auth"),
         value_map=data.get("value_map"),
         cost_per_call=float(data.get("cost_per_call", 0.0)),
+        fail_on_error=bool(data.get("fail_on_error", True)),
     )
 
 

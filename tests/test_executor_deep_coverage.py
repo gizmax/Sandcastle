@@ -158,7 +158,7 @@ class TestHttpStep:
             result = await _execute_http_step(step, ctx)
 
         assert result.status == "completed"
-        assert result.output == {"result": "ok"}
+        assert result.output == {"result": "ok", "status_code": 200}
 
     @pytest.mark.asyncio
     async def test_http_post_with_body(self):
@@ -187,7 +187,7 @@ class TestHttpStep:
             result = await _execute_http_step(step, ctx)
 
         assert result.status == "completed"
-        assert result.output == {"id": 123}
+        assert result.output == {"id": 123, "status_code": 201}
 
     @pytest.mark.asyncio
     async def test_http_text_response_not_json(self):

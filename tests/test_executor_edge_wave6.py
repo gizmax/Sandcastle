@@ -287,6 +287,88 @@ class TestLoopEmptyStepIds:
         assert len(result.output) == 2
 
 
+class TestLoopMidRunBudget:
+    """Loop steps must abort mid-run once the budget is exceeded (wave 2 fix D)."""
+
+    @pytest.mark.asyncio
+    async def test_loop_aborts_mid_run_on_budget(self):
+        """A loop over many costed sub-steps aborts before finishing all items."""
+        from sandcastle.engine.executor import _execute_loop_step
+
+        s = step(
+            id="loop1",
+            type="loop",
+            loop_config=LoopConfig(
+                over="{input.items}",
+                step_ids=["sub_step"],
+                max_iterations=100,
+            ),
+        )
+        # Budget 2.5; each iteration costs 1.0 -> should abort after 3 iterations
+        # (projected 3.0 >= 2.5), not run all 10.
+        c = ctx(input={"items": list(range(10))}, costs=[], max_cost_usd=2.5)
+
+        sub = step(id="sub_step", prompt="echo")
+        wf = MagicMock(spec=WorkflowDefinition)
+        wf.get_step.return_value = sub
+
+        call_count = {"n": 0}
+
+        async def _fake_run(*args, **kwargs):
+            call_count["n"] += 1
+            return StepResult(
+                step_id="sub_step", output="done", cost_usd=1.0, status="completed"
+            )
+
+        storage = AsyncMock()
+        with patch(
+            "sandcastle.engine.executor.execute_step_with_retry",
+            new=_fake_run,
+        ):
+            result = await _execute_loop_step(s, c, None, storage, wf, 0)
+
+        assert result.status == "failed"
+        assert result.output["status"] == "budget_exceeded"
+        # Aborted mid-loop, not after all 10 iterations.
+        assert result.output["completed_iterations"] < 10
+        assert call_count["n"] < 10
+
+    @pytest.mark.asyncio
+    async def test_loop_completes_within_budget(self):
+        """A loop under budget still completes all iterations normally."""
+        from sandcastle.engine.executor import _execute_loop_step
+
+        s = step(
+            id="loop1",
+            type="loop",
+            loop_config=LoopConfig(
+                over="{input.items}",
+                step_ids=["sub_step"],
+                max_iterations=100,
+            ),
+        )
+        c = ctx(input={"items": [1, 2, 3]}, costs=[], max_cost_usd=100.0)
+
+        sub = step(id="sub_step", prompt="echo")
+        wf = MagicMock(spec=WorkflowDefinition)
+        wf.get_step.return_value = sub
+
+        async def _fake_run(*args, **kwargs):
+            return StepResult(
+                step_id="sub_step", output="done", cost_usd=1.0, status="completed"
+            )
+
+        storage = AsyncMock()
+        with patch(
+            "sandcastle.engine.executor.execute_step_with_retry",
+            new=_fake_run,
+        ):
+            result = await _execute_loop_step(s, c, None, storage, wf, 0)
+
+        assert result.status == "completed"
+        assert len(result.output) == 3
+
+
 # ═══════════════════════════════════════════════════════════
 # BUG 3: _escape_braces applied uniformly
 # ═══════════════════════════════════════════════════════════
