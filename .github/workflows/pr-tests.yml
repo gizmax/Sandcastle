@@ -28,7 +28,9 @@ jobs:
   python:
     name: Python tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # ~17k tests run in ~13.5 min plus dashboard build and dependency install;
+    # 20 min leaves headroom over the total setup + run time.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 

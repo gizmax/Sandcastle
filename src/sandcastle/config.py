@@ -116,6 +116,13 @@ class Settings(BaseSettings):
     # intentionally use code steps can opt in via CODE_STEPS_ALLOW_UNTRUSTED=true.
     code_steps_allow_untrusted: bool = False
 
+    # Run "code" steps in a separate Python subprocess (out-of-process isolation)
+    # so a sandbox escape cannot reach the parent process memory (settings, DB
+    # session factory, other tenants' data). On by default. Operators can fall
+    # back to the legacy in-process path via CODE_STEPS_OUT_OF_PROCESS=false if
+    # the subprocess path misbehaves in their environment.
+    code_steps_out_of_process: bool = True
+
     # Database (empty = local SQLite mode)
     database_url: str = ""
 

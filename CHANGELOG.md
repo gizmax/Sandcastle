@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.40.3] - 2026-07-11 - "Deeper Isolation"
+
+Follow-up hardening that finishes the three deferred items from the 0.40.2 audit sweep. Defaults
+are secure; existing behavior is preserved with per-feature opt-outs.
+
+### Security
+- **Code steps now run out-of-process by default.** Validated `code` steps execute in a separate
+  Python subprocess with a secret-free environment and POSIX CPU/address-space limits, so a
+  sandbox escape cannot reach the parent process memory (`settings`, DB session factory, other
+  tenants' data). The subprocess is really killed on timeout (the in-process thread path could
+  not be). Set `CODE_STEPS_OUT_OF_PROCESS=false` to use the legacy in-process path; infrastructure
+  failures fall back to it automatically so a step is never lost.
+- **HTTP steps pin the validated IP at connect time.** The SSRF pre-flight resolves the hostname
+  once, validates the address, and a custom transport dials that exact IP while preserving the
+  `Host` header and TLS SNI, closing the DNS-rebind TOCTOU. Non-resolvable/mocked hosts are
+  unaffected.
+- **Memory MCP per-tenant scope enforcement.** With `MEMORY_MCP_SCOPE_PREFIX` set, every tool call
+  (`add`/`search`/`list_memories`/`forget`) must stay within the configured scope, so an
+  authenticated caller cannot reach another tenant's memories by supplying a different scope
+  string. `forget` requires and validates the owning `user_id` against the prefix. Unset preserves
+  today's single-tenant behavior.
+
 ## [0.40.2] - 2026-07-11 - "Hardened Steps"
 
 Security and correctness patch from a full audit sweep (engine, API, CLI, sandbox, deps). No new
