@@ -1,16 +1,27 @@
 FROM node:20-slim
 
-RUN useradd --uid 1000 --create-home runner
+ARG PLAYWRIGHT_VERSION=1.61.1
+ARG CLAUDE_AGENT_SDK_VERSION=0.3.207
+ARG OPENAI_VERSION=6.46.0
+
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+RUN useradd --uid 1000 --create-home --home-dir /home/user runner
+
+WORKDIR /home/user
 
 # Pre-install Playwright + Chromium as root so browsers land in a system path
 # accessible to the runner user. This eliminates the ~60s cold-start penalty
 # that occurs when playwright/chromium must be installed at step runtime.
-RUN npm install playwright && npx playwright install --with-deps chromium
+RUN npm install \
+        "playwright@${PLAYWRIGHT_VERSION}" \
+        "@anthropic-ai/claude-agent-sdk@${CLAUDE_AGENT_SDK_VERSION}" \
+        "openai@${OPENAI_VERSION}" \
+    && npx playwright install --with-deps chromium \
+    && npm cache clean --force \
+    && chmod -R a+rX /ms-playwright \
+    && chown -R runner:runner /home/user /ms-playwright
 
 USER runner
-WORKDIR /home/user
-
-# Pre-install agent SDKs so sandbox start is fast
-RUN npm install @anthropic-ai/claude-agent-sdk openai && npm cache clean --force
 
 ENV NODE_PATH=/home/user/node_modules

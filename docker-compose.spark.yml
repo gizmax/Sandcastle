@@ -1,0 +1,59 @@
+services:
+  runner-image:
+    image: sandcastle-runner:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.runner
+    command: ["node", "--version"]
+    restart: "no"
+
+  sandcastle:
+    depends_on:
+      runner-image:
+        condition: service_completed_successfully
+    user: "1000:${DOCKER_GID:-1000}"
+    group_add:
+      - "${DOCKER_GID:-1000}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - app_data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      SANDCASTLE_SPARK_MODE: "${SANDCASTLE_SPARK_MODE:-on}"
+      SANDBOX_BACKEND: "${SPARK_SANDBOX_BACKEND:-docker}"
+      DATA_RESIDENCY: "${DATA_RESIDENCY:-local}"
+      NIM_BASE_URL: "${NIM_BASE_URL:-http://host.docker.internal:8000}"
+      OLLAMA_HOST: "${OLLAMA_HOST:-http://host.docker.internal:11434}"
+      DOCKER_IMAGE: "${DOCKER_IMAGE:-sandcastle-runner:latest}"
+
+  worker:
+    depends_on:
+      runner-image:
+        condition: service_completed_successfully
+    user: "1000:${DOCKER_GID:-1000}"
+    group_add:
+      - "${DOCKER_GID:-1000}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - app_data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      SANDCASTLE_SPARK_MODE: "${SANDCASTLE_SPARK_MODE:-on}"
+      SANDBOX_BACKEND: "${SPARK_SANDBOX_BACKEND:-docker}"
+      DATA_RESIDENCY: "${DATA_RESIDENCY:-local}"
+      NIM_BASE_URL: "${NIM_BASE_URL:-http://host.docker.internal:8000}"
+      OLLAMA_HOST: "${OLLAMA_HOST:-http://host.docker.internal:11434}"
+      DOCKER_IMAGE: "${DOCKER_IMAGE:-sandcastle-runner:latest}"
+
+  scheduler:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      SANDCASTLE_SPARK_MODE: "${SANDCASTLE_SPARK_MODE:-on}"
+      SANDBOX_BACKEND: "${SPARK_SANDBOX_BACKEND:-docker}"
+      DATA_RESIDENCY: "${DATA_RESIDENCY:-local}"
+      NIM_BASE_URL: "${NIM_BASE_URL:-http://host.docker.internal:8000}"
+      OLLAMA_HOST: "${OLLAMA_HOST:-http://host.docker.internal:11434}"
+      DOCKER_IMAGE: "${DOCKER_IMAGE:-sandcastle-runner:latest}"

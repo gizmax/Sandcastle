@@ -15,13 +15,13 @@
 # Override versions:
 #   docker build --build-arg PYTHON_VERSION=3.12 \
 #                --build-arg NODE_VERSION=22 \
-#                --build-arg ANT_VERSION=latest \
+#                --build-arg ANT_VERSION=v1.17.0 \
 #                -t sandcastle/worker:custom deploy/cookbooks/docker/
 
 ARG PYTHON_VERSION=3.12
 ARG NODE_VERSION=22
-ARG ANT_VERSION=latest
-ARG PLAYWRIGHT_VERSION=1.49.0
+ARG ANT_VERSION=v1.17.0
+ARG PLAYWRIGHT_VERSION=1.61.1
 ARG LIGHTPANDA_VERSION=nightly
 
 # ---------------------------------------------------------------------------
@@ -33,13 +33,14 @@ ARG NODE_VERSION
 ARG ANT_VERSION
 ARG PLAYWRIGHT_VERSION
 ARG LIGHTPANDA_VERSION
+ARG TARGETARCH
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Documented runtime requirements for the ant CLI: bash, tar, unzip, curl,
-# ca-certificates. Node is needed because ant ships as an npm package.
+# Documented worker requirements: bash, tar, unzip, curl, ca-certificates.
+# Node 22 stays available for JavaScript tool calls; ant is a release binary.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         bash \
         ca-certificates \
@@ -56,17 +57,24 @@ RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_VERSION}.x" | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Install the Anthropic ant CLI globally.
-RUN npm install -g "@anthropic-ai/ant@${ANT_VERSION}"
+# Install the official Anthropic ant CLI release.
+RUN mkdir -p /tmp/ant \
+    && ANT_VERSION_NO_V="${ANT_VERSION#v}" \
+    && case "${TARGETARCH:-$(dpkg --print-architecture)}" in \
+        amd64|x86_64) ANT_ARCH="amd64" ;; \
+        arm64|aarch64) ANT_ARCH="arm64" ;; \
+        *) echo "Unsupported ant arch: ${TARGETARCH:-$(dpkg --print-architecture)}"; exit 1 ;; \
+    esac \
+    && curl -fsSL -o /tmp/ant/ant.tar.gz \
+        "https://github.com/anthropics/anthropic-cli/releases/download/${ANT_VERSION}/ant_${ANT_VERSION_NO_V}_linux_${ANT_ARCH}.tar.gz" \
+    && tar -xzf /tmp/ant/ant.tar.gz -C /tmp/ant \
+    && install -m 0755 /tmp/ant/ant /usr/local/bin/ant \
+    && ant --version \
+    && rm -rf /tmp/ant
 
 # Python deps. We do NOT vendor the Sandcastle source here - the worker
 # only needs the ant CLI + a tiny Python shim for output upload.
-COPY requirements.txt /tmp/requirements.txt 2>/dev/null || true
-RUN if [ -f /tmp/requirements.txt ]; then \
-        pip install --prefix=/install -r /tmp/requirements.txt; \
-    else \
-        pip install --prefix=/install httpx pydantic; \
-    fi
+RUN pip install --prefix=/install httpx pydantic
 
 # Pre-bake Playwright browsers so per-session containers do not download
 # them on first run.
@@ -76,8 +84,13 @@ RUN pip install --prefix=/install "playwright==${PLAYWRIGHT_VERSION}" \
 
 # LightPanda is pulled in as a static binary for headless browsing.
 RUN mkdir -p /opt/lightpanda \
+    && case "${TARGETARCH:-$(uname -m)}" in \
+        amd64|x86_64) LIGHTPANDA_ARCH="x86_64" ;; \
+        arm64|aarch64) LIGHTPANDA_ARCH="aarch64" ;; \
+        *) echo "Unsupported LightPanda arch: ${TARGETARCH:-$(uname -m)}"; exit 1 ;; \
+    esac \
     && curl -fsSL -o /opt/lightpanda/lightpanda \
-        "https://github.com/lightpanda-io/browser/releases/download/${LIGHTPANDA_VERSION}/lightpanda-x86_64-linux" \
+        "https://github.com/lightpanda-io/browser/releases/download/${LIGHTPANDA_VERSION}/lightpanda-${LIGHTPANDA_ARCH}-linux" \
     && chmod +x /opt/lightpanda/lightpanda \
     || echo "LightPanda fetch failed; runtime will skip browser tool"
 
@@ -110,13 +123,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Copy pre-baked Python, Node, ant, browsers from the builder.
 COPY --from=builder /install /install
+COPY --from=builder /usr/local/bin/ant /usr/local/bin/ant
 COPY --from=builder /usr/bin/node /usr/bin/node
 COPY --from=builder /usr/bin/npm /usr/bin/npm
 COPY --from=builder /usr/lib/node_modules /usr/lib/node_modules
 COPY --from=builder /opt/lightpanda /opt/lightpanda
 COPY --from=builder /root/.cache/ms-playwright /home/sandcastle/.cache/ms-playwright
 
-RUN ln -sf /usr/lib/node_modules/@anthropic-ai/ant/bin/ant.js /usr/local/bin/ant \
+RUN ant --version \
     && chown -R 10001:10001 /home/sandcastle
 
 WORKDIR /workspace

@@ -52,6 +52,7 @@ memory = [
     "mem0ai>=0.1.0",
     "fastembed>=0.3.6",
     "anthropic>=0.95",
+    "grpcio!=1.78.1",
 ]
 parse = [
     "pymupdf>=1.26",
@@ -59,7 +60,7 @@ parse = [
     "openpyxl>=3.1",
 ]
 ocr = [
-    "chandra-ocr>=2.0",
+    "chandra-ocr>=0.2,<0.3",
 ]
 report = [
     "weasyprint>=68",
@@ -71,7 +72,7 @@ docker = [
     "aiodocker>=0.22",
 ]
 mcp = [
-    "mcp>=1.23",
+    "mcp>=1.24",
 ]
 security = [
     "cryptography>=43.0",
@@ -101,7 +102,7 @@ dev = [
     "hypothesis>=6.0",
     "ruff>=0.8",
     "aiodocker>=0.22",
-    "mcp>=1.23",
+    "mcp>=1.24",
     "sentry-sdk[fastapi]>=2.0",
     "cryptography>=43.0",
 ]
@@ -133,7 +134,7 @@ packages = ["src/sandcastle"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]

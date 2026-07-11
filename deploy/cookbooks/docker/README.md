@@ -18,7 +18,7 @@ docker build -t sandcastle/worker:latest deploy/cookbooks/docker/
 ```
 
 Override pinned versions via `--build-arg PYTHON_VERSION=3.12`,
-`NODE_VERSION=22`, `ANT_VERSION=latest`. Browsers (Playwright, LightPanda)
+`NODE_VERSION=22`, `ANT_VERSION=v1.17.0`. Browsers (Playwright, LightPanda)
 are pre-baked so per-session containers do not pay first-run cost.
 
 ## 2. Create your env file

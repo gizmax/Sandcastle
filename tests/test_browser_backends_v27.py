@@ -684,6 +684,7 @@ class TestDockerBackendV27:
             assert config["HostConfig"]["CapDrop"] == ["ALL"]
             assert config["HostConfig"]["PidsLimit"] == 100
             assert config["HostConfig"]["ReadonlyRootfs"] is True
+            assert config["HostConfig"]["ExtraHosts"] == ["host.docker.internal:host-gateway"]
             assert config["User"] == "1000:1000"
             assert config["HostConfig"]["Memory"] == 512 * 1024 * 1024
             assert config["HostConfig"]["MemorySwap"] == 512 * 1024 * 1024

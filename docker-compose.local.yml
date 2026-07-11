@@ -11,10 +11,12 @@ services:
       DATABASE_URL: ""
       REDIS_URL: ""
       AUTH_REQUIRED: "false"
+      SANDBOX_BACKEND: local
       STORAGE_BACKEND: local
       DATA_DIR: /app/data
       WORKFLOWS_DIR: /app/workflows
       LOG_LEVEL: debug
+      DASHBOARD_ORIGIN: "http://localhost:8080"
     volumes:
       - local_data:/app/data
       - ./workflows:/app/workflows

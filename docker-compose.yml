@@ -1,3 +1,23 @@
+name: sandcastle
+
+x-sandcastle-build: &sandcastle-build
+  image: sandcastle-ai:local
+  build: .
+
+x-sandcastle-env: &sandcastle-env
+  env_file:
+    - .env
+  environment: &sandcastle-environment
+    DATABASE_URL: postgresql+asyncpg://sandcastle:sandcastle@postgres:5432/sandcastle
+    REDIS_URL: redis://redis:6379/0
+    AUTH_REQUIRED: "true"
+    API_KEY_PEPPER: "${API_KEY_PEPPER:?Set API_KEY_PEPPER in .env, for example: openssl rand -hex 32}"
+    STORAGE_BACKEND: local
+    DATA_DIR: /app/data
+    WORKFLOWS_DIR: /app/workflows
+    LOG_LEVEL: info
+    DASHBOARD_ORIGIN: "http://localhost:8080"
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -27,74 +47,62 @@ services:
       retries: 5
     # Not exposed to host - only accessible within the Docker network
 
+  migrate:
+    <<: [*sandcastle-build, *sandcastle-env]
+    restart: "no"
+    command: ["python", "-m", "sandcastle", "db", "migrate"]
+    environment:
+      <<: *sandcastle-environment
+      ADMIN_API_KEY: ""
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   sandcastle:
-    build: .
+    <<: [*sandcastle-build, *sandcastle-env]
     restart: unless-stopped
     ports:
       - "8080:8080"
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
-    env_file:
-      - .env
+      migrate:
+        condition: service_completed_successfully
     environment:
-      DATABASE_URL: postgresql+asyncpg://sandcastle:sandcastle@postgres:5432/sandcastle
-      REDIS_URL: redis://redis:6379/0
-      AUTH_REQUIRED: "true"
+      <<: *sandcastle-environment
+      ADMIN_API_KEY: "${ADMIN_API_KEY:?Set ADMIN_API_KEY in .env, for example: sc_<random-secret>}"
       SCHEDULER_ENABLED: "false"
-      STORAGE_BACKEND: local
-      DATA_DIR: /app/data
-      WORKFLOWS_DIR: /app/workflows
-      LOG_LEVEL: info
-      DASHBOARD_ORIGIN: "http://localhost:8080"
-      # ADMIN_API_KEY: "sc_your-bootstrap-key-here"
     volumes:
       - app_data:/app/data
 
   scheduler:
-    build: .
+    <<: [*sandcastle-build, *sandcastle-env]
     restart: unless-stopped
     command: ["uvicorn", "sandcastle.main:app", "--host", "0.0.0.0", "--port", "8081", "--workers", "1"]
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
-    env_file:
-      - .env
+      migrate:
+        condition: service_completed_successfully
     environment:
-      DATABASE_URL: postgresql+asyncpg://sandcastle:sandcastle@postgres:5432/sandcastle
-      REDIS_URL: redis://redis:6379/0
-      AUTH_REQUIRED: "true"
+      <<: *sandcastle-environment
+      ADMIN_API_KEY: ""
       SCHEDULER_ENABLED: "true"
-      STORAGE_BACKEND: local
-      DATA_DIR: /app/data
-      WORKFLOWS_DIR: /app/workflows
-      LOG_LEVEL: info
     volumes:
       - app_data:/app/data
 
   worker:
-    build: .
+    <<: [*sandcastle-build, *sandcastle-env]
     restart: unless-stopped
     command: ["arq", "sandcastle.queue.worker.WorkerSettings"]
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
-    env_file:
-      - .env
+      migrate:
+        condition: service_completed_successfully
     environment:
-      DATABASE_URL: postgresql+asyncpg://sandcastle:sandcastle@postgres:5432/sandcastle
-      REDIS_URL: redis://redis:6379/0
-      AUTH_REQUIRED: "true"
-      STORAGE_BACKEND: local
-      DATA_DIR: /app/data
-      WORKFLOWS_DIR: /app/workflows
-      LOG_LEVEL: info
+      <<: *sandcastle-environment
+      ADMIN_API_KEY: ""
     volumes:
       - app_data:/app/data
 

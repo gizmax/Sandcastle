@@ -478,6 +478,9 @@ class DockerBackend:
                     "CpuQuota": self._cpu_quota,
                     "ReadonlyRootfs": True,
                     "Tmpfs": {"/tmp": "rw,noexec,nosuid,size=64m"},
+                    # Let runner containers reach host-local model servers
+                    # (NIM/Ollama/vLLM), especially on DGX Spark Docker hosts.
+                    "ExtraHosts": ["host.docker.internal:host-gateway"],
                 },
             }
 

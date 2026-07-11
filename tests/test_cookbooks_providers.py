@@ -69,9 +69,10 @@ def test_daytona_runner_sets_auto_pause_interval() -> None:
 
 def test_daytona_dockerfile_installs_ant_cli() -> None:
     df = (DAYTONA / "byoc_env_default.dockerfile").read_text()
-    assert re.search(r"npm\s+install\s+-g\s+@anthropic-ai/ant", df), (
-        "Daytona snapshot Dockerfile must install the ant CLI globally"
+    assert "anthropics/anthropic-cli/releases/download" in df, (
+        "Daytona snapshot Dockerfile must install the official ant CLI release"
     )
+    assert "ant --version" in df
 
 
 # ---------------------------------------------------------------------------
@@ -90,7 +91,18 @@ def test_modal_runner_uses_sandbox_create_with_volumes_and_gpu() -> None:
 def test_modal_image_pins_python_312_and_ant() -> None:
     img = (MODAL / "image.py").read_text()
     assert 'python_version="3.12"' in img, "Modal image must pin python 3.12"
-    assert "@anthropic-ai/ant" in img, "Modal image must install ant CLI"
+    assert "anthropics/anthropic-cli/releases/download" in img, (
+        "Modal image must install the official ant CLI release"
+    )
+
+
+def test_cookbooks_do_not_use_retired_ant_npm_package() -> None:
+    text_suffixes = {".py", ".md", ".yml", ".yaml", ".dockerfile", ""}
+    for path in COOKBOOKS.rglob("*"):
+        if path.is_file() and path.suffix in text_suffixes:
+            assert "@anthropic-ai/ant" not in path.read_text(), (
+                f"{path} still references the retired ant npm package"
+            )
 
 
 # ---------------------------------------------------------------------------

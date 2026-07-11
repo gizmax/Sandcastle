@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.40.1] - 2026-07-11 - "Docker on Your Box"
+
+Patch release for teams installing Sandcastle through Docker Compose and for NVIDIA DGX Spark
+deployments that run Sandcastle, local model servers, and Docker sandboxes on the same host.
+
+### Added
+- Added `docker-compose.spark.yml`, a full-stack Spark override that enables Docker sandboxes,
+  host-local NIM/Ollama/vLLM access, Docker socket group wiring, and a prebuilt
+  `sandcastle-runner:latest` runner image.
+- Added explicit Spark/Docker environment examples to `.env.example` and README, including
+  `SPARK_SANDBOX_BACKEND`, `DOCKER_GID`, `NIM_BASE_URL`, and `OLLAMA_HOST`.
+- Added an infra-only Compose file (`docker-compose.infra.yml`) for PostgreSQL, Redis, and
+  MinIO-only development setups.
+
+### Changed
+- The production Docker image now builds the dashboard before packaging, includes `README.md`,
+  and installs Sandcastle with the `docker` extra so `aiodocker` is present for the Docker
+  sandbox backend.
+- Docker Compose startup now runs migrations before the API, scheduler, and worker services.
+- Docker runner images now pin Playwright, Claude Agent SDK, and OpenAI npm package versions for
+  reproducible builds; the self-hosted Docker cookbook now defaults to Playwright 1.61.1.
+- Ruff's target version now matches the package's Python 3.12+ runtime support.
+
+### Fixed
+- Fixed Docker builds failing because the package wheel expected `README.md` and
+  `dashboard/dist` to exist inside the image build context.
+- Fixed authenticated Docker Compose deployments starting without required `API_KEY_PEPPER` and
+  `ADMIN_API_KEY` values.
+- Fixed Docker-backed Spark deployments where sandbox runner containers could not reach
+  host-local model servers by adding `host.docker.internal:host-gateway` wiring.
+- Fixed the `ocr` extra by using the published `chandra-ocr` version range, and avoided a yanked
+  `grpcio` release in the optional memory dependency path.
+- Fixed LightPanda cookbook downloads on ARM64 hosts by selecting the architecture-specific
+  Linux binary.
+- Fixed self-hosted sandbox cookbooks that tried to install the `ant` CLI from a non-existent
+  npm package; they now use the official Anthropic CLI release binary pinned to `v1.17.0`.
+- Fixed cookbook Docker build blockers caused by an invalid optional `COPY requirements.txt`
+  pattern and a Daytona `COPY skills/` instruction pointing at a directory that is not shipped.
 ## [0.40.0] - 2026-06-11 - "Build Once, Run Anywhere"
 
 Describe what you want in plain English and Sandcastle builds the workflow. Run it on any model — Claude, GPT, Mistral, a local model on your own box — and move it between them with one line. Deploy it your way: cloud, your server, fully air-gapped, EU-only. And it gets better over time, on its own. Build any agent once; run it on any model, anywhere; watch it improve.

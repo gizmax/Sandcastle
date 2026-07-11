@@ -19,7 +19,9 @@ S3-compatible storage (agent data persistence).
 ```
 sandcastle/
 ├── sandcastle.yaml.example      # Example workflow definition
-├── docker-compose.yaml          # Redis + Postgres + MinIO for local dev
+├── docker-compose.yml           # Full application stack
+├── docker-compose.spark.yml     # DGX Spark / local GPU inference override
+├── docker-compose.infra.yml     # Redis + Postgres + MinIO for local dev
 ├── pyproject.toml
 ├── .env.example
 ├── README.md
@@ -756,7 +758,7 @@ TEST: curl with a simple 2-step workflow → get result back.
 9. queue/worker.py -arq worker
 10. api/routes.py -add POST /workflows/run (async) + GET /runs/{id}
 11. engine/storage.py -S3 storage backend
-12. docker-compose.yaml
+12. docker-compose.yml / docker-compose.spark.yml / docker-compose.infra.yml
 
 TEST: Submit workflow, poll /runs/{id}, see status progress.
 
