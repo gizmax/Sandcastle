@@ -12,6 +12,9 @@ from __future__ import annotations
 
 import modal
 
+ANT_VERSION = "v1.17.0"
+ANT_RELEASE_VERSION = ANT_VERSION.removeprefix("v")
+
 # Single canonical image consumed by both the webhook function and the
 # per-session `modal.Sandbox.create(image=IMAGE, ...)` call.
 IMAGE = (
@@ -25,7 +28,7 @@ IMAGE = (
         "jq",
         "build-essential",
     )
-    # Node 22 (required by `ant` CLI tool dispatcher).
+    # Node 22 (available for JavaScript-based tool calls).
     .run_commands(
         "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -",
         "apt-get install -y --no-install-recommends nodejs",
@@ -34,7 +37,21 @@ IMAGE = (
     # `ant` CLI - the Managed Agents worker binary that `sandbox_runner.py`
     # invokes once per work item.
     .run_commands(
-        "npm install -g @anthropic-ai/ant@latest",
+        (
+            "set -eux; "
+            'case "$(uname -m)" in '
+            'x86_64) ANT_ARCH="amd64" ;; '
+            'aarch64|arm64) ANT_ARCH="arm64" ;; '
+            '*) echo "Unsupported ant arch: $(uname -m)"; exit 1 ;; '
+            "esac; "
+            "mkdir -p /tmp/ant; "
+            "curl -fsSL -o /tmp/ant/ant.tar.gz "
+            f"https://github.com/anthropics/anthropic-cli/releases/download/{ANT_VERSION}/"
+            f"ant_{ANT_RELEASE_VERSION}_linux_${{ANT_ARCH}}.tar.gz; "
+            "tar -xzf /tmp/ant/ant.tar.gz -C /tmp/ant; "
+            "install -m 0755 /tmp/ant/ant /usr/local/bin/ant; "
+            "rm -rf /tmp/ant"
+        ),
         "ant --version",
     )
     # Python SDK + standardwebhooks for signature verification.

@@ -1,4 +1,16 @@
-# -- Builder stage --
+# -- Dashboard builder stage --
+FROM node:20-slim AS dashboard-builder
+
+WORKDIR /dashboard
+
+COPY dashboard/package*.json ./
+RUN npm ci
+
+COPY dashboard/ ./
+RUN npm run build
+
+
+# -- Python builder stage --
 FROM python:3.12-slim AS builder
 
 WORKDIR /build
@@ -7,13 +19,14 @@ WORKDIR /build
 RUN pip install --no-cache-dir hatchling
 
 # Copy project metadata and source for pip install
-COPY pyproject.toml ./
+COPY pyproject.toml README.md ./
 COPY src/ src/
+COPY --from=dashboard-builder /dashboard/dist dashboard/dist/
 
 # Build a wheel and install into a virtual environment
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir ".[docker]"
 
 
 # -- Runtime stage --

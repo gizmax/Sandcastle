@@ -6,7 +6,17 @@ on:
       - "src/**"
       - "tests/**"
       - "dashboard/**"
+      - "deploy/cookbooks/**"
+      - "cf-sandbox-worker/**"
+      - "Dockerfile"
+      - "Dockerfile.runner"
+      - "e2b.Dockerfile"
+      - "docker-compose*.yml"
+      - "docker-compose*.yaml"
+      - ".dockerignore"
+      - ".env.example"
       - "pyproject.toml"
+      - "uv.lock"
       - ".github/workflows/pr-tests.yml"
   workflow_dispatch:
 
@@ -43,6 +53,25 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev,mcp,memory,otel,parse,report,docker,security]"
+
+      - name: Validate Compose files
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+
+          for name in (
+              "docker-compose.yml",
+              "docker-compose.local.yml",
+              "docker-compose.infra.yml",
+              "docker-compose.spark.yml",
+          ):
+              data = yaml.safe_load(Path(name).read_text())
+              services = data.get("services") or {}
+              if not services:
+                  raise SystemExit(f"{name} has no services")
+              print(f"{name}: {', '.join(sorted(services))}")
+          PY
 
       - name: Run pytest
         run: |
