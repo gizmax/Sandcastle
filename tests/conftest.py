@@ -21,6 +21,14 @@ _test_db_fd, _test_db_path = tempfile.mkstemp(suffix=".sqlite", prefix="sandcast
 os.close(_test_db_fd)
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_test_db_path}"
 
+# Run code steps in-process during the whole test suite for speed. Production
+# defaults to out-of-process isolation, but spawning a Python subprocess per code
+# step (~170ms each) across ~17k tests pushes the suite past the CI job timeout.
+# Set via env (before any sandcastle import) so child processes tests spawn - the
+# CLI, workflow e2e - inherit it too, not just this process' settings singleton.
+# The out-of-process path is covered explicitly by test_code_subprocess_runner.py.
+os.environ.setdefault("CODE_STEPS_OUT_OF_PROCESS", "false")
+
 
 @atexit.register
 def _cleanup_test_db() -> None:
@@ -91,6 +99,35 @@ def _create_test_tables():
     _run_async(_create())
     yield
     event.remove(engine.sync_engine, "connect", _ensure_schema)
+
+
+@pytest.fixture(autouse=True)
+def _in_process_code_steps():
+    """Run code steps in-process during the test suite for speed.
+
+    Production defaults to out-of-process isolation (CODE_STEPS_OUT_OF_PROCESS),
+    but spawning a Python subprocess per code step adds ~170ms each and, across
+    the whole suite, pushes it past the CI job timeout. The out-of-process path
+    is exercised explicitly by tests/test_code_subprocess_runner.py (which calls
+    the runner directly and flips this flag back on for its integration test).
+    """
+    try:
+        from sandcastle.config import settings
+
+        prev = settings.code_steps_out_of_process
+        settings.code_steps_out_of_process = False
+    except Exception:
+        prev = None
+    try:
+        yield
+    finally:
+        if prev is not None:
+            try:
+                from sandcastle.config import settings
+
+                settings.code_steps_out_of_process = prev
+            except Exception:
+                pass
 
 
 @pytest.fixture(autouse=True)

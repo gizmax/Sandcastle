@@ -107,6 +107,34 @@ def _load_memory_module() -> Any:
 # ---------------------------------------------------------------------------
 
 
+#: Env var that, when set, pins every tool call to a single tenant scope.
+_SCOPE_PREFIX_ENV = "MEMORY_MCP_SCOPE_PREFIX"
+
+
+def _scope_prefix() -> str:
+    """Return the configured tenant scope prefix, or '' when unset."""
+    return (os.environ.get(_SCOPE_PREFIX_ENV) or "").strip()
+
+
+def _enforce_scope_prefix(user_id: str) -> None:
+    """Reject a ``user_id`` that falls outside ``MEMORY_MCP_SCOPE_PREFIX``.
+
+    A no-op when the prefix is unset (single-tenant / local deployments keep
+    today's behavior). When set, ``user_id`` must equal the prefix exactly or
+    start with ``"<prefix>/"`` so an authenticated caller cannot read/write/delete
+    another tenant's memories by supplying a different scope string.
+    """
+    prefix = _scope_prefix()
+    if not prefix:
+        return
+    if user_id == prefix or user_id.startswith(prefix + "/"):
+        return
+    raise MemoryValidationError(
+        f"user_id '{user_id}' is outside the configured "
+        f"{_SCOPE_PREFIX_ENV} '{prefix}'"
+    )
+
+
 def _validate_user_id(value: Any) -> str:
     """Validate ``user_id`` for any memory operation."""
     if not isinstance(value, str):
@@ -313,6 +341,16 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     "description": "Memory row identifier returned by add() or search().",
                     "minLength": 1,
                 },
+                "user_id": {
+                    "type": "string",
+                    "description": (
+                        "Owning user or scope identifier. Required when the server "
+                        "is started with MEMORY_MCP_SCOPE_PREFIX so the delete stays "
+                        "inside the caller's tenant; optional otherwise."
+                    ),
+                    "minLength": 1,
+                    "maxLength": MAX_USER_ID_LENGTH,
+                },
             },
             "required": ["memory_id"],
             "additionalProperties": False,
@@ -389,6 +427,7 @@ async def _tool_add(
 ) -> dict[str, Any]:
     text = _validate_text(text)
     user_id = _validate_user_id(user_id)
+    _enforce_scope_prefix(user_id)
     metadata = _validate_metadata(metadata)
 
     mem = _load_memory_module()
@@ -415,6 +454,7 @@ async def _tool_search(
     if not isinstance(query, str) or not query.strip():
         raise MemoryValidationError("query must be a non-empty string")
     user_id = _validate_user_id(user_id)
+    _enforce_scope_prefix(user_id)
     limit = _validate_limit(limit)
 
     mem = _load_memory_module()
@@ -427,8 +467,28 @@ async def _tool_search(
     return {"results": [_normalize_record(r) for r in (records or [])]}
 
 
-async def _tool_forget(memory_id: str) -> dict[str, Any]:
+async def _tool_forget(
+    memory_id: str,
+    user_id: str | None = None,
+) -> dict[str, Any]:
     memory_id = _validate_memory_id(memory_id)
+    # forget() deletes by id and the backend does not scope the delete. When a
+    # tenant prefix is configured, require the caller to also name the owning
+    # user_id and prove it is inside the prefix, so a token cannot delete another
+    # tenant's memory by guessing an id. Backward-compat: when no prefix is set,
+    # user_id stays optional and behavior is unchanged.
+    prefix = _scope_prefix()
+    if prefix:
+        if user_id is None:
+            raise MemoryValidationError(
+                "user_id is required to delete a memory when "
+                f"{_SCOPE_PREFIX_ENV} is set"
+            )
+        user_id = _validate_user_id(user_id)
+        _enforce_scope_prefix(user_id)
+    elif user_id is not None:
+        # Validate for shape even when no prefix is enforced.
+        user_id = _validate_user_id(user_id)
     mem = _load_memory_module()
     try:
         deleted = await mem.delete_memory(memory_id)
@@ -444,6 +504,7 @@ async def _tool_list_memories(
     limit: int = DEFAULT_LIST_LIMIT,
 ) -> dict[str, Any]:
     user_id = _validate_user_id(user_id)
+    _enforce_scope_prefix(user_id)
     limit = _validate_limit(limit)
     mem = _load_memory_module()
     try:

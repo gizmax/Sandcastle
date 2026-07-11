@@ -2841,6 +2841,36 @@ async def _execute_llm_step(
         )
 
 
+def _build_pinned_transport(host_to_ip: dict[str, str]) -> Any:
+    """Build an httpx transport that dials pre-validated IPs, not re-resolved DNS.
+
+    ``host_to_ip`` maps a hostname to the single allowed IP address already
+    validated by ``_execute_http_step``'s SSRF pre-flight. The transport rewrites
+    each outgoing request's URL host to that pinned IP so the connection goes to
+    the validated address, while preserving the original ``Host`` header (already
+    set by httpx before the transport runs) and the TLS SNI (via the
+    ``sni_hostname`` request extension) so certificate validation still uses the
+    hostname. This closes the DNS-rebind TOCTOU between the pre-flight check and
+    the actual dial.
+    """
+    import httpx
+
+    class _PinnedHTTPTransport(httpx.AsyncHTTPTransport):
+        async def handle_async_request(self, request: Any) -> Any:
+            original_host = request.url.host
+            pinned_ip = host_to_ip.get(original_host)
+            if pinned_ip and pinned_ip != original_host:
+                # Dial the validated IP but keep the hostname for TLS SNI so the
+                # certificate still validates against the real host.
+                request.url = request.url.copy_with(host=pinned_ip)
+                extensions = dict(request.extensions or {})
+                extensions.setdefault("sni_hostname", original_host)
+                request.extensions = extensions
+            return await super().handle_async_request(request)
+
+    return _PinnedHTTPTransport()
+
+
 async def _execute_http_step(
     step: StepDefinition,
     context: RunContext,
@@ -2862,14 +2892,20 @@ async def _execute_http_step(
         # SSRF prevention for HTTP steps - block private/internal networks.
         # Reuse the webhook dispatcher's blocked-range list (IPv4-mapped, CGNAT,
         # ULA, loopback, ...) so the ranges stay defined in one place.
-        # TODO(ssrf): this validates the resolved IPs but hands the *hostname* to
-        # httpx, which re-resolves at connect time. A TTL=0 rebind between this
-        # check and httpx's own resolution is therefore still theoretically
-        # possible. Closing that fully needs a custom httpx transport that pins and
-        # dials the validated address; that (and fail-closing on gaierror, which
-        # would change behavior for mocked-transport callers) is intentionally
-        # deferred. Redirects are blocked below to limit the remaining surface,
-        # mirroring the webhook dispatcher's accepted mitigation.
+        #
+        # We resolve the hostname ONCE here, validate every resolved IP against
+        # the blocked ranges, and record one allowed address. That validated
+        # address is then pinned at connect time via a custom httpx transport
+        # (see _build_pinned_transport below), so httpx never re-resolves the
+        # hostname. This closes the DNS-rebind TOCTOU: a TTL=0 record that flips
+        # to a private IP between this check and the actual dial can no longer be
+        # reached, because the dial goes to the address we already validated while
+        # the original Host header and TLS SNI are preserved.
+        #
+        # Compatibility: resolution failures (gaierror) are still swallowed and
+        # left for httpx to surface, and no pin is applied in that case, so mocked
+        # or non-resolvable test hosts keep working exactly as before.
+        _pinned_hosts: dict[str, str] = {}
         try:
             import ipaddress as _ipaddress
             import socket as _socket
@@ -2887,6 +2923,7 @@ async def _execute_http_step(
             if _parsed.hostname:
                 try:
                     _resolved = _socket.getaddrinfo(_parsed.hostname, _parsed.port or 443)
+                    _first_allowed_ip: str | None = None
                     for _, _, _, _, _sockaddr in _resolved:
                         _ip = _ipaddress.ip_address(_sockaddr[0])
                         for _network in _BLOCKED_NETWORKS:
@@ -2897,6 +2934,11 @@ async def _execute_http_step(
                                     error=f"HTTP step URL resolves to blocked network ({_ip})",
                                     duration_seconds=time.monotonic() - started_at,
                                 )
+                        if _first_allowed_ip is None:
+                            _first_allowed_ip = _sockaddr[0]
+                    # Only pin when we actually resolved a public, allowed IP.
+                    if _first_allowed_ip is not None:
+                        _pinned_hosts[_parsed.hostname] = _first_allowed_ip
                 except _socket.gaierror:
                     pass  # DNS resolution failure - let httpx surface it naturally
         except ImportError:
@@ -2999,10 +3041,15 @@ async def _execute_http_step(
             len(body) if body else 0, len(url),
         )
 
+        # Pin the validated address at connect time so httpx cannot re-resolve
+        # the hostname to a rebound private IP. Transport is None (httpx default)
+        # when no public IP was pinned (e.g. gaierror path or mocked callers).
+        _pinned_transport = _build_pinned_transport(_pinned_hosts) if _pinned_hosts else None
         async with httpx.AsyncClient(
             timeout=step.timeout,
             follow_redirects=False,
             max_redirects=0,
+            transport=_pinned_transport,
         ) as client:
             resp = await client.request(
                 method=cfg.method.upper(),
@@ -4966,6 +5013,55 @@ async def _execute_code_step(
         from sandcastle.engine.code_sandbox_helpers import make_code_sandbox_helpers
 
         _code_data_dir = Path(_code_settings.data_dir).resolve()
+
+        _CODE_STEP_TIMEOUT = min(step.timeout, 30)
+
+        # Out-of-process isolation (default). Run the validated code in a separate
+        # Python subprocess so a sandbox escape cannot reach this process' memory
+        # (settings, DB session factory, other tenants' data). The subprocess is
+        # really killed on timeout, which the in-process thread path could not do.
+        # Operators can fall back to the in-process path via
+        # CODE_STEPS_OUT_OF_PROCESS=false. Infrastructure failures (spawn /
+        # serialization) fall back to the in-process path so a step is never lost.
+        if _code_settings.code_steps_out_of_process:
+            from sandcastle.engine.code_subprocess_runner import (
+                SubprocessInfraError,
+                run_code_in_subprocess,
+            )
+
+            try:
+                sub = await run_code_in_subprocess(
+                    code=code,
+                    input_data=context.input,
+                    step_outputs=context.step_outputs,
+                    data_dir=str(_code_data_dir),
+                    timeout=_CODE_STEP_TIMEOUT,
+                )
+            except SubprocessInfraError as infra_exc:
+                logger.warning(
+                    "Code step '%s': subprocess unavailable (%s); "
+                    "falling back to in-process execution",
+                    step.id, infra_exc,
+                )
+                sub = None
+
+            if sub is not None:
+                duration = time.monotonic() - started_at
+                if sub.get("status") == "completed":
+                    return StepResult(
+                        step_id=step.id,
+                        output=sub.get("output"),
+                        cost_usd=0.0,
+                        duration_seconds=duration,
+                        status="completed",
+                    )
+                return StepResult(
+                    step_id=step.id,
+                    status="failed",
+                    error=sub.get("error", "code step failed"),
+                    duration_seconds=duration,
+                )
+
         _read_file_b64, _save_file_b64 = make_code_sandbox_helpers(_code_data_dir)
 
         exec_globals: dict[str, Any] = {
@@ -5015,8 +5111,6 @@ async def _execute_code_step(
         # thread does not block returning the failed result; the leaked thread
         # dies with the process on exit.
         import concurrent.futures
-
-        _CODE_STEP_TIMEOUT = min(step.timeout, 30)
 
         def _run_code():
             exec(code, exec_globals)  # noqa: S102

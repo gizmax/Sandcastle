@@ -217,6 +217,80 @@ class TestListMemories:
 
 
 # ---------------------------------------------------------------------------
+# Per-tenant scope enforcement (MEMORY_MCP_SCOPE_PREFIX)
+# ---------------------------------------------------------------------------
+
+
+class TestScopePrefixEnforcement:
+    """With a scope prefix set, tools must not cross tenants."""
+
+    def test_no_prefix_allows_any_user_id(
+        self, fake_memory: _FakeMemoryModule, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("MEMORY_MCP_SCOPE_PREFIX", raising=False)
+        # Any user_id works and no error is raised when the prefix is unset.
+        _run(mms._tool_add("hi", "tenant:other/user:9"))
+        _run(mms._tool_search("q", "tenant:other/user:9"))
+        _run(mms._tool_list_memories("tenant:other/user:9"))
+        _run(mms._tool_forget("mem_1"))
+        fake_memory.delete_memory.assert_awaited_once_with("mem_1")
+
+    def test_add_in_prefix_allowed(
+        self, fake_memory: _FakeMemoryModule, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("MEMORY_MCP_SCOPE_PREFIX", "tenant:acme")
+        # Exact prefix and a child scope are both allowed.
+        _run(mms._tool_add("hi", "tenant:acme"))
+        _run(mms._tool_add("hi", "tenant:acme/user:1"))
+        assert fake_memory.save_memory.await_count == 2
+
+    def test_add_out_of_prefix_rejected(
+        self, fake_memory: _FakeMemoryModule, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("MEMORY_MCP_SCOPE_PREFIX", "tenant:acme")
+        with pytest.raises(mms.MemoryValidationError):
+            _run(mms._tool_add("hi", "tenant:evil/user:1"))
+        # A prefix that is only a string-prefix but not a scope boundary is rejected.
+        with pytest.raises(mms.MemoryValidationError):
+            _run(mms._tool_add("hi", "tenant:acme-evil"))
+        fake_memory.save_memory.assert_not_awaited()
+
+    def test_search_and_list_out_of_prefix_rejected(
+        self, fake_memory: _FakeMemoryModule, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("MEMORY_MCP_SCOPE_PREFIX", "tenant:acme")
+        with pytest.raises(mms.MemoryValidationError):
+            _run(mms._tool_search("q", "tenant:evil"))
+        with pytest.raises(mms.MemoryValidationError):
+            _run(mms._tool_list_memories("tenant:evil"))
+        fake_memory.load_memories.assert_not_awaited()
+
+    def test_forget_requires_user_id_when_prefix_set(
+        self, fake_memory: _FakeMemoryModule, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("MEMORY_MCP_SCOPE_PREFIX", "tenant:acme")
+        with pytest.raises(mms.MemoryValidationError):
+            _run(mms._tool_forget("mem_1"))
+        fake_memory.delete_memory.assert_not_awaited()
+
+    def test_forget_rejects_out_of_prefix_owner(
+        self, fake_memory: _FakeMemoryModule, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("MEMORY_MCP_SCOPE_PREFIX", "tenant:acme")
+        with pytest.raises(mms.MemoryValidationError):
+            _run(mms._tool_forget("mem_1", user_id="tenant:evil/user:1"))
+        fake_memory.delete_memory.assert_not_awaited()
+
+    def test_forget_allows_in_prefix_owner(
+        self, fake_memory: _FakeMemoryModule, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("MEMORY_MCP_SCOPE_PREFIX", "tenant:acme")
+        result = _run(mms._tool_forget("mem_1", user_id="tenant:acme/user:1"))
+        fake_memory.delete_memory.assert_awaited_once_with("mem_1")
+        assert result == {"memory_id": "mem_1", "deleted": True}
+
+
+# ---------------------------------------------------------------------------
 # Resources
 # ---------------------------------------------------------------------------
 
