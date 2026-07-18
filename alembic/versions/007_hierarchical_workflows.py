@@ -27,7 +27,10 @@ def upgrade() -> None:
     # Add sub_run_ids to run_steps
     op.add_column("run_steps", sa.Column("sub_run_ids", JSONB, nullable=True))
 
-    # Index for finding child runs
+    # Index for finding child runs. Migration 003 already created a plain index
+    # under this name; replace it with the partial one instead of failing on the
+    # duplicate name.
+    op.execute("DROP INDEX IF EXISTS ix_runs_parent_run_id")
     op.create_index(
         "ix_runs_parent_run_id",
         "runs",
@@ -37,7 +40,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Restore the plain index from 003 that upgrade() replaced, so 003's own
+    # downgrade can drop it.
     op.drop_index("ix_runs_parent_run_id", table_name="runs")
+    op.create_index("ix_runs_parent_run_id", "runs", ["parent_run_id"])
     op.drop_column("run_steps", "sub_run_ids")
     op.drop_column("runs", "depth")
     op.drop_column("runs", "sub_workflow_of_step")

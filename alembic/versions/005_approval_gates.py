@@ -10,7 +10,7 @@ from typing import Sequence
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ENUM, JSONB, UUID
 
 
 revision: str = "005"
@@ -43,7 +43,9 @@ def upgrade() -> None:
         sa.Column("step_id", sa.String(255), nullable=False),
         sa.Column(
             "status",
-            sa.Enum(
+            # postgresql.ENUM, not sa.Enum: create_type is only honored by the
+            # dialect type, and the type is already created explicitly above.
+            ENUM(
                 "pending", "approved", "rejected", "skipped", "timed_out",
                 name="approvalstatus", create_type=False,
             ),
