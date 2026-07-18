@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.40.4] - 2026-07-18 - "Fresh Install Fixed"
+
+### Fixed
+- **PostgreSQL migrations failed on fresh installs** - the docker compose `migrate` service exited
+  with `DuplicateObjectError: type "runstatus" already exists`, so a new deployment never started.
+  Three latent bugs in the migration chain (enum double-create in 001, `create_type` silently
+  ignored on generic `sa.Enum` in 005/006, duplicate `ix_runs_parent_run_id` index in 007) are
+  fixed, and 007's downgrade now restores the index 003 expects. Existing databases are
+  unaffected (already-applied revisions never re-run).
+- New `postgres-migrations` CI job runs `python -m sandcastle db migrate` twice against a real
+  `postgres:16` service on every PR touching migrations, Docker, or compose files, so migration
+  regressions can no longer ship undetected (the test suite runs on SQLite).
+
 ## [0.40.3] - 2026-07-11 - "Deeper Isolation"
 
 Follow-up hardening that finishes the three deferred items from the 0.40.2 audit sweep. Defaults
