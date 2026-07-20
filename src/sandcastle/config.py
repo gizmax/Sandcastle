@@ -123,6 +123,11 @@ class Settings(BaseSettings):
     # the subprocess path misbehaves in their environment.
     code_steps_out_of_process: bool = True
 
+    # Fail closed when the subprocess isolation path is unavailable. Operators
+    # may explicitly opt into the legacy in-process fallback for a controlled,
+    # single-tenant environment.
+    code_steps_allow_inprocess_fallback: bool = False
+
     # Database (empty = local SQLite mode)
     database_url: str = ""
 

@@ -2,17 +2,87 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
+
+_SQLITE_SCOPE_LOCK_STATE = "_sandcastle_audit_scope_locks"
+_sqlite_scope_locks: dict[tuple[int, str], asyncio.Lock] = {}
+
+
+def _audit_scope(run_id: uuid.UUID | None) -> str:
+    """Return the lock scope for a run-specific or global audit chain."""
+    return f"run:{run_id}" if run_id is not None else "global"
+
+
+async def _lock_audit_scope(session: "AsyncSession", scope: str) -> bool:
+    """Serialize appends for an audit chain until the session transaction ends.
+
+    PostgreSQL's transaction-scoped advisory lock protects the chain across
+    application processes. SQLite is single-writer in the supported local
+    deployment, so an in-process lock is sufficient there; retain it until the
+    outer transaction ends so a caller's later ``commit()`` remains covered.
+
+    Returns whether this call acquired a new SQLite lock. PostgreSQL locks are
+    released by the database at transaction end.
+    """
+    from sqlalchemy import event, text
+
+    dialect_name = session.get_bind().dialect.name
+    if dialect_name == "postgresql":
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:scope))"),
+            {"scope": scope},
+        )
+        return False
+
+    if dialect_name != "sqlite":
+        return False
+
+    sync_session = session.sync_session
+    state = sync_session.info.get(_SQLITE_SCOPE_LOCK_STATE)
+    if state is None:
+        locks: dict[str, asyncio.Lock] = {}
+
+        def release_locks(_session, transaction) -> None:
+            if transaction.parent is not None:
+                return
+            for held_lock in locks.values():
+                if held_lock.locked():
+                    held_lock.release()
+            locks.clear()
+
+        state = locks
+        sync_session.info[_SQLITE_SCOPE_LOCK_STATE] = state
+        event.listen(sync_session, "after_transaction_end", release_locks)
+
+    if scope in state:
+        return False
+
+    loop_key = id(asyncio.get_running_loop())
+    lock = _sqlite_scope_locks.setdefault((loop_key, scope), asyncio.Lock())
+    await lock.acquire()
+    state[scope] = lock
+    return True
+
+
+def _unlock_failed_sqlite_scope(session: "AsyncSession", scope: str) -> None:
+    """Release a newly acquired SQLite scope lock after a failed append."""
+    state = session.sync_session.info.get(_SQLITE_SCOPE_LOCK_STATE)
+    if not state:
+        return
+    lock = state.pop(scope, None)
+    if lock is not None and lock.locked():
+        lock.release()
 
 
 def compute_audit_hash(
@@ -55,8 +125,7 @@ async def append_audit_event(
     """Append a new audit event, chaining it to the previous event for this run.
 
     For system-level events (run_id=None), the chain is global across all
-    system events (ordered by created_at). For run-scoped events, the chain
-    is scoped to the run.
+    system events. For run-scoped events, the chain is scoped to the run.
 
     Returns the persisted AuditEvent, or None if persistence failed.
     """
@@ -64,44 +133,49 @@ async def append_audit_event(
 
     from sandcastle.models.db import AuditEvent
 
+    run_uuid_val: uuid.UUID | None = None
+    if run_id is not None:
+        try:
+            run_uuid_val = uuid.UUID(str(run_id))
+        except ValueError:
+            pass
+
+    scope = _audit_scope(run_uuid_val)
+    acquired_sqlite_lock = False
     try:
+        acquired_sqlite_lock = await _lock_audit_scope(session, scope)
         now = datetime.now(timezone.utc)
-        timestamp = now.isoformat()
 
         # Determine prev_hash: most recent entry for this run (or system chain)
-        if run_id is not None:
-            try:
-                run_uuid = uuid.UUID(run_id)
-            except ValueError:
-                run_uuid = None
-
-            if run_uuid is not None:
-                prev_stmt = (
-                    select(AuditEvent.entry_hash)
-                    .where(AuditEvent.run_id == run_uuid)
-                    .order_by(AuditEvent.created_at.desc())
-                    .limit(1)
-                )
-            else:
-                prev_stmt = (
-                    select(AuditEvent.entry_hash)
-                    .where(AuditEvent.run_id.is_(None))
-                    .order_by(AuditEvent.created_at.desc())
-                    .limit(1)
-                )
+        if run_uuid_val is not None:
+            prev_stmt = (
+                select(AuditEvent.entry_hash, AuditEvent.created_at)
+                .where(AuditEvent.run_id == run_uuid_val)
+                .order_by(AuditEvent.created_at.desc(), AuditEvent.id.desc())
+                .limit(1)
+            )
         else:
             prev_stmt = (
-                select(AuditEvent.entry_hash)
+                select(AuditEvent.entry_hash, AuditEvent.created_at)
                 .where(AuditEvent.run_id.is_(None))
-                .order_by(AuditEvent.created_at.desc())
+                .order_by(AuditEvent.created_at.desc(), AuditEvent.id.desc())
                 .limit(1)
             )
 
         prev_result = await session.execute(prev_stmt)
-        prev_hash_row = prev_result.scalar_one_or_none()
-        prev_hash = prev_hash_row if prev_hash_row is not None else "genesis"
+        previous_event = prev_result.one_or_none()
+        prev_hash = previous_event[0] if previous_event is not None else "genesis"
+        if previous_event is not None and previous_event[1] is not None:
+            previous_created_at = previous_event[1]
+            if previous_created_at.tzinfo is None:
+                previous_created_at = previous_created_at.replace(tzinfo=timezone.utc)
+            # The chain order is timestamp-first. Ensure sequentially locked
+            # appends have an unambiguous order even on coarse system clocks.
+            if now <= previous_created_at:
+                now = previous_created_at + timedelta(microseconds=1)
+        timestamp = now.isoformat()
 
-        run_id_str = str(run_id) if run_id is not None else None
+        run_id_str = str(run_uuid_val) if run_uuid_val is not None else None
         entry_hash = compute_audit_hash(
             event_type=event_type,
             run_id=run_id_str,
@@ -110,13 +184,6 @@ async def append_audit_event(
             payload=payload or {},
             prev_hash=prev_hash,
         )
-
-        run_uuid_val: uuid.UUID | None = None
-        if run_id is not None:
-            try:
-                run_uuid_val = uuid.UUID(str(run_id))
-            except ValueError:
-                run_uuid_val = None
 
         event = AuditEvent(
             event_type=event_type,
@@ -129,11 +196,17 @@ async def append_audit_event(
             entry_hash=entry_hash,
             created_at=now,
         )
-        session.add(event)
-        await session.flush()  # assign id without committing the outer transaction
+        # A failed audit insert must not leave the caller's enclosing
+        # transaction in a failed state. The savepoint rolls back only this
+        # best-effort audit event.
+        async with session.begin_nested():
+            session.add(event)
+            await session.flush()  # assign id without committing the outer transaction
         return event
 
     except Exception as exc:
+        if acquired_sqlite_lock:
+            _unlock_failed_sqlite_scope(session, scope)
         logger.warning("Failed to append audit event '%s': %s", event_type, exc)
         return None
 
@@ -166,13 +239,13 @@ async def verify_audit_chain(
         stmt = (
             select(AuditEvent)
             .where(AuditEvent.run_id == run_uuid)
-            .order_by(AuditEvent.created_at.asc())
+            .order_by(AuditEvent.created_at.asc(), AuditEvent.id.asc())
         )
     else:
         stmt = (
             select(AuditEvent)
             .where(AuditEvent.run_id.is_(None))
-            .order_by(AuditEvent.created_at.asc())
+            .order_by(AuditEvent.created_at.asc(), AuditEvent.id.asc())
         )
 
     result = await session.execute(stmt)

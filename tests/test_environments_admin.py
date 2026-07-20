@@ -6,6 +6,7 @@ import asyncio
 import json
 import time
 from typing import Any
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -418,3 +419,58 @@ def test_work_stream_emits_normalised_sse_event(fake_client, monkeypatch):
     assert payload["oldest_queued_at"] == "2026-05-19T10:00:00Z"
     assert payload["workers_polling"] == 2
     assert "ts" in payload
+
+
+def test_work_stream_ends_at_duration_cap(monkeypatch):
+    class _State:
+        tenant_id = None
+        _auth_checked = True
+
+    class _Req:
+        client = None
+        state = _State()
+
+        async def is_disconnected(self):
+            return False
+
+    monkeypatch.setattr(environments_admin, "_STREAM_MAX_DURATION_SECONDS", 0.0)
+
+    async def _drive():
+        response = await environments_admin.work_stream("env_1", _Req())  # type: ignore[arg-type]
+        chunks: list[str] = []
+        async for piece in response.body_iterator:
+            chunks.append(piece if isinstance(piece, str) else piece.decode("utf-8"))
+        return "".join(chunks)
+
+    body = asyncio.run(_drive())
+    assert "event: end" in body
+    assert '"reason": "Stream timed out"' in body
+
+
+@pytest.mark.asyncio
+async def test_stats_cache_prunes_expired_entries_and_evicts_oldest(monkeypatch):
+    now = time.monotonic()
+    environments_admin._stats_cache.clear()
+    environments_admin._stats_cache.update(
+        {
+            ("tenant", "expired"): (
+                now - environments_admin._STATS_CACHE_TTL_SECONDS,
+                {"depth": 1},
+            ),
+            ("tenant", "oldest"): (now - 1.0, {"depth": 2}),
+            ("tenant", "newer"): (now - 0.5, {"depth": 3}),
+        }
+    )
+    monkeypatch.setattr(environments_admin, "_STATS_CACHE_MAXSIZE", 2)
+    fetch = AsyncMock(return_value={"depth": 4})
+    monkeypatch.setattr(environments_admin, "_fetch_work_stats", fetch)
+
+    await environments_admin._get_cached_stats("tenant", "new")
+
+    assert ("tenant", "expired") not in environments_admin._stats_cache
+    assert ("tenant", "oldest") not in environments_admin._stats_cache
+    assert set(environments_admin._stats_cache) == {
+        ("tenant", "newer"),
+        ("tenant", "new"),
+    }
+    fetch.assert_awaited_once_with("new")

@@ -35,6 +35,28 @@ from sandcastle.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Keep webhook dispatch tasks alive until they finish and surface failures.
+_background_tasks: set[asyncio.Task[Any]] = set()
+
+
+def _background_task_done(task: asyncio.Task[Any]) -> None:
+    """Discard a finished dispatch task and log any unhandled exception."""
+    _background_tasks.discard(task)
+    if task.cancelled():
+        return
+    try:
+        task.result()
+    except Exception:
+        logger.exception("Background agent webhook task failed")
+
+
+def _create_background_task(coro: Any) -> asyncio.Task[Any]:
+    """Create and retain a webhook dispatch task until completion."""
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_task_done)
+    return task
+
 
 SUPPORTED_EVENTS: tuple[str, ...] = (
     "session.status_idle",
@@ -199,7 +221,7 @@ async def receive_anthropic_webhook(
         return {"status": "ignored", "event_type": event_type}
 
     # Fire-and-forget dispatch so we ACK Anthropic within their timeout.
-    asyncio.create_task(_dispatch(event_type, payload))
+    _create_background_task(_dispatch(event_type, payload))
 
     return {"status": "accepted", "event_type": event_type}
 

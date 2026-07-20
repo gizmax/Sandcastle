@@ -9,7 +9,6 @@ All tests use TestClient with mocked executor to avoid real AI calls.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import uuid
 from datetime import datetime, timezone
@@ -262,11 +261,6 @@ class TestPublishedWorkflowAuth:
             ms.workflows_dir = str(tmp_path)
             ms.default_max_cost_usd = None
             limiter.check = AsyncMock()
-
-            # Patch the request state to have restricted allowed_workflows
-            original_post = client.post
-
-            from starlette.testclient import TestClient as _TC
 
             # Use a middleware-style approach to inject state
             async def _inject_scope(request, call_next):
@@ -630,10 +624,10 @@ def _a2a_jsonrpc(method: str, params: dict, req_id: str | int = 1) -> dict:
 
 
 class TestA2ATaskCreation:
-    """tasks/send creates and executes a workflow via JSON-RPC."""
+    """tasks/send creates and queues a workflow via JSON-RPC."""
 
-    def test_tasks_send_with_workflow(self, tmp_path, mock_executor):
-        """tasks/send executes a named workflow and returns completed task."""
+    def test_tasks_send_with_workflow(self, tmp_path):
+        """tasks/send queues a named workflow and returns a submitted task."""
         name = _unique_name("a2a")
         # Write workflow YAML to disk
         yaml_content = _make_workflow_yaml(name)
@@ -643,12 +637,7 @@ class TestA2ATaskCreation:
         with patch("sandcastle.api.a2a.settings") as ms:
             ms.workflows_dir = str(tmp_path)
             ms.auth_required = False
-            with patch("sandcastle.api.a2a.execute_workflow", new_callable=AsyncMock) as mock_exec:
-                mock_exec.return_value = MagicMock(
-                    status="completed",
-                    total_cost_usd=0.005,
-                    outputs={"greet": {"text": "Hello!"}},
-                )
+            with patch("sandcastle.api.a2a.enqueue_workflow", new_callable=AsyncMock) as enqueue:
                 body = _a2a_jsonrpc(
                     "tasks/send",
                     {
@@ -664,7 +653,8 @@ class TestA2ATaskCreation:
 
         assert "result" in body
         task = body["result"]
-        assert task["status"]["state"] in ("completed", "working", "submitted")
+        assert task["status"]["state"] == "submitted"
+        enqueue.assert_awaited_once()
 
     def test_tasks_send_missing_workflow_name(self):
         """tasks/send with empty message returns failed state."""

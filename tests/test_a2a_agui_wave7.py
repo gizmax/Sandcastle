@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -624,6 +624,138 @@ class TestA2ATenantIsolation:
         assert result["status"]["state"] == "failed"
         assert "not found" in result["status"]["message"]
 
+
+class TestA2AQueuedExecution:
+    """A2A workflow tasks use the same asynchronous model as REST runs."""
+
+    @pytest.mark.asyncio
+    async def test_tasks_send_enqueues_and_returns_submitted(self, tmp_path):
+        from sandcastle.api import a2a
+        from sandcastle.models.db import RunStatus
+
+        yaml_content = """\
+name: queued-workflow
+steps:
+  - id: step
+    prompt: hello
+"""
+        (tmp_path / "queued-workflow.yaml").write_text(yaml_content)
+        task_id = str(uuid.uuid4())
+        session = AsyncMock()
+        session.add = MagicMock()
+        session.commit = AsyncMock()
+        session_context = MagicMock()
+        session_context.__aenter__ = AsyncMock(return_value=session)
+        session_context.__aexit__ = AsyncMock(return_value=False)
+        enqueue = AsyncMock()
+        execute_inline = AsyncMock()
+
+        with patch("sandcastle.api.a2a.async_session", return_value=session_context), \
+             patch("sandcastle.api.a2a.enqueue_workflow", enqueue), \
+             patch.object(a2a, "execute_workflow", execute_inline, create=True), \
+             patch.object(a2a.settings, "workflows_dir", str(tmp_path)):
+            result = await a2a._handle_tasks_send(
+                {
+                    "id": task_id,
+                    "message": {
+                        "parts": [{"type": "text", "text": "queued-workflow"}],
+                    },
+                }
+            )
+
+        assert result["id"] == task_id
+        assert result["status"]["state"] == "submitted"
+        enqueue.assert_awaited_once_with(yaml_content, {}, task_id)
+        execute_inline.assert_not_awaited()
+        db_run = session.add.call_args.args[0]
+        assert db_run.status == RunStatus.QUEUED
+
+    @pytest.mark.asyncio
+    async def test_tasks_get_observes_queued_run_transitions(self):
+        from sandcastle.api.a2a import _handle_tasks_get
+
+        task_id = str(uuid.uuid4())
+        running = _make_mock_run(task_id, status="running")
+        completed = _make_mock_run(
+            task_id, status="completed", output_data={"result": "done"}
+        )
+        session = AsyncMock()
+        session_context = MagicMock()
+        session_context.__aenter__ = AsyncMock(return_value=session)
+        session_context.__aexit__ = AsyncMock(return_value=False)
+        session.execute = AsyncMock(
+            side_effect=[
+                MagicMock(scalar_one_or_none=MagicMock(return_value=running)),
+                MagicMock(scalar_one_or_none=MagicMock(return_value=completed)),
+            ]
+        )
+
+        with patch("sandcastle.api.a2a.async_session", return_value=session_context):
+            working = await _handle_tasks_get({"id": task_id})
+            done = await _handle_tasks_get({"id": task_id})
+
+        assert working["status"]["state"] == "working"
+        assert done["status"]["state"] == "completed"
+        assert done["artifacts"][0]["parts"][0]["data"]["outputs"] == {"result": "done"}
+
+
+class TestA2ACancellationSignals:
+    """Cancellation signals must reach the executor in local and Redis modes."""
+
+    @staticmethod
+    def _session_for_running_task(task_id: str) -> MagicMock:
+        run = _make_mock_run(task_id, status="running")
+        session = AsyncMock()
+        session.execute = AsyncMock(
+            return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=run))
+        )
+        session_context = MagicMock()
+        session_context.__aenter__ = AsyncMock(return_value=session)
+        session_context.__aexit__ = AsyncMock(return_value=False)
+        return session_context
+
+    @pytest.mark.asyncio
+    async def test_tasks_cancel_sets_redis_flag_without_db_terminal_update(self, monkeypatch):
+        from sandcastle.api import a2a
+        from sandcastle.engine import executor
+
+        task_id = str(uuid.uuid4())
+        redis = MagicMock()
+        redis.set = AsyncMock()
+        get_redis = AsyncMock(return_value=redis)
+        cancel_local = AsyncMock()
+        monkeypatch.setattr(a2a.settings, "redis_url", "redis://example.test/0")
+        monkeypatch.setattr(executor, "_get_redis", get_redis)
+        monkeypatch.setattr(executor, "cancel_run_local", cancel_local)
+
+        with patch(
+            "sandcastle.api.a2a.async_session",
+            return_value=self._session_for_running_task(task_id),
+        ):
+            result = await a2a._handle_tasks_cancel({"id": task_id})
+
+        assert result["status"]["state"] == "canceled"
+        redis.set.assert_awaited_once_with(f"cancel:{task_id}", "1", ex=3600)
+        cancel_local.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_tasks_cancel_uses_guarded_local_cancel_path(self, monkeypatch):
+        from sandcastle.api import a2a
+        from sandcastle.engine import executor
+
+        task_id = str(uuid.uuid4())
+        cancel_local = AsyncMock()
+        monkeypatch.setattr(a2a.settings, "redis_url", None)
+        monkeypatch.setattr(executor, "cancel_run_local", cancel_local)
+
+        with patch(
+            "sandcastle.api.a2a.async_session",
+            return_value=self._session_for_running_task(task_id),
+        ):
+            await a2a._handle_tasks_cancel({"id": task_id})
+
+        cancel_local.assert_awaited_once_with(task_id)
+
     def test_tasks_get_filters_by_tenant(self):
         """tasks/get should filter by tenant_id when auth is enabled."""
         from sandcastle.api.a2a import _handle_tasks_get
@@ -685,6 +817,7 @@ class TestA2ARateLimiting:
     def test_tasks_send_rate_limited(self):
         """tasks/send should be rate limited."""
         from fastapi import HTTPException
+
         from sandcastle.api import rate_limit
 
         original_limiter = rate_limit.execution_limiter
@@ -1001,6 +1134,7 @@ class TestAguiTenantIsolation:
         # This is enforced by the SQL query adding a tenant_id filter.
         # We verify the code path exists by checking the function source.
         import inspect
+
         from sandcastle.api.agui import agui_stream
         source = inspect.getsource(agui_stream)
         assert "tenant_id" in source
@@ -1080,7 +1214,7 @@ class TestAguiEventMappingWave7:
         }
         result = _map_event_bus_event(event, "r1")
         assert result is not None
-        lines = [l for l in result.split("\n") if l.startswith("data: ")]
+        lines = [line for line in result.split("\n") if line.startswith("data: ")]
         assert len(lines) == 2
         text_msg = json.loads(lines[0].removeprefix("data: "))
         assert text_msg["type"] == "text_message"

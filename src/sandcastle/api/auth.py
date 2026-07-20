@@ -7,6 +7,8 @@ import hmac as _hmac
 import logging
 import os
 import secrets
+import time
+from asyncio import Lock
 from datetime import datetime, timezone
 
 from fastapi import Request
@@ -17,6 +19,12 @@ from sandcastle.config import settings
 from sandcastle.models.db import ApiKey, async_session
 
 logger = logging.getLogger(__name__)
+
+# ``last_used_at`` is informational. This process-local throttle intentionally
+# permits multi-worker staleness to avoid a database write on every request.
+_LAST_USED_AT_WRITE_INTERVAL_SECONDS = 5 * 60
+_last_used_at_write_times: dict[str, float] = {}
+_last_used_at_write_lock = Lock()
 
 # Public endpoints that don't require authentication.
 # NOTE: /.well-known/agent.json is public per the A2A discovery spec.
@@ -227,15 +235,33 @@ async def auth_middleware(request: Request, call_next):
     request.state.allowed_workflows = db_key.allowed_workflows
     request.state._auth_checked = True
 
-    # Update last_used_at
-    try:
-        async with async_session() as session:
-            db_key_update = await session.get(ApiKey, db_key.id)
-            if db_key_update:
-                db_key_update.last_used_at = datetime.now(timezone.utc)
-                await session.commit()
-    except Exception:
-        pass  # Non-critical
+    # Update last_used_at at most once every five minutes per API key. Reserve
+    # the interval before the write so concurrent requests do not all update it.
+    key_id = str(db_key.id)
+    write_time = time.monotonic()
+    should_update_last_used = False
+    async with _last_used_at_write_lock:
+        last_write = _last_used_at_write_times.get(key_id)
+        if (
+            last_write is None
+            or write_time - last_write >= _LAST_USED_AT_WRITE_INTERVAL_SECONDS
+        ):
+            _last_used_at_write_times[key_id] = write_time
+            should_update_last_used = True
+
+    if should_update_last_used:
+        try:
+            async with async_session() as session:
+                db_key_update = await session.get(ApiKey, db_key.id)
+                if db_key_update:
+                    db_key_update.last_used_at = datetime.now(timezone.utc)
+                    await session.commit()
+        except Exception:
+            # Do not let an informational write reject an authenticated request.
+            # Permit a later request to retry if this reservation was the latest.
+            async with _last_used_at_write_lock:
+                if _last_used_at_write_times.get(key_id) == write_time:
+                    _last_used_at_write_times.pop(key_id, None)
 
     return await call_next(request)
 

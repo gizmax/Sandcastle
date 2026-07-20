@@ -92,18 +92,13 @@ def validate_callback_url(url: str) -> str:
     return url
 
 
-def _resolve_and_check_ip(hostname: str, port: int) -> str:
-    """Resolve, validate, and return the IP address used for delivery.
+def _pick_allowed_ip(resolved: list, hostname: str) -> str:
+    """Validate resolved addresses and pick the one to pin for delivery.
 
     Every resolved address must be public. The first validated address is
     returned so the caller can pin the subsequent TCP connection to the exact
     same address, preventing a DNS-rebinding TOCTOU.
     """
-    try:
-        resolved = socket.getaddrinfo(hostname, port)
-    except socket.gaierror:
-        raise ValueError(f"Cannot resolve hostname '{hostname}' at delivery time")
-
     first_allowed_ip: str | None = None
     for _, _, _, _, sockaddr in resolved:
         ip = ipaddress.ip_address(sockaddr[0])
@@ -119,6 +114,15 @@ def _resolve_and_check_ip(hostname: str, port: int) -> str:
     if first_allowed_ip is None:
         raise ValueError(f"Cannot resolve hostname '{hostname}' at delivery time")
     return first_allowed_ip
+
+
+async def _resolve_and_check_ip(hostname: str, port: int) -> str:
+    """Resolve (off the event loop), validate, and return the delivery IP."""
+    try:
+        resolved = await asyncio.get_running_loop().getaddrinfo(hostname, port)
+    except socket.gaierror:
+        raise ValueError(f"Cannot resolve hostname '{hostname}' at delivery time")
+    return _pick_allowed_ip(resolved, hostname)
 
 
 def _truncate_payload(
@@ -198,9 +202,13 @@ async def dispatch_webhook(
 
     Returns True if the webhook was delivered successfully.
     """
-    # Validate URL to prevent SSRF
+    # Validate URL syntax without synchronously resolving on this async path.
+    parsed = urlparse(url)
     try:
-        validate_callback_url(url)
+        if parsed.scheme not in ("https", "http"):
+            raise ValueError(f"callback_url must use http(s), got '{parsed.scheme}'")
+        if not parsed.hostname:
+            raise ValueError("callback_url has no hostname")
     except ValueError as e:
         logger.error(f"Webhook URL validation failed: {e}")
         return False
@@ -209,10 +217,9 @@ async def dispatch_webhook(
     # that exact address so httpx cannot resolve a TTL-0 rebound address later.
     # The initial validate_callback_url() checks at creation/submission time,
     # but the hostname could resolve to a different IP at delivery time.
-    parsed = urlparse(url)
     default_port = 443 if parsed.scheme == "https" else 80
     try:
-        pinned_ip = _resolve_and_check_ip(
+        pinned_ip = await _resolve_and_check_ip(
             parsed.hostname or "", parsed.port or default_port
         )
     except ValueError as e:

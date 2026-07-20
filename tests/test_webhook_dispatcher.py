@@ -10,6 +10,7 @@ import httpx
 import pytest
 
 from sandcastle.webhooks.dispatcher import (
+    _pick_allowed_ip,
     _resolve_and_check_ip,
     _sign_payload,
     _truncate_payload,
@@ -194,50 +195,37 @@ class TestResolveAndCheckIp:
 
     def test_public_ip_passes(self):
         """A public IP at delivery time should pass."""
-        with patch("socket.getaddrinfo", return_value=[
-            (2, 1, 6, "", ("93.184.216.34", 443)),
-        ]):
-            # Should not raise
-            _resolve_and_check_ip("example.com", 443)
+        # Should not raise
+        _pick_allowed_ip([(2, 1, 6, "", ("93.184.216.34", 443))], "example.com")
 
     def test_private_ip_at_delivery_time_blocked(self):
         """DNS rebinding: hostname now resolves to private IP."""
-        with patch("socket.getaddrinfo", return_value=[
-            (2, 1, 6, "", ("10.0.0.1", 443)),
-        ]):
-            with pytest.raises(ValueError, match="rebinding"):
-                _resolve_and_check_ip("evil-rebind.com", 443)
+        with pytest.raises(ValueError, match="rebinding"):
+            _pick_allowed_ip([(2, 1, 6, "", ("10.0.0.1", 443))], "evil-rebind.com")
 
     def test_localhost_at_delivery_time_blocked(self):
         """DNS rebinding: hostname now resolves to localhost."""
-        with patch("socket.getaddrinfo", return_value=[
-            (2, 1, 6, "", ("127.0.0.1", 443)),
-        ]):
-            with pytest.raises(ValueError, match="rebinding"):
-                _resolve_and_check_ip("evil-rebind.com", 443)
+        with pytest.raises(ValueError, match="rebinding"):
+            _pick_allowed_ip([(2, 1, 6, "", ("127.0.0.1", 443))], "evil-rebind.com")
 
     def test_metadata_service_at_delivery_time_blocked(self):
         """DNS rebinding: hostname now resolves to cloud metadata endpoint."""
-        with patch("socket.getaddrinfo", return_value=[
-            (2, 1, 6, "", ("169.254.169.254", 80)),
-        ]):
-            with pytest.raises(ValueError, match="rebinding"):
-                _resolve_and_check_ip("evil-rebind.com", 80)
+        with pytest.raises(ValueError, match="rebinding"):
+            _pick_allowed_ip([(2, 1, 6, "", ("169.254.169.254", 80))], "evil-rebind.com")
 
-    def test_dns_failure_at_delivery_time_blocked(self):
+    async def test_dns_failure_at_delivery_time_blocked(self):
         """Unresolvable hostname at delivery time should fail."""
         import socket
         with patch("socket.getaddrinfo", side_effect=socket.gaierror("nope")):
             with pytest.raises(ValueError, match="resolve"):
-                _resolve_and_check_ip("gone.example.com", 443)
+                await _resolve_and_check_ip("gone.example.com", 443)
 
     def test_ipv6_ula_at_delivery_time_blocked(self):
         """IPv6 unique-local address at delivery time should be blocked."""
-        with patch("socket.getaddrinfo", return_value=[
-            (10, 1, 6, "", ("fd12:3456:789a::1", 443, 0, 0)),
-        ]):
-            with pytest.raises(ValueError, match="rebinding"):
-                _resolve_and_check_ip("evil-ipv6.com", 443)
+        with pytest.raises(ValueError, match="rebinding"):
+            _pick_allowed_ip(
+                [(10, 1, 6, "", ("fd12:3456:789a::1", 443, 0, 0))], "evil-ipv6.com"
+            )
 
 
 class TestWebhookDeliveryPinning:
@@ -247,10 +235,9 @@ class TestWebhookDeliveryPinning:
     async def test_delivery_rejects_private_ip_after_initial_validation(self, monkeypatch):
         from sandcastle.webhooks.dispatcher import dispatch_webhook
 
-        resolutions = iter([_PUBLIC_IP, _PRIVATE_IP])
-
         def fake_getaddrinfo(host, port, *args, **kwargs):  # noqa: ANN001
-            return [(2, 1, 6, "", (next(resolutions), port))]
+            # Delivery-time resolution lands on a private IP (TTL-0 rebind).
+            return [(2, 1, 6, "", (_PRIVATE_IP, port))]
 
         client_cls = MagicMock()
         monkeypatch.setattr("socket.getaddrinfo", fake_getaddrinfo)
@@ -316,7 +303,7 @@ class TestWebhookDeliveryPinning:
         def fake_getaddrinfo(host, port, *args, **kwargs):  # noqa: ANN001
             nonlocal calls
             calls += 1
-            if calls <= 2:  # creation validation and delivery validation
+            if calls == 1:  # the single delivery-time resolution
                 return [(2, 1, 6, "", (_PUBLIC_IP, port))]
             raise AssertionError("pinned transport must not resolve DNS again")
 
@@ -340,7 +327,7 @@ class TestWebhookDeliveryPinning:
         )
 
         assert delivered is True
-        assert calls == 2
+        assert calls == 1
         assert captured["host"] == _PUBLIC_IP
 
 

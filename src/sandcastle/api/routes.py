@@ -19,6 +19,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy import case, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from sandcastle.api.auth import generate_api_key, get_tenant_id, hash_key, is_admin
@@ -178,12 +179,49 @@ from sandcastle.queue.worker import enqueue_workflow
 
 logger = logging.getLogger(__name__)
 
+# Keep fire-and-forget API tasks alive until completion and surface failures.
+_background_tasks: set[asyncio.Task[Any]] = set()
+
+
+def _background_task_done(task: asyncio.Task[Any]) -> None:
+    """Discard a finished background task and log any unhandled exception."""
+    _background_tasks.discard(task)
+    if task.cancelled():
+        return
+    try:
+        task.result()
+    except Exception:
+        logger.exception("Background API task failed")
+
+
+def _create_background_task(coro: Any) -> asyncio.Task[Any]:
+    """Create and retain a background task until its completion."""
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_task_done)
+    return task
+
+
 router = APIRouter()
 
 # --- SSE streaming configuration ---
 # Interval (in seconds) between keepalive comments sent to prevent
 # proxies / load balancers from closing idle SSE connections.
 SSE_KEEPALIVE_INTERVAL_SECONDS = 30
+# Match the AG-UI stream cap so a dead worker cannot leave a DB poll running forever.
+SSE_MAX_DURATION_SECONDS = 600
+
+_TERMINAL_RUN_STATUSES = frozenset(
+    {
+        RunStatus.COMPLETED,
+        RunStatus.FAILED,
+        RunStatus.PARTIAL,
+        RunStatus.CANCELLED,
+        RunStatus.BUDGET_EXCEEDED,
+        RunStatus.AWAITING_APPROVAL,
+    }
+)
+_TERMINAL_RUN_STATUS_VALUES = frozenset(status.value for status in _TERMINAL_RUN_STATUSES)
 
 # --- Hub registry cache (5 min TTL, bounded to 100 entries) ---
 
@@ -974,6 +1012,7 @@ async def _emit_update_audit(
                 payload=payload,
                 source_ip=source_ip,
             )
+            await session.commit()
     except Exception:
         logger.warning("Failed to emit audit event: %s", event_type, exc_info=True)
 
@@ -1411,6 +1450,7 @@ _UPLOAD_ALLOWED_EXTENSIONS = {
 # 50 MB for S3/production, 10 MB for local
 _UPLOAD_MAX_BYTES_S3 = 50 * 1024 * 1024
 _UPLOAD_MAX_BYTES_LOCAL = 10 * 1024 * 1024
+_UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
 
 # Map common extensions to MIME types for S3 uploads
 _EXTENSION_CONTENT_TYPES: dict[str, str] = {
@@ -1478,8 +1518,15 @@ async def upload_file(file: UploadFile) -> ApiResponse:
     is_s3 = settings.storage_backend == "s3"
     max_bytes = _UPLOAD_MAX_BYTES_S3 if is_s3 else _UPLOAD_MAX_BYTES_LOCAL
 
-    # Read file into memory and enforce size limit
-    contents = await file.read()
+    # Read bounded chunks so an oversized upload never gets fully buffered.
+    contents = bytearray()
+    while len(contents) <= max_bytes:
+        remaining = max_bytes + 1 - len(contents)
+        chunk = await file.read(min(_UPLOAD_READ_CHUNK_BYTES, remaining))
+        if not chunk:
+            break
+        contents.extend(chunk[:remaining])
+
     if len(contents) > max_bytes:
         raise HTTPException(
             status_code=400,
@@ -1490,6 +1537,7 @@ async def upload_file(file: UploadFile) -> ApiResponse:
                 )
             ).model_dump(),
         )
+    contents = bytes(contents)
 
     file_id = uuid.uuid4().hex[:8]
     dest_name = f"{file_id}_{safe_name}"
@@ -4017,7 +4065,7 @@ async def start_architect(req: Request, request: ArchitectRequest) -> ApiRespons
         "result": None,
         "error": None,
     }
-    asyncio.create_task(_run_architect_job(job_id, request))
+    _create_background_task(_run_architect_job(job_id, request))
 
     return ApiResponse(data={"job_id": job_id, "status": "queued"})
 
@@ -5169,7 +5217,21 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
                 admin_trusted=is_admin(req) or settings.code_steps_allow_untrusted,
             )
             session.add(db_run)
-            await session.commit()
+            try:
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()
+                # With auth disabled tenant_id is NULL; PostgreSQL treats NULLs
+                # as distinct, so this constraint does not deduplicate no-auth runs.
+                if request.idempotency_key:
+                    idemp_stmt = select(Run.id).where(
+                        Run.idempotency_key == request.idempotency_key
+                    )
+                    idemp_stmt = _apply_tenant_filter(idemp_stmt, tenant_id, Run.tenant_id)
+                    existing = await session.scalar(idemp_stmt)
+                    if existing:
+                        return ApiResponse(data=RunIdempotentResponse(run_id=str(existing)))
+                raise
     except Exception:
         logger.error(
             "Failed to create run record in database for %s",
@@ -5446,7 +5508,21 @@ async def run_workflow_async(request: WorkflowRunRequest, req: Request) -> ApiRe
                 admin_trusted=is_admin(req) or settings.code_steps_allow_untrusted,
             )
             session.add(db_run)
-            await session.commit()
+            try:
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()
+                # With auth disabled tenant_id is NULL; PostgreSQL treats NULLs
+                # as distinct, so this constraint does not deduplicate no-auth runs.
+                if request.idempotency_key:
+                    idemp_stmt = select(Run.id).where(
+                        Run.idempotency_key == request.idempotency_key
+                    )
+                    idemp_stmt = _apply_tenant_filter(idemp_stmt, tenant_id, Run.tenant_id)
+                    existing = await session.scalar(idemp_stmt)
+                    if existing:
+                        return ApiResponse(data=RunIdempotentResponse(run_id=str(existing)))
+                raise
     except Exception as e:
         logger.error("Could not create run in database: %s", e)
         raise HTTPException(
@@ -5993,10 +6069,17 @@ async def stream_run(run_id: str, request: Request) -> StreamingResponse:
         # Dedup key includes status so state transitions (running -> completed) are sent
         seen_step_keys: set[tuple[str, int | None, str]] = set()
         last_event_time = time.monotonic()
+        stream_started_at = last_event_time
 
-        while True:  # Run until terminal state or client disconnect
+        while True:  # Run until terminal state, client disconnect, or timeout
             if await request.is_disconnected():
                 break
+            if time.monotonic() - stream_started_at >= SSE_MAX_DURATION_SECONDS:
+                yield _sse_event(
+                    "error",
+                    {"run_id": run_id, "message": "Run not progressing; stream timed out"},
+                )
+                return
             async with async_session() as session:
                 stmt = select(Run).options(selectinload(Run.steps)).where(Run.id == run_uuid)
                 result = await session.execute(stmt)
@@ -6046,14 +6129,7 @@ async def stream_run(run_id: str, request: Request) -> StreamingResponse:
                 last_event_time = time.monotonic()
 
             # Terminal states - emit final result and stop
-            if current_status in (
-                "completed",
-                "failed",
-                "partial",
-                "cancelled",
-                "budget_exceeded",
-                "awaiting_approval",
-            ):
+            if current_status in _TERMINAL_RUN_STATUS_VALUES:
                 yield _sse_event(
                     "result",
                     {
@@ -10340,10 +10416,7 @@ async def batch_run_workflow(name: str, req: Request) -> ApiResponse:
                         await asyncio.sleep(1)
                         async with async_session() as session:
                             db_run = await session.get(Run, uuid.UUID(run_id))
-                            if db_run and db_run.status in (
-                                RunStatus.COMPLETED,
-                                RunStatus.FAILED,
-                            ):
+                            if db_run and db_run.status in _TERMINAL_RUN_STATUSES:
                                 item["cost_usd"] = float(
                                     db_run.total_cost_usd or 0
                                 )
@@ -10352,7 +10425,7 @@ async def batch_run_workflow(name: str, req: Request) -> ApiResponse:
                                     async with counter_lock:
                                         batch["completed"] += 1
                                 else:
-                                    item["status"] = "failed"
+                                    item["status"] = db_run.status.value
                                     item["error"] = db_run.error or "Unknown error"
                                     async with counter_lock:
                                         batch["failed"] += 1
@@ -10449,7 +10522,7 @@ async def batch_run_workflow(name: str, req: Request) -> ApiResponse:
             else:
                 batch["status"] = "failed"
 
-    asyncio.create_task(_process_batch())
+    _create_background_task(_process_batch())
 
     return ApiResponse(
         data=BatchStartedResponse(

@@ -32,6 +32,7 @@ from sandcastle.engine.sandshore import (
     SandshoreError,
     SandshoreRuntime,
     get_sandshore_runtime,
+    is_region_allowed,
 )
 from sandcastle.engine.storage import StorageBackend
 from sandcastle.engine.subprocess_env import build_minimal_subprocess_env
@@ -65,6 +66,10 @@ class StepResult:
     error: str | None = None
     attempt: int = 1
     input_prompt: str | None = None  # Resolved prompt sent to the LLM
+    # Deterministic failures must not spend the configured retry budget.  Step
+    # implementations may set this directly; the retry wrappers also infer it
+    # from known fatal error messages for legacy implementations.
+    retryable: bool = True
 
 
 @dataclass
@@ -573,11 +578,7 @@ def _enforce_data_residency(model_info: Any) -> None:
     residency = settings.data_residency
     if not residency:
         return
-    allowed = {"eu": {"eu", "local"}, "local": {"local"}}
-    ok_regions = allowed.get(residency)
-    if ok_regions is None:
-        return  # Unknown residency value - no restriction
-    if model_info.region not in ok_regions:
+    if not is_region_allowed(residency, model_info.region):
         raise ValueError(
             f"Data residency violation: model '{model_info.api_model_id}' "
             f"(region={model_info.region}) is not allowed under "
@@ -813,7 +814,7 @@ def _escape_js_string(text: str) -> str:
 
 
 def _validate_browser_url(url: str) -> str:
-    """Validate and sanitize a URL for browser navigation.
+    """Validate and sanitize a browser URL before asynchronous DNS validation.
 
     Rejects dangerous schemes (javascript:, data:, file:) and ensures
     the URL uses http or https. Returns the validated URL.
@@ -843,26 +844,27 @@ def _validate_browser_url(url: str) -> str:
         url = f"https://{url}"
         parsed = urlparse(url)
 
-    # SSRF prevention: resolve the host and reject private/internal networks
-    # (cloud metadata 169.254.169.254, localhost, RFC-1918, link-local, etc.),
-    # mirroring the HTTP-step guard so browser / computer-use / CDP steps cannot
-    # be pointed at internal services. Opt out for trusted single-tenant setups
-    # that automate local apps with SANDCASTLE_ALLOW_PRIVATE_NETWORKS=1.
+    # Fast-fail literal private addresses (and localhost) without a DNS lookup.
+    # Hostname resolution remains in the async helper below so browser execution
+    # never blocks the event loop on a slow resolver.
     import os as _os
 
     if _os.getenv("SANDCASTLE_ALLOW_PRIVATE_NETWORKS", "").lower() not in ("1", "true", "yes"):
         import ipaddress as _ipaddress
-        import socket as _socket
 
         from sandcastle.webhooks.dispatcher import _BLOCKED_NETWORKS
 
         if parsed.hostname:
+            if parsed.hostname.lower() == "localhost":
+                raise ValueError(
+                    "Browser URL host resolves to a blocked private/internal "
+                    "network (localhost) - refusing to navigate (SSRF guard)"
+                )
             try:
-                _resolved = _socket.getaddrinfo(parsed.hostname, parsed.port or 443)
-            except _socket.gaierror:
-                _resolved = []  # let the browser surface the resolution error naturally
-            for _, _, _, _, _sockaddr in _resolved:
-                _ip = _ipaddress.ip_address(_sockaddr[0])
+                _ip = _ipaddress.ip_address(parsed.hostname)
+            except ValueError:
+                _ip = None
+            if _ip is not None:
                 for _network in _BLOCKED_NETWORKS:
                     if _ip in _network:
                         raise ValueError(
@@ -870,6 +872,42 @@ def _validate_browser_url(url: str) -> str:
                             f"network ({_ip}) - refusing to navigate (SSRF guard)"
                         )
 
+    return url
+
+
+async def _validate_browser_url_with_ssrf_guard(url: str) -> str:
+    """Validate a browser URL and asynchronously resolve its host for SSRF checks."""
+    url = _validate_browser_url(url)
+
+    import os as _os
+
+    if _os.getenv("SANDCASTLE_ALLOW_PRIVATE_NETWORKS", "").lower() in ("1", "true", "yes"):
+        return url
+
+    import ipaddress as _ipaddress
+    import socket as _socket
+    from urllib.parse import urlparse
+
+    from sandcastle.webhooks.dispatcher import _BLOCKED_NETWORKS
+
+    parsed = urlparse(url)
+    if not parsed.hostname:
+        return url
+    try:
+        resolved = await asyncio.get_running_loop().getaddrinfo(
+            parsed.hostname, parsed.port or 443
+        )
+    except _socket.gaierror:
+        return url  # Let the browser surface the resolution error naturally.
+
+    for _, _, _, _, sockaddr in resolved:
+        ip = _ipaddress.ip_address(sockaddr[0])
+        for network in _BLOCKED_NETWORKS:
+            if ip in network:
+                raise ValueError(
+                    "Browser URL host resolves to a blocked private/internal "
+                    f"network ({ip}) - refusing to navigate (SSRF guard)"
+                )
     return url
 
 
@@ -981,7 +1019,7 @@ async def _check_cancel(run_id: str) -> bool:
         return False
 
 
-def _check_budget(context: RunContext) -> str | None:
+def _check_budget(context: RunContext, additional_cost_usd: float = 0.0) -> str | None:
     """Check if the run has exceeded its budget.
 
     Returns None if OK, "warning" at 80%, "exceeded" at 100%.
@@ -992,7 +1030,7 @@ def _check_budget(context: RunContext) -> str | None:
         return None
     import math
 
-    total = context.total_cost
+    total = context.total_cost + additional_cost_usd
     # NaN or Infinity in accumulated costs is a bug - treat as exceeded
     # to fail safely rather than silently ignoring budget limits.
     if math.isnan(total) or math.isinf(total):
@@ -1006,6 +1044,61 @@ def _check_budget(context: RunContext) -> str | None:
     if ratio >= 0.8:
         return "warning"
     return None
+
+
+def _fan_out_child_budget(max_cost_usd: float | None, item_count: int) -> float | None:
+    """Return one equal share of an enforced budget for a parallel child.
+
+    ``None`` and non-positive budgets retain their existing unlimited semantics.
+    Empty fan-outs never create a child, so avoid division by zero by returning
+    the original value in that case.
+    """
+    if max_cost_usd is None or max_cost_usd <= 0 or item_count <= 0:
+        return max_cost_usd
+    return max_cost_usd / item_count
+
+
+def _is_retryable_step_failure(result: StepResult) -> bool:
+    """Return whether a failed result is safe to retry.
+
+    Unknown execution failures retain the historical retry behavior.  Known
+    deterministic request, validation, trust, and SSRF failures are stopped
+    before they can issue another paid request.
+    """
+    if not result.retryable:
+        return False
+
+    error = (result.error or "").lower()
+    if re.search(r"\b(?:400|401|403|404|422)\b", error):
+        return False
+
+    fatal_markers = (
+        "output_schema",
+        "output schema",
+        "schema mismatch",
+        "schema validation",
+        "validation error",
+        "validation failed",
+        "template",
+        "data residency",
+        "@file:",
+        "file ref",
+        "admin-trusted",
+        "admin trusted",
+        "blocked network",
+        "private/internal network",
+        "ssrf",
+        "must use http",
+        "unsupported url scheme",
+        "dangerous url scheme",
+    )
+    if any(marker in error for marker in fatal_markers):
+        return False
+
+    if re.search(r"\bmissing\s+\w+_?config\b", error):
+        return False
+
+    return True
 
 
 def _write_csv_output(
@@ -1475,8 +1568,20 @@ async def execute_step_with_retry(
                 _step_span_cm.__exit__(None, None, None)
                 return result
 
-            # Last attempt - check for fallback
-            if attempt >= max_attempts:
+            retryable = _is_retryable_step_failure(result)
+            if not retryable:
+                result.retryable = False
+
+            # Account for the failed call before deciding whether another
+            # attempt is affordable.  The result is appended to context.costs
+            # by the caller exactly once, so project that pending aggregate
+            # here instead of mutating shared context during retries.
+            budget_status = _check_budget(context, total_attempt_cost_usd)
+
+            # Terminal failure: exhausted retries, deterministic error, or no
+            # remaining budget.  Fallback routing remains available in all
+            # three cases, matching the classic on_failure semantics.
+            if attempt >= max_attempts or not retryable or budget_status == "exceeded":
                 on_failure = step.retry.on_failure if step.retry else "abort"
 
                 # Try fallback prompt if configured
@@ -1509,7 +1614,7 @@ async def execute_step_with_retry(
                         _step_span_cm.__exit__(None, None, None)
                         return fallback_result
 
-                logger.warning(f"Step '{step.id}' failed after {max_attempts} attempts: {result.error}")
+                logger.warning(f"Step '{step.id}' failed after {attempt} attempt(s): {result.error}")
                 result.cost_usd = total_attempt_cost_usd
                 from sandcastle.engine.telemetry import capture_step_error
 
@@ -1570,6 +1675,14 @@ async def execute_step_with_retry(
         _otel_span_exited = True
         _step_span_cm.__exit__(None, None, None)
         return result  # Should not reach here
+
+    except asyncio.CancelledError as cancelled:
+        # Propagate charges from completed failed attempts to composite callers
+        # (loop/race) so a sibling-triggered pause can checkpoint them.
+        cancelled.accrued_cost_usd = (
+            getattr(cancelled, "accrued_cost_usd", 0.0) + total_attempt_cost_usd
+        )
+        raise
 
     finally:
         # Ensure OTEL span is always closed, even on WorkflowPaused/StepBlocked
@@ -2303,13 +2416,27 @@ async def _execute_step_once(
             input_prompt=resolved_input_prompt,
         )
 
-    except (StepBlocked, WorkflowPaused):
+    except WorkflowPaused as paused:
+        # A policy can request approval only after a paid provider response.
+        # Preserve that charge for the workflow-level pause checkpoint.
+        paused.accrued_cost_usd += query_cost_usd
+        raise
+
+    except asyncio.CancelledError as cancelled:
+        # The provider may already have supplied usage before a sibling pause
+        # cancels this task during post-query processing.
+        cancelled.accrued_cost_usd = (
+            getattr(cancelled, "accrued_cost_usd", 0.0) + query_cost_usd
+        )
+        raise
+
+    except StepBlocked:
         raise
 
     except (SandshoreError, Exception) as e:
         duration = (datetime.now(timezone.utc) - started_at).total_seconds()
         logger.error(f"Step '{step.id}' attempt {attempt} error: {e}")
-        return StepResult(
+        failed_result = StepResult(
             step_id=step.id,
             parallel_index=parallel_index,
             cost_usd=query_cost_usd,
@@ -2319,6 +2446,8 @@ async def _execute_step_once(
             attempt=attempt,
             input_prompt=resolved_input_prompt,
         )
+        failed_result.retryable = _is_retryable_step_failure(failed_result)
+        return failed_result
 
 
 async def _execute_approval_step(
@@ -2593,8 +2722,8 @@ async def _execute_sub_workflow_step(
             items = []
         elif not isinstance(items, list):
             items = [items]
-
         semaphore = asyncio.Semaphore(step.sub_workflow.max_concurrent)
+        child_budget = _fan_out_child_budget(context.max_cost_usd, len(items))
 
         async def run_sub(item: Any, index: int) -> WorkflowResult:
             async with semaphore:
@@ -2607,7 +2736,7 @@ async def _execute_sub_workflow_step(
                     run_id=sub_run_id,
                     storage=storage,
                     depth=depth + 1,
-                    max_cost_usd=context.max_cost_usd,
+                    max_cost_usd=child_budget,
                     admin_trusted=context.admin_trusted,
                     tenant_id=context.tenant_id,
                 )
@@ -2909,7 +3038,9 @@ async def _execute_http_step(
                 )
             if _parsed.hostname:
                 try:
-                    _resolved = _socket.getaddrinfo(_parsed.hostname, _parsed.port or 443)
+                    _resolved = await asyncio.get_running_loop().getaddrinfo(
+                        _parsed.hostname, _parsed.port or 443
+                    )
                     _first_allowed_ip: str | None = None
                     for _, _, _, _, _sockaddr in _resolved:
                         _ip = _ipaddress.ip_address(_sockaddr[0])
@@ -3108,6 +3239,7 @@ async def _execute_http_step(
                 duration_seconds=duration,
                 status="failed",
                 error=f"HTTP {resp.status_code}: {reason}",
+                retryable=resp.status_code not in (400, 401, 403, 404, 422),
             )
         return StepResult(
             step_id=step.id,
@@ -5033,9 +5165,9 @@ async def _execute_code_step(
         # Python subprocess so a sandbox escape cannot reach this process' memory
         # (settings, DB session factory, other tenants' data). The subprocess is
         # really killed on timeout, which the in-process thread path could not do.
-        # Operators can fall back to the in-process path via
-        # CODE_STEPS_OUT_OF_PROCESS=false. Infrastructure failures (spawn /
-        # serialization) fall back to the in-process path so a step is never lost.
+        # Operators can explicitly opt into an in-process fallback if their
+        # environment cannot support subprocess isolation. The default fails
+        # closed so an unavailable isolation boundary is never silently bypassed.
         if _code_settings.code_steps_out_of_process:
             from sandcastle.engine.code_subprocess_runner import (
                 SubprocessInfraError,
@@ -5051,10 +5183,27 @@ async def _execute_code_step(
                     timeout=_CODE_STEP_TIMEOUT,
                 )
             except SubprocessInfraError as infra_exc:
+                if not _code_settings.code_steps_allow_inprocess_fallback:
+                    duration = time.monotonic() - started_at
+                    return StepResult(
+                        step_id=step.id,
+                        status="failed",
+                        error=(
+                            "Code step subprocess isolation failed: "
+                            f"{infra_exc}. In-process fallback is disabled."
+                        ),
+                        duration_seconds=duration,
+                    )
                 logger.warning(
                     "Code step '%s': subprocess unavailable (%s); "
                     "falling back to in-process execution",
                     step.id, infra_exc,
+                )
+                await _emit_audit_event(
+                    "code_step.inprocess_fallback",
+                    run_id=context.run_id,
+                    actor_id="system",
+                    payload={"step_id": step.id, "reason": str(infra_exc)},
                 )
                 sub = None
 
@@ -5270,16 +5419,17 @@ async def _execute_condition_step(
 
         # Populate skip/run steps. A step explicitly selected to run by
         # ANY condition takes precedence over skips from other conditions.
-        if result:
-            skip_candidates = set(cfg.else_steps) - context.branch_run_steps
-            context.branch_skip_steps.update(skip_candidates)
-            context.branch_run_steps.update(cfg.then_steps)
-            context.branch_skip_steps -= set(cfg.then_steps)
-        else:
-            skip_candidates = set(cfg.then_steps) - context.branch_run_steps
-            context.branch_skip_steps.update(skip_candidates)
-            context.branch_run_steps.update(cfg.else_steps)
-            context.branch_skip_steps -= set(cfg.else_steps)
+        async with context._lock:
+            if result:
+                skip_candidates = set(cfg.else_steps) - context.branch_run_steps
+                context.branch_skip_steps.update(skip_candidates)
+                context.branch_run_steps.update(cfg.then_steps)
+                context.branch_skip_steps -= set(cfg.then_steps)
+            else:
+                skip_candidates = set(cfg.then_steps) - context.branch_run_steps
+                context.branch_skip_steps.update(skip_candidates)
+                context.branch_run_steps.update(cfg.else_steps)
+                context.branch_skip_steps -= set(cfg.else_steps)
 
         duration = time.monotonic() - started_at
         return StepResult(
@@ -5413,12 +5563,13 @@ async def _execute_classify_step(
 
         # Mark matched branch steps as run, skip non-matching branches
         matched_steps = set(cfg.branches.get(matched, []))
-        context.branch_run_steps.update(matched_steps)
-        context.branch_skip_steps -= matched_steps
-        for cat, branch_steps in cfg.branches.items():
-            if cat != matched:
-                skip_candidates = set(branch_steps) - context.branch_run_steps
-                context.branch_skip_steps.update(skip_candidates)
+        async with context._lock:
+            context.branch_run_steps.update(matched_steps)
+            context.branch_skip_steps -= matched_steps
+            for cat, branch_steps in cfg.branches.items():
+                if cat != matched:
+                    skip_candidates = set(branch_steps) - context.branch_run_steps
+                    context.branch_skip_steps.update(skip_candidates)
 
         duration = time.monotonic() - started_at
         return StepResult(
@@ -5454,6 +5605,7 @@ async def _execute_loop_step(
     if not cfg:
         return StepResult(step_id=step.id, status="failed", error="Missing loop_config")
 
+    total_cost = 0.0
     try:
         # Resolve the 'over' variable path
         over_path = cfg.over.strip("{}")
@@ -5477,7 +5629,6 @@ async def _execute_loop_step(
             )
 
         results = []
-        total_cost = 0.0
 
         for i, item in enumerate(items):
             if await _check_cancel(context.run_id):
@@ -5566,8 +5717,16 @@ async def _execute_loop_step(
             duration_seconds=duration,
             status="completed",
         )
-    except WorkflowPaused:
+    except WorkflowPaused as paused:
         # Approval gates inside loops must propagate to the main executor
+        # while retaining all completed iterations' paid work.
+        paused.accrued_cost_usd += total_cost
+        raise
+    except asyncio.CancelledError as cancelled:
+        partial_cost = total_cost + getattr(cancelled, "accrued_cost_usd", 0.0)
+        if partial_cost:
+            async with context._lock:
+                context.costs.append(partial_cost)
         raise
     except Exception as e:
         duration = time.monotonic() - started_at
@@ -5595,19 +5754,33 @@ async def _execute_race_step(
     if not cfg:
         return StepResult(step_id=step.id, status="failed", error="Missing race_config")
 
+    # Updated after each completed branch sub-step, including branches later
+    # cancelled after another branch requests approval.
+    branch_costs: dict[int, float] = {}
+    tasks: dict[asyncio.Task, int] = {}
     try:
-        # Track partial costs per branch so cancelled branches still count
-        branch_costs: dict[int, float] = {}
-
         async def run_branch(branch_idx: int, branch_steps: list[str]) -> dict:
             """Execute a sequence of steps and return the last output."""
             branch_context = RunContext(
                 run_id=context.run_id,
                 input=dict(context.input),
-                step_outputs=dict(context.step_outputs),
-                costs=list(context.costs),
+                step_outputs=copy.deepcopy(context.step_outputs),
+                step_results=copy.deepcopy(context.step_results),
+                costs=[],
+                status=context.status,
+                max_cost_usd=context.max_cost_usd,
                 workflow_name=context.workflow_name,
                 default_tools=context.default_tools,
+                memories=list(context.memories),
+                _resolved_context=context._resolved_context,
+                _memory_config=context._memory_config,
+                _memory_scope_id=context._memory_scope_id,
+                branch_skip_steps=set(context.branch_skip_steps),
+                branch_run_steps=set(context.branch_run_steps),
+                _file_read_cache=dict(context._file_read_cache),
+                _file_read_counts=dict(context._file_read_counts),
+                _seen_prompt_hashes=set(context._seen_prompt_hashes),
+                _step_output_max_tokens=dict(context._step_output_max_tokens),
                 admin_trusted=context.admin_trusted,
                 tenant_id=context.tenant_id,
                 cassette=context.cassette,
@@ -5620,12 +5793,18 @@ async def _execute_race_step(
                     sub_step = workflow.get_step(sub_step_id)
                 except ValueError:
                     continue
-                sub_result = await execute_step_with_retry(
-                    sub_step,
-                    branch_context,
-                    sandbox,
-                    storage,
-                )
+                try:
+                    sub_result = await execute_step_with_retry(
+                        sub_step,
+                        branch_context,
+                        sandbox,
+                        storage,
+                    )
+                except asyncio.CancelledError as cancelled:
+                    branch_costs[branch_idx] = branch_cost + getattr(
+                        cancelled, "accrued_cost_usd", 0.0
+                    )
+                    raise
                 branch_context.step_outputs[sub_step_id] = sub_result.output
                 branch_context.step_results[sub_step_id] = sub_result
                 branch_cost += sub_result.cost_usd
@@ -5715,8 +5894,22 @@ async def _execute_race_step(
             duration_seconds=duration,
             status="completed",
         )
-    except WorkflowPaused:
+    except WorkflowPaused as paused:
         # Approval gates inside race branches must propagate to the main executor
+        # with both the pausing query's charge and costs already accrued by
+        # sibling branches.  The workflow pause handler checkpoints this sum.
+        paused.accrued_cost_usd += sum(branch_costs.values())
+        raise
+    except asyncio.CancelledError:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        partial_cost = sum(branch_costs.values())
+        if partial_cost:
+            async with context._lock:
+                context.costs.append(partial_cost)
         raise
     except Exception as e:
         duration = time.monotonic() - started_at
@@ -5746,6 +5939,10 @@ async def _execute_sensor_step(
     try:
         url = resolve_templates(cfg.url, context, step.depends_on)
 
+        # Resolve once, validate, and pin the result so later sensor polls
+        # cannot re-resolve a TTL=0 hostname to a private address.
+        _pinned_hosts: dict[str, str] = {}
+
         # SSRF prevention for sensor steps - block private/internal networks
         try:
             import ipaddress as _ipaddress
@@ -5763,7 +5960,10 @@ async def _execute_sensor_step(
                 )
             if _parsed.hostname:
                 try:
-                    _resolved = _socket.getaddrinfo(_parsed.hostname, _parsed.port or 443)
+                    _resolved = await asyncio.get_running_loop().getaddrinfo(
+                        _parsed.hostname, _parsed.port or 443
+                    )
+                    _first_allowed_ip: str | None = None
                     for _, _, _, _, _sockaddr in _resolved:
                         _ip = _ipaddress.ip_address(_sockaddr[0])
                         for _network in _BLOCKED_NETWORKS:
@@ -5774,6 +5974,10 @@ async def _execute_sensor_step(
                                     error=f"Sensor step URL resolves to blocked network ({_ip})",
                                     duration_seconds=time.monotonic() - started_at,
                                 )
+                        if _first_allowed_ip is None:
+                            _first_allowed_ip = _sockaddr[0]
+                    if _first_allowed_ip is not None:
+                        _pinned_hosts[_parsed.hostname] = _first_allowed_ip
                 except _socket.gaierror:
                     pass  # DNS resolution failure - let httpx handle it naturally
         except ImportError:
@@ -5786,7 +5990,8 @@ async def _execute_sensor_step(
         current_interval = cfg.check_interval
         max_interval = min(cfg.check_interval * 32, cfg.timeout / 4)
 
-        async with httpx.AsyncClient(timeout=30) as client:
+        _pinned_transport = _build_pinned_transport(_pinned_hosts) if _pinned_hosts else None
+        async with httpx.AsyncClient(timeout=30, transport=_pinned_transport) as client:
             while time.monotonic() < deadline:
                 # Check for cancellation between polls
                 if await _check_cancel(context.run_id):
@@ -6046,6 +6251,7 @@ async def _execute_gate_step(
             raise WorkflowPaused(
                 approval_id=pending_approval_ids[0],
                 run_id=context.run_id,
+                accrued_cost_usd=total_cost,
             )
 
         # All non-human strategies approved
@@ -6577,7 +6783,7 @@ async def _browser_playwright_mode(
             step.depends_on,
         )
         try:
-            start_url = _validate_browser_url(start_url)
+            start_url = await _validate_browser_url_with_ssrf_guard(start_url)
         except ValueError as e:
             return StepResult(
                 step_id=step.id,
@@ -6717,7 +6923,7 @@ async def _browser_dom_mode(
         )
 
     try:
-        validated_url = _validate_browser_url(cfg.start_url)
+        validated_url = await _validate_browser_url_with_ssrf_guard(cfg.start_url)
     except ValueError as e:
         return StepResult(
             step_id=step.id,
@@ -6899,7 +7105,7 @@ async def _browser_computer_use_mode(
     if start_url:
         start_url = resolve_templates(start_url, context, step.depends_on)
         try:
-            start_url = _validate_browser_url(start_url)
+            start_url = await _validate_browser_url_with_ssrf_guard(start_url)
         except ValueError as e:
             return StepResult(
                 step_id=step.id,
@@ -7383,7 +7589,7 @@ async def _browser_lightpanda_mode(
         )
 
     try:
-        validated_url = _validate_browser_url(cfg.start_url)
+        validated_url = await _validate_browser_url_with_ssrf_guard(cfg.start_url)
     except ValueError as e:
         return StepResult(
             step_id=step.id,
@@ -7648,7 +7854,7 @@ async def _browser_browserbase_mode(
                 )
 
                 if cfg.start_url:
-                    start_url = _validate_browser_url(cfg.start_url)
+                    start_url = await _validate_browser_url_with_ssrf_guard(cfg.start_url)
                     await page.goto(start_url, timeout=cfg.timeout_seconds * 1000)
 
                 # Inject credentials into local storage / cookies if provided
@@ -7836,7 +8042,13 @@ async def _prepare_and_run_step(
                 model=model,
             )
             on_fail = step.retry.on_failure if step.retry else "abort"
-            if use_dead_letter:
+            # A between-attempt budget stop must surface as the workflow's
+            # budget_exceeded status, rather than being converted to a normal
+            # abort failure before the scheduler sees the accumulated cost.
+            if _check_budget(context) == "exceeded":
+                async with context._lock:
+                    context.step_outputs[step_id] = None
+            elif use_dead_letter:
                 await _send_to_dead_letter(
                     run_id=context.run_id,
                     step_id=step_id,
@@ -7947,6 +8159,77 @@ async def _prepare_and_run_step(
             return await _execute_tool_step(s, ctx)
         raise StepExecutionError(f"Unknown hybrid type '{s.type}'")
 
+    async def _run_hybrid_with_retry(
+        s: StepDefinition,
+        ctx: RunContext,
+        parallel_index: int | None = None,
+    ) -> StepResult:
+        """Run a hybrid step with the classic retry and fallback semantics.
+
+        Hybrid implementations already return ``StepResult`` values, so they
+        cannot use ``execute_step_with_retry``'s standard-step dispatcher.
+        Keep their retry accounting equivalent here without changing the
+        individual implementations or their existing persistence behavior.
+        """
+        max_attempts = s.retry.max_attempts if s.retry else 1
+        backoff = s.retry.backoff if s.retry else "exponential"
+        total_attempt_cost_usd = 0.0
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                result = await _run_hybrid(s, ctx)
+            except WorkflowPaused:
+                raise
+            except StepBlocked:
+                raise
+            except Exception as exc:
+                result = StepResult(
+                    step_id=s.id,
+                    parallel_index=parallel_index,
+                    status="failed",
+                    error=str(exc),
+                    retryable=_is_retryable_step_failure(
+                        StepResult(step_id=s.id, status="failed", error=str(exc))
+                    ),
+                )
+
+            result.parallel_index = parallel_index
+            result.attempt = attempt
+            total_attempt_cost_usd += result.cost_usd
+            if result.status == "completed":
+                result.cost_usd = total_attempt_cost_usd
+                return result
+
+            retryable = _is_retryable_step_failure(result)
+            if not retryable:
+                result.retryable = False
+            budget_status = _check_budget(ctx, total_attempt_cost_usd)
+
+            if attempt >= max_attempts or not retryable or budget_status == "exceeded":
+                on_failure = s.retry.on_failure if s.retry else "abort"
+                if on_failure == "fallback" and s.fallback and s.fallback.prompt:
+                    fallback_result = await _execute_fallback(
+                        s, ctx, sandbox, storage, parallel_index, attempt
+                    )
+                    if fallback_result.status == "completed":
+                        fallback_result.cost_usd += total_attempt_cost_usd
+                        fallback_result.duration_seconds += result.duration_seconds
+                        return fallback_result
+
+                result.cost_usd = total_attempt_cost_usd
+                return result
+
+            delay = _backoff_delay(attempt, backoff)
+            logger.info(
+                "Hybrid step '%s' attempt %d failed, retrying in %ss...",
+                s.id,
+                attempt,
+                delay,
+            )
+            await asyncio.sleep(delay)
+
+        return result  # pragma: no cover - loop always returns above
+
     # --- Fan-out (parallel_over) - must come BEFORE type dispatch ---
     # so that hybrid types (llm, http, etc.) also get per-item contexts.
     if step.parallel_over:
@@ -7959,6 +8242,12 @@ async def _prepare_and_run_step(
             items = []
         elif not isinstance(items, list):
             items = [items]
+        child_budget = _fan_out_child_budget(context.max_cost_usd, len(items))
+
+        def child_context(item: Any, index: int) -> RunContext:
+            child = context.with_item(item, index)
+            child.max_cost_usd = child_budget
+            return child
 
         is_hybrid = step.type in _HYBRID_TYPES
         logger.info(
@@ -7968,7 +8257,7 @@ async def _prepare_and_run_step(
         if is_hybrid:
             tasks = [
                 asyncio.create_task(
-                    _run_hybrid(step, context.with_item(item, i))
+                    _run_hybrid_with_retry(step, child_context(item, i), i)
                 )
                 for i, item in enumerate(items)
             ]
@@ -7977,7 +8266,7 @@ async def _prepare_and_run_step(
                 asyncio.create_task(
                     execute_step_with_retry(
                         step,
-                        context.with_item(item, i),
+                        child_context(item, i),
                         sandbox,
                         storage,
                         parallel_index=i,
@@ -8015,7 +8304,9 @@ async def _prepare_and_run_step(
             if result.status == "failed":
                 fan_out_failed += 1
                 on_fail = step.retry.on_failure if step.retry else "abort"
-                if use_dead_letter:
+                if _check_budget(context) == "exceeded":
+                    fan_out_items.append(None)
+                elif use_dead_letter:
                     dlq_ok = await _send_to_dead_letter(
                         run_id=context.run_id,
                         step_id=step_id,
@@ -8065,25 +8356,35 @@ async def _prepare_and_run_step(
 
     # --- Hybrid step types (single execution, no parallel_over) ---
     if step.type in _HYBRID_TYPES:
-        result = await _run_hybrid(step, context)
+        result = await _run_hybrid_with_retry(step, context)
         model = step.model if step.type in ("llm", "browser") else None
         await _handle_step_result(result, model=model)
         return
 
     # Regular (standard/sandbox) step
-    result = await execute_step_with_retry(
-        step,
-        context,
-        sandbox,
-        storage,
-        step_overrides=overrides,
-    )
+    try:
+        result = await execute_step_with_retry(
+            step,
+            context,
+            sandbox,
+            storage,
+            step_overrides=overrides,
+        )
+    except asyncio.CancelledError as cancelled:
+        partial_cost = getattr(cancelled, "accrued_cost_usd", 0.0)
+        if partial_cost:
+            async with context._lock:
+                context.costs.append(partial_cost)
+        raise
     async with context._lock:
         context.costs.append(result.cost_usd)
         context.step_results[step_id] = result
     if result.status == "failed":
         on_fail = step.retry.on_failure if step.retry else "abort"
-        if use_dead_letter:
+        if _check_budget(context) == "exceeded":
+            async with context._lock:
+                context.step_outputs[step_id] = None
+        elif use_dead_letter:
             dlq_ok = await _send_to_dead_letter(
                 run_id=context.run_id,
                 step_id=step_id,
@@ -8679,7 +8980,6 @@ async def execute_workflow(
             for task in done_tasks:
                 sid = next(k for k, v in running.items() if v is task)
                 del running[sid]
-                completed.append((sid, task))
                 try:
                     exc = task.exception()
                 except asyncio.CancelledError as exc:
@@ -8687,14 +8987,12 @@ async def execute_workflow(
                 else:
                     if exc is not None:
                         task_exceptions.append(exc)
+                    else:
+                        completed.append((sid, task))
 
-            # asyncio.wait() may return several completed tasks. Retrieve every
-            # exception before raising so sibling failures are not orphaned as
-            # "Task exception was never retrieved" warnings.
-            if task_exceptions:
-                await _cancel_running()
-                raise task_exceptions[0]
-
+            # Commit successfully finished siblings before propagating a pause
+            # or error from the same batch.  Otherwise approval resume starts
+            # from an older checkpoint and replays work that has already run.
             for sid, task in completed:
                 done_steps.add(sid)
                 # Also mark branch-skipped steps as done so dependents unblock
@@ -8709,6 +9007,13 @@ async def execute_workflow(
                     checkpoint_counter,
                     context,
                 )
+
+            # asyncio.wait() may return several completed tasks. Retrieve every
+            # exception before raising so sibling failures are not orphaned as
+            # "Task exception was never retrieved" warnings.
+            if task_exceptions:
+                await _cancel_running()
+                raise task_exceptions[0]
 
         completed_at = datetime.now(timezone.utc)
 
@@ -8749,7 +9054,20 @@ async def execute_workflow(
             token_report=token_report,
         )
 
-    except WorkflowPaused:
+    except WorkflowPaused as paused:
+        # Paid provider work can trigger an approval after the response is
+        # received.  Keep it in the durable pause checkpoint alongside any
+        # siblings that completed in the same scheduler batch.
+        if paused.accrued_cost_usd:
+            async with context._lock:
+                context.costs.append(paused.accrued_cost_usd)
+        checkpoint_counter += 1
+        await _save_checkpoint(
+            run_id,
+            f"pause:{paused.approval_id}",
+            checkpoint_counter,
+            context,
+        )
         return WorkflowResult(
             run_id=run_id,
             outputs=context.step_outputs,
@@ -8993,7 +9311,8 @@ class StepBlocked(Exception):
 class WorkflowPaused(Exception):
     """A workflow is paused waiting for human approval."""
 
-    def __init__(self, approval_id: str, run_id: str):
+    def __init__(self, approval_id: str, run_id: str, accrued_cost_usd: float = 0.0):
         self.approval_id = approval_id
         self.run_id = run_id
+        self.accrued_cost_usd = accrued_cost_usd
         super().__init__(f"Workflow paused: approval {approval_id} for run {run_id}")

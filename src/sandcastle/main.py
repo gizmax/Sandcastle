@@ -491,6 +491,9 @@ async def lifespan(app: FastAPI):
     # skipping dispose for it is safe.
     if not _is_in_memory_sqlite(_engine_url):
         await engine.dispose()
+    from sandcastle.queue.worker import cleanup_enqueue_pool
+
+    await cleanup_enqueue_pool()
     logger.info("Sandcastle shut down")
 
 

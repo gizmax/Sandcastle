@@ -21,6 +21,15 @@ from sandcastle.engine.providers import get_failover
 logger = logging.getLogger(__name__)
 
 
+_REGION_ALLOWANCES = {"eu": {"eu", "local"}, "local": {"local"}}
+
+
+def is_region_allowed(data_residency: str, region: str) -> bool:
+    """Return whether ``region`` satisfies a configured residency constraint."""
+    allowed_regions = _REGION_ALLOWANCES.get(data_residency)
+    return allowed_regions is None or region in allowed_regions
+
+
 # ------------------------------------------------------------------
 # Data classes
 # ------------------------------------------------------------------
@@ -236,6 +245,7 @@ class SandshoreRuntime:
         self._docker_image = docker_image
         self._docker_url = docker_url
         self._cloudflare_worker_url = cloudflare_worker_url
+        self._in_flight_queries = 0
 
         # Cached health check result (value, timestamp) with lock
         self._health_cache: tuple[bool, float] = (False, 0.0)
@@ -389,18 +399,22 @@ class SandshoreRuntime:
         cancel_event: asyncio.Event | None = None,
     ) -> AsyncIterator[SSEEvent]:
         """Execute a query and yield SSE events as they stream."""
-        backend_healthy = await self._cached_health()
+        self._in_flight_queries = getattr(self, "_in_flight_queries", 0) + 1
+        try:
+            backend_healthy = await self._cached_health()
 
-        if backend_healthy:
-            async for event in self._stream_backend(
-                request, cancel_event=cancel_event
-            ):
-                yield event
-        else:
-            raise SandshoreError(
-                f"Sandbox backend '{self._sandbox_backend_type}' is not "
-                f"available."
-            )
+            if backend_healthy:
+                async for event in self._stream_backend(
+                    request, cancel_event=cancel_event
+                ):
+                    yield event
+            else:
+                raise SandshoreError(
+                    f"Sandbox backend '{self._sandbox_backend_type}' is not "
+                    f"available."
+                )
+        finally:
+            self._in_flight_queries -= 1
 
     async def sandbox_exec(
         self,
@@ -608,7 +622,7 @@ class SandshoreRuntime:
         if _residency:
             try:
                 _model_info = resolve_model(model_str)
-                if _model_info.region != _residency:
+                if not is_region_allowed(_residency, _model_info.region):
                     raise SandshoreError(
                         f"Data residency mode '{_residency}' is active. "
                         f"Model '{model_str}' runs in region '{_model_info.region}', "
@@ -778,11 +792,25 @@ def get_sandshore_runtime(
         client = _client_pool.get(key)
         if client is None:
             # Evict oldest entry if pool is at capacity
-            if len(_client_pool) >= _MAX_POOL_SIZE:
-                oldest_key = next(iter(_client_pool))
+            while len(_client_pool) >= _MAX_POOL_SIZE:
+                oldest_key = next(
+                    (
+                        pool_key
+                        for pool_key, runtime in _client_pool.items()
+                        if not getattr(runtime, "_in_flight_queries", 0)
+                    ),
+                    None,
+                )
+                if oldest_key is None:
+                    logger.warning(
+                        "Runtime pool at capacity (%d), but all runtimes have active queries; "
+                        "temporarily exceeding capacity",
+                        _MAX_POOL_SIZE,
+                    )
+                    break
                 evicted = _client_pool.pop(oldest_key)
                 logger.warning(
-                    "Runtime pool at capacity (%d), evicting oldest entry",
+                    "Runtime pool at capacity (%d), evicting inactive entry",
                     _MAX_POOL_SIZE,
                 )
                 # Best-effort close - can't await in sync context.
@@ -792,7 +820,16 @@ def get_sandshore_runtime(
                 try:
                     loop = asyncio.get_running_loop()
                     _task = loop.create_task(evicted.close())
-                    _task.add_done_callback(lambda t: t.result() if not t.cancelled() else None)
+
+                    def _log_close_error(task: asyncio.Task) -> None:
+                        if task.cancelled():
+                            return
+                        try:
+                            task.result()
+                        except Exception as exc:
+                            logger.warning("Error closing evicted runtime: %s", exc)
+
+                    _task.add_done_callback(_log_close_error)
                 except RuntimeError:
                     # No running loop - skip async close; the evicted
                     # runtime's backend will be GC'd.

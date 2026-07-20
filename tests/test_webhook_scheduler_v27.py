@@ -29,7 +29,7 @@ import pytest
 from sandcastle.webhooks.dispatcher import (
     MAX_PAYLOAD_BYTES,
     MAX_RETRY_DELAY_SECONDS,
-    _resolve_and_check_ip,
+    _pick_allowed_ip,
     _sign_payload,
     _truncate_payload,
     dispatch_webhook,
@@ -356,12 +356,11 @@ class TestDispatchWebhookBehavior:
                 validate_callback_url("https://ip6-localhost/hook")
 
     def test_dns_rebinding_protection(self):
-        """_resolve_and_check_ip blocks when hostname resolves to private IP."""
-        with patch("socket.getaddrinfo", return_value=[
-            (2, 1, 6, "", ("10.0.0.1", 443)),
-        ]):
-            with pytest.raises(ValueError, match="rebinding"):
-                _resolve_and_check_ip("evil-rebind.example.com", 443)
+        """_pick_allowed_ip blocks when hostname resolves to private IP."""
+        with pytest.raises(ValueError, match="rebinding"):
+            _pick_allowed_ip(
+                [(2, 1, 6, "", ("10.0.0.1", 443))], "evil-rebind.example.com"
+            )
 
     @pytest.mark.asyncio
     async def test_dispatch_dns_rebinding_returns_false(self):

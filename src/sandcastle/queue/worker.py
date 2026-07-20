@@ -365,6 +365,26 @@ if uses_redis_queue():
     WorkerSettings.redis_settings = _parse_redis_url(settings.redis_url)
 
 
+async def _mark_run_timed_out(run_id: str, timeout_seconds: int) -> None:
+    """Mark an in-process job as failed after its worker timeout expires."""
+    import uuid as _uuid
+
+    from sandcastle.models.db import Run, RunStatus, async_session
+
+    error_message = f"Workflow job timed out after {timeout_seconds} seconds"
+    try:
+        async with async_session() as session:
+            run = await session.get(Run, _uuid.UUID(run_id))
+            if run and run.status in (RunStatus.QUEUED, RunStatus.RUNNING):
+                run.status = RunStatus.FAILED
+                run.error = error_message
+                run.completed_at = datetime.now(timezone.utc)
+                await session.commit()
+                logger.error("Marked run %s as FAILED: %s", run_id, error_message)
+    except Exception as db_err:
+        logger.error("Failed to mark timed-out run %s as FAILED: %s", run_id, db_err)
+
+
 async def enqueue_workflow(
     workflow_yaml: str,
     input_data: dict,
@@ -429,18 +449,34 @@ async def enqueue_workflow(
     else:
         # Local mode: run directly in-process
         logger.info(f"Local mode: executing run {run_id} in-process")
+
+        async def run_with_timeout() -> None:
+            timeout_seconds = int(os.environ.get("SANDCASTLE_WORKER_JOB_TIMEOUT", "600"))
+            try:
+                await asyncio.wait_for(
+                    run_workflow_job(
+                        {},  # empty ctx for in-process
+                        workflow_yaml,
+                        input_data,
+                        run_id,
+                        max_cost_usd=max_cost_usd,
+                        initial_context=initial_context,
+                        skip_steps=skip_steps,
+                        step_overrides=step_overrides,
+                        admin_trusted=admin_trusted,
+                    ),
+                    timeout=timeout_seconds,
+                )
+            except asyncio.TimeoutError:
+                logger.error(
+                    "Local workflow run %s exceeded worker timeout of %d seconds",
+                    run_id,
+                    timeout_seconds,
+                )
+                await _mark_run_timed_out(run_id, timeout_seconds)
+
         task = asyncio.create_task(
-            run_workflow_job(
-                {},  # empty ctx for in-process
-                workflow_yaml,
-                input_data,
-                run_id,
-                max_cost_usd=max_cost_usd,
-                initial_context=initial_context,
-                skip_steps=skip_steps,
-                step_overrides=step_overrides,
-                admin_trusted=admin_trusted,
-            ),
+            run_with_timeout(),
             name=f"workflow-{run_id}",
         )
         _background_tasks.add(task)

@@ -46,10 +46,12 @@ ALLOWED_ENV_TYPES: frozenset[str] = frozenset({"self_hosted"})
 
 # In-process cache for work/stats (5 second TTL).
 _STATS_CACHE_TTL_SECONDS = 5.0
+_STATS_CACHE_MAXSIZE = 200
 _stats_cache: dict[tuple[str | None, str], tuple[float, dict[str, Any]]] = {}
 
 # SSE poll interval.
 _STREAM_POLL_INTERVAL_SECONDS = 2.0
+_STREAM_MAX_DURATION_SECONDS = 10 * 60.0
 
 
 router = APIRouter(prefix="/admin/environments", tags=["environments-admin"])
@@ -352,6 +354,15 @@ async def _get_cached_stats(tenant_id: str | None, env_id: str) -> dict[str, Any
         if now - ts < _STATS_CACHE_TTL_SECONDS:
             return data
     data = await _fetch_work_stats(env_id)
+
+    # Prune expired records on writes so a high-cardinality tenant/env stream
+    # cannot grow this small in-process cache without bound.
+    for cache_key, (cached_at, _) in list(_stats_cache.items()):
+        if now - cached_at >= _STATS_CACHE_TTL_SECONDS:
+            _stats_cache.pop(cache_key, None)
+    if len(_stats_cache) >= _STATS_CACHE_MAXSIZE and key not in _stats_cache:
+        oldest_key = min(_stats_cache, key=lambda cache_key: _stats_cache[cache_key][0])
+        _stats_cache.pop(oldest_key, None)
     _stats_cache[key] = (now, data)
     return data
 
@@ -384,9 +395,14 @@ async def work_stream(env_id: str, req: Request) -> StreamingResponse:
     tenant_id = get_tenant_id(req)
 
     async def event_generator():
+        deadline = time.monotonic() + _STREAM_MAX_DURATION_SECONDS
         try:
             while True:
                 if await req.is_disconnected():
+                    return
+                if time.monotonic() >= deadline:
+                    payload = {"reason": "Stream timed out", "ts": time.time()}
+                    yield f"event: end\ndata: {json.dumps(payload)}\n\n"
                     return
                 try:
                     raw = await _get_cached_stats(tenant_id, env_id)

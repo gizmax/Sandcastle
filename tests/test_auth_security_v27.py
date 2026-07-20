@@ -19,10 +19,8 @@ from fastapi import HTTPException
 
 from sandcastle.api.auth import (
     _API_KEY_PEPPER,
-    PUBLIC_PATHS,
     auth_middleware,
     generate_api_key,
-    get_tenant_id,
     hash_key,
     is_admin,
 )
@@ -30,11 +28,9 @@ from sandcastle.api.rate_limit import (
     InMemoryBackend,
     RateLimiter,
     _Window,
-    get_client_ip,
 )
 from sandcastle.api.security_headers import _CSP_POLICY, security_headers_middleware
 from sandcastle.config import settings
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -500,6 +496,9 @@ class TestAuthLastUsedAt:
 
     @pytest.mark.asyncio
     async def test_last_used_at_updated(self):
+        from sandcastle.api.auth import _last_used_at_write_times
+
+        _last_used_at_write_times.clear()
         api_key = "sc_test_lastused_key_ab"
         db_key = _make_db_key(api_key)
 
@@ -527,6 +526,34 @@ class TestAuthLastUsedAt:
         assert isinstance(update_key.last_used_at, datetime)
         # Verify commit was called (at least once for the update)
         mock_session.commit.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_last_used_at_writes_once_within_window_then_again_afterwards(self):
+        from sandcastle.api.auth import _last_used_at_write_times
+
+        _last_used_at_write_times.clear()
+        api_key = "sc_test_lastused_throttle_key"
+        db_key = _make_db_key(api_key, key_id="last-used-throttle")
+        call_next = AsyncMock(return_value=MagicMock())
+
+        mock_session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [db_key]
+        mock_session.execute = AsyncMock(return_value=mock_result)
+        mock_session.get = AsyncMock(return_value=MagicMock())
+
+        with patch("sandcastle.api.auth.async_session") as mock_ctx, \
+             patch("sandcastle.api.auth.time.monotonic", side_effect=[100.0, 101.0, 401.0]):
+            mock_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
+            settings.auth_required = True
+            for _ in range(3):
+                await auth_middleware(
+                    _make_request(headers={"X-API-Key": api_key}), call_next
+                )
+
+        assert mock_session.get.await_count == 2
+        assert mock_session.commit.await_count == 2
 
 
 class TestAuthAdminVsTenant:

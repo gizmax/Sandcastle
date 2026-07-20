@@ -27,6 +27,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 
+from sandcastle.api.auth import get_tenant_id
 from sandcastle.config import settings
 from sandcastle.engine.events import event_bus
 from sandcastle.models.db import Run, async_session
@@ -167,11 +168,8 @@ def _emit_terminal_event(run_id: str, status: str, run: Run):
 
 
 def _get_tenant_id_safe(request: Request) -> str | None:
-    """Extract tenant_id from request state without raising.
-
-    Returns None when auth is disabled or tenant_id is not set.
-    """
-    return getattr(request.state, "tenant_id", None)
+    """Extract tenant_id while preserving the auth middleware guard."""
+    return get_tenant_id(request)
 
 
 @agui_router.get("/stream/{run_id}")

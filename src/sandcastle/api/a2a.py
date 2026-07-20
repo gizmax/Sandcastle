@@ -33,11 +33,11 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
 from sandcastle import __version__
+from sandcastle.api.auth import get_tenant_id
 from sandcastle.config import settings
-from sandcastle.engine.dag import build_plan, parse_yaml_string, validate
-from sandcastle.engine.executor import execute_workflow
-from sandcastle.engine.storage import create_storage
+from sandcastle.engine.dag import parse_yaml_string, validate
 from sandcastle.models.db import Run, RunStatus, async_session
+from sandcastle.queue.worker import enqueue_workflow
 
 logger = logging.getLogger(__name__)
 
@@ -76,12 +76,8 @@ def _map_status(sandcastle_status: str) -> str:
 
 
 def _get_tenant_id_safe(request: Request) -> str | None:
-    """Extract tenant_id from request state, returning None if unavailable.
-
-    Unlike auth.get_tenant_id(), this does not raise on missing auth state
-    because A2A endpoints may be accessed without auth when AUTH_REQUIRED=false.
-    """
-    return getattr(request.state, "tenant_id", None)
+    """Extract tenant_id while preserving the auth middleware guard."""
+    return get_tenant_id(request)
 
 
 def _get_allowed_workflows_safe(request: Request) -> list[str] | None:
@@ -341,7 +337,7 @@ async def _handle_tasks_send(
     allowed_workflows: list[str] | None = None,
     max_cost_usd: float | None = None,
 ) -> dict[str, Any]:
-    """Handle tasks/send - create and execute a workflow.
+    """Handle tasks/send - create and enqueue a workflow.
 
     Args:
         params: JSON-RPC params dict.
@@ -444,8 +440,6 @@ async def _handle_tasks_send(
             task_id, "failed", error="; ".join(errors)
         )
 
-    plan = build_plan(workflow)
-
     # Create DB run record with tenant isolation
     run_id = task_id
     try:
@@ -457,9 +451,8 @@ async def _handle_tasks_send(
             db_run = Run(
                 id=run_uuid,
                 workflow_name=workflow.name,
-                status=RunStatus.RUNNING,
+                status=RunStatus.QUEUED,
                 input_data=workflow_input,
-                started_at=datetime.now(timezone.utc),
                 tenant_id=tenant_id,
                 max_cost_usd=max_cost_usd,
             )
@@ -472,42 +465,28 @@ async def _handle_tasks_send(
             task_id, "failed", error="Failed to create task"
         )
 
-    # Execute the workflow
-    storage = create_storage()
+    # Enqueue the job and return immediately, matching the REST async run
+    # endpoint. The task ID is the canonical Run UUID created above.
     try:
-        result = await execute_workflow(
-            workflow=workflow,
-            plan=plan,
-            input_data=workflow_input,
-            run_id=run_id,
-            storage=storage,
-            max_cost_usd=max_cost_usd,
-            tenant_id=tenant_id,
-        )
+        await enqueue_workflow(yaml_content, workflow_input, run_id)
     except Exception as e:
-        # Update run as failed
-        async with async_session() as session:
-            stmt = select(Run).where(Run.id == uuid.UUID(run_id))
-            res = await session.execute(stmt)
-            db_run = res.scalar_one_or_none()
-            if db_run:
-                db_run.status = RunStatus.FAILED
-                db_run.error = str(e)
-                db_run.completed_at = datetime.now(timezone.utc)
-                await session.commit()
+        # Keep a failed enqueue from leaving a task permanently submitted.
+        try:
+            async with async_session() as session:
+                db_run = await session.get(Run, uuid.UUID(run_id))
+                if db_run:
+                    db_run.status = RunStatus.FAILED
+                    db_run.error = f"Failed to enqueue: {e}"
+                    db_run.completed_at = datetime.now(timezone.utc)
+                    await session.commit()
+        except Exception:
+            logger.error("Could not clean up orphan A2A run %s", run_id)
+        logger.error("Could not enqueue A2A run %s: %s", run_id, e)
         return _build_task_response(
             run_id, "failed", error=str(e)
         )
 
-    # Build output from result
-    output = {
-        "run_id": run_id,
-        "status": result.status,
-        "total_cost_usd": result.total_cost_usd,
-        "outputs": result.outputs,
-    }
-    a2a_state = _map_status(result.status)
-    return _build_task_response(run_id, a2a_state, output_data=output)
+    return _build_task_response(run_id, "submitted")
 
 
 async def _handle_tasks_get(
@@ -605,20 +584,21 @@ async def _handle_tasks_cancel(
             error=f"Cannot cancel task with status '{run_status}'"
         )
 
-    # Set cancel flag (in-memory for local mode)
-    from sandcastle.engine.executor import _cancel_flags
+    # Follow the executor's cancellation signalling path. Do not force a
+    # terminal DB status here: the executor observes this flag and records the
+    # final state, avoiding a race with a still-running workflow.
+    if settings.redis_url:
+        try:
+            from sandcastle.engine.executor import _get_redis
 
-    _cancel_flags[task_id] = None
+            redis = await _get_redis()
+            await redis.set(f"cancel:{task_id}", "1", ex=3600)
+        except Exception as e:
+            logger.error("Could not set A2A cancel flag in Redis: %s", e)
+    else:
+        from sandcastle.engine.executor import cancel_run_local
 
-    # Update DB status
-    async with async_session() as session:
-        stmt = select(Run).where(Run.id == run_uuid)
-        result = await session.execute(stmt)
-        run = result.scalar_one_or_none()
-        if run:
-            run.status = RunStatus.CANCELLED
-            run.completed_at = datetime.now(timezone.utc)
-            await session.commit()
+        await cancel_run_local(task_id)
 
     return _build_task_response(task_id, "canceled")
 
