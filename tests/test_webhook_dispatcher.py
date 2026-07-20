@@ -6,6 +6,7 @@ import hashlib
 import hmac
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from sandcastle.webhooks.dispatcher import (
@@ -15,6 +16,9 @@ from sandcastle.webhooks.dispatcher import (
     validate_callback_url,
     verify_signature,
 )
+
+_PUBLIC_IP = "93.184.216.34"
+_PRIVATE_IP = "169.254.169.254"
 
 
 class TestSignPayload:
@@ -236,6 +240,110 @@ class TestResolveAndCheckIp:
                 _resolve_and_check_ip("evil-ipv6.com", 443)
 
 
+class TestWebhookDeliveryPinning:
+    """Delivery must dial the exact public IP validated immediately beforehand."""
+
+    @pytest.mark.asyncio
+    async def test_delivery_rejects_private_ip_after_initial_validation(self, monkeypatch):
+        from sandcastle.webhooks.dispatcher import dispatch_webhook
+
+        resolutions = iter([_PUBLIC_IP, _PRIVATE_IP])
+
+        def fake_getaddrinfo(host, port, *args, **kwargs):  # noqa: ANN001
+            return [(2, 1, 6, "", (next(resolutions), port))]
+
+        client_cls = MagicMock()
+        monkeypatch.setattr("socket.getaddrinfo", fake_getaddrinfo)
+        monkeypatch.setattr("sandcastle.webhooks.dispatcher.httpx.AsyncClient", client_cls)
+
+        delivered = await dispatch_webhook(
+            url="https://rebind.example/hook",
+            event="workflow.completed",
+            run_id="run-rebind",
+            workflow="wf",
+            status="completed",
+        )
+
+        assert delivered is False
+        client_cls.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_delivery_dials_validated_public_ip_with_pinned_transport(self, monkeypatch):
+        from sandcastle.engine.http_transport import build_pinned_transport
+        from sandcastle.webhooks.dispatcher import dispatch_webhook
+
+        def fake_getaddrinfo(host, port, *args, **kwargs):  # noqa: ANN001
+            return [(2, 1, 6, "", (_PUBLIC_IP, port))]
+
+        captured = {}
+        transport_hosts = []
+
+        def capture_pinned_transport(host_to_ip):  # noqa: ANN001
+            transport_hosts.append(host_to_ip)
+            return build_pinned_transport(host_to_ip)
+
+        async def fake_parent_transport(self, request):  # noqa: ANN001
+            captured["host"] = request.url.host
+            captured["sni"] = request.extensions.get("sni_hostname")
+            return httpx.Response(200, json={"ok": True}, request=request)
+
+        monkeypatch.setattr("socket.getaddrinfo", fake_getaddrinfo)
+        monkeypatch.setattr(
+            httpx.AsyncHTTPTransport, "handle_async_request", fake_parent_transport
+        )
+        monkeypatch.setattr(
+            "sandcastle.webhooks.dispatcher.build_pinned_transport", capture_pinned_transport
+        )
+
+        delivered = await dispatch_webhook(
+            url="https://public.example/hook",
+            event="workflow.completed",
+            run_id="run-public",
+            workflow="wf",
+            status="completed",
+        )
+
+        assert delivered is True
+        assert transport_hosts == [{"public.example": _PUBLIC_IP}]
+        assert captured == {"host": _PUBLIC_IP, "sni": "public.example"}
+
+    @pytest.mark.asyncio
+    async def test_rebind_after_delivery_check_cannot_change_dial_target(self, monkeypatch):
+        from sandcastle.webhooks.dispatcher import dispatch_webhook
+
+        calls = 0
+
+        def fake_getaddrinfo(host, port, *args, **kwargs):  # noqa: ANN001
+            nonlocal calls
+            calls += 1
+            if calls <= 2:  # creation validation and delivery validation
+                return [(2, 1, 6, "", (_PUBLIC_IP, port))]
+            raise AssertionError("pinned transport must not resolve DNS again")
+
+        captured = {}
+
+        async def fake_parent_transport(self, request):  # noqa: ANN001
+            captured["host"] = request.url.host
+            return httpx.Response(200, json={"ok": True}, request=request)
+
+        monkeypatch.setattr("socket.getaddrinfo", fake_getaddrinfo)
+        monkeypatch.setattr(
+            httpx.AsyncHTTPTransport, "handle_async_request", fake_parent_transport
+        )
+
+        delivered = await dispatch_webhook(
+            url="https://ttl-zero.example/hook",
+            event="workflow.completed",
+            run_id="run-ttl-zero",
+            workflow="wf",
+            status="completed",
+        )
+
+        assert delivered is True
+        assert calls == 2
+        assert captured["host"] == _PUBLIC_IP
+
+
 class TestTruncatePayload:
     """Tests for the payload truncation logic."""
 
@@ -280,7 +388,6 @@ class TestTruncatePayload:
 
     def test_none_outputs_truncation(self):
         """Truncation with None outputs should set preview to None."""
-        import json
         # Build a payload that is large due to a huge error field
         payload = {
             "event": "test",
@@ -294,7 +401,6 @@ class TestTruncatePayload:
 
     def test_hard_truncation_safety_net(self):
         """If truncated payload is still over 1MB (e.g. huge error), hard-truncate."""
-        import json
         payload = {
             "event": "test",
             "run_id": "run-4",

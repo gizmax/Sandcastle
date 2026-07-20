@@ -7,9 +7,9 @@ import hashlib
 import hmac
 import json
 import time
-from typing import Any
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -26,7 +26,6 @@ from sandcastle.api.agent_webhooks import (
     router,
     verify_signature,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -115,7 +114,7 @@ def test_signature_with_sha256_prefix(client: TestClient, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Local-mode vs production behaviour when secret is missing
+# Missing-secret behaviour
 # ---------------------------------------------------------------------------
 
 
@@ -123,7 +122,11 @@ def test_local_mode_without_secret_accepted_with_warning(
     client: TestClient, monkeypatch, caplog
 ):
     monkeypatch.delenv("ANTHROPIC_WEBHOOK_SECRET", raising=False)
-    monkeypatch.setattr(agent_webhooks, "settings", SimpleNamespace(is_local_mode=True))
+    monkeypatch.setattr(
+        agent_webhooks,
+        "settings",
+        SimpleNamespace(is_local_mode=True, auth_required=False),
+    )
 
     body = json.dumps({"type": "session.status_idle"}).encode()
     with caplog.at_level("WARNING"):
@@ -136,9 +139,57 @@ def test_local_mode_without_secret_accepted_with_warning(
     assert any("skipping signature verify" in r.message for r in caplog.records)
 
 
+def test_auth_required_without_secret_rejected_even_in_local_mode(client: TestClient, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_WEBHOOK_SECRET", raising=False)
+    monkeypatch.setattr(
+        agent_webhooks,
+        "settings",
+        SimpleNamespace(is_local_mode=True, auth_required=True),
+    )
+
+    body = json.dumps({"type": "session.status_idle"}).encode()
+    resp = client.post(
+        "/agent-webhooks/anthropic",
+        content=body,
+        headers={"content-type": "application/json"},
+    )
+
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "webhook secret not configured"
+
+
+def test_auth_required_with_secret_still_verifies_hmac(client: TestClient, monkeypatch):
+    secret = "topsecret"
+    monkeypatch.setenv("ANTHROPIC_WEBHOOK_SECRET", secret)
+    monkeypatch.setattr(
+        agent_webhooks,
+        "settings",
+        SimpleNamespace(is_local_mode=True, auth_required=True),
+    )
+    body = json.dumps({"type": "session.status_idle"}).encode()
+
+    valid = client.post(
+        "/agent-webhooks/anthropic",
+        content=body,
+        headers={"X-Anthropic-Signature": _sign(secret, body)},
+    )
+    invalid = client.post(
+        "/agent-webhooks/anthropic",
+        content=body,
+        headers={"X-Anthropic-Signature": _sign("wrongsecret", body)},
+    )
+
+    assert valid.status_code == 200
+    assert invalid.status_code == 401
+
+
 def test_production_mode_without_secret_rejected(client: TestClient, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_WEBHOOK_SECRET", raising=False)
-    monkeypatch.setattr(agent_webhooks, "settings", SimpleNamespace(is_local_mode=False))
+    monkeypatch.setattr(
+        agent_webhooks,
+        "settings",
+        SimpleNamespace(is_local_mode=False, auth_required=False),
+    )
 
     body = json.dumps({"type": "session.status_idle"}).encode()
     resp = client.post(
@@ -159,7 +210,11 @@ def test_event_dispatched_to_registered_handler(
     client: TestClient, monkeypatch, event_type: str
 ):
     monkeypatch.delenv("ANTHROPIC_WEBHOOK_SECRET", raising=False)
-    monkeypatch.setattr(agent_webhooks, "settings", SimpleNamespace(is_local_mode=True))
+    monkeypatch.setattr(
+        agent_webhooks,
+        "settings",
+        SimpleNamespace(is_local_mode=True, auth_required=False),
+    )
 
     received: list[dict[str, Any]] = []
 
@@ -192,7 +247,11 @@ def test_register_handler_accumulates_multiple_handlers(
     client: TestClient, monkeypatch
 ):
     monkeypatch.delenv("ANTHROPIC_WEBHOOK_SECRET", raising=False)
-    monkeypatch.setattr(agent_webhooks, "settings", SimpleNamespace(is_local_mode=True))
+    monkeypatch.setattr(
+        agent_webhooks,
+        "settings",
+        SimpleNamespace(is_local_mode=True, auth_required=False),
+    )
 
     calls: list[str] = []
 
@@ -228,7 +287,11 @@ def test_register_handler_accumulates_multiple_handlers(
 
 def test_slow_handler_does_not_delay_ack(client: TestClient, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_WEBHOOK_SECRET", raising=False)
-    monkeypatch.setattr(agent_webhooks, "settings", SimpleNamespace(is_local_mode=True))
+    monkeypatch.setattr(
+        agent_webhooks,
+        "settings",
+        SimpleNamespace(is_local_mode=True, auth_required=False),
+    )
 
     async def slow(event):
         await asyncio.sleep(0.5)

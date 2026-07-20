@@ -37,6 +37,7 @@ from urllib.parse import urlparse
 import httpx
 
 from sandcastle.config import settings
+from sandcastle.engine.http_transport import build_pinned_transport
 
 logger = logging.getLogger(__name__)
 
@@ -91,17 +92,19 @@ def validate_callback_url(url: str) -> str:
     return url
 
 
-def _resolve_and_check_ip(hostname: str, port: int) -> None:
-    """Re-resolve a hostname at delivery time and check against blocked networks.
+def _resolve_and_check_ip(hostname: str, port: int) -> str:
+    """Resolve, validate, and return the IP address used for delivery.
 
-    This prevents DNS rebinding attacks where a hostname resolves to a public
-    IP at validation time but to a private IP at delivery time.
+    Every resolved address must be public. The first validated address is
+    returned so the caller can pin the subsequent TCP connection to the exact
+    same address, preventing a DNS-rebinding TOCTOU.
     """
     try:
         resolved = socket.getaddrinfo(hostname, port)
     except socket.gaierror:
         raise ValueError(f"Cannot resolve hostname '{hostname}' at delivery time")
 
+    first_allowed_ip: str | None = None
     for _, _, _, _, sockaddr in resolved:
         ip = ipaddress.ip_address(sockaddr[0])
         for network in _BLOCKED_NETWORKS:
@@ -110,6 +113,12 @@ def _resolve_and_check_ip(hostname: str, port: int) -> None:
                     f"DNS rebinding detected: '{hostname}' now resolves to "
                     f"blocked network ({ip})"
                 )
+        if first_allowed_ip is None:
+            first_allowed_ip = sockaddr[0]
+
+    if first_allowed_ip is None:
+        raise ValueError(f"Cannot resolve hostname '{hostname}' at delivery time")
+    return first_allowed_ip
 
 
 def _truncate_payload(
@@ -196,13 +205,14 @@ async def dispatch_webhook(
         logger.error(f"Webhook URL validation failed: {e}")
         return False
 
-    # Re-validate DNS at delivery time to prevent DNS rebinding attacks.
+    # Resolve and re-validate DNS at delivery time, then pin the connection to
+    # that exact address so httpx cannot resolve a TTL-0 rebound address later.
     # The initial validate_callback_url() checks at creation/submission time,
     # but the hostname could resolve to a different IP at delivery time.
     parsed = urlparse(url)
     default_port = 443 if parsed.scheme == "https" else 80
     try:
-        _resolve_and_check_ip(
+        pinned_ip = _resolve_and_check_ip(
             parsed.hostname or "", parsed.port or default_port
         )
     except ValueError as e:
@@ -239,6 +249,7 @@ async def dispatch_webhook(
         timeout=httpx.Timeout(30.0, connect=10.0),
         follow_redirects=False,
         max_redirects=0,
+        transport=build_pinned_transport({parsed.hostname: pinned_ip}) if parsed.hostname else None,
     ) as client:
         for attempt in range(1, max_retries + 1):
             try:

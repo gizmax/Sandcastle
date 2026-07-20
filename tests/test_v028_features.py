@@ -14,10 +14,8 @@ services (PyPI, GitHub, pip) and workflow resolution.
 
 from __future__ import annotations
 
-import time
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -27,11 +25,12 @@ from pydantic import ValidationError
 
 # Disable rate limiting before importing the app
 from sandcastle.api import rate_limit as _rl_mod
+from sandcastle.api import routes as routes_module
 
 _rl_mod.execution_limiter.check = AsyncMock()
 
-from sandcastle.api.routes import _batch_store, _is_in_blackout_window, _update_cache
-from sandcastle.api.schemas import (
+from sandcastle.api.routes import _batch_store, _is_in_blackout_window, _update_cache  # noqa: E402
+from sandcastle.api.schemas import (  # noqa: E402
     BatchItemStatus,
     BatchRunRequest,
     BatchStartedResponse,
@@ -40,8 +39,8 @@ from sandcastle.api.schemas import (
     UpdateRequest,
     UpdateResponse,
 )
-from sandcastle.config import Settings, settings
-from sandcastle.main import app
+from sandcastle.config import Settings, settings  # noqa: E402
+from sandcastle.main import app  # noqa: E402
 
 client = TestClient(app)
 
@@ -575,7 +574,11 @@ class TestAdminUpdate:
                         (b"1.0.0", b""),
                     ]
                     with patch("sandcastle.api.routes._emit_update_audit", new_callable=AsyncMock):
-                        with patch("sandcastle.api.routes._pre_update_backup", new_callable=AsyncMock):
+                        with patch(
+                            "sandcastle.api.routes._pre_update_backup",
+                            new_callable=AsyncMock,
+                            return_value=None,
+                        ):
                             resp = client.post(
                                 "/api/admin/update",
                                 json={"target_version": "1.0.0"},
@@ -609,7 +612,11 @@ class TestAdminUpdate:
             mock_client.get = AsyncMock(return_value=mock_resp)
 
             with patch("sandcastle.api.routes._emit_update_audit", new_callable=AsyncMock):
-                with patch("sandcastle.api.routes._pre_update_backup", new_callable=AsyncMock):
+                with patch(
+                    "sandcastle.api.routes._pre_update_backup",
+                    new_callable=AsyncMock,
+                    return_value=None,
+                ):
                     resp = client.post("/api/admin/update", json={})
 
             data = resp.json()["data"]
@@ -639,48 +646,30 @@ class TestAdminUpdate:
 class TestAdminRollback:
     """POST /api/admin/rollback - rollback to previous version."""
 
-    def test_rollback_without_previous_version_returns_error(self):
+    def test_rollback_without_previous_version_returns_error(self, monkeypatch, tmp_path):
         """Rollback fails when no previous_version file exists."""
-        # Ensure the file does not exist
-        prev_file = Path.home() / ".sandcastle" / "previous_version"
-        existed = prev_file.exists()
-        if existed:
-            content = prev_file.read_text()
-            prev_file.unlink()
+        state_dir = tmp_path / "sandcastle-state"
+        monkeypatch.setattr(routes_module, "_SANDCASTLE_HOME", state_dir)
 
-        try:
-            resp = client.post("/api/admin/rollback")
-            assert resp.status_code == 200
-            data = resp.json()["data"]
-            assert data["status"] == "failed"
-            assert "previous version" in data["error"].lower() or "no previous" in data["error"].lower()
-        finally:
-            if existed:
-                prev_file.parent.mkdir(parents=True, exist_ok=True)
-                prev_file.write_text(content)
+        resp = client.post("/api/admin/rollback")
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert data["status"] == "failed"
+        assert "previous version" in data["error"].lower() or "no previous" in data["error"].lower()
 
-    def test_rollback_with_empty_previous_version_returns_error(self):
+    def test_rollback_with_empty_previous_version_returns_error(self, monkeypatch, tmp_path):
         """Rollback fails when previous_version file is empty."""
-        prev_file = Path.home() / ".sandcastle" / "previous_version"
-        existed = prev_file.exists()
-        old_content = None
-        if existed:
-            old_content = prev_file.read_text()
+        state_dir = tmp_path / "sandcastle-state"
+        monkeypatch.setattr(routes_module, "_SANDCASTLE_HOME", state_dir)
+        prev_file = state_dir / "previous_version"
+        prev_file.parent.mkdir(parents=True)
+        prev_file.write_text("")
 
-        try:
-            prev_file.parent.mkdir(parents=True, exist_ok=True)
-            prev_file.write_text("")
-
-            resp = client.post("/api/admin/rollback")
-            assert resp.status_code == 200
-            data = resp.json()["data"]
-            assert data["status"] == "failed"
-            assert "empty" in data["error"].lower() or "no previous" in data["error"].lower()
-        finally:
-            if existed and old_content is not None:
-                prev_file.write_text(old_content)
-            elif prev_file.exists():
-                prev_file.unlink()
+        resp = client.post("/api/admin/rollback")
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert data["status"] == "failed"
+        assert "empty" in data["error"].lower() or "no previous" in data["error"].lower()
 
     def test_rollback_requires_admin_when_auth_enabled(self):
         """When auth is enabled, non-admin requests get 403."""
@@ -695,38 +684,28 @@ class TestAdminRollback:
         finally:
             settings.auth_required = original_auth
 
-    def test_rollback_with_valid_previous_version(self):
+    def test_rollback_with_valid_previous_version(self, monkeypatch, tmp_path):
         """Rollback succeeds when previous_version file has a valid version."""
-        prev_file = Path.home() / ".sandcastle" / "previous_version"
-        existed = prev_file.exists()
-        old_content = None
-        if existed:
-            old_content = prev_file.read_text()
+        state_dir = tmp_path / "sandcastle-state"
+        monkeypatch.setattr(routes_module, "_SANDCASTLE_HOME", state_dir)
+        prev_file = state_dir / "previous_version"
+        prev_file.parent.mkdir(parents=True)
+        prev_file.write_text("0.27.0")
 
-        try:
-            prev_file.parent.mkdir(parents=True, exist_ok=True)
-            prev_file.write_text("0.27.0")
+        mock_proc = AsyncMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(return_value=(b"Successfully installed", b""))
 
-            mock_proc = AsyncMock()
-            mock_proc.returncode = 0
-            mock_proc.communicate = AsyncMock(return_value=(b"Successfully installed", b""))
+        with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc):
+            with patch("asyncio.wait_for", new_callable=AsyncMock, return_value=(b"", b"")):
+                with patch("sandcastle.api.routes._emit_update_audit", new_callable=AsyncMock):
+                    with patch("sandcastle.api.routes._restore_pre_update_backup", new_callable=AsyncMock):
+                        resp = client.post("/api/admin/rollback")
 
-            with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc):
-                with patch("asyncio.wait_for", new_callable=AsyncMock, return_value=(b"", b"")):
-                    with patch("sandcastle.api.routes._emit_update_audit", new_callable=AsyncMock):
-                        with patch("sandcastle.api.routes._restore_pre_update_backup", new_callable=AsyncMock):
-                            resp = client.post("/api/admin/rollback")
-
-            data = resp.json()["data"]
-            assert data["status"] == "success"
-            assert data["rolled_back_to"] == "0.27.0"
-            assert data["restart_required"] is True
-        finally:
-            if existed and old_content is not None:
-                prev_file.parent.mkdir(parents=True, exist_ok=True)
-                prev_file.write_text(old_content)
-            elif prev_file.exists():
-                prev_file.unlink()
+        data = resp.json()["data"]
+        assert data["status"] == "success"
+        assert data["rolled_back_to"] == "0.27.0"
+        assert data["restart_required"] is True
 
 
 class TestUpdateCheckResponseSchema:

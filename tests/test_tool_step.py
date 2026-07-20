@@ -108,6 +108,29 @@ async def test_tool_step_resolves_templates_in_args():
 
 
 @pytest.mark.asyncio
+async def test_tool_step_subprocess_env_is_minimal_and_tool_scoped(monkeypatch):
+    """Connectors receive OS plumbing and only their own registered credentials."""
+    monkeypatch.setenv("DATABASE_URL", "postgresql://secret-db")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "provider-secret")
+    monkeypatch.setenv("TOOL_ANTHROPIC_API_KEY", "other-tool-secret")
+    monkeypatch.setenv("TOOL_NANO_BANANA_API_KEY", "own-tool-secret")
+    step = _step(
+        tool_config=ToolConfig(tool="nano-banana", function="generate", arguments=["p"])
+    )
+    mock_exec = AsyncMock(return_value=_fake_proc(json.dumps({"ok": True})))
+
+    with patch("asyncio.create_subprocess_exec", new=mock_exec):
+        result = await _execute_tool_step(step, _ctx())
+
+    assert result.status == "completed"
+    proc_env = mock_exec.call_args.kwargs["env"]
+    assert proc_env["TOOL_NANO_BANANA_API_KEY"] == "own-tool-secret"
+    assert "DATABASE_URL" not in proc_env
+    assert "ANTHROPIC_API_KEY" not in proc_env
+    assert "TOOL_ANTHROPIC_API_KEY" not in proc_env
+
+
+@pytest.mark.asyncio
 async def test_tool_step_missing_config_fails():
     res = await _execute_tool_step(_step(tool_config=None), _ctx())
     assert res.status == "failed"

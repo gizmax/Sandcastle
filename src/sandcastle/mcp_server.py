@@ -27,9 +27,7 @@ client. The 6th primitive (Elicitation) was added in MCP spec revision
                     input fields when a workflow needs them mid-run
                     (uses ctx.session.elicit per MCP rev 2025-11-25)
 
-Discovery: a .well-known/mcp.json manifest is exposed when the server is
-run over HTTP (streamable-http / sse). The stdio transport answers the same
-data via the sandcastle://manifest resource.
+Discovery metadata is available through the sandcastle://manifest resource.
 """
 
 from __future__ import annotations
@@ -244,6 +242,28 @@ def _get_client():
     return SandcastleClient(base_url=url, api_key=api_key)
 
 
+def _run_workflow_via_client(
+    workflow_name: str,
+    input_data: str = "{}",
+    wait: bool = False,
+) -> str:
+    """Run a saved workflow through the authenticated API client."""
+    try:
+        validated_name = _validate_workflow_name(workflow_name)
+        parsed_input = _safe_parse_json(input_data)
+    except ValueError as exc:
+        return _error_result(exc)
+
+    client = _get_client()
+    try:
+        run = client.run(validated_name, input=parsed_input, wait=wait)
+        return _json_result(_to_dict(run))
+    except Exception as exc:
+        return _error_result(exc)
+    finally:
+        client.close()
+
+
 def _json_result(data: Any) -> str:
     """Serialize result to JSON string for MCP response."""
     return json.dumps(data, indent=2, default=str)
@@ -401,7 +421,7 @@ def _publish_filter() -> set[str] | None:
 
 
 def _manifest_payload() -> dict[str, Any]:
-    """Build the .well-known/mcp.json discovery payload."""
+    """Build the MCP discovery payload."""
     from sandcastle import __version__
 
     tools = []
@@ -419,10 +439,9 @@ def _manifest_payload() -> dict[str, Any]:
         "spec_version": "2026-03-26",
         "primitives": ["tools", "resources", "prompts", "sampling", "roots", "elicitation"],
         "spec_revision": "2025-11-25",
-        "transport": ["stdio", "streamable-http"],
+        "transport": ["stdio"],
         "tools": tools,
         "endpoints": {
-            "well_known": "/.well-known/mcp.json",
             "stdio_command": "sandcastle mcp",
         },
     }
@@ -463,20 +482,7 @@ def create_mcp_server() -> FastMCP:
             input_data: JSON string with input key-value pairs (e.g. '{"url": "https://..."}').
             wait: If true, wait for the workflow to complete before returning.
         """
-        try:
-            validated_name = _validate_workflow_name(workflow_name)
-            parsed_input = _safe_parse_json(input_data)
-        except ValueError as exc:
-            return _error_result(exc)
-
-        client = _get_client()
-        try:
-            run = client.run(validated_name, input=parsed_input, wait=wait)
-            return _json_result(_to_dict(run))
-        except Exception as exc:
-            return _error_result(exc)
-        finally:
-            client.close()
+        return _run_workflow_via_client(workflow_name, input_data, wait)
 
     @mcp.tool()
     def run_workflow_yaml(
@@ -714,11 +720,7 @@ def create_mcp_server() -> FastMCP:
 
     @mcp.resource("sandcastle://manifest")
     def resource_manifest() -> str:
-        """Return the same payload the .well-known/mcp.json HTTP route serves.
-
-        Stdio clients use this resource to discover server capabilities since
-        they cannot hit an HTTP endpoint.
-        """
+        """Return discovery metadata for stdio MCP clients."""
         return _json_result(_manifest_payload())
 
     # -------------------------------------------------------------------
@@ -909,55 +911,23 @@ def create_mcp_server() -> FastMCP:
             continue
         _register_workflow_tool(mcp, wf_meta)
 
-    # -------------------------------------------------------------------
-    # HTTP manifest route - only active for SSE / streamable-http transports.
-    # Stdio clients use the sandcastle://manifest resource instead.
-    # -------------------------------------------------------------------
-
-    @mcp.custom_route("/.well-known/mcp.json", methods=["GET"], include_in_schema=False)
-    async def _well_known_mcp(_request):  # pragma: no cover - exercised in HTTP mode
-        from starlette.responses import JSONResponse
-
-        return JSONResponse(_manifest_payload())
-
     return mcp
 
 
 def _register_workflow_tool(mcp: FastMCP, wf_meta: dict[str, Any]) -> None:
-    """Register a workflow as an MCP tool that invokes execute_workflow.
-
-    The closure captures the workflow name and YAML path - calls into the
-    existing executor so we never reimplement workflow semantics.
-    """
+    """Register a workflow as an MCP tool that calls the authenticated API."""
     workflow_name = wf_meta["name"]
     tool_name = wf_meta["tool_name"]
     description = wf_meta["description"]
-    source_path = wf_meta["source_path"]
 
     async def _invoke(input_data: str = "{}") -> str:
-        """Run the workflow via execute_workflow and return the result as JSON."""
-        try:
-            _validate_workflow_name(workflow_name)
-            parsed_input = _safe_parse_json(input_data)
-        except ValueError as exc:
-            return _error_result(exc)
-        try:
-            from sandcastle.engine.dag import build_plan
-            from sandcastle.engine.dag import parse as parse_workflow
-            from sandcastle.engine.executor import execute_workflow
-
-            workflow = parse_workflow(source_path)
-            plan = build_plan(workflow)
-            result = await execute_workflow(workflow, plan, parsed_input)
-            return _json_result(_to_dict(result))
-        except Exception as exc:
-            return _error_result(exc)
+        """Run the workflow through the authenticated API and return JSON."""
+        return _run_workflow_via_client(workflow_name, input_data)
 
     # Use a docstring that describes the workflow so MCP clients see useful help.
     _invoke.__doc__ = (
         f"{description}\n\n"
         f"Workflow: {workflow_name}\n"
-        f"Source:   {source_path}\n\n"
         "Args:\n"
         "    input_data: JSON object string matching the workflow's input_schema."
     )

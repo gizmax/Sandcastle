@@ -31,6 +31,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from sandcastle.engine.subprocess_env import build_minimal_subprocess_env
+
 
 class SubprocessInfraError(RuntimeError):
     """Raised for infrastructure failures (spawn / serialization) so the caller
@@ -198,13 +200,7 @@ def _child_env() -> dict[str, str]:
     other parent env var are intentionally dropped.
     """
     env: dict[str, str] = {"PYTHONPATH": os.pathsep.join(sys.path)}
-    # Non-secret OS plumbing some interpreters/libraries need to start.
-    for key in (
-        "PATH", "HOME", "SYSTEMROOT", "PATHEXT", "TEMP", "TMP", "TMPDIR", "LANG", "LC_ALL",
-    ):
-        val = os.environ.get(key)
-        if val:
-            env[key] = val
+    env.update(build_minimal_subprocess_env())
     # Keep hash randomization deterministic-free but present; harmless.
     return env
 

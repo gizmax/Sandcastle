@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import re
+import sys
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -865,8 +866,30 @@ def _is_in_blackout_window() -> bool:
         return False
 
 
-async def _pre_update_backup(current_version: str) -> None:
-    """Create pre-update backups of the database and .env file."""
+def _environment_backup_dir() -> Path:
+    """Return the directory reserved for protected environment backups."""
+    data_dir = Path(settings.data_dir).resolve()
+    backup_dir = (data_dir / "backups").resolve()
+    if not backup_dir.is_relative_to(data_dir):
+        raise RuntimeError("Environment backup directory must be inside data_dir")
+    return backup_dir
+
+
+def _latest_environment_backup() -> Path | None:
+    """Return the newest pre-update environment backup, if one exists."""
+    backup_dir = _environment_backup_dir()
+    try:
+        return max(
+            backup_dir.glob(".env.pre-update-*"),
+            key=lambda path: path.stat().st_mtime_ns,
+            default=None,
+        )
+    except OSError:
+        return None
+
+
+async def _pre_update_backup(current_version: str) -> Path | None:
+    """Create pre-update backups and return the protected .env backup path."""
     # Store previous version
     _SANDCASTLE_HOME.mkdir(parents=True, exist_ok=True)
     previous_version_file = _SANDCASTLE_HOME / "previous_version"
@@ -888,16 +911,27 @@ async def _pre_update_backup(current_version: str) -> None:
                 shutil.copy2(str(db_path), str(backup_path))
                 logger.info("Database backup created: %s", backup_path)
 
-    # Copy .env to .env.pre-update if exists
+    # Copy .env into data_dir rather than leaving a second secret-bearing copy in CWD.
     env_path = Path(".env")
     if env_path.exists():
         import shutil
-        shutil.copy2(".env", ".env.pre-update")
-        logger.info("Environment file backup created: .env.pre-update")
+
+        backup_dir = _environment_backup_dir()
+        backup_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        backup_dir.chmod(0o700)
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        env_backup_path = backup_dir / f".env.pre-update-{timestamp}"
+        shutil.copy2(env_path, env_backup_path)
+        # copy2 preserves the source mode, which may expose the copied secrets.
+        env_backup_path.chmod(0o600)
+        logger.info("Environment file backup created: %s", env_backup_path)
+        return env_backup_path
+
+    return None
 
 
 async def _restore_pre_update_backup() -> None:
-    """Restore database from pre-update backup if it exists."""
+    """Restore database and environment files from pre-update backups if available."""
     db_url = settings.database_url
     if not db_url or db_url.startswith("sqlite"):
         if db_url:
@@ -911,6 +945,15 @@ async def _restore_pre_update_backup() -> None:
                 import shutil
                 shutil.copy2(str(backup_path), str(db_path))
                 logger.info("Database restored from backup: %s", backup_path)
+
+    env_backup_path = _latest_environment_backup()
+    if env_backup_path:
+        import shutil
+
+        env_path = Path(".env")
+        shutil.copy2(env_backup_path, env_path)
+        env_path.chmod(0o600)
+        logger.info("Environment file restored from backup: %s", env_backup_path)
 
 
 async def _emit_update_audit(
@@ -1023,8 +1066,9 @@ async def trigger_update(req: Request, body: UpdateRequest | None = None) -> Api
     )
 
     # Pre-update backup
+    env_backup_path: Path | None = None
     try:
-        await _pre_update_backup(current)
+        env_backup_path = await _pre_update_backup(current)
     except Exception as exc:
         logger.error("Pre-update backup failed: %s", exc, exc_info=True)
         # Continue with update even if backup fails - log the warning
@@ -1032,7 +1076,12 @@ async def trigger_update(req: Request, body: UpdateRequest | None = None) -> Api
     # Run pip install
     try:
         proc = await asyncio.create_subprocess_exec(
-            "pip", "install", "--upgrade", f"sandcastle-ai=={target}",
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            f"sandcastle-ai=={target}",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -1082,18 +1131,62 @@ async def trigger_update(req: Request, body: UpdateRequest | None = None) -> Api
     # Verify installation by checking the installed version
     try:
         verify_proc = await asyncio.create_subprocess_exec(
-            "python", "-c",
+            sys.executable,
+            "-c",
             "from sandcastle import __version__; print(__version__)",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        v_stdout, _ = await asyncio.wait_for(verify_proc.communicate(), timeout=15)
+        v_stdout, v_stderr = await asyncio.wait_for(verify_proc.communicate(), timeout=15)
+        if verify_proc.returncode != 0:
+            error_msg = v_stderr.decode("utf-8", errors="replace").strip()
+            raise RuntimeError(
+                f"version check exited {verify_proc.returncode}: {error_msg[:500]}"
+            )
         installed_version = v_stdout.decode("utf-8").strip()
-    except Exception:
-        installed_version = target  # Assume success if verification fails
+        if Version(installed_version) != Version(target):
+            raise RuntimeError(
+                f"expected version {target}, found {installed_version or 'no version output'}"
+            )
+    except Exception as exc:
+        error_msg = f"Version verification failed: {exc}"
+        _update_cache.clear()
+        await _emit_update_audit(
+            "update.failed",
+            {"target_version": target, "error": error_msg},
+            source_ip=source_ip,
+        )
+        return ApiResponse(
+            data=UpdateResponse(
+                status="failed",
+                previous_version=current,
+                error=error_msg,
+            )
+        )
 
     # Invalidate update check cache
     _update_cache.clear()
+
+    # Keep the backup on every failure path for rollback; remove it only after
+    # the install and version verification have both succeeded.
+    if env_backup_path:
+        try:
+            env_backup_path.unlink()
+        except OSError as exc:
+            error_msg = f"Update succeeded but failed to remove environment backup: {exc}"
+            logger.error(error_msg)
+            await _emit_update_audit(
+                "update.failed",
+                {"target_version": target, "error": error_msg},
+                source_ip=source_ip,
+            )
+            return ApiResponse(
+                data=UpdateResponse(
+                    status="failed",
+                    previous_version=current,
+                    error=error_msg,
+                )
+            )
 
     await _emit_update_audit(
         "update.completed",
@@ -1116,7 +1209,8 @@ async def trigger_rollback(req: Request) -> ApiResponse:
     """Roll back to the previously installed version.
 
     Reads the stored previous version from ~/.sandcastle/previous_version,
-    reinstalls that version, and restores the database backup if available.
+    reinstalls that version, and restores pre-update database and environment
+    backups if available.
     """
     _require_admin(req)
 
@@ -1156,7 +1250,11 @@ async def trigger_rollback(req: Request) -> ApiResponse:
     # Run pip install for the previous version
     try:
         proc = await asyncio.create_subprocess_exec(
-            "pip", "install", f"sandcastle-ai=={previous}",
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            f"sandcastle-ai=={previous}",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

@@ -139,10 +139,11 @@ async def receive_anthropic_webhook(
 ) -> dict[str, Any]:
     """Receive a webhook from Anthropic Managed Agents.
 
-    Verifies HMAC-SHA256 signature when `ANTHROPIC_WEBHOOK_SECRET` is set, or
-    when running in non-local mode (in which case absence of the secret is a
-    misconfiguration and yields 401). Dispatches in the background and returns
-    immediately so Anthropic's ACK timeout is not exceeded.
+    Verifies HMAC-SHA256 signatures whenever `ANTHROPIC_WEBHOOK_SECRET` is
+    set. A missing secret is rejected whenever authentication is required, and
+    unsigned callbacks are accepted only for fully unauthenticated local
+    development. Dispatches in the background and returns immediately so
+    Anthropic's ACK timeout is not exceeded.
     """
 
     raw_body = await request.body()
@@ -156,6 +157,14 @@ async def receive_anthropic_webhook(
                 detail="invalid signature",
             )
     else:
+        if getattr(settings, "auth_required", False):
+            logger.error(
+                "ANTHROPIC_WEBHOOK_SECRET not set while authentication is required; rejecting"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="webhook secret not configured",
+            )
         if settings.is_local_mode:
             logger.warning(
                 "ANTHROPIC_WEBHOOK_SECRET not set; skipping signature verify "

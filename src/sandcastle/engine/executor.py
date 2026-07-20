@@ -27,12 +27,14 @@ from sandcastle.engine.dag import (
     WorkflowDefinition,
 )
 from sandcastle.engine.events import event_bus
+from sandcastle.engine.http_transport import build_pinned_transport as _build_pinned_transport
 from sandcastle.engine.sandshore import (
     SandshoreError,
     SandshoreRuntime,
     get_sandshore_runtime,
 )
 from sandcastle.engine.storage import StorageBackend
+from sandcastle.engine.subprocess_env import build_minimal_subprocess_env
 
 logger = logging.getLogger(__name__)
 
@@ -2856,36 +2858,6 @@ async def _execute_llm_step(
         )
 
 
-def _build_pinned_transport(host_to_ip: dict[str, str]) -> Any:
-    """Build an httpx transport that dials pre-validated IPs, not re-resolved DNS.
-
-    ``host_to_ip`` maps a hostname to the single allowed IP address already
-    validated by ``_execute_http_step``'s SSRF pre-flight. The transport rewrites
-    each outgoing request's URL host to that pinned IP so the connection goes to
-    the validated address, while preserving the original ``Host`` header (already
-    set by httpx before the transport runs) and the TLS SNI (via the
-    ``sni_hostname`` request extension) so certificate validation still uses the
-    hostname. This closes the DNS-rebind TOCTOU between the pre-flight check and
-    the actual dial.
-    """
-    import httpx
-
-    class _PinnedHTTPTransport(httpx.AsyncHTTPTransport):
-        async def handle_async_request(self, request: Any) -> Any:
-            original_host = request.url.host
-            pinned_ip = host_to_ip.get(original_host)
-            if pinned_ip and pinned_ip != original_host:
-                # Dial the validated IP but keep the hostname for TLS SNI so the
-                # certificate still validates against the real host.
-                request.url = request.url.copy_with(host=pinned_ip)
-                extensions = dict(request.extensions or {})
-                extensions.setdefault("sni_hostname", original_host)
-                request.extensions = extensions
-            return await super().handle_async_request(request)
-
-    return _PinnedHTTPTransport()
-
-
 async def _execute_http_step(
     step: StepDefinition,
     context: RunContext,
@@ -2911,7 +2883,7 @@ async def _execute_http_step(
         # We resolve the hostname ONCE here, validate every resolved IP against
         # the blocked ranges, and record one allowed address. That validated
         # address is then pinned at connect time via a custom httpx transport
-        # (see _build_pinned_transport below), so httpx never re-resolves the
+        # (via the shared pinned transport), so httpx never re-resolves the
         # hostname. This closes the DNS-rebind TOCTOU: a TTL=0 record that flips
         # to a private IP between this check and the actual dial can no longer be
         # reached, because the dial goes to the address we already validated while
@@ -3211,8 +3183,11 @@ async def _execute_tool_step(
             else:
                 cli_args.append(resolve_templates(json.dumps(arg), context))
 
-        # Build subprocess env with the tool's credentials injected.
-        proc_env = os.environ.copy()
+        # Build a minimal subprocess environment, then inject only this tool's
+        # registered credentials. This prevents connectors from inheriting the
+        # API/worker process's database URLs, provider keys, and other tools'
+        # restored TOOL_* credentials.
+        proc_env = build_minimal_subprocess_env()
         proc_env.update(get_tool_credentials([cfg.tool]))
         # Ensure ~/.bun/bin is on PATH so bun-based connectors (e.g. nano-banana)
         # can locate their CLI dependencies.

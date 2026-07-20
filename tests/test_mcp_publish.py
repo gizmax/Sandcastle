@@ -4,7 +4,7 @@ Covers the v0.31 prep feature that lets Sandcastle workflows be discovered
 and called as MCP tools by Claude Desktop, Cursor, Windsurf, and any other
 MCP client.
 
-Mocks execute_workflow so no real LLM calls happen.
+Mocks the API client so no real workflow execution happens.
 """
 
 from __future__ import annotations
@@ -14,10 +14,9 @@ import io
 import json
 import textwrap
 from contextlib import redirect_stderr, redirect_stdout
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -205,18 +204,19 @@ class TestMcpServerRegistersWorkflows:
             "tools", "resources", "prompts", "sampling", "roots", "elicitation",
         }
         assert payload.get("spec_revision") == "2025-11-25"
+        assert payload["transport"] == ["stdio"]
         tools = payload["tools"]
         assert any(t["workflow"] == "mcp-publish-demo" for t in tools)
 
-    def test_workflow_tool_invokes_execute_workflow(self, workflows_dir):
-        """Calling a workflow tool routes to execute_workflow (mocked)."""
-        from sandcastle.engine.executor import WorkflowResult
+    def test_workflow_tool_uses_authenticated_client(self, workflows_dir):
+        """Published tools use the same authenticated client path as run_workflow."""
+        from mcp.server.fastmcp import FastMCP
+
         from sandcastle.mcp_server import (
             _register_workflow_tool,
             _sanitize_tool_name,
             discover_publishable_workflows,
         )
-        from mcp.server.fastmcp import FastMCP
 
         mcp = FastMCP("test-publish")
         wf_meta = next(
@@ -225,15 +225,14 @@ class TestMcpServerRegistersWorkflows:
         )
         _register_workflow_tool(mcp, wf_meta)
 
-        mock_exec = AsyncMock(return_value=WorkflowResult(
-            run_id="mock-run-1",
-            outputs={"echo": {"topic": "mcp"}},
-            total_cost_usd=0.0,
-            status="completed",
-        ))
+        mock_client = MagicMock()
+        mock_client.run.return_value = {
+            "run_id": "mock-run-1",
+            "status": "completed",
+        }
         with patch(
-            "sandcastle.engine.executor.execute_workflow", mock_exec,
-        ):
+            "sandcastle.mcp_server._get_client", return_value=mock_client
+        ) as mock_get_client:
             tool_name = _sanitize_tool_name("mcp-publish-demo")
             result = asyncio.run(asyncio.wait_for(
                 mcp.call_tool(tool_name, {"input_data": '{"topic": "mcp"}'}),
@@ -255,7 +254,11 @@ class TestMcpServerRegistersWorkflows:
         parsed = json.loads(text_payload)
         assert parsed["status"] == "completed"
         assert parsed["run_id"] == "mock-run-1"
-        mock_exec.assert_awaited_once()
+        mock_get_client.assert_called_once_with()
+        mock_client.run.assert_called_once_with(
+            "mcp-publish-demo", input={"topic": "mcp"}, wait=False,
+        )
+        mock_client.close.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
