@@ -2350,7 +2350,9 @@ async def _execute_approval_step(
     if step.approval_config and step.approval_config.show_images:
         import base64 as _b64
 
-        artifacts_dir = Path(f"data/artifacts/{context.run_id}")
+        from sandcastle.config import settings
+
+        artifacts_dir = Path(settings.data_dir) / "artifacts" / context.run_id
         image_urls: list[dict] = []
         img_counter = 0
 
@@ -2996,6 +2998,9 @@ async def _execute_http_step(
         #   @file:/path/to/file.txt
         #   @file:"/path/with spaces/file.txt"
         if body and "@file:" in body:
+            if not context.admin_trusted:
+                raise ValueError("HTTP step: @file: references require an admin-trusted workflow")
+
             import re as _re_file
 
             from sandcastle.config import settings
@@ -3005,7 +3010,10 @@ async def _execute_http_step(
             async def _load_file_ref(match: _re_file.Match) -> str:
                 # group(1) is quoted path, group(2) is unquoted path
                 fpath = (match.group(1) or match.group(2)).strip()
-                path = Path(fpath).resolve()
+                path = Path(fpath)
+                if not path.is_absolute():
+                    path = _data_dir / path
+                path = path.resolve()
                 if not path.is_relative_to(_data_dir):
                     raise ValueError(
                         f"HTTP step: file ref is outside data directory: {fpath}"

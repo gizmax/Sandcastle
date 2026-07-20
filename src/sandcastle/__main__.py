@@ -943,12 +943,18 @@ def _cmd_serve(args: argparse.Namespace) -> None:
             f"{_color('UNAVAILABLE', _C.YELLOW)} - {e}"
         )
 
-    validate_server_bind(args.host)
+    try:
+        validate_server_bind(args.host)
+    except RuntimeError as exc:
+        print(f"  {_color('Error: ' + str(exc), _C.RED)}", file=sys.stderr)
+        sys.exit(2)
+
     uvicorn.run(
         "sandcastle.main:app",
         host=args.host,
         port=port,
         reload=args.reload,
+        workers=getattr(args, "workers", 1),
     )
 
 
@@ -1079,7 +1085,12 @@ def _cmd_node(args: argparse.Namespace) -> None:
 
         from sandcastle.config import validate_server_bind
 
-        validate_server_bind(args.host)
+        try:
+            validate_server_bind(args.host)
+        except RuntimeError as exc:
+            print(f"  {_color('Error: ' + str(exc), _C.RED)}", file=sys.stderr)
+            sys.exit(2)
+
         config = uvicorn.Config(
             "sandcastle.main:app", host=args.host, port=args.port, log_level="warning"
         )
@@ -5336,6 +5347,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_serve.add_argument(
         "--reload", action="store_true", default=False, help="Enable auto-reload for development"
     )
+    p_serve.add_argument("--workers", type=int, default=1, help="Worker processes (default: 1)")
 
     # --- node (Sandcastle Mesh) ---
     p_node = subparsers.add_parser("node", help="Sandcastle Mesh node commands")

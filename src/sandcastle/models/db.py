@@ -21,6 +21,10 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    false,
+    func,
+    text,
+    true,
 )
 from sqlalchemy.ext.asyncio import AsyncAttrs, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -88,11 +92,14 @@ class Run(Base):
     )
     workflow_name: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[RunStatus] = mapped_column(
-        Enum(RunStatus), nullable=False, default=RunStatus.QUEUED
+        Enum(RunStatus),
+        nullable=False,
+        default=RunStatus.QUEUED,
+        server_default=RunStatus.QUEUED.name,
     )
     input_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     output_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    total_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    total_cost_usd: Mapped[float] = mapped_column(Float, default=0.0, server_default="0.0")
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -107,13 +114,18 @@ class Run(Base):
     fork_changes: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     sub_workflow_of_step: Mapped[str | None] = mapped_column(String(255), nullable=True)
     workflow_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    depth: Mapped[int] = mapped_column(Integer, default=0)
-    risk_level: Mapped[str | None] = mapped_column(String(50), nullable=True, default="minimal")
+    depth: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    admin_trusted: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
+    risk_level: Mapped[str | None] = mapped_column(
+        String(50), nullable=True, default="minimal", server_default="minimal"
+    )
     api_key_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("api_keys.id", ondelete="SET NULL"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
     )
     # Public share token: when set, the run is viewable at /api/r/{share_token} with
     # secrets and PII scrubbed. None means private (the default).
@@ -155,17 +167,20 @@ class RunStep(Base):
     step_id: Mapped[str] = mapped_column(String(255), nullable=False)
     parallel_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[StepStatus] = mapped_column(
-        Enum(StepStatus), nullable=False, default=StepStatus.PENDING
+        Enum(StepStatus),
+        nullable=False,
+        default=StepStatus.PENDING,
+        server_default=StepStatus.PENDING.name,
     )
     input_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     output_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
-    duration_seconds: Mapped[float] = mapped_column(Float, default=0.0)
-    attempt: Mapped[int] = mapped_column(Integer, default=1)
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0, server_default="0.0")
+    duration_seconds: Mapped[float] = mapped_column(Float, default=0.0, server_default="0.0")
+    attempt: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     sub_run_ids: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    policy_violations_count: Mapped[int] = mapped_column(Integer, default=0)
+    policy_violations_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     policy_actions: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -191,13 +206,13 @@ class Schedule(Base):
     cron_expression: Mapped[str] = mapped_column(String(255), nullable=False)
     input_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     notify: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
     tenant_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     last_run_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("runs.id", ondelete="SET NULL"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
     )
 
 
@@ -214,17 +229,19 @@ class ApiKey(Base):
         Uuid, primary_key=True, default=uuid.uuid4
     )
     key_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
-    key_prefix: Mapped[str] = mapped_column(String(8), nullable=False, default="")
+    key_prefix: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="", server_default=text("''")
+    )
     tenant_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
     max_cost_per_run_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     rotated_from_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     allowed_cidrs: Mapped[list | None] = mapped_column(JSON, nullable=True)
     allowed_workflows: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
     )
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -248,9 +265,9 @@ class DeadLetterItem(Base):
     parallel_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     input_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    attempts: Mapped[int] = mapped_column(Integer, default=1)
+    attempts: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
     )
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     resolved_by: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -279,13 +296,18 @@ class AutoPilotExperiment(Base):
     workflow_name: Mapped[str] = mapped_column(String(255), nullable=False)
     step_id: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[ExperimentStatus] = mapped_column(
-        Enum(ExperimentStatus), nullable=False, default=ExperimentStatus.RUNNING
+        Enum(ExperimentStatus),
+        nullable=False,
+        default=ExperimentStatus.RUNNING,
+        server_default=ExperimentStatus.RUNNING.name,
     )
-    optimize_for: Mapped[str] = mapped_column(String(50), nullable=False, default="quality")
+    optimize_for: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="quality", server_default="quality"
+    )
     config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     deployed_variant_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     rollout_stage: Mapped[str | None] = mapped_column(String(20), nullable=True, default=None)
@@ -322,10 +344,10 @@ class AutoPilotSample(Base):
     variant_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     output_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     quality_score: Mapped[float | None] = mapped_column(Float, nullable=True)
-    cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
-    duration_seconds: Mapped[float] = mapped_column(Float, default=0.0)
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0, server_default="0.0")
+    duration_seconds: Mapped[float] = mapped_column(Float, default=0.0, server_default="0.0")
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
     )
 
     experiment: Mapped[AutoPilotExperiment] = relationship(back_populates="samples")
@@ -349,18 +371,25 @@ class ApprovalRequest(Base):
     )
     step_id: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[ApprovalStatus] = mapped_column(
-        Enum(ApprovalStatus), nullable=False, default=ApprovalStatus.PENDING
+        Enum(ApprovalStatus),
+        nullable=False,
+        default=ApprovalStatus.PENDING,
+        server_default=ApprovalStatus.PENDING.name,
     )
     request_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     response_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    message: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    message: Mapped[str] = mapped_column(
+        Text, nullable=False, default="", server_default=text("''")
+    )
     reviewer_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     reviewer_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     timeout_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    on_timeout: Mapped[str] = mapped_column(String(50), nullable=False, default="abort")
-    allow_edit: Mapped[bool] = mapped_column(Boolean, default=False)
+    on_timeout: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="abort", server_default="abort"
+    )
+    allow_edit: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
     )
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -389,12 +418,12 @@ class RoutingDecision(Base):
     selected_model: Mapped[str] = mapped_column(String(255), nullable=False)
     selected_variant_id: Mapped[str] = mapped_column(String(255), nullable=False)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    budget_pressure: Mapped[float] = mapped_column(Float, default=0.0)
-    confidence: Mapped[float] = mapped_column(Float, default=0.1)
+    budget_pressure: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
+    confidence: Mapped[float] = mapped_column(Float, default=0.1, server_default="0.1")
     alternatives: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     slo: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
     )
 
     run: Mapped[Run] = relationship(foreign_keys=[run_id])
@@ -417,12 +446,14 @@ class PolicyViolation(Base):
     )
     step_id: Mapped[str] = mapped_column(String(255), nullable=False)
     policy_id: Mapped[str] = mapped_column(String(255), nullable=False)
-    severity: Mapped[str] = mapped_column(String(50), nullable=False, default="medium")
+    severity: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="medium", server_default="medium"
+    )
     trigger_details: Mapped[str | None] = mapped_column(Text, nullable=True)
     action_taken: Mapped[str] = mapped_column(String(50), nullable=False)
-    output_modified: Mapped[bool] = mapped_column(Boolean, default=False)
+    output_modified: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
     )
 
     run: Mapped[Run] = relationship(foreign_keys=[run_id])
@@ -446,7 +477,7 @@ class RunCheckpoint(Base):
     stage_index: Mapped[int] = mapped_column(Integer, nullable=False)
     context_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
     )
 
 
@@ -462,14 +493,16 @@ class StepCache(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     cache_key: Mapped[str] = mapped_column(String(64), unique=True, index=True)
-    workflow_name: Mapped[str] = mapped_column(String(200), default="")
+    workflow_name: Mapped[str] = mapped_column(
+        String(200), default="", server_default=text("''")
+    )
     step_id: Mapped[str] = mapped_column(String(200), nullable=False)
     model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     output_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
-    hit_count: Mapped[int] = mapped_column(Integer, default=0)
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0, server_default="0.0")
+    hit_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
     )
     expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -487,14 +520,17 @@ class ToolConnection(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     tool_name: Mapped[str] = mapped_column(String(100), nullable=False)
     connection_name: Mapped[str] = mapped_column(String(100), nullable=False)
-    credentials: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    credentials: Mapped[dict] = mapped_column(
+        JSON, nullable=False, default=dict, server_default=text("'{}'")
+    )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
     )
 
 
@@ -526,20 +562,25 @@ class EvalRun(Base):
     suite_name: Mapped[str] = mapped_column(String(255), nullable=False)
     workflow_name: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[EvalRunStatus] = mapped_column(
-        Enum(EvalRunStatus), nullable=False, default=EvalRunStatus.RUNNING
+        Enum(EvalRunStatus),
+        nullable=False,
+        default=EvalRunStatus.RUNNING,
+        server_default=EvalRunStatus.RUNNING.name,
     )
-    total_cases: Mapped[int] = mapped_column(Integer, default=0)
-    passed_cases: Mapped[int] = mapped_column(Integer, default=0)
-    failed_cases: Mapped[int] = mapped_column(Integer, default=0)
-    pass_rate: Mapped[float] = mapped_column(Float, default=0.0)
-    total_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
-    total_duration_seconds: Mapped[float] = mapped_column(Float, default=0.0)
+    total_cases: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    passed_cases: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    failed_cases: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    pass_rate: Mapped[float] = mapped_column(Float, default=0.0, server_default="0.0")
+    total_cost_usd: Mapped[float] = mapped_column(Float, default=0.0, server_default="0.0")
+    total_duration_seconds: Mapped[float] = mapped_column(
+        Float, default=0.0, server_default="0.0"
+    )
     suite_yaml: Mapped[str | None] = mapped_column(Text, nullable=True)
     tenant_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
     )
 
     case_results: Mapped[list[EvalCaseResult]] = relationship(
@@ -565,17 +606,17 @@ class EvalCaseResult(Base):
         Uuid, ForeignKey("eval_runs.id", ondelete="CASCADE"), nullable=False
     )
     case_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    passed: Mapped[bool] = mapped_column(Boolean, default=False)
+    passed: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     run_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("runs.id", ondelete="SET NULL"), nullable=True
     )
-    cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
-    duration_seconds: Mapped[float] = mapped_column(Float, default=0.0)
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0, server_default="0.0")
+    duration_seconds: Mapped[float] = mapped_column(Float, default=0.0, server_default="0.0")
     assertions: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     output_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
     )
 
     eval_run: Mapped[EvalRun] = relationship(back_populates="case_results")
@@ -608,11 +649,13 @@ class GoldenDataset(Base):
     tenant_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     workflow_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    description: Mapped[str] = mapped_column(
+        Text, nullable=False, default="", server_default=text("''")
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
     )
 
     cases: Mapped[list[GoldenCase]] = relationship(
@@ -638,12 +681,14 @@ class GoldenCase(Base):
     dataset_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("golden_datasets.id", ondelete="CASCADE"), nullable=False
     )
-    case_label: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    case_label: Mapped[str] = mapped_column(
+        String(255), nullable=False, default="", server_default=text("''")
+    )
     input_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     expected_output: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    expected_score_min: Mapped[float] = mapped_column(Float, default=0.7)
+    expected_score_min: Mapped[float] = mapped_column(Float, default=0.7, server_default="0.7")
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
     )
 
     dataset: Mapped[GoldenDataset] = relationship(back_populates="cases")
@@ -655,11 +700,14 @@ class Setting(Base):
     __tablename__ = "settings"
 
     key: Mapped[str] = mapped_column(String(100), primary_key=True)
-    value: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    value: Mapped[str] = mapped_column(
+        Text, nullable=False, default="", server_default=text("''")
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
     )
 
 
@@ -687,19 +735,24 @@ class WorkflowVersion(Base):
     workflow_name: Mapped[str] = mapped_column(String(255), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[WorkflowVersionStatus] = mapped_column(
-        Enum(WorkflowVersionStatus), nullable=False, default=WorkflowVersionStatus.DRAFT
+        Enum(WorkflowVersionStatus),
+        nullable=False,
+        default=WorkflowVersionStatus.DRAFT,
+        server_default=WorkflowVersionStatus.DRAFT.name,
     )
     yaml_content: Mapped[str] = mapped_column(Text, nullable=False)
-    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    steps_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    description: Mapped[str] = mapped_column(
+        Text, nullable=False, default="", server_default=text("''")
+    )
+    steps_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     checksum: Mapped[str] = mapped_column(String(64), nullable=False)
     created_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     promoted_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     promoted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
     )
-    is_public: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    is_public: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
 
 class AuditEvent(Base):
@@ -727,7 +780,7 @@ class AuditEvent(Base):
     prev_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     entry_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
     )
 
     run: Mapped[Run | None] = relationship(foreign_keys=[run_id])
@@ -755,21 +808,31 @@ class HubSubmission(Base):
     name: Mapped[str] = mapped_column(String(500), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     yaml_content: Mapped[str] = mapped_column(Text, nullable=False)
-    category: Mapped[str] = mapped_column(String(100), nullable=False, default="general_ai")
-    tags: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    category: Mapped[str] = mapped_column(
+        String(100), nullable=False, default="general_ai", server_default="general_ai"
+    )
+    tags: Mapped[list] = mapped_column(JSON, nullable=False, default=list, server_default=text("'[]'"))
     author: Mapped[str] = mapped_column(String(255), nullable=False)
     # pending | approved | rejected
-    status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending")
-    models_used: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
-    tools_used: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
-    step_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    downloads: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="pending", server_default="pending"
+    )
+    models_used: Mapped[list] = mapped_column(
+        JSON, nullable=False, default=list, server_default=text("'[]'")
+    )
+    tools_used: Mapped[list] = mapped_column(
+        JSON, nullable=False, default=list, server_default=text("'[]'")
+    )
+    step_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    downloads: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     # Running average rating (1-5); null until first rating is submitted
     rating: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Number of ratings received (used for running average computation)
-    rating_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    rating_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
     )
 
 
@@ -785,11 +848,13 @@ class WorkflowEvolution(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     workflow_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    status: Mapped[str] = mapped_column(String(50), default="running")
+    status: Mapped[str] = mapped_column(String(50), default="running", server_default="running")
     # running, completed, failed, cancelled
-    strategy: Mapped[str] = mapped_column(String(50), default="autoresearch")
+    strategy: Mapped[str] = mapped_column(
+        String(50), default="autoresearch", server_default="autoresearch"
+    )
     # autoresearch, manual
-    optimize_for: Mapped[str] = mapped_column(String(50), default="quality")
+    optimize_for: Mapped[str] = mapped_column(String(50), default="quality", server_default="quality")
     # quality, cost, latency, balanced
 
     # Baseline metrics
@@ -805,16 +870,16 @@ class WorkflowEvolution(Base):
 
     # Config
     eval_suite_yaml: Mapped[str | None] = mapped_column(Text, nullable=True)
-    max_iterations: Mapped[int] = mapped_column(Integer, default=20)
+    max_iterations: Mapped[int] = mapped_column(Integer, default=20, server_default="20")
     budget_limit_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # Progress
-    current_iteration: Mapped[int] = mapped_column(Integer, default=0)
-    total_keeps: Mapped[int] = mapped_column(Integer, default=0)
-    total_discards: Mapped[int] = mapped_column(Integer, default=0)
+    current_iteration: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    total_keeps: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    total_discards: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     tenant_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -852,12 +917,12 @@ class EvolutionIteration(Base):
     duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
     eval_pass_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
 
-    status: Mapped[str] = mapped_column(String(50), default="pending")
+    status: Mapped[str] = mapped_column(String(50), default="pending", server_default="pending")
     # pending, keep, discard, crash
     variant_yaml: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
     )
 
     evolution: Mapped[WorkflowEvolution] = relationship(back_populates="iterations")
@@ -888,19 +953,23 @@ class HealAttempt(Base):
     )
     workflow_name: Mapped[str] = mapped_column(String(255), nullable=False)
     step_id: Mapped[str] = mapped_column(String(255), nullable=False)
-    diagnosis: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    diagnosis: Mapped[str] = mapped_column(
+        Text, nullable=False, default="", server_default=text("''")
+    )
+    confidence: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
     diff: Mapped[str | None] = mapped_column(Text, nullable=True)
     from_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     to_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    status: Mapped[str] = mapped_column(String(50), nullable=False, default="proposed")
+    status: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="proposed", server_default="proposed"
+    )
     # proposed, applied, auto_applied, rejected, failed, succeeded, regressed
     approval_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("approval_requests.id", ondelete="SET NULL"), nullable=True
     )
     applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
     )
 
     dead_letter_item: Mapped[DeadLetterItem] = relationship(foreign_keys=[dead_letter_id])
@@ -930,9 +999,9 @@ class MeshNode(Base):
     )
     # "alive" | "dead" - persisted snapshot; liveness is recomputed from
     # last_heartbeat on every read so a stale snapshot never lies.
-    status: Mapped[str] = mapped_column(String(50), default="alive")
+    status: Mapped[str] = mapped_column(String(50), default="alive", server_default="alive")
     registered_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
     )
 
 
@@ -1057,7 +1126,18 @@ def _add_missing_columns(connection, **_kw) -> None:
                 # for simple scalar values (int, float, bool, str).
                 default_clause = ""
                 if col.server_default is not None:
-                    default_clause = f" DEFAULT {col.server_default.arg}"
+                    default_arg = col.server_default.arg
+                    if isinstance(default_arg, str):
+                        if isinstance(col.type, (String, Text, Enum, JSON)):
+                            safe = default_arg.replace("'", "''")
+                            default_clause = f" DEFAULT '{safe}'"
+                        else:
+                            default_clause = f" DEFAULT {default_arg}"
+                    else:
+                        default_clause = (
+                            " DEFAULT "
+                            f"{default_arg.compile(dialect=connection.dialect)}"
+                        )
                 elif col.default is not None and col.default.is_scalar:
                     val = col.default.arg
                     if isinstance(val, bool):

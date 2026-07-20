@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { POLL_INTERVAL } from "@/lib/constants";
 import {
@@ -830,7 +830,9 @@ export default function EvolutionPage() {
       setDetailData(null);
       setDetailLoading(true);
       try {
-        const res = await api.get<EvolutionDetail>(`/evolution/${evo.workflow_name}/status`);
+        const res = await api.get<EvolutionDetail>(
+          `/evolution/${encodeURIComponent(evo.workflow_name)}/status`
+        );
         if (!mountedRef.current) return;
         if (res.data) setDetailData(res.data);
       } finally {
@@ -845,7 +847,7 @@ export default function EvolutionPage() {
       if (actionLoadingRef.current.has(workflowName)) return;
       setActionLoading((prev) => new Set(prev).add(workflowName));
       try {
-        const res = await api.post(`/evolution/${workflowName}/accept`);
+        const res = await api.post(`/evolution/${encodeURIComponent(workflowName)}/accept`);
         if (!mountedRef.current) return;
         if (res.error) {
           toast.error(`Failed to accept variant: ${res.error.message}`);
@@ -873,7 +875,7 @@ export default function EvolutionPage() {
       if (actionLoadingRef.current.has(workflowName)) return;
       setActionLoading((prev) => new Set(prev).add(workflowName));
       try {
-        const res = await api.post(`/evolution/${workflowName}/cancel`);
+        const res = await api.post(`/evolution/${encodeURIComponent(workflowName)}/cancel`);
         if (!mountedRef.current) return;
         if (res.error) {
           toast.error(`Failed to cancel evolution: ${res.error.message}`);
@@ -913,6 +915,19 @@ export default function EvolutionPage() {
     },
     [fetchData]
   );
+
+  const supersededEvolutionIds = useMemo(() => {
+    const latestWorkflowNames = new Set<string>();
+    const supersededIds = new Set<string>();
+    for (const evolution of evolutions) {
+      if (latestWorkflowNames.has(evolution.workflow_name)) {
+        supersededIds.add(evolution.id);
+      } else {
+        latestWorkflowNames.add(evolution.workflow_name);
+      }
+    }
+    return supersededIds;
+  }, [evolutions]);
 
   if (loading) {
     return (
@@ -1013,6 +1028,7 @@ export default function EvolutionPage() {
               ? Math.round((evo.current_iteration / evo.max_iterations) * 100)
               : 0;
             const isExpanded = expandedId === evo.id;
+            const isSuperseded = supersededEvolutionIds.has(evo.id);
 
             return (
               <div
@@ -1024,10 +1040,19 @@ export default function EvolutionPage() {
                   role="button"
                   tabIndex={0}
                   aria-expanded={isExpanded}
-                  className="flex items-center gap-4 px-5 py-4 cursor-pointer hover:bg-running/10 transition-colors focus-visible:outline-none focus-visible:bg-running/10"
-                  onClick={() => { void handleExpand(evo); }}
+                  aria-disabled={isSuperseded}
+                  title={isSuperseded ? "Superseded by a newer evolution" : undefined}
+                  className={cn(
+                    "flex items-center gap-4 px-5 py-4 transition-colors focus-visible:outline-none",
+                    isSuperseded
+                      ? "cursor-not-allowed opacity-60"
+                      : "cursor-pointer hover:bg-running/10 focus-visible:bg-running/10"
+                  )}
+                  onClick={() => {
+                    if (!isSuperseded) void handleExpand(evo);
+                  }}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
+                    if (!isSuperseded && (e.key === "Enter" || e.key === " ")) {
                       e.preventDefault();
                       void handleExpand(evo);
                     }
@@ -1044,6 +1069,9 @@ export default function EvolutionPage() {
                         <span className="h-1.5 w-1.5 rounded-full bg-running animate-pulse" />
                         Running
                       </span>
+                      {isSuperseded && (
+                        <span className="text-xs text-muted">Superseded</span>
+                      )}
                     </div>
                     {/* Progress bar */}
                     <div className="flex items-center gap-2">
@@ -1084,7 +1112,7 @@ export default function EvolutionPage() {
                       e.stopPropagation();
                       void handleCancel(evo.workflow_name);
                     }}
-                    disabled={actionLoading.has(evo.workflow_name)}
+                    disabled={isSuperseded || actionLoading.has(evo.workflow_name)}
                     className={cn(
                       "inline-flex items-center gap-1 rounded-md border border-error/30 px-2.5 py-1.5",
                       "text-xs font-medium text-error hover:bg-error/10 transition-colors",
@@ -1148,6 +1176,7 @@ export default function EvolutionPage() {
               : "0.0";
             const isExpanded = expandedId === evo.id;
             const isAccepted = evo.status === "accepted";
+            const isSuperseded = supersededEvolutionIds.has(evo.id);
 
             return (
               <div
@@ -1159,10 +1188,19 @@ export default function EvolutionPage() {
                   role="button"
                   tabIndex={0}
                   aria-expanded={isExpanded}
-                  className="flex items-center gap-4 px-5 py-4 cursor-pointer hover:bg-border/10 transition-colors focus-visible:outline-none focus-visible:bg-border/10"
-                  onClick={() => { void handleExpand(evo); }}
+                  aria-disabled={isSuperseded}
+                  title={isSuperseded ? "Superseded by a newer evolution" : undefined}
+                  className={cn(
+                    "flex items-center gap-4 px-5 py-4 transition-colors focus-visible:outline-none",
+                    isSuperseded
+                      ? "cursor-not-allowed opacity-60"
+                      : "cursor-pointer hover:bg-border/10 focus-visible:bg-border/10"
+                  )}
+                  onClick={() => {
+                    if (!isSuperseded) void handleExpand(evo);
+                  }}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
+                    if (!isSuperseded && (e.key === "Enter" || e.key === " ")) {
                       e.preventDefault();
                       void handleExpand(evo);
                     }
@@ -1185,6 +1223,9 @@ export default function EvolutionPage() {
                           <CheckCircle2 className="h-3 w-3" />
                           Accepted
                         </span>
+                      )}
+                      {isSuperseded && (
+                        <span className="text-xs text-muted">Superseded</span>
                       )}
                     </div>
                     <div className="flex items-center gap-3 mt-1">
@@ -1220,7 +1261,7 @@ export default function EvolutionPage() {
                           e.stopPropagation();
                           void handleAccept(evo.workflow_name);
                         }}
-                        disabled={actionLoading.has(evo.workflow_name)}
+                        disabled={isSuperseded || actionLoading.has(evo.workflow_name)}
                         className={cn(
                           "inline-flex items-center gap-1 rounded-md bg-success/10 border border-success/30 px-2.5 py-1.5",
                           "text-xs font-medium text-success hover:bg-success/20 transition-colors",

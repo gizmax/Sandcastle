@@ -16,14 +16,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 
 
-def _ok_session_factory():
+def _ok_session_factory(saved_runs: list | None = None):
     """async_session() context manager where all DB ops succeed."""
 
     def make_cm():
         sess = AsyncMock()
         sess.get = AsyncMock(return_value=MagicMock())
         sess.commit = AsyncMock()
-        sess.add = MagicMock()
+        sess.add = MagicMock(
+            side_effect=(lambda run: saved_runs.append(run)) if saved_runs is not None else None
+        )
         sess.execute = AsyncMock(return_value=MagicMock())
         cm = AsyncMock()
         cm.__aenter__ = AsyncMock(return_value=sess)
@@ -134,3 +136,31 @@ def test_async_enqueue_threads_admin_trusted():
 
     assert resp.status_code == 202, resp.text
     assert captured.get("admin_trusted") is False
+
+
+def test_async_submit_persists_admin_trusted():
+    """The restart-safe Run row retains the trust decision used for initial enqueue."""
+    import sandcastle.api.routes as routes
+    from sandcastle.main import app
+
+    client = TestClient(app, raise_server_exceptions=False)
+    saved_runs: list = []
+
+    with (
+        patch("sandcastle.api.routes.async_session", side_effect=_ok_session_factory(saved_runs)),
+        patch("sandcastle.api.routes.enqueue_workflow", new_callable=AsyncMock),
+        patch("sandcastle.api.routes.is_admin", return_value=True),
+    ):
+        original = routes.settings.code_steps_allow_untrusted
+        routes.settings.code_steps_allow_untrusted = False
+        try:
+            resp = client.post(
+                "/api/workflows/run",
+                json={"workflow": _CODE_WORKFLOW, "input": {}},
+            )
+        finally:
+            routes.settings.code_steps_allow_untrusted = original
+
+    assert resp.status_code == 202, resp.text
+    assert len(saved_runs) == 1
+    assert saved_runs[0].admin_trusted is True

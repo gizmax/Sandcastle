@@ -115,13 +115,21 @@ jobs:
           # hatchling force-includes dashboard/dist; an empty dir satisfies it
           # without pulling the whole Node toolchain into this job.
           mkdir -p dashboard/dist
-          pip install -e .
+          pip install -e ".[dev]"
 
       - name: Apply migrations (customer CLI path)
         run: python -m sandcastle db migrate
 
       - name: Re-run migrations (container restart scenario)
         run: python -m sandcastle db migrate
+
+      - name: Check migration metadata drift
+        run: python -m alembic check
+
+      - name: Smoke PostgreSQL enum persistence
+        run: |
+          POSTGRES_MIGRATIONS_DATABASE_URL="$DATABASE_URL" \
+            python -m pytest tests/test_postgres_enum_smoke.py -q --tb=short --timeout=120
 
       - name: Verify current revision is the migration head
         run: |

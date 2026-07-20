@@ -15,6 +15,7 @@ from sandcastle.__main__ import (
     _cmd_fork,
     _cmd_health,
     _cmd_ls,
+    _cmd_node,
     _cmd_reject,
     _cmd_replay,
     _cmd_runs,
@@ -32,7 +33,7 @@ from sandcastle.__main__ import (
 
 class TestArgParsing:
     def test_serve_defaults(self):
-        """'serve' command should have correct default host, port, and reload."""
+        """'serve' command should have correct default host, port, reload, and workers."""
         parser = _build_parser()
         args = parser.parse_args(["serve"])
 
@@ -40,6 +41,7 @@ class TestArgParsing:
         assert args.host == "127.0.0.1"
         assert args.port == 8080
         assert args.reload is False
+        assert args.workers == 1
 
     def test_serve_custom_port(self):
         """'serve --port 9090' should set port to 9090."""
@@ -269,7 +271,7 @@ class TestHealthCommand:
 
 class TestServeCommand:
     def test_serve_calls_uvicorn_with_correct_args(self):
-        """serve command should call uvicorn.run with host, port, and reload."""
+        """serve command should call uvicorn.run with host, port, reload, and workers."""
         parser = _build_parser()
         args = parser.parse_args(["serve", "--host", "127.0.0.1", "--port", "9000"])
 
@@ -282,6 +284,7 @@ class TestServeCommand:
             host="127.0.0.1",
             port=9000,
             reload=False,
+            workers=1,
         )
 
     def test_serve_default_args(self):
@@ -298,7 +301,60 @@ class TestServeCommand:
             host="127.0.0.1",
             port=8080,
             reload=False,
+            workers=1,
         )
+
+    def test_serve_workers_passthrough(self):
+        parser = _build_parser()
+        args = parser.parse_args(["serve", "--workers", "4"])
+
+        with patch("uvicorn.run") as mock_run, patch(
+            "sandcastle.__main__._port_in_use", return_value=False
+        ):
+            _cmd_serve(args)
+
+        assert args.workers == 4
+        assert mock_run.call_args.kwargs["workers"] == 4
+
+    def test_serve_bind_guard_exits_cleanly(self, capsys):
+        parser = _build_parser()
+        args = parser.parse_args(["serve", "--host", "0.0.0.0"])
+
+        with (
+            patch("sandcastle.__main__._port_in_use", return_value=False),
+            patch(
+                "sandcastle.config.validate_server_bind",
+                side_effect=RuntimeError("bind guard tripped"),
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            _cmd_serve(args)
+
+        assert exc_info.value.code == 2
+        error_output = capsys.readouterr().err
+        assert "Error: bind guard tripped" in error_output
+        assert "Traceback" not in error_output
+
+    def test_node_bind_guard_exits_cleanly(self, monkeypatch, capsys):
+        parser = _build_parser()
+        args = parser.parse_args(["node", "join", "http://coordinator.test", "--token", "token"])
+        from sandcastle.config import settings
+
+        monkeypatch.setattr(settings, "mesh_enabled", False)
+        monkeypatch.setattr(settings, "mesh_token", "")
+        with (
+            patch(
+                "sandcastle.config.validate_server_bind",
+                side_effect=RuntimeError("bind guard tripped"),
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            _cmd_node(args)
+
+        assert exc_info.value.code == 2
+        error_output = capsys.readouterr().err
+        assert "Error: bind guard tripped" in error_output
+        assert "Traceback" not in error_output
 
 
 # ---------------------------------------------------------------------------

@@ -23,6 +23,14 @@ def test_network_bind_without_auth_is_rejected():
         validate_server_bind("0.0.0.0", _settings(auth_required=False, allow_insecure_bind=False))
 
 
+def test_network_bind_error_explains_the_safe_remediations():
+    with pytest.raises(RuntimeError) as exc_info:
+        validate_server_bind("0.0.0.0", _settings(auth_required=False, allow_insecure_bind=False))
+
+    assert "Set AUTH_REQUIRED=true" in str(exc_info.value)
+    assert "SANDCASTLE_ALLOW_INSECURE_BIND=true" in str(exc_info.value)
+
+
 def test_network_bind_without_auth_allows_explicit_opt_out():
     validate_server_bind("0.0.0.0", _settings(auth_required=False, allow_insecure_bind=True))
 

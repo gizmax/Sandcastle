@@ -190,6 +190,7 @@ async def _validate_providers() -> None:
 async def _cleanup_orphaned_runs() -> tuple[int, int]:
     """Fail interrupted work and restore Redis-queued jobs after API restart."""
     from datetime import datetime, timezone
+    from uuid import UUID
 
     from sqlalchemy import func
     from sqlalchemy import select as sa_select
@@ -199,7 +200,7 @@ async def _cleanup_orphaned_runs() -> tuple[int, int]:
     from sandcastle.queue.worker import uses_redis_queue
 
     redis_queue = uses_redis_queue()
-    queued_runs: list[tuple[str, str, dict, float | None]] = []
+    queued_runs: list[tuple[UUID, str, int | None, dict, float | None, bool]] = []
 
     async with async_session() as session:
         if redis_queue:
@@ -207,7 +208,14 @@ async def _cleanup_orphaned_runs() -> tuple[int, int]:
                 sa_select(Run).where(Run.status == RunStatus.QUEUED)
             )
             queued_runs = [
-                (str(run.id), run.workflow_name, run.input_data or {}, run.max_cost_usd)
+                (
+                    run.id,
+                    run.workflow_name,
+                    run.workflow_version,
+                    run.input_data or {},
+                    run.max_cost_usd,
+                    run.admin_trusted,
+                )
                 for run in queued_result.scalars().all()
             ]
             stale_statuses = [RunStatus.RUNNING]
@@ -232,16 +240,30 @@ async def _cleanup_orphaned_runs() -> tuple[int, int]:
 
     reenqueued_count = 0
     if redis_queue:
-        from sandcastle.api.routes import _load_workflow_yaml
+        from sandcastle.api.routes import _load_versioned_workflow_yaml
         from sandcastle.queue.worker import enqueue_workflow
 
-        for run_id, workflow_name, input_data, max_cost_usd in queued_runs:
+        for run_id, workflow_name, workflow_version, input_data, max_cost_usd, admin_trusted in queued_runs:
+            try:
+                yaml_content = await _load_versioned_workflow_yaml(workflow_name, workflow_version)
+            except Exception as exc:
+                logger.warning("Could not recover workflow YAML for queued run %s: %s", run_id, exc)
+                async with async_session() as session:
+                    run = await session.get(Run, run_id)
+                    if run and run.status == RunStatus.QUEUED:
+                        run.status = RunStatus.FAILED
+                        run.error = f"Could not recover workflow YAML after restart: {exc}"
+                        run.completed_at = datetime.now(timezone.utc)
+                        await session.commit()
+                continue
+
             try:
                 await enqueue_workflow(
-                    _load_workflow_yaml(workflow_name),
+                    yaml_content,
                     input_data,
-                    run_id,
+                    str(run_id),
                     max_cost_usd=max_cost_usd,
+                    admin_trusted=admin_trusted,
                     # A temporary Redis outage must not discard a durable queued run.
                     mark_failed_on_error=False,
                 )

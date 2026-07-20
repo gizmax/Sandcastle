@@ -5068,6 +5068,7 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
                 workflow_version=wf_version,
                 started_at=datetime.now(timezone.utc),
                 risk_level=getattr(workflow, "risk_level", "minimal"),
+                admin_trusted=is_admin(req) or settings.code_steps_allow_untrusted,
             )
             session.add(db_run)
             await session.commit()
@@ -5344,6 +5345,7 @@ async def run_workflow_async(request: WorkflowRunRequest, req: Request) -> ApiRe
                 max_cost_usd=budget,
                 workflow_version=wf_version,
                 risk_level=getattr(workflow, "risk_level", "minimal"),
+                admin_trusted=is_admin(req) or settings.code_steps_allow_untrusted,
             )
             session.add(db_run)
             await session.commit()
@@ -8524,6 +8526,7 @@ async def _resume_after_approval(
         workflow_version = run.workflow_version
         input_data = run.input_data or {}
         max_cost_usd = run.max_cost_usd
+        admin_trusted = run.admin_trusted
 
     # Load workflow YAML (use versioned loader to match replay/fork behavior)
     try:
@@ -8594,6 +8597,7 @@ async def _resume_after_approval(
             max_cost_usd=max_cost_usd,
             initial_context=initial_context,
             skip_steps=skip_steps,
+            admin_trusted=admin_trusted,
         )
         logger.info(f"Resumed workflow {run_id} after approval of step '{step_id}'")
         return True
@@ -12733,14 +12737,16 @@ async def get_evolution_status(workflow_name: str, req: Request = None) -> ApiRe
     Admin-only when auth is enabled.
     """
     _require_admin(req)
+    tenant_id = get_tenant_id(req)
     async with async_session() as session:
         stmt = (
             select(WorkflowEvolution)
             .where(WorkflowEvolution.workflow_name == workflow_name)
             .order_by(WorkflowEvolution.created_at.desc())
+            .limit(1)
         )
-        result = await session.execute(stmt)
-        ev = result.scalar_one_or_none()
+        stmt = _apply_tenant_filter(stmt, tenant_id, WorkflowEvolution.tenant_id)
+        ev = (await session.execute(stmt)).scalars().first()
 
         if ev is None:
             raise HTTPException(
@@ -12805,6 +12811,7 @@ async def accept_evolution(workflow_name: str, req: Request) -> ApiResponse:
     Admin-only when auth is enabled.
     """
     _require_admin(req)
+    tenant_id = get_tenant_id(req)
     body = {}
     try:
         body = await req.json()
@@ -12819,6 +12826,7 @@ async def accept_evolution(workflow_name: str, req: Request) -> ApiResponse:
             .where(WorkflowEvolution.workflow_name == workflow_name)
             .order_by(WorkflowEvolution.created_at.desc())
         )
+        stmt = _apply_tenant_filter(stmt, tenant_id, WorkflowEvolution.tenant_id)
         result = await session.execute(stmt)
         ev = result.scalar_one_or_none()
 
@@ -12895,6 +12903,7 @@ async def accept_evolution(workflow_name: str, req: Request) -> ApiResponse:
 async def cancel_evolution(workflow_name: str, req: Request) -> ApiResponse:
     """Cancel a running evolution experiment. Admin-only when auth is enabled."""
     _require_admin(req)
+    tenant_id = get_tenant_id(req)
     async with async_session() as session:
         stmt = (
             select(WorkflowEvolution)
@@ -12904,6 +12913,7 @@ async def cancel_evolution(workflow_name: str, req: Request) -> ApiResponse:
             )
             .order_by(WorkflowEvolution.created_at.desc())
         )
+        stmt = _apply_tenant_filter(stmt, tenant_id, WorkflowEvolution.tenant_id)
         result = await session.execute(stmt)
         ev = result.scalar_one_or_none()
 
@@ -12930,11 +12940,11 @@ async def cancel_evolution(workflow_name: str, req: Request) -> ApiResponse:
 async def get_evolution_stats(req: Request) -> ApiResponse:
     """Get aggregated evolution statistics across all workflows. Admin-only when auth is enabled."""
     _require_admin(req)
+    tenant_id = get_tenant_id(req)
     async with async_session() as session:
-        count_stmt = (
-            select(WorkflowEvolution.status, func.count(WorkflowEvolution.id).label("cnt"))
-            .group_by(WorkflowEvolution.status)
-        )
+        count_stmt = select(WorkflowEvolution.status, func.count(WorkflowEvolution.id).label("cnt"))
+        count_stmt = _apply_tenant_filter(count_stmt, tenant_id, WorkflowEvolution.tenant_id)
+        count_stmt = count_stmt.group_by(WorkflowEvolution.status)
         count_result = await session.execute(count_stmt)
         counts_by_status = {row.status: row.cnt for row in count_result.all()}
 
@@ -12948,6 +12958,7 @@ async def get_evolution_stats(req: Request) -> ApiResponse:
             WorkflowEvolution.best_score > WorkflowEvolution.baseline_score,
             WorkflowEvolution.status == "completed",
         )
+        improv_stmt = _apply_tenant_filter(improv_stmt, tenant_id, WorkflowEvolution.tenant_id)
         improvements = (await session.scalar(improv_stmt)) or 0
 
         avg_stmt = select(
@@ -12957,6 +12968,7 @@ async def get_evolution_stats(req: Request) -> ApiResponse:
             WorkflowEvolution.baseline_score.is_not(None),
             WorkflowEvolution.best_score.is_not(None),
         )
+        avg_stmt = _apply_tenant_filter(avg_stmt, tenant_id, WorkflowEvolution.tenant_id)
         avg_improvement = await session.scalar(avg_stmt)
 
         top_stmt = (
@@ -12976,6 +12988,7 @@ async def get_evolution_stats(req: Request) -> ApiResponse:
             )
             .limit(10)
         )
+        top_stmt = _apply_tenant_filter(top_stmt, tenant_id, WorkflowEvolution.tenant_id)
         top_result = await session.execute(top_stmt)
         top_workflows = [
             {

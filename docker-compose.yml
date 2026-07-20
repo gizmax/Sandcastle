@@ -78,7 +78,7 @@ services:
   scheduler:
     <<: [*sandcastle-build, *sandcastle-env]
     restart: unless-stopped
-    command: ["uvicorn", "sandcastle.main:app", "--host", "0.0.0.0", "--port", "8081", "--workers", "1"]
+    command: ["python", "-m", "sandcastle", "serve", "--host", "0.0.0.0", "--port", "8081", "--workers", "1"]
     depends_on:
       redis:
         condition: service_healthy
