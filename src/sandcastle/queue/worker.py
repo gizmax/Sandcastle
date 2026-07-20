@@ -83,6 +83,11 @@ def _parse_redis_url(url: str):
     )
 
 
+def uses_redis_queue() -> bool:
+    """Return whether workflow jobs are dispatched through the Redis queue."""
+    return bool(settings.redis_url)
+
+
 async def run_workflow_job(
     ctx: dict,
     workflow_yaml: str,
@@ -281,11 +286,12 @@ async def run_workflow_job(
 
 
 async def _recover_stuck_runs() -> None:
-    """Recover runs stuck in RUNNING/QUEUED after a worker crash.
+    """Recover runs stuck in RUNNING after a worker crash.
 
-    Finds runs that have been in RUNNING or QUEUED status for longer than
-    twice the job timeout and marks them as FAILED.  Called during worker
-    startup to clean up after unexpected shutdowns.
+    Finds runs that have been RUNNING for longer than twice the job timeout
+    and marks them as FAILED. QUEUED jobs can legitimately remain in Redis
+    during a backlog, so they are left for the queue to deliver. Called during
+    worker startup to clean up after unexpected shutdowns.
     """
     from datetime import timedelta
 
@@ -308,17 +314,9 @@ async def _recover_stuck_runs() -> None:
             result = await session.execute(stmt_running)
             stuck_running = result.scalars().all()
 
-            # Find runs stuck in QUEUED that were created before the cutoff
-            stmt_queued = select(Run).where(
-                Run.status == RunStatus.QUEUED,
-                Run.created_at <= cutoff,
-            )
-            result = await session.execute(stmt_queued)
-            stuck_queued = result.scalars().all()
-
             recovered = 0
             now = datetime.now(timezone.utc)
-            for run in [*stuck_running, *stuck_queued]:
+            for run in stuck_running:
                 run.status = RunStatus.FAILED
                 run.completed_at = now
                 run.error = "Worker crashed or timed out - recovered on startup"
@@ -363,7 +361,7 @@ class WorkerSettings:
 
 
 # Lazy init: only set redis_settings when Redis is configured
-if settings.redis_url:
+if uses_redis_queue():
     WorkerSettings.redis_settings = _parse_redis_url(settings.redis_url)
 
 
@@ -376,6 +374,7 @@ async def enqueue_workflow(
     skip_steps: list[str] | None = None,
     step_overrides: dict | None = None,
     admin_trusted: bool = False,
+    mark_failed_on_error: bool = True,
 ) -> None:
     """Enqueue a workflow job - via Redis (arq) or in-process (asyncio.create_task).
 
@@ -391,7 +390,7 @@ async def enqueue_workflow(
     """
     global _enqueue_redis_pool
 
-    if settings.redis_url:
+    if uses_redis_queue():
         # Production mode: enqueue via arq/Redis using a shared connection pool
         from arq import create_pool
 
@@ -419,11 +418,13 @@ async def enqueue_workflow(
             logger.error(
                 "Failed to enqueue run %s to Redis: %s", run_id, enqueue_err
             )
-            # Mark the run as FAILED so it does not stay stuck in QUEUED
-            await _mark_run_failed(
-                run_id,
-                f"Redis enqueue failed: {enqueue_err}",
-            )
+            if mark_failed_on_error:
+                # Mark newly submitted runs as FAILED so they do not remain
+                # stuck in QUEUED when their initial enqueue fails.
+                await _mark_run_failed(
+                    run_id,
+                    f"Redis enqueue failed: {enqueue_err}",
+                )
             raise
     else:
         # Local mode: run directly in-process

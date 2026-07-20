@@ -1,8 +1,26 @@
 {
   "name": "sandcastle-sandbox",
   "main": "src/index.ts",
-  "compatibility_date": "2025-01-01",
-  "containers": {
-    "max_instances": 5
-  }
+  "compatibility_date": "2026-07-20",
+  "containers": [
+    {
+      "class_name": "Sandbox",
+      "image": "./Dockerfile",
+      "max_instances": 5
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "Sandbox",
+        "class_name": "Sandbox"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["Sandbox"]
+    }
+  ]
 }

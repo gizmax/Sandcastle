@@ -140,6 +140,8 @@ class LlmConfig:
     """Configuration for a lightweight LLM step (no sandbox)."""
 
     system_prompt: str = ""
+    temperature: float | None = None
+    max_tokens: int | None = None
 
 
 @dataclass
@@ -1016,7 +1018,34 @@ def _parse_llm_config(data: dict | None) -> LlmConfig | None:
     """Parse LLM step configuration from YAML data."""
     if data is None:
         return None
-    return LlmConfig(system_prompt=data.get("system_prompt", ""))
+    temperature = data.get("temperature")
+    if temperature is not None:
+        try:
+            temperature = float(temperature)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("llm_config.temperature must be a number between 0 and 2") from exc
+        if not 0 <= temperature <= 2:
+            raise ValueError("llm_config.temperature must be between 0 and 2")
+
+    max_tokens = data.get("max_tokens")
+    if max_tokens is not None:
+        if isinstance(max_tokens, bool):
+            raise ValueError("llm_config.max_tokens must be a positive integer")
+        try:
+            parsed_max_tokens = int(max_tokens)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("llm_config.max_tokens must be a positive integer") from exc
+        if parsed_max_tokens <= 0 or (
+            isinstance(max_tokens, float) and not max_tokens.is_integer()
+        ):
+            raise ValueError("llm_config.max_tokens must be a positive integer")
+        max_tokens = parsed_max_tokens
+
+    return LlmConfig(
+        system_prompt=data.get("system_prompt", ""),
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
 
 
 def _parse_http_config(data: dict | None) -> HttpConfig | None:

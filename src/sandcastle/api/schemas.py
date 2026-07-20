@@ -1434,6 +1434,28 @@ class EvolutionStatusResponse(BaseModel):
     iterations: list[EvolutionIterationResponse] = Field(default_factory=list)
 
 
+class EvolutionListItemResponse(BaseModel):
+    """Summary of a workflow evolution experiment for the evolution list."""
+
+    id: str
+    workflow_name: str
+    status: str
+    optimize_for: str
+    baseline_score: float | None = None
+    baseline_quality: float | None = None
+    baseline_cost: float | None = None
+    best_score: float | None = None
+    best_quality: float | None = None
+    best_cost: float | None = None
+    max_iterations: int
+    current_iteration: int
+    total_keeps: int
+    total_discards: int
+    budget_limit_usd: float | None = None
+    created_at: datetime | None = None
+    completed_at: datetime | None = None
+
+
 class EvolutionAcceptRequest(BaseModel):
     """Request to accept and promote the best evolution variant."""
 

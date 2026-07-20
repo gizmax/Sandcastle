@@ -11,6 +11,8 @@ services:
       DATABASE_URL: ""
       REDIS_URL: ""
       AUTH_REQUIRED: "false"
+      # Intentional local-dev opt-out for the published 0.0.0.0 Docker port.
+      SANDCASTLE_ALLOW_INSECURE_BIND: "true"
       SANDBOX_BACKEND: local
       STORAGE_BACKEND: local
       DATA_DIR: /app/data

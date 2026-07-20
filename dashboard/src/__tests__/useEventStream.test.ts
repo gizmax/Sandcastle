@@ -36,7 +36,7 @@ function createSseStream() {
     headers: { "Content-Type": "text/event-stream" },
   });
 
-  return { response, sendEvent, close, error };
+  return { response, push, sendEvent, close, error };
 }
 
 // ---------------------------------------------------------------------------
@@ -118,6 +118,23 @@ describe("useEventStream", () => {
     });
     expect(result.current.events[0].type).toBe("run.completed");
     expect(result.current.events[0].data).toEqual({ run_id: "r1", status: "completed" });
+  });
+
+  it("preserves an event split across response chunks", async () => {
+    const { result } = renderHook(() => useEventStream());
+
+    await waitFor(() => expect(result.current.status).toBe("connected"));
+
+    // The first chunk ends before the data line. This used to reset the event
+    // type before the next reader iteration, so the event was dropped.
+    act(() => {
+      sseHelper.push("event: run.completed\n");
+      sseHelper.push('data: {"run_id":"split"}\n\n');
+    });
+
+    await waitFor(() => expect(result.current.events).toHaveLength(1));
+    expect(result.current.events[0].type).toBe("run.completed");
+    expect(result.current.events[0].data).toEqual({ run_id: "split" });
   });
 
   it("processes generic message events", async () => {

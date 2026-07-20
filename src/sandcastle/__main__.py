@@ -868,7 +868,7 @@ def _cmd_serve(args: argparse.Namespace) -> None:
     """Start the Sandcastle API server."""
     import uvicorn
 
-    from sandcastle.config import settings
+    from sandcastle.config import settings, validate_server_bind
 
     _print_banner()
     if settings.spark_mode:
@@ -943,6 +943,7 @@ def _cmd_serve(args: argparse.Namespace) -> None:
             f"{_color('UNAVAILABLE', _C.YELLOW)} - {e}"
         )
 
+    validate_server_bind(args.host)
     uvicorn.run(
         "sandcastle.main:app",
         host=args.host,
@@ -1076,6 +1077,9 @@ def _cmd_node(args: argparse.Namespace) -> None:
 
         import uvicorn
 
+        from sandcastle.config import validate_server_bind
+
+        validate_server_bind(args.host)
         config = uvicorn.Config(
             "sandcastle.main:app", host=args.host, port=args.port, log_level="warning"
         )
@@ -5327,7 +5331,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # --- serve ---
     p_serve = subparsers.add_parser("serve", help="Start the API server")
-    p_serve.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
+    p_serve.add_argument("--host", default="127.0.0.1", help="Bind host (default: 127.0.0.1)")
     p_serve.add_argument("--port", type=int, default=8080, help="Bind port (default: 8080)")
     p_serve.add_argument(
         "--reload", action="store_true", default=False, help="Enable auto-reload for development"

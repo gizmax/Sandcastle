@@ -134,6 +134,10 @@ class RunContext:
             _file_read_counts=dict(self._file_read_counts),
             _seen_prompt_hashes=set(self._seen_prompt_hashes),
             _step_output_max_tokens=dict(self._step_output_max_tokens),
+            admin_trusted=self.admin_trusted,
+            tenant_id=self.tenant_id,
+            cassette=self.cassette,
+            cassette_mode=self.cassette_mode,
         )
 
     @property
@@ -1308,6 +1312,7 @@ async def execute_step_with_retry(
 
     max_attempts = step.retry.max_attempts if step.retry else 1
     backoff = step.retry.backoff if step.retry else "exponential"
+    total_attempt_cost_usd = 0.0
 
     # Record step as running
     await _save_run_step(
@@ -1352,8 +1357,10 @@ async def execute_step_with_retry(
     try:
         for attempt in range(1, max_attempts + 1):
             result = await _execute_step_once(step, context, sandbox, storage, parallel_index, attempt)
+            total_attempt_cost_usd += result.cost_usd
 
             if result.status == "completed":
+                result.cost_usd = total_attempt_cost_usd
                 # AutoPilot: evaluate and save sample
                 if autopilot_experiment and autopilot_variant:
                     try:
@@ -1483,12 +1490,12 @@ async def execute_step_with_retry(
                             status="completed",
                             parallel_index=parallel_index,
                             output=fallback_result.output,
-                            cost_usd=result.cost_usd + fallback_result.cost_usd,
+                            cost_usd=total_attempt_cost_usd + fallback_result.cost_usd,
                             duration_seconds=result.duration_seconds + fallback_result.duration_seconds,
                             attempt=attempt,
                         )
                         # Combine costs from all attempts + fallback
-                        fallback_result.cost_usd += result.cost_usd
+                        fallback_result.cost_usd += total_attempt_cost_usd
                         fallback_result.duration_seconds += result.duration_seconds
                         record_step_result(
                             _step_otel_span,
@@ -1501,6 +1508,7 @@ async def execute_step_with_retry(
                         return fallback_result
 
                 logger.warning(f"Step '{step.id}' failed after {max_attempts} attempts: {result.error}")
+                result.cost_usd = total_attempt_cost_usd
                 from sandcastle.engine.telemetry import capture_step_error
 
                 capture_step_error(
@@ -1823,6 +1831,7 @@ async def _execute_step_once(
     """Execute a single attempt of a step."""
     started_at = datetime.now(timezone.utc)
     resolved_input_prompt: str | None = None  # Populated after template resolution
+    query_cost_usd = 0.0
 
     try:
         # SLO-based model selection (optimizer)
@@ -2029,6 +2038,7 @@ async def _execute_step_once(
             raise TimeoutError(
                 f"Step '{step.id}' exceeded hard timeout of {_hard_timeout}s"
             )
+        query_cost_usd = result.total_cost_usd
 
         # Save routing decision to DB
         if routing_decision:
@@ -2300,7 +2310,7 @@ async def _execute_step_once(
         return StepResult(
             step_id=step.id,
             parallel_index=parallel_index,
-            cost_usd=0.0,
+            cost_usd=query_cost_usd,
             duration_seconds=duration,
             status="failed",
             error=str(e),
@@ -2724,6 +2734,9 @@ async def _execute_llm_step(
         _step_temp = getattr(step.llm_config, "temperature", None)
         if _step_temp is not None:
             temperature = _step_temp
+    max_tokens = 4096
+    if step.llm_config is not None and step.llm_config.max_tokens is not None:
+        max_tokens = step.llm_config.max_tokens
 
     # Map short aliases to real Anthropic model IDs for direct API calls
     _CLAUDE_MODEL_ALIASES = {
@@ -2747,7 +2760,7 @@ async def _execute_llm_step(
                     },
                     json={
                         "model": api_model,
-                        "max_tokens": 4096,
+                        "max_tokens": max_tokens,
                         "temperature": temperature,
                         "system": system_prompt,
                         "messages": [{"role": "user", "content": prompt}],
@@ -2777,7 +2790,7 @@ async def _execute_llm_step(
                     },
                     json={
                         "model": model_info.api_model_id,
-                        "max_tokens": 4096,
+                        "max_tokens": max_tokens,
                         "temperature": temperature,
                         "messages": [
                             {"role": "system", "content": system_prompt},
@@ -2956,7 +2969,9 @@ async def _execute_http_step(
             else:
                 import os
 
-                token = os.environ.get(auth_resolved, auth_resolved)
+                token = os.environ.get(auth_resolved)
+                if token is None:
+                    raise ValueError(f"HTTP step: auth env var {auth_resolved} is not set")
                 headers["Authorization"] = f"Bearer {token}"
 
         body = None
@@ -2983,11 +2998,20 @@ async def _execute_http_step(
         if body and "@file:" in body:
             import re as _re_file
 
-            def _load_file_ref(match: _re_file.Match) -> str:
+            from sandcastle.config import settings
+
+            _data_dir = Path(settings.data_dir).resolve()
+
+            async def _load_file_ref(match: _re_file.Match) -> str:
                 # group(1) is quoted path, group(2) is unquoted path
                 fpath = (match.group(1) or match.group(2)).strip()
+                path = Path(fpath).resolve()
+                if not path.is_relative_to(_data_dir):
+                    raise ValueError(
+                        f"HTTP step: file ref is outside data directory: {fpath}"
+                    )
                 try:
-                    content = Path(fpath).read_text()
+                    content = await asyncio.to_thread(path.read_text)
                     logger.debug("HTTP step: loaded file ref %s (%d chars)", fpath, len(content))
                     return content
                 except FileNotFoundError:
@@ -2995,9 +3019,15 @@ async def _execute_http_step(
                 except Exception as e:
                     raise ValueError(f"HTTP step: failed to load file ref {fpath}: {e}")
 
-            body = _re_file.sub(
-                r'@file:(?:"([^"]+)"|([^\s"\\]+))', _load_file_ref, body
-            )
+            _file_ref_pattern = _re_file.compile(r'@file:(?:"([^"]+)"|([^\s"\\]+))')
+            _body_parts: list[str] = []
+            _last_end = 0
+            for _match in _file_ref_pattern.finditer(body):
+                _body_parts.append(body[_last_end : _match.start()])
+                _body_parts.append(await _load_file_ref(_match))
+                _last_end = _match.end()
+            _body_parts.append(body[_last_end:])
+            body = "".join(_body_parts)
 
         # Apply value_map: post-resolution value transformations in body
         if cfg.value_map and body:
@@ -5595,6 +5625,10 @@ async def _execute_race_step(
                 costs=list(context.costs),
                 workflow_name=context.workflow_name,
                 default_tools=context.default_tools,
+                admin_trusted=context.admin_trusted,
+                tenant_id=context.tenant_id,
+                cassette=context.cassette,
+                cassette_mode=context.cassette_mode,
             )
             branch_cost = 0.0
             last_output = None
@@ -8657,15 +8691,28 @@ async def execute_workflow(
                 return_when=asyncio.FIRST_COMPLETED,
             )
 
+            completed: list[tuple[str, asyncio.Task]] = []
+            task_exceptions: list[BaseException] = []
             for task in done_tasks:
                 sid = next(k for k, v in running.items() if v is task)
                 del running[sid]
+                completed.append((sid, task))
+                try:
+                    exc = task.exception()
+                except asyncio.CancelledError as exc:
+                    task_exceptions.append(exc)
+                else:
+                    if exc is not None:
+                        task_exceptions.append(exc)
 
-                exc = task.exception()
-                if exc is not None:
-                    await _cancel_running()
-                    raise exc
+            # asyncio.wait() may return several completed tasks. Retrieve every
+            # exception before raising so sibling failures are not orphaned as
+            # "Task exception was never retrieved" warnings.
+            if task_exceptions:
+                await _cancel_running()
+                raise task_exceptions[0]
 
+            for sid, task in completed:
                 done_steps.add(sid)
                 # Also mark branch-skipped steps as done so dependents unblock
                 for skip_sid in list(context.branch_skip_steps):
@@ -8810,6 +8857,7 @@ async def execute_workflow(
         )
 
     finally:
+        await _cancel_running()
         async with _cancel_flags_lock:
             _cancel_flags.pop(run_id, None)
         _wf_span_cm.__exit__(None, None, None)

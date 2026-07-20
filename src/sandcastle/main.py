@@ -23,7 +23,7 @@ from sandcastle.api.environments_admin import router as environments_admin_route
 from sandcastle.api.mesh import router as mesh_router
 from sandcastle.api.routes import router
 from sandcastle.api.security_headers import security_headers_middleware
-from sandcastle.config import Settings, settings
+from sandcastle.config import Settings, settings, validate_server_bind
 
 # Configure logging
 logging.basicConfig(
@@ -187,6 +187,71 @@ async def _validate_providers() -> None:
         logger.info("Provider pre-flight: all %d configured provider(s) reachable", checked)
 
 
+async def _cleanup_orphaned_runs() -> tuple[int, int]:
+    """Fail interrupted work and restore Redis-queued jobs after API restart."""
+    from datetime import datetime, timezone
+
+    from sqlalchemy import func
+    from sqlalchemy import select as sa_select
+    from sqlalchemy import update as sa_update
+
+    from sandcastle.models.db import Run, RunStatus, async_session
+    from sandcastle.queue.worker import uses_redis_queue
+
+    redis_queue = uses_redis_queue()
+    queued_runs: list[tuple[str, str, dict, float | None]] = []
+
+    async with async_session() as session:
+        if redis_queue:
+            queued_result = await session.execute(
+                sa_select(Run).where(Run.status == RunStatus.QUEUED)
+            )
+            queued_runs = [
+                (str(run.id), run.workflow_name, run.input_data or {}, run.max_cost_usd)
+                for run in queued_result.scalars().all()
+            ]
+            stale_statuses = [RunStatus.RUNNING]
+        else:
+            stale_statuses = [RunStatus.QUEUED, RunStatus.RUNNING]
+
+        count_result = await session.execute(
+            sa_select(func.count()).select_from(Run).where(Run.status.in_(stale_statuses))
+        )
+        failed_count = count_result.scalar() or 0
+        if failed_count:
+            await session.execute(
+                sa_update(Run)
+                .where(Run.status.in_(stale_statuses))
+                .values(
+                    status=RunStatus.FAILED,
+                    error="Server restarted - run was orphaned",
+                    completed_at=datetime.now(timezone.utc),
+                )
+            )
+            await session.commit()
+
+    reenqueued_count = 0
+    if redis_queue:
+        from sandcastle.api.routes import _load_workflow_yaml
+        from sandcastle.queue.worker import enqueue_workflow
+
+        for run_id, workflow_name, input_data, max_cost_usd in queued_runs:
+            try:
+                await enqueue_workflow(
+                    _load_workflow_yaml(workflow_name),
+                    input_data,
+                    run_id,
+                    max_cost_usd=max_cost_usd,
+                    # A temporary Redis outage must not discard a durable queued run.
+                    mark_failed_on_error=False,
+                )
+                reenqueued_count += 1
+            except Exception as exc:
+                logger.warning("Could not re-enqueue queued run %s: %s", run_id, exc)
+
+    return failed_count, reenqueued_count
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle - startup and shutdown hooks."""
@@ -231,7 +296,6 @@ async def lifespan(app: FastAPI):
         )
 
     # Load saved settings from DB
-    from sqlalchemy import func
     from sqlalchemy import select as sa_select
 
     from sandcastle.models.db import ApiKey, Setting, async_session
@@ -314,34 +378,13 @@ async def lifespan(app: FastAPI):
         if tool_cred_count:
             logger.info(f"Restored {tool_cred_count} tool credential(s) from database")
 
-    # Clean up stale runs (queued/running) left from previous crash/restart
-    from datetime import datetime, timezone
-
-    from sqlalchemy import update as sa_update
-
-    from sandcastle.models.db import Run, RunStatus
-
-    async with async_session() as session:
-        # Count first, then update
-        count_result = await session.execute(
-            sa_select(func.count()).select_from(Run).where(
-                Run.status.in_([RunStatus.QUEUED, RunStatus.RUNNING])
-            )
+    failed_count, reenqueued_count = await _cleanup_orphaned_runs()
+    if failed_count or reenqueued_count:
+        logger.info(
+            "Startup orphan cleanup failed %d run(s) and re-enqueued %d queued run(s)",
+            failed_count,
+            reenqueued_count,
         )
-        orphan_count = count_result.scalar() or 0
-
-        if orphan_count:
-            await session.execute(
-                sa_update(Run)
-                .where(Run.status.in_([RunStatus.QUEUED, RunStatus.RUNNING]))
-                .values(
-                    status=RunStatus.FAILED,
-                    error="Server restarted - run was orphaned",
-                    completed_at=datetime.now(timezone.utc),
-                )
-            )
-            await session.commit()
-            logger.info(f"Cleaned up {orphan_count} orphaned runs from previous session")
 
     # Start the cron scheduler (skip in multi-worker deployments)
     if settings.scheduler_enabled:
@@ -527,6 +570,7 @@ if _dashboard_dir:
 if __name__ == "__main__":
     import uvicorn
 
+    validate_server_bind("0.0.0.0")
     uvicorn.run(
         "sandcastle.main:app",
         host="0.0.0.0",

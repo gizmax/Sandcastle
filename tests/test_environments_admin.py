@@ -6,12 +6,12 @@ import asyncio
 import json
 import time
 from typing import Any
-from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from sandcastle.api import environments_admin
 from sandcastle.api.environments_admin import (
@@ -19,7 +19,6 @@ from sandcastle.api.environments_admin import (
     ENVIRONMENTS_ENDPOINT,
     router,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -242,6 +241,42 @@ def test_non_admin_caller_gets_403(fake_client, app_factory, monkeypatch):
         "/admin/environments", json={"name": "x", "type": "self_hosted"}
     )
     assert resp.status_code == 403
+
+
+def test_real_auth_middleware_protects_admin_environments(fake_client, monkeypatch):
+    """The root-mounted router must not bypass production API-key auth."""
+    from sandcastle.api.auth import auth_middleware, hash_key
+    from sandcastle.config import settings
+    from sandcastle.models.db import ApiKey, async_session
+
+    monkeypatch.setattr(settings, "auth_required", True)
+
+    app = FastAPI()
+    app.add_middleware(BaseHTTPMiddleware, dispatch=auth_middleware)
+    app.include_router(router)
+    client = TestClient(app)
+
+    tenant_key = f"sc_env_tenant_{time.time_ns()}"
+
+    async def _insert_tenant_key() -> None:
+        async with async_session() as session:
+            session.add(
+                ApiKey(
+                    key_hash=hash_key(tenant_key),
+                    key_prefix=tenant_key[:8],
+                    tenant_id="tenant_a",
+                    name="environment tenant key",
+                )
+            )
+            await session.commit()
+
+    asyncio.run(_insert_tenant_key())
+
+    assert client.get("/admin/environments").status_code == 401
+    assert client.get(
+        "/admin/environments", headers={"X-API-Key": tenant_key}
+    ).status_code == 403
+    assert fake_client.calls == []
 
 
 def test_tenant_isolation_on_list(fake_client, app_factory, monkeypatch):

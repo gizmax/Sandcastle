@@ -1,48 +1,35 @@
-# Self-Hosted Sandbox - Cloudflare Containers Cookbook
+# Cloudflare Sandbox Worker Cookbook
 
-Run Anthropic Managed Agents on a per-session Cloudflare Container,
-dispatched from a Worker that consumes Anthropic's
-`session.status_run_started` webhook. Mirrors Anthropic's
-[cf cookbook](https://github.com/anthropics/claude-cookbooks/tree/main/managed_agents/self_hosted_sandboxes/cf)
-and pairs with `deploy/cookbooks/docker/` (same Dockerfile contract).
+Deploy Sandcastle's Cloudflare Sandbox Worker from `cf-sandbox-worker/`.
+The Worker provides `/health` and `/run` endpoints and starts isolated
+Cloudflare Sandbox containers for agent runner scripts.
 
-The Worker is the wake-up + dispatch layer. The Container is the actual
-sandbox: it runs `ant beta:worker run` once, heartbeats the work item lease
-itself, then exits.
-
-## When to pick this over the pure-Worker variant
-
-| Need                                 | This cookbook (Containers) | `cf-worker/` (DO isolate) |
-|--------------------------------------|----------------------------|---------------------------|
-| Real subprocess + filesystem         | yes                        | no (RAM-only fake FS)     |
-| Cold start                           | ~1 to 3 s                  | ~5 ms                     |
-| Disk persistence between tool calls  | yes (per Container)        | no                        |
-| Bash / Playwright / language servers | yes                        | no                        |
-| RAM budget per session               | up to Container limit      | ~128 MB DO                |
-
-## 1. wrangler login
+## 1. Install and log in
 
 ```sh
-npm install
+cd cf-sandbox-worker
+npm ci
 npx wrangler login
 ```
 
-Pick the Cloudflare account that owns the Worker. `wrangler whoami` should
-return the same account id you see in Anthropic Console -> Environments.
+Pick the Cloudflare account that will own the Worker. `wrangler whoami` should
+return that account.
 
-## 2. Create the work-queue webhook tunnel
+## 2. Configure the worker
 
-In `wrangler.toml`, set `[vars].ANTHROPIC_ENVIRONMENT_ID` to the environment
-created in Anthropic Console. Then store the two secrets:
+`cf-sandbox-worker/wrangler.jsonc` declares the `Sandbox` container, Durable
+Object binding, and migration. Keep the `Sandbox` class and binding names in
+sync; they match the binding used by `src/index.ts`. Adjust `name` and
+`containers[0].max_instances` for your deployment as needed.
+
+To require authentication on `/run`, store the optional shared secret:
 
 ```sh
-npx wrangler secret put ANTHROPIC_ENVIRONMENT_KEY
-npx wrangler secret put ANTHROPIC_WEBHOOK_SECRET
+npx wrangler secret put SANDBOX_SHARED_SECRET
 ```
 
-Both are zero-trust bindings: scoped to this Worker, never exposed to the
-Container image, never written to disk. The Worker forwards
-`ANTHROPIC_ENVIRONMENT_KEY` to each Container via the `dispatch()` RPC.
+The secret is scoped to the Worker and is never written to the Container
+image.
 
 ## 3. wrangler deploy
 
@@ -51,30 +38,22 @@ npx wrangler deploy
 ```
 
 `wrangler` builds `./Dockerfile` for the Containers runtime, uploads the
-image, and binds the `SANDBOX_CONTAINER` Durable Object class. First deploy
+image, and binds the `Sandbox` Durable Object class. First deploy
 takes ~2 minutes; subsequent layer-cached deploys are seconds.
 
-## 4. Confirm in the Anthropic Console
+## 4. Configure Sandcastle and verify
 
-In Console -> Environments -> your env -> Webhooks, paste the Worker URL
-(printed at the end of `wrangler deploy`). Click "Send test event"; the
-Worker should respond `{"status": "ignored", "event_type": "ping"}` and the
-function log shows `[webhook] polled work=...` for any pending session.
+Set Sandcastle to use the deployed Worker URL:
 
-## 5. Trigger work from a managed-agent step
-
-```yaml
-- id: heavy-research
-  type: managed-agent
-  runtime: "self-hosted-sandbox"
-  managed_agent_config:
-    agent_template: researcher
-    self_hosted_sandbox:
-      environment_id: env_xxxxxxxxxxxx
-      environment_key_env: ANTHROPIC_ENVIRONMENT_KEY
-      provider: cloudflare-containers
+```sh
+SANDBOX_BACKEND=cloudflare
+CLOUDFLARE_WORKER_URL=https://sandbox.your-domain.workers.dev
 ```
 
-Sandcastle dispatches the session-create call with the `environment`
-block, Anthropic enqueues a work item, the webhook fires, the Worker
-drains the queue, and a fresh Container handles the session.
+Confirm the deployment responds to its health endpoint:
+
+```sh
+curl https://sandbox.your-domain.workers.dev/health
+```
+
+It should return `{"ok":true}`.

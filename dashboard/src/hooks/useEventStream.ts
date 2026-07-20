@@ -124,6 +124,10 @@ export function useEventStream() {
           "step.started", "step.completed", "step.failed",
           "dlq.new", "message",
         ]);
+        // Preserve parsed event state across chunks: an `event:` line can
+        // arrive in one read and its `data:` line in the next.
+        let currentEvent = "message";
+        let currentData = "";
 
         while (true) {
           const { done, value } = await reader.read();
@@ -132,9 +136,6 @@ export function useEventStream() {
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split("\n");
           buffer = lines.pop() || "";
-
-          let currentEvent = "message";
-          let currentData = "";
 
           for (const line of lines) {
             if (line.startsWith("event: ")) {

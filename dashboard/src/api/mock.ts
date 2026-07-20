@@ -676,6 +676,7 @@ const MOCK_EVOLUTIONS = [
     current_iteration: 20,
     total_keeps: 7,
     total_discards: 13,
+    budget_limit_usd: 20,
     created_at: h(48),
     completed_at: h(46),
   },
@@ -694,6 +695,7 @@ const MOCK_EVOLUTIONS = [
     current_iteration: 8,
     total_keeps: 3,
     total_discards: 5,
+    budget_limit_usd: null,
     created_at: h(2),
     completed_at: null,
   },
@@ -735,11 +737,13 @@ const MOCK_ITERATIONS_EVO_002 = [
 
 const MOCK_EVOLUTION_STATS = {
   total_evolutions: 2,
-  running_evolutions: 1,
+  active_evolutions: 1,
   completed_evolutions: 1,
-  avg_score_improvement: 28.4,
-  avg_cost_savings_pct: 31.2,
-  total_iterations_run: 28,
+  total_improvements: 1,
+  avg_improvement: 28.4,
+  top_workflows: [
+    { workflow_name: "customer-support", max_improvement: 28.4, runs: 1 },
+  ],
 };
 
 // Night Shift (Overnight Self-Tune) mock data
@@ -7103,9 +7107,7 @@ const routes: MockRoute[] = [
     match: /^\/autopilot\/stats$/,
     handler: () => MOCK_AUTOPILOT_STATS,
   },
-  // NOTE: Backend has no GET /evolution list endpoint. The dashboard fetches
-  // evolution data via GET /evolution/{name}/status for each workflow. This
-  // mock route is kept for dashboard convenience but has no backend equivalent.
+  // GET /evolution
   {
     match: /^\/evolution$/,
     method: "GET",
@@ -7138,6 +7140,7 @@ const routes: MockRoute[] = [
         current_iteration: 0,
         total_keeps: 0,
         total_discards: 0,
+        budget_limit_usd: null,
         created_at: new Date().toISOString(),
         completed_at: null,
       };
@@ -7151,7 +7154,7 @@ const routes: MockRoute[] = [
       const evo = MOCK_EVOLUTIONS.find((e) => e.id === params._1 || e.workflow_name === params._1);
       if (!evo) return null;
       const iterations = evo.id === "evo-001" ? MOCK_ITERATIONS_EVO_001 : MOCK_ITERATIONS_EVO_002;
-      return { ...evo, iterations };
+      return { ...evo, evolution_id: evo.id, iterations };
     },
   },
   // POST /evolution/{name}/accept

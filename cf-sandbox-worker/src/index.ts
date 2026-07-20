@@ -12,7 +12,7 @@ import { getSandbox, type Sandbox } from "@cloudflare/sandbox";
 export { Sandbox } from "@cloudflare/sandbox";
 
 interface Env {
-  Sandbox: Sandbox;
+  Sandbox: DurableObjectNamespace<Sandbox>;
   SANDBOX_SHARED_SECRET?: string;
 }
 

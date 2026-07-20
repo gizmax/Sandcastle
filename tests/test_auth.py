@@ -1,6 +1,9 @@
 """Tests for auth module - key hashing and helpers."""
 
-from sandcastle.api.auth import generate_api_key, hash_key
+from unittest.mock import MagicMock
+
+from sandcastle.api.auth import generate_api_key, hash_key, is_admin
+from sandcastle.config import settings
 
 
 class TestHashKey:
@@ -35,3 +38,19 @@ class TestGenerateApiKey:
     def test_sufficient_length(self):
         key = generate_api_key()
         assert len(key) > 30
+
+
+class TestAdminAuthenticationState:
+
+    def test_unauthed_tenantless_request_is_not_admin_when_auth_required(self):
+        original_auth_required = settings.auth_required
+        try:
+            settings.auth_required = True
+            request = MagicMock()
+            request.state._auth_checked = True
+            request.state.tenant_id = None
+            request.state.api_key_id = None
+
+            assert is_admin(request) is False
+        finally:
+            settings.auth_required = original_auth_required

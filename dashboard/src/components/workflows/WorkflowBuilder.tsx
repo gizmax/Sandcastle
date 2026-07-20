@@ -37,6 +37,7 @@ import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { PaletteItem } from "@/components/workflows/PaletteItem";
 import { getNextStepSuggestions } from "@/components/workflows/nextStepSuggestions";
 import { getStepMeta } from "@/lib/builder/stepMetadata";
+import jsYaml from "js-yaml";
 
 /** localStorage key persisting the palette "Learn mode" toggle. */
 const LEARN_MODE_KEY = "sandcastle-builder-learn";
@@ -69,6 +70,20 @@ const DEFAULT_DELEGATE_CONFIG = { workflow: "", taskDescription: "", timeout: 36
 const DEFAULT_BROWSER_CONFIG: BrowserStepConfig = { mode: "playwright", startUrl: "", viewportWidth: 1280, viewportHeight: 720, timeout: 120, waitAfterAction: 1.0, headless: true, credentials_env: "", screenshotOnError: true, max_actions: 100, capture_screenshots: false, output_schema: null, captcha_strategy: "pause" };
 const DEFAULT_AGENT_CONFIG: AgentStepConfig = { template: "", runtime: "auto", message: "", describe: "", timeout: 600, outputFormat: "text", fallbackTemplate: "" };
 
+/** Serialize a string safely for its position as a YAML scalar. */
+function yamlScalar(value: string): string {
+  return jsYaml.dump(value, {
+    forceQuotes: true,
+    quotingType: '"',
+    lineWidth: -1,
+    noRefs: true,
+  }).trimEnd();
+}
+
+function yamlInlineList(values: string[]): string {
+  return values.map(yamlScalar).join(", ");
+}
+
 function generateYaml(
   workflowName: string,
   steps: StepConfig[],
@@ -91,13 +106,13 @@ function generateYaml(
   });
   const defaultModel = [...modelCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || "sonnet";
 
-  let yaml = `name: "${workflowName}"\n`;
+  let yaml = `name: ${yamlScalar(workflowName)}\n`;
   yaml += `description: ""\n`;
-  yaml += `default_model: ${defaultModel}\n`;
+  yaml += `default_model: ${yamlScalar(defaultModel)}\n`;
   yaml += `default_max_turns: 10\n`;
   yaml += `default_timeout: 300\n`;
   if (defaultTools.length > 0) {
-    yaml += `default_tools: [${defaultTools.join(", ")}]\n`;
+    yaml += `default_tools: [${yamlInlineList(defaultTools)}]\n`;
   }
   yaml += `\n`;
 
@@ -110,7 +125,7 @@ function generateYaml(
     yaml += `      type: string\n`;
     yaml += `      description: "Path to directory"\n`;
     if (dirStep.directoryInput.defaultPath) {
-      yaml += `      default: "${dirStep.directoryInput.defaultPath}"\n`;
+      yaml += `      default: ${yamlScalar(dirStep.directoryInput.defaultPath)}\n`;
     }
     yaml += `\n`;
   }
@@ -122,21 +137,21 @@ function generateYaml(
 
     // Approval gate steps have a different type
     if (step.approval.enabled) {
-      yaml += `  - id: "${step.id}"\n`;
+      yaml += `  - id: ${yamlScalar(step.id)}\n`;
       yaml += `    type: approval\n`;
       yaml += `    approval_config:\n`;
-      yaml += `      message: "${step.approval.message}"\n`;
+      yaml += `      message: ${yamlScalar(step.approval.message)}\n`;
       yaml += `      timeout_hours: ${step.approval.timeoutHours}\n`;
-      yaml += `      on_timeout: ${step.approval.onTimeout}\n`;
+      yaml += `      on_timeout: ${yamlScalar(step.approval.onTimeout)}\n`;
       yaml += `      allow_edit: ${step.approval.allowEdit}\n`;
     } else if (sType === "http") {
-      yaml += `  - id: "${step.id}"\n`;
+      yaml += `  - id: ${yamlScalar(step.id)}\n`;
       yaml += `    type: http\n`;
       yaml += `    http_config:\n`;
-      yaml += `      url: "${step.httpConfig.url}"\n`;
-      yaml += `      method: ${step.httpConfig.method}\n`;
+      yaml += `      url: ${yamlScalar(step.httpConfig.url)}\n`;
+      yaml += `      method: ${yamlScalar(step.httpConfig.method)}\n`;
       if (step.httpConfig.auth) {
-        yaml += `      auth: "${step.httpConfig.auth}"\n`;
+        yaml += `      auth: ${yamlScalar(step.httpConfig.auth)}\n`;
       }
       if (step.httpConfig.body) {
         yaml += `      body: |\n`;
@@ -145,65 +160,65 @@ function generateYaml(
         });
       }
     } else if (sType === "code") {
-      yaml += `  - id: "${step.id}"\n`;
+      yaml += `  - id: ${yamlScalar(step.id)}\n`;
       yaml += `    type: code\n`;
       yaml += `    code_config:\n`;
-      yaml += `      language: ${step.codeConfig.language}\n`;
+      yaml += `      language: ${yamlScalar(step.codeConfig.language)}\n`;
       yaml += `      code: |\n`;
       step.codeConfig.code.split("\n").forEach((line) => {
         yaml += `        ${line}\n`;
       });
     } else if (sType === "condition") {
-      yaml += `  - id: "${step.id}"\n`;
+      yaml += `  - id: ${yamlScalar(step.id)}\n`;
       yaml += `    type: condition\n`;
       yaml += `    condition_config:\n`;
-      yaml += `      expression: "${step.conditionConfig.expression}"\n`;
+      yaml += `      expression: ${yamlScalar(step.conditionConfig.expression)}\n`;
       if (step.conditionConfig.thenSteps.length > 0) {
-        yaml += `      then: [${step.conditionConfig.thenSteps.join(", ")}]\n`;
+        yaml += `      then: [${yamlInlineList(step.conditionConfig.thenSteps)}]\n`;
       }
       if (step.conditionConfig.elseSteps.length > 0) {
-        yaml += `      else: [${step.conditionConfig.elseSteps.join(", ")}]\n`;
+        yaml += `      else: [${yamlInlineList(step.conditionConfig.elseSteps)}]\n`;
       }
     } else if (sType === "classify") {
-      yaml += `  - id: "${step.id}"\n`;
+      yaml += `  - id: ${yamlScalar(step.id)}\n`;
       yaml += `    type: classify\n`;
       yaml += `    classify_config:\n`;
-      yaml += `      categories: [${step.classifyConfig.categories.join(", ")}]\n`;
-      yaml += `      input: "${step.classifyConfig.input}"\n`;
-      yaml += `      model: ${step.classifyConfig.model}\n`;
+      yaml += `      categories: [${yamlInlineList(step.classifyConfig.categories)}]\n`;
+      yaml += `      input: ${yamlScalar(step.classifyConfig.input)}\n`;
+      yaml += `      model: ${yamlScalar(step.classifyConfig.model)}\n`;
       if (Object.keys(step.classifyConfig.branches).length > 0) {
         yaml += `      branches:\n`;
         for (const [cat, branchSteps] of Object.entries(step.classifyConfig.branches)) {
-          yaml += `        ${cat}: [${branchSteps.join(", ")}]\n`;
+          yaml += `        ${yamlScalar(cat)}: [${yamlInlineList(branchSteps)}]\n`;
         }
       }
     } else if (sType === "loop") {
-      yaml += `  - id: "${step.id}"\n`;
+      yaml += `  - id: ${yamlScalar(step.id)}\n`;
       yaml += `    type: loop\n`;
       yaml += `    loop_config:\n`;
-      yaml += `      over: "${step.loopConfig.over}"\n`;
-      yaml += `      step_ids: [${step.loopConfig.stepIds.join(", ")}]\n`;
+      yaml += `      over: ${yamlScalar(step.loopConfig.over)}\n`;
+      yaml += `      step_ids: [${yamlInlineList(step.loopConfig.stepIds)}]\n`;
       yaml += `      max_iterations: ${step.loopConfig.maxIterations}\n`;
     } else if (sType === "race") {
-      yaml += `  - id: "${step.id}"\n`;
+      yaml += `  - id: ${yamlScalar(step.id)}\n`;
       yaml += `    type: race\n`;
       yaml += `    race_config:\n`;
       yaml += `      branches:\n`;
       const branchLines = step.raceConfig.branches.split("\n").filter((l: string) => l.trim());
       for (const line of branchLines) {
         const stepIds = line.split(",").map((s: string) => s.trim()).filter(Boolean);
-        yaml += `        - [${stepIds.join(", ")}]\n`;
+        yaml += `        - [${yamlInlineList(stepIds)}]\n`;
       }
       if (step.raceConfig.validator) {
-        yaml += `      validator: "${step.raceConfig.validator}"\n`;
+        yaml += `      validator: ${yamlScalar(step.raceConfig.validator)}\n`;
       }
     } else if (sType === "sensor") {
-      yaml += `  - id: "${step.id}"\n`;
+      yaml += `  - id: ${yamlScalar(step.id)}\n`;
       yaml += `    type: sensor\n`;
       yaml += `    sensor_config:\n`;
-      yaml += `      url: "${step.sensorConfig.url}"\n`;
-      yaml += `      method: ${step.sensorConfig.method}\n`;
-      yaml += `      condition: "${step.sensorConfig.condition}"\n`;
+      yaml += `      url: ${yamlScalar(step.sensorConfig.url)}\n`;
+      yaml += `      method: ${yamlScalar(step.sensorConfig.method)}\n`;
+      yaml += `      condition: ${yamlScalar(step.sensorConfig.condition)}\n`;
       yaml += `      check_interval: ${step.sensorConfig.checkInterval}\n`;
       yaml += `      timeout: ${step.sensorConfig.timeout}\n`;
       if (step.sensorConfig.headers) {
@@ -212,34 +227,34 @@ function generateYaml(
           if (Object.keys(hdrs).length > 0) {
             yaml += `      headers:\n`;
             for (const [k, v] of Object.entries(hdrs)) {
-              yaml += `        ${k}: "${v}"\n`;
+              yaml += `        ${yamlScalar(k)}: ${yamlScalar(String(v))}\n`;
             }
           }
         } catch { /* skip invalid JSON */ }
       }
     } else if (sType === "gate") {
-      yaml += `  - id: "${step.id}"\n`;
+      yaml += `  - id: ${yamlScalar(step.id)}\n`;
       yaml += `    type: gate\n`;
       yaml += `    gate_config:\n`;
       yaml += `      strategies:\n`;
       for (const strategy of step.gateConfig.strategies) {
-        yaml += `        - type: ${strategy.type}\n`;
+        yaml += `        - type: ${yamlScalar(strategy.type)}\n`;
         yaml += `          config:\n`;
         if (strategy.type === "llm_eval") {
-          if (strategy.prompt) yaml += `            prompt: "${strategy.prompt}"\n`;
-          if (strategy.input) yaml += `            input: "${strategy.input}"\n`;
-          yaml += `            model: ${strategy.model}\n`;
+          if (strategy.prompt) yaml += `            prompt: ${yamlScalar(strategy.prompt)}\n`;
+          if (strategy.input) yaml += `            input: ${yamlScalar(strategy.input)}\n`;
+          yaml += `            model: ${yamlScalar(strategy.model)}\n`;
         } else if (strategy.type === "human") {
-          if (strategy.message) yaml += `            message: "${strategy.message}"\n`;
+          if (strategy.message) yaml += `            message: ${yamlScalar(strategy.message)}\n`;
           yaml += `            timeout_hours: ${strategy.timeoutHours}\n`;
-          yaml += `            on_timeout: ${strategy.onTimeout}\n`;
+          yaml += `            on_timeout: ${yamlScalar(strategy.onTimeout)}\n`;
         } else if (strategy.type === "timeout") {
           yaml += `            seconds: ${strategy.seconds}\n`;
-          yaml += `            action: ${strategy.action}\n`;
+          yaml += `            action: ${yamlScalar(strategy.action)}\n`;
         }
       }
     } else if (sType === "transform") {
-      yaml += `  - id: "${step.id}"\n`;
+      yaml += `  - id: ${yamlScalar(step.id)}\n`;
       yaml += `    type: transform\n`;
       yaml += `    transform_config:\n`;
       yaml += `      template: |\n`;
@@ -247,22 +262,22 @@ function generateYaml(
         yaml += `        ${line}\n`;
       });
     } else if (sType === "notify") {
-      yaml += `  - id: "${step.id}"\n`;
+      yaml += `  - id: ${yamlScalar(step.id)}\n`;
       yaml += `    type: notify\n`;
       yaml += `    notify_config:\n`;
-      yaml += `      service: ${step.notifyConfig.service}\n`;
+      yaml += `      service: ${yamlScalar(step.notifyConfig.service)}\n`;
       if (step.notifyConfig.channel) {
-        yaml += `      channel: "${step.notifyConfig.channel}"\n`;
+        yaml += `      channel: ${yamlScalar(step.notifyConfig.channel)}\n`;
       }
       yaml += `      message: |\n`;
       step.notifyConfig.message.split("\n").forEach((line) => {
         yaml += `        ${line}\n`;
       });
     } else if (sType === "delegate") {
-      yaml += `  - id: "${step.id}"\n`;
+      yaml += `  - id: ${yamlScalar(step.id)}\n`;
       yaml += `    type: delegate\n`;
       yaml += `    delegate_config:\n`;
-      yaml += `      workflow: "${step.delegateConfig.workflow}"\n`;
+      yaml += `      workflow: ${yamlScalar(step.delegateConfig.workflow)}\n`;
       if (step.delegateConfig.taskDescription) {
         yaml += `      task_description: |\n`;
         step.delegateConfig.taskDescription.split("\n").forEach((line) => {
@@ -273,12 +288,12 @@ function generateYaml(
         yaml += `      timeout: ${step.delegateConfig.timeout}\n`;
       }
     } else if (sType === "browser") {
-      yaml += `  - id: "${step.id}"\n`;
+      yaml += `  - id: ${yamlScalar(step.id)}\n`;
       yaml += `    type: browser\n`;
       yaml += `    browser_config:\n`;
-      yaml += `      mode: ${step.browserConfig.mode}\n`;
+      yaml += `      mode: ${yamlScalar(step.browserConfig.mode)}\n`;
       if (step.browserConfig.startUrl) {
-        yaml += `      start_url: "${step.browserConfig.startUrl}"\n`;
+        yaml += `      start_url: ${yamlScalar(step.browserConfig.startUrl)}\n`;
       }
       if (step.browserConfig.viewportWidth !== 1280 || step.browserConfig.viewportHeight !== 720) {
         yaml += `      viewport: [${step.browserConfig.viewportWidth}, ${step.browserConfig.viewportHeight}]\n`;
@@ -293,7 +308,7 @@ function generateYaml(
         yaml += `      headless: false\n`;
       }
       if (step.browserConfig.credentials_env) {
-        yaml += `      credentials_env: "${step.browserConfig.credentials_env}"\n`;
+        yaml += `      credentials_env: ${yamlScalar(step.browserConfig.credentials_env)}\n`;
       }
       if (!step.browserConfig.screenshotOnError) {
         yaml += `      screenshot_on_error: false\n`;
@@ -302,7 +317,7 @@ function generateYaml(
         yaml += `      max_actions: ${step.browserConfig.max_actions}\n`;
       }
       if (step.browserConfig.captcha_strategy !== "pause") {
-        yaml += `      captcha_strategy: ${step.browserConfig.captcha_strategy}\n`;
+        yaml += `      captcha_strategy: ${yamlScalar(step.browserConfig.captcha_strategy)}\n`;
       }
       if (step.browserConfig.capture_screenshots) {
         yaml += `      capture_screenshots: true\n`;
@@ -312,11 +327,11 @@ function generateYaml(
       }
     } else if (sType === "agent" || sType === "managed-agent") {
       const configKey = sType === "agent" ? "agent_config" : "managed_agent_config";
-      yaml += `  - id: "${step.id}"\n`;
-      yaml += `    type: ${sType}\n`;
+      yaml += `  - id: ${yamlScalar(step.id)}\n`;
+      yaml += `    type: ${yamlScalar(sType)}\n`;
       yaml += `    ${configKey}:\n`;
       if (step.agentConfig?.template) {
-        yaml += `      ${sType === "agent" ? "template" : "agent_template"}: ${step.agentConfig?.template}\n`;
+        yaml += `      ${sType === "agent" ? "template" : "agent_template"}: ${yamlScalar(step.agentConfig.template)}\n`;
       }
       if (step.agentConfig?.describe && !step.agentConfig?.template) {
         yaml += `      describe: |\n`;
@@ -331,36 +346,36 @@ function generateYaml(
         });
       }
       if (sType === "agent" && step.agentConfig?.runtime !== "auto") {
-        yaml += `      runtime: ${step.agentConfig?.runtime}\n`;
+        yaml += `      runtime: ${yamlScalar(step.agentConfig?.runtime ?? "auto")}\n`;
       }
       if (step.agentConfig?.timeout !== 600) {
         yaml += `      timeout: ${step.agentConfig?.timeout}\n`;
       }
       if (step.agentConfig?.outputFormat !== "text") {
-        yaml += `      output_format: ${step.agentConfig?.outputFormat}\n`;
+        yaml += `      output_format: ${yamlScalar(step.agentConfig?.outputFormat ?? "text")}\n`;
       }
       if (step.agentConfig?.fallbackTemplate) {
-        yaml += `      fallback_template: ${step.agentConfig?.fallbackTemplate}\n`;
+        yaml += `      fallback_template: ${yamlScalar(step.agentConfig.fallbackTemplate)}\n`;
       }
     } else if (sType === "llm") {
-      yaml += `  - id: "${step.id}"\n`;
+      yaml += `  - id: ${yamlScalar(step.id)}\n`;
       yaml += `    type: llm\n`;
       yaml += `    prompt: |\n`;
       step.prompt.split("\n").forEach((line) => {
         yaml += `      ${line}\n`;
       });
-      if (step.model !== defaultModel) yaml += `    model: ${step.model}\n`;
+      if (step.model !== defaultModel) yaml += `    model: ${yamlScalar(step.model)}\n`;
       if (step.llmSystemPrompt) {
         yaml += `    llm_config:\n`;
-        yaml += `      system_prompt: "${step.llmSystemPrompt}"\n`;
+        yaml += `      system_prompt: ${yamlScalar(step.llmSystemPrompt)}\n`;
       }
     } else {
-      yaml += `  - id: "${step.id}"\n`;
+      yaml += `  - id: ${yamlScalar(step.id)}\n`;
       yaml += `    prompt: |\n`;
       step.prompt.split("\n").forEach((line) => {
         yaml += `      ${line}\n`;
       });
-      if (step.model !== defaultModel) yaml += `    model: ${step.model}\n`;
+      if (step.model !== defaultModel) yaml += `    model: ${yamlScalar(step.model)}\n`;
       if (step.maxTurns !== 10) yaml += `    max_turns: ${step.maxTurns}\n`;
       if (step.timeout !== 300) yaml += `    timeout: ${step.timeout}\n`;
     }
@@ -369,11 +384,11 @@ function generateYaml(
     if (deps && deps.length > 0) {
       yaml += `    depends_on:\n`;
       deps.forEach((d) => {
-        yaml += `      - "${d}"\n`;
+        yaml += `      - ${yamlScalar(d)}\n`;
       });
     }
     if (step.parallelOver) {
-      yaml += `    parallel_over: "${step.parallelOver}"\n`;
+      yaml += `    parallel_over: ${yamlScalar(step.parallelOver)}\n`;
     }
 
     // Tools (only if step has tools different from default)
@@ -381,7 +396,7 @@ function generateYaml(
       const sameAsDefault = defaultTools.length === step.tools.length &&
         defaultTools.every((t) => step.tools.includes(t));
       if (!sameAsDefault) {
-        yaml += `    tools: [${step.tools.join(", ")}]\n`;
+        yaml += `    tools: [${yamlInlineList(step.tools)}]\n`;
       }
     }
 
@@ -389,25 +404,25 @@ function generateYaml(
     if (step.retry.enabled) {
       yaml += `    retry:\n`;
       yaml += `      max_attempts: ${step.retry.maxAttempts}\n`;
-      yaml += `      backoff: ${step.retry.backoff}\n`;
-      yaml += `      on_failure: ${step.retry.onFailure}\n`;
+      yaml += `      backoff: ${yamlScalar(step.retry.backoff)}\n`;
+      yaml += `      on_failure: ${yamlScalar(step.retry.onFailure)}\n`;
     }
 
     // AutoPilot config
     if (step.autopilot.enabled && step.autopilot.variants.length >= 2) {
       yaml += `    autopilot:\n`;
       yaml += `      enabled: true\n`;
-      yaml += `      optimize_for: ${step.autopilot.optimizeFor}\n`;
+      yaml += `      optimize_for: ${yamlScalar(step.autopilot.optimizeFor)}\n`;
       yaml += `      sample_rate: ${step.autopilot.sampleRate}\n`;
       yaml += `      min_samples: ${step.autopilot.minSamples}\n`;
       yaml += `      quality_threshold: ${step.autopilot.qualityThreshold}\n`;
       yaml += `      auto_deploy: ${step.autopilot.autoDeploy}\n`;
       yaml += `      evaluation:\n`;
-      yaml += `        method: ${step.autopilot.evaluation}\n`;
+      yaml += `        method: ${yamlScalar(step.autopilot.evaluation)}\n`;
       yaml += `      variants:\n`;
       for (const v of step.autopilot.variants) {
-        yaml += `        - id: "${v.id}"\n`;
-        yaml += `          model: ${v.model}\n`;
+        yaml += `        - id: ${yamlScalar(v.id)}\n`;
+        yaml += `          model: ${yamlScalar(v.model)}\n`;
         if (v.prompt) {
           yaml += `          prompt: |\n`;
           v.prompt.split("\n").forEach((line) => {
@@ -424,7 +439,7 @@ function generateYaml(
     if (step.policies.length > 0) {
       yaml += `    policies:\n`;
       step.policies.forEach((p) => {
-        yaml += `      - "${p}"\n`;
+        yaml += `      - ${yamlScalar(p)}\n`;
       });
     }
 
@@ -434,27 +449,27 @@ function generateYaml(
       yaml += `      quality_min: ${step.slo.qualityMin}\n`;
       yaml += `      cost_max_usd: ${step.slo.costMaxUsd}\n`;
       yaml += `      latency_max_seconds: ${step.slo.latencyMaxSeconds}\n`;
-      yaml += `      optimize_for: ${step.slo.optimizeFor}\n`;
+      yaml += `      optimize_for: ${yamlScalar(step.slo.optimizeFor)}\n`;
       yaml += `      model_pool: auto\n`;
     }
 
     // CSV output config
     if (step.csvOutput.enabled) {
       yaml += `    csv_output:\n`;
-      yaml += `      directory: "${step.csvOutput.directory || "./output"}"\n`;
-      yaml += `      mode: ${step.csvOutput.mode}\n`;
+      yaml += `      directory: ${yamlScalar(step.csvOutput.directory || "./output")}\n`;
+      yaml += `      mode: ${yamlScalar(step.csvOutput.mode)}\n`;
       if (step.csvOutput.filename) {
-        yaml += `      filename: "${step.csvOutput.filename}"\n`;
+        yaml += `      filename: ${yamlScalar(step.csvOutput.filename)}\n`;
       }
     }
 
     // PDF report config
     if (step.pdfReport.enabled) {
       yaml += `    pdf_report:\n`;
-      yaml += `      directory: "${step.pdfReport.directory || "./output"}"\n`;
-      yaml += `      language: ${step.pdfReport.language}\n`;
+      yaml += `      directory: ${yamlScalar(step.pdfReport.directory || "./output")}\n`;
+      yaml += `      language: ${yamlScalar(step.pdfReport.language)}\n`;
       if (step.pdfReport.filename) {
-        yaml += `      filename: "${step.pdfReport.filename}"\n`;
+        yaml += `      filename: ${yamlScalar(step.pdfReport.filename)}\n`;
       }
     }
 

@@ -58,6 +58,7 @@ from sandcastle.api.schemas import (
     EvalStatsResponse,
     EvalSuiteRunRequest,
     EvolutionIterationResponse,
+    EvolutionListItemResponse,
     EvolutionStartRequest,
     EvolutionStartResponse,
     EvolutionStatsResponse,
@@ -12639,6 +12640,51 @@ async def get_compliance_status() -> ApiResponse:
 # ---------------------------------------------------------------------------
 # Workflow Evolution endpoints
 # ---------------------------------------------------------------------------
+
+
+@router.get("/evolution")
+async def list_evolutions(req: Request) -> ApiResponse:
+    """List the most recent workflow evolution experiments.
+
+    Admin-only when auth is enabled. Results are tenant-scoped for tenant
+    requests and capped to keep the dashboard list bounded.
+    """
+    _require_admin(req)
+    tenant_id = get_tenant_id(req)
+
+    async with async_session() as session:
+        stmt = (
+            select(WorkflowEvolution)
+            .order_by(WorkflowEvolution.created_at.desc())
+            .limit(100)
+        )
+        stmt = _apply_tenant_filter(stmt, tenant_id, WorkflowEvolution.tenant_id)
+        evolutions = (await session.execute(stmt)).scalars().all()
+
+    return ApiResponse(
+        data=[
+            EvolutionListItemResponse(
+                id=str(evolution.id),
+                workflow_name=evolution.workflow_name,
+                status=evolution.status,
+                optimize_for=evolution.optimize_for,
+                baseline_score=evolution.baseline_score,
+                baseline_quality=evolution.baseline_quality,
+                baseline_cost=evolution.baseline_cost,
+                best_score=evolution.best_score,
+                best_quality=evolution.best_quality,
+                best_cost=evolution.best_cost,
+                max_iterations=evolution.max_iterations,
+                current_iteration=evolution.current_iteration,
+                total_keeps=evolution.total_keeps,
+                total_discards=evolution.total_discards,
+                budget_limit_usd=evolution.budget_limit_usd,
+                created_at=evolution.created_at,
+                completed_at=evolution.completed_at,
+            )
+            for evolution in evolutions
+        ]
+    )
 
 
 @router.post("/evolution/start", status_code=202)

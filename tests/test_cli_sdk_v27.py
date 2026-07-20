@@ -326,7 +326,7 @@ class TestCLIServeArgParsing:
     def test_serve_default_values(self):
         parser = _build_parser()
         args = parser.parse_args(["serve"])
-        assert args.host == "0.0.0.0"
+        assert args.host == "127.0.0.1"
         assert args.port == 8080
         assert args.reload is False
 

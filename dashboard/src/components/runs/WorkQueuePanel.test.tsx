@@ -34,65 +34,38 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 
 import { WorkQueuePanel } from "./WorkQueuePanel";
 
-// ---------------------------------------------------------------------------
-// Fake EventSource
-// ---------------------------------------------------------------------------
+function createSseStream() {
+  let controller: ReadableStreamDefaultController<Uint8Array>;
+  const stream = new ReadableStream<Uint8Array>({
+    start(c) {
+      controller = c;
+    },
+  });
+  const encoder = new TextEncoder();
 
-type Listener = (ev: MessageEvent | Event) => void;
-
-class FakeEventSource {
-  static instances: FakeEventSource[] = [];
-  url: string;
-  withCredentials: boolean;
-  readyState = 0;
-  private listeners = new Map<string, Set<Listener>>();
-  onerror: ((ev: Event) => void) | null = null;
-  onopen: ((ev: Event) => void) | null = null;
-
-  constructor(url: string, init?: { withCredentials?: boolean }) {
-    this.url = url;
-    this.withCredentials = Boolean(init?.withCredentials);
-    FakeEventSource.instances.push(this);
-    // Defer "open" to the next microtask so subscribers can attach first.
-    queueMicrotask(() => {
-      this.readyState = 1;
-      this.dispatch("open", new Event("open"));
-    });
-  }
-
-  addEventListener(type: string, fn: Listener) {
-    if (!this.listeners.has(type)) this.listeners.set(type, new Set());
-    this.listeners.get(type)!.add(fn);
-  }
-
-  removeEventListener(type: string, fn: Listener) {
-    this.listeners.get(type)?.delete(fn);
-  }
-
-  close() {
-    this.readyState = 2;
-  }
-
-  dispatch(type: string, ev: MessageEvent | Event) {
-    this.listeners.get(type)?.forEach((fn) => fn(ev));
-  }
-
-  emitWorkStats(payload: Record<string, unknown>) {
-    const ev = new MessageEvent("work_stats", {
-      data: JSON.stringify(payload),
-    });
-    this.dispatch("work_stats", ev);
-  }
+  return {
+    response: new Response(stream, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+    }),
+    emitWorkStats(payload: Record<string, unknown>) {
+      controller.enqueue(encoder.encode(`event: work_stats\ndata: ${JSON.stringify(payload)}\n\n`));
+    },
+  };
 }
 
+let fetchMock: ReturnType<typeof vi.fn>;
+let stream: ReturnType<typeof createSseStream>;
+
 beforeEach(() => {
-  FakeEventSource.instances = [];
-  // @ts-expect-error - install fake on global
-  globalThis.EventSource = FakeEventSource;
+  stream = createSseStream();
+  fetchMock = vi.fn().mockResolvedValue(stream.response);
+  vi.stubGlobal("fetch", fetchMock);
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 function sample(depth: number, extra: Record<string, unknown> = {}) {
@@ -106,11 +79,9 @@ function sample(depth: number, extra: Record<string, unknown> = {}) {
   };
 }
 
-async function waitForSource() {
-  await waitFor(() =>
-    expect(FakeEventSource.instances.length).toBeGreaterThan(0)
-  );
-  return FakeEventSource.instances[FakeEventSource.instances.length - 1];
+async function waitForStream() {
+  await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+  return stream;
 }
 
 describe("WorkQueuePanel", () => {
@@ -121,10 +92,10 @@ describe("WorkQueuePanel", () => {
 
   it("renders depth from the first work_stats event", async () => {
     render(<WorkQueuePanel environmentId="env_1" />);
-    const es = await waitForSource();
+    const sse = await waitForStream();
 
     await act(async () => {
-      es.emitWorkStats(sample(3));
+      sse.emitWorkStats(sample(3));
     });
 
     expect(screen.getByTestId("work-queue-depth")).toHaveTextContent("3");
@@ -132,10 +103,10 @@ describe("WorkQueuePanel", () => {
 
   it("flips the status pill to amber at depth=10", async () => {
     render(<WorkQueuePanel environmentId="env_1" />);
-    const es = await waitForSource();
+    const sse = await waitForStream();
 
     await act(async () => {
-      es.emitWorkStats(sample(2));
+      sse.emitWorkStats(sample(2));
     });
     expect(screen.getByTestId("work-queue-pill")).toHaveAttribute(
       "data-level",
@@ -143,7 +114,7 @@ describe("WorkQueuePanel", () => {
     );
 
     await act(async () => {
-      es.emitWorkStats(sample(10));
+      sse.emitWorkStats(sample(10));
     });
     expect(screen.getByTestId("work-queue-pill")).toHaveAttribute(
       "data-level",
@@ -153,14 +124,14 @@ describe("WorkQueuePanel", () => {
 
   it("collects multiple samples for the sparkline", async () => {
     render(<WorkQueuePanel environmentId="env_1" />);
-    const es = await waitForSource();
+    const sse = await waitForStream();
 
     await act(async () => {
-      es.emitWorkStats(sample(1));
-      es.emitWorkStats(sample(2));
-      es.emitWorkStats(sample(3));
-      es.emitWorkStats(sample(4));
-      es.emitWorkStats(sample(5));
+      sse.emitWorkStats(sample(1));
+      sse.emitWorkStats(sample(2));
+      sse.emitWorkStats(sample(3));
+      sse.emitWorkStats(sample(4));
+      sse.emitWorkStats(sample(5));
     });
 
     const spark = screen.getByTestId("work-queue-sparkline");
@@ -169,16 +140,18 @@ describe("WorkQueuePanel", () => {
 
   it("subscribes to the correct SSE endpoint", async () => {
     render(<WorkQueuePanel environmentId="env_xyz" />);
-    const es = await waitForSource();
-    expect(es.url).toContain("/admin/environments/env_xyz/work/stream");
+    await waitForStream();
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/admin/environments/env_xyz/work/stream");
+    expect((init.headers as Record<string, string>)["X-API-Key"]).toBe("test");
   });
 
   it("renders secondary metrics", async () => {
     render(<WorkQueuePanel environmentId="env_1" />);
-    const es = await waitForSource();
+    const sse = await waitForStream();
 
     await act(async () => {
-      es.emitWorkStats(
+      sse.emitWorkStats(
         sample(0, {
           pending: 4,
           workers_polling: 7,
@@ -192,10 +165,20 @@ describe("WorkQueuePanel", () => {
 
   it("renders the depth value with aria-live polite", async () => {
     render(<WorkQueuePanel environmentId="env_1" />);
-    await waitForSource();
+    await waitForStream();
     expect(screen.getByTestId("work-queue-depth")).toHaveAttribute(
       "aria-live",
       "polite"
     );
+  });
+
+  it("aborts the authenticated stream on unmount", async () => {
+    const { unmount } = render(<WorkQueuePanel environmentId="env_1" />);
+    await waitForStream();
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+
+    unmount();
+
+    expect((init.signal as AbortSignal).aborted).toBe(true);
   });
 });

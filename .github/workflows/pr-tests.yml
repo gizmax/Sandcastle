@@ -163,3 +163,33 @@ jobs:
       - name: Production build
         working-directory: dashboard
         run: npm run build
+
+  cf-sandbox-worker:
+    name: Cloudflare Sandbox worker
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: cf-sandbox-worker
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: cf-sandbox-worker/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: TypeScript typecheck
+        run: npx tsc --noEmit
+
+      - name: Validate Wrangler configuration
+        # The Docker build below validates the image; skipping rollout keeps
+        # this dry-run account-independent.
+        run: npx wrangler deploy --dry-run --containers-rollout=none --outdir /tmp/wrangler-dry
+
+      - name: Build Sandbox container
+        run: docker build -t sandcastle-cf-sandbox-test .

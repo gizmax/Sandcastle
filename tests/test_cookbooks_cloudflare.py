@@ -102,9 +102,9 @@ def test_both_index_ts_reference_documented_beta_header() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_cf_readme_has_five_step_walkthrough() -> None:
+def test_cf_readme_has_four_step_walkthrough() -> None:
     raw = (CF_DIR / "README.md").read_text(encoding="utf-8")
-    for n in (1, 2, 3, 4, 5):
+    for n in (1, 2, 3, 4):
         assert re.search(rf"^##\s+{n}\.\s", raw, flags=re.MULTILINE), (
             f"cloudflare/README.md is missing step {n}"
         )

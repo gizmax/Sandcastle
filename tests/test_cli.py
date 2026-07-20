@@ -14,12 +14,10 @@ from sandcastle.__main__ import (
     _cmd_cancel,
     _cmd_fork,
     _cmd_health,
-    _cmd_keys_delete,
     _cmd_ls,
     _cmd_reject,
     _cmd_replay,
     _cmd_runs,
-    _cmd_runs_compare,
     _cmd_serve,
     _cmd_status,
     _cmd_templates,
@@ -39,7 +37,7 @@ class TestArgParsing:
         args = parser.parse_args(["serve"])
 
         assert args.command == "serve"
-        assert args.host == "0.0.0.0"
+        assert args.host == "127.0.0.1"
         assert args.port == 8080
         assert args.reload is False
 
@@ -287,7 +285,7 @@ class TestServeCommand:
         )
 
     def test_serve_default_args(self):
-        """serve command with defaults should call uvicorn with 0.0.0.0:8080 and reload=False."""
+        """serve command with defaults should call uvicorn with 127.0.0.1:8080 and reload=False."""
         parser = _build_parser()
         args = parser.parse_args(["serve"])
 
@@ -297,7 +295,7 @@ class TestServeCommand:
 
         mock_run.assert_called_once_with(
             "sandcastle.main:app",
-            host="0.0.0.0",
+            host="127.0.0.1",
             port=8080,
             reload=False,
         )

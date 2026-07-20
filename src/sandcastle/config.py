@@ -148,6 +148,12 @@ class Settings(BaseSettings):
 
     # Auth
     auth_required: bool = False  # Set to True to enforce API key auth
+    allow_insecure_bind: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "SANDCASTLE_ALLOW_INSECURE_BIND", "ALLOW_INSECURE_BIND", "allow_insecure_bind"
+        ),
+    )
     dashboard_origin: str = "http://localhost:5173"
 
     # Budget
@@ -709,3 +715,21 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+_LOOPBACK_BIND_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+
+
+def validate_server_bind(host: str, config: Settings | None = None) -> None:
+    """Refuse unauthenticated network binds unless explicitly opted out."""
+    active_config = config or settings
+    if (
+        host.strip().lower() in _LOOPBACK_BIND_HOSTS
+        or active_config.auth_required
+        or active_config.allow_insecure_bind
+    ):
+        return
+    raise RuntimeError(
+        "Refusing to bind to a non-loopback host while AUTH_REQUIRED=false. "
+        "Set AUTH_REQUIRED=true or explicitly set SANDCASTLE_ALLOW_INSECURE_BIND=true."
+    )

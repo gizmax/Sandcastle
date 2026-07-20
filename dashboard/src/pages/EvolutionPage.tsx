@@ -37,16 +37,17 @@ interface Evolution {
   workflow_name: string;
   status: string;
   optimize_for: string;
-  baseline_score: number;
-  best_score: number;
-  baseline_quality: number;
-  best_quality: number;
-  baseline_cost: number;
-  best_cost: number;
+  baseline_score: number | null;
+  best_score: number | null;
+  baseline_quality: number | null;
+  best_quality: number | null;
+  baseline_cost: number | null;
+  best_cost: number | null;
   max_iterations: number;
   current_iteration: number;
   total_keeps: number;
   total_discards: number;
+  budget_limit_usd: number | null;
   created_at: string | null;
   completed_at: string | null;
 }
@@ -55,23 +56,28 @@ interface Iteration {
   iteration_number: number;
   mutation_type: string;
   mutation_description: string;
-  score: number;
-  quality: number;
-  cost_usd: number;
-  status: "keep" | "discard";
+  score: number | null;
+  quality: number | null;
+  cost_usd: number | null;
+  status: string;
 }
 
-interface EvolutionDetail extends Evolution {
+interface EvolutionDetail extends Omit<Evolution, "id"> {
+  evolution_id: string;
   iterations: Iteration[];
 }
 
 interface EvolutionStats {
   total_evolutions: number;
-  running_evolutions: number;
+  active_evolutions: number;
   completed_evolutions: number;
-  avg_score_improvement: number;
-  avg_cost_savings_pct: number;
-  total_iterations_run: number;
+  total_improvements: number;
+  avg_improvement: number | null;
+  top_workflows: Array<{
+    workflow_name: string;
+    max_improvement: number;
+    runs: number;
+  }>;
 }
 
 // --- Helpers ---
@@ -94,6 +100,10 @@ const OPTIMIZE_LABELS: Record<string, string> = {
   latency: "Latency",
   balanced: "Balanced",
 };
+
+function displayNumber(value: number | null | undefined): number {
+  return value ?? 0;
+}
 
 function ScoreDelta({ baseline, best }: { baseline: number; best: number }) {
   const delta = best - baseline;
@@ -212,10 +222,10 @@ interface StartModalProps {
   onClose: () => void;
   onStart: (data: {
     workflow_name: string;
-    eval_suite: string;
+    eval_suite_yaml: string;
     optimize_for: string;
     max_iterations: number;
-    budget_limit?: number;
+    budget_limit_usd?: number;
   }) => Promise<void>;
   workflows: string[];
 }
@@ -268,10 +278,10 @@ function StartEvolutionModal({ initialWorkflow, onClose, onStart, workflows }: S
     try {
       await onStart({
         workflow_name: workflowName,
-        eval_suite: evalSuite,
+        eval_suite_yaml: evalSuite,
         optimize_for: optimizeFor,
         max_iterations: maxIterations,
-        budget_limit: budgetLimit ? parseFloat(budgetLimit) : undefined,
+        budget_limit_usd: budgetLimit ? parseFloat(budgetLimit) : undefined,
       });
     } finally {
       setSubmitting(false);
@@ -498,21 +508,27 @@ function EvolutionDetail({
   actionLoading,
 }: {
   evolution: EvolutionDetail;
-  onAccept: (id: string) => Promise<void>;
+  onAccept: (workflowName: string) => Promise<void>;
   onClose: () => void;
   actionLoading: boolean;
 }) {
-  const scoreImprovement = evolution.baseline_score > 0
-    ? (((evolution.best_score - evolution.baseline_score) / evolution.baseline_score) * 100).toFixed(1)
+  const baselineScore = displayNumber(evolution.baseline_score);
+  const bestScore = displayNumber(evolution.best_score);
+  const baselineQuality = displayNumber(evolution.baseline_quality);
+  const bestQuality = displayNumber(evolution.best_quality);
+  const baselineCost = displayNumber(evolution.baseline_cost);
+  const bestCost = displayNumber(evolution.best_cost);
+  const scoreImprovement = baselineScore > 0
+    ? (((bestScore - baselineScore) / baselineScore) * 100).toFixed(1)
     : "0.0";
-  const costSavingsPct = evolution.baseline_cost > 0
-    ? (((evolution.baseline_cost - evolution.best_cost) / evolution.baseline_cost) * 100).toFixed(1)
+  const costSavingsPct = baselineCost > 0
+    ? (((baselineCost - bestCost) / baselineCost) * 100).toFixed(1)
     : "0.0";
 
   const chartData = evolution.iterations.map((it) => ({
     iteration: it.iteration_number,
-    score: it.score,
-    baseline: evolution.baseline_score,
+    score: displayNumber(it.score),
+    baseline: baselineScore,
   }));
 
   return (
@@ -542,15 +558,15 @@ function EvolutionDetail({
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs text-muted">Score</span>
-                <span className="text-sm font-semibold text-foreground">{evolution.baseline_score.toFixed(1)}</span>
+                <span className="text-sm font-semibold text-foreground">{baselineScore.toFixed(1)}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-xs text-muted">Quality</span>
-                <span className="text-sm font-medium text-foreground">{(evolution.baseline_quality * 100).toFixed(0)}%</span>
+                <span className="text-sm font-medium text-foreground">{(baselineQuality * 100).toFixed(0)}%</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-xs text-muted">Cost/run</span>
-                <span className="text-sm font-medium text-foreground">{formatCost(evolution.baseline_cost)}</span>
+                <span className="text-sm font-medium text-foreground">{formatCost(baselineCost)}</span>
               </div>
             </div>
           </div>
@@ -561,17 +577,17 @@ function EvolutionDetail({
               <div className="flex items-center justify-between">
                 <span className="text-xs text-muted">Score</span>
                 <div className="flex items-center gap-1.5">
-                  <span className="text-sm font-semibold text-foreground">{evolution.best_score.toFixed(1)}</span>
-                  <ScoreDelta baseline={evolution.baseline_score} best={evolution.best_score} />
+                  <span className="text-sm font-semibold text-foreground">{bestScore.toFixed(1)}</span>
+                  <ScoreDelta baseline={baselineScore} best={bestScore} />
                 </div>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-xs text-muted">Quality</span>
-                <span className="text-sm font-medium text-success">{(evolution.best_quality * 100).toFixed(0)}%</span>
+                <span className="text-sm font-medium text-success">{(bestQuality * 100).toFixed(0)}%</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-xs text-muted">Cost/run</span>
-                <span className="text-sm font-medium text-success">{formatCost(evolution.best_cost)}</span>
+                <span className="text-sm font-medium text-success">{formatCost(bestCost)}</span>
               </div>
             </div>
           </div>
@@ -625,7 +641,7 @@ function EvolutionDetail({
                     ]) as never}
                   />
                   <ReferenceLine
-                    y={evolution.baseline_score}
+                    y={baselineScore}
                     stroke="var(--color-muted)"
                     strokeDasharray="4 2"
                     label={{ value: "Baseline", fontSize: 10, fill: "var(--color-muted)" }}
@@ -701,9 +717,9 @@ function EvolutionDetail({
                     <td className="px-4 py-2.5 text-xs text-foreground max-w-xs truncate" title={it.mutation_description}>
                       {it.mutation_description}
                     </td>
-                    <td className="px-4 py-2.5 text-right text-xs font-medium text-foreground">{it.score.toFixed(1)}</td>
-                    <td className="px-4 py-2.5 text-right text-xs text-muted">{(it.quality * 100).toFixed(0)}%</td>
-                    <td className="px-4 py-2.5 text-right text-xs text-muted">{formatCost(it.cost_usd)}</td>
+                    <td className="px-4 py-2.5 text-right text-xs font-medium text-foreground">{displayNumber(it.score).toFixed(1)}</td>
+                    <td className="px-4 py-2.5 text-right text-xs text-muted">{(displayNumber(it.quality) * 100).toFixed(0)}%</td>
+                    <td className="px-4 py-2.5 text-right text-xs text-muted">{formatCost(displayNumber(it.cost_usd))}</td>
                     <td className="px-4 py-2.5 text-center">
                       {it.status === "keep" ? (
                         <CheckCircle2 className="h-4 w-4 text-success inline-block" />
@@ -722,7 +738,7 @@ function EvolutionDetail({
         {evolution.status === "completed" && (
           <div className="flex justify-end">
             <button
-              onClick={() => { void onAccept(evolution.id); }}
+              onClick={() => { void onAccept(evolution.workflow_name); }}
               disabled={actionLoading}
               className={cn(
                 "inline-flex items-center gap-2 rounded-lg bg-success/10 border border-success/30 px-4 py-2",
@@ -814,7 +830,7 @@ export default function EvolutionPage() {
       setDetailData(null);
       setDetailLoading(true);
       try {
-        const res = await api.get<EvolutionDetail>(`/evolution/${evo.id}/status`);
+        const res = await api.get<EvolutionDetail>(`/evolution/${evo.workflow_name}/status`);
         if (!mountedRef.current) return;
         if (res.data) setDetailData(res.data);
       } finally {
@@ -825,11 +841,11 @@ export default function EvolutionPage() {
   );
 
   const handleAccept = useCallback(
-    async (id: string) => {
-      if (actionLoadingRef.current.has(id)) return;
-      setActionLoading((prev) => new Set(prev).add(id));
+    async (workflowName: string) => {
+      if (actionLoadingRef.current.has(workflowName)) return;
+      setActionLoading((prev) => new Set(prev).add(workflowName));
       try {
-        const res = await api.post(`/evolution/${id}/accept`);
+        const res = await api.post(`/evolution/${workflowName}/accept`);
         if (!mountedRef.current) return;
         if (res.error) {
           toast.error(`Failed to accept variant: ${res.error.message}`);
@@ -843,7 +859,7 @@ export default function EvolutionPage() {
         if (mountedRef.current) {
           setActionLoading((prev) => {
             const next = new Set(prev);
-            next.delete(id);
+            next.delete(workflowName);
             return next;
           });
         }
@@ -853,11 +869,11 @@ export default function EvolutionPage() {
   );
 
   const handleCancel = useCallback(
-    async (id: string) => {
-      if (actionLoadingRef.current.has(id)) return;
-      setActionLoading((prev) => new Set(prev).add(id));
+    async (workflowName: string) => {
+      if (actionLoadingRef.current.has(workflowName)) return;
+      setActionLoading((prev) => new Set(prev).add(workflowName));
       try {
-        const res = await api.post(`/evolution/${id}/cancel`);
+        const res = await api.post(`/evolution/${workflowName}/cancel`);
         if (!mountedRef.current) return;
         if (res.error) {
           toast.error(`Failed to cancel evolution: ${res.error.message}`);
@@ -869,7 +885,7 @@ export default function EvolutionPage() {
         if (mountedRef.current) {
           setActionLoading((prev) => {
             const next = new Set(prev);
-            next.delete(id);
+            next.delete(workflowName);
             return next;
           });
         }
@@ -881,10 +897,10 @@ export default function EvolutionPage() {
   const handleStart = useCallback(
     async (data: {
       workflow_name: string;
-      eval_suite: string;
+      eval_suite_yaml: string;
       optimize_for: string;
       max_iterations: number;
-      budget_limit?: number;
+      budget_limit_usd?: number;
     }) => {
       const res = await api.post<Evolution>("/evolution/start", data);
       if (res.error) {
@@ -959,29 +975,29 @@ export default function EvolutionPage() {
           </div>
           <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
             <p className="text-xs font-medium text-muted-foreground">Running</p>
-            <p className="mt-1 text-2xl font-semibold text-running">{stats.running_evolutions}</p>
+            <p className="mt-1 text-2xl font-semibold text-running">{stats.active_evolutions}</p>
           </div>
           <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
             <p className="text-xs font-medium text-muted-foreground">Completed</p>
             <p className="mt-1 text-2xl font-semibold text-success">{stats.completed_evolutions}</p>
           </div>
           <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
-            <p className="text-xs font-medium text-muted-foreground">Avg Score Gain</p>
+            <p className="text-xs font-medium text-muted-foreground">Avg Improvement</p>
             <div className="mt-1 flex items-center gap-1">
               <TrendingUp className="h-4 w-4 text-success" />
-              <p className="text-2xl font-semibold text-success">+{stats.avg_score_improvement.toFixed(0)}%</p>
+              <p className="text-2xl font-semibold text-success">+{displayNumber(stats.avg_improvement).toFixed(1)}</p>
             </div>
           </div>
           <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
-            <p className="text-xs font-medium text-muted-foreground">Cost Savings</p>
+            <p className="text-xs font-medium text-muted-foreground">Improved</p>
             <div className="mt-1 flex items-center gap-1">
-              <TrendingDown className="h-4 w-4 text-accent" />
-              <p className="text-2xl font-semibold text-accent">-{stats.avg_cost_savings_pct.toFixed(0)}%</p>
+              <TrendingUp className="h-4 w-4 text-success" />
+              <p className="text-2xl font-semibold text-success">{stats.total_improvements}</p>
             </div>
           </div>
           <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
-            <p className="text-xs font-medium text-muted-foreground">Iterations Run</p>
-            <p className="mt-1 text-2xl font-semibold text-foreground">{stats.total_iterations_run}</p>
+            <p className="text-xs font-medium text-muted-foreground">Top Workflows</p>
+            <p className="mt-1 text-2xl font-semibold text-foreground">{stats.top_workflows.length}</p>
           </div>
         </div>
       )}
@@ -1047,9 +1063,9 @@ export default function EvolutionPage() {
                   <div className="hidden sm:flex items-center gap-6 text-right">
                     <div>
                       <p className="text-[10px] text-muted-foreground">Best Score</p>
-                      <p className="text-lg font-bold text-foreground">{evo.best_score.toFixed(1)}</p>
+                      <p className="text-lg font-bold text-foreground">{displayNumber(evo.best_score).toFixed(1)}</p>
                       <p className="text-[10px] text-muted">
-                        vs {evo.baseline_score.toFixed(1)} baseline
+                        vs {displayNumber(evo.baseline_score).toFixed(1)} baseline
                       </p>
                     </div>
                     <div>
@@ -1066,9 +1082,9 @@ export default function EvolutionPage() {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      void handleCancel(evo.id);
+                      void handleCancel(evo.workflow_name);
                     }}
-                    disabled={actionLoading.has(evo.id)}
+                    disabled={actionLoading.has(evo.workflow_name)}
                     className={cn(
                       "inline-flex items-center gap-1 rounded-md border border-error/30 px-2.5 py-1.5",
                       "text-xs font-medium text-error hover:bg-error/10 transition-colors",
@@ -1102,7 +1118,7 @@ export default function EvolutionPage() {
                           setExpandedId(null);
                           setDetailData(null);
                         }}
-                        actionLoading={actionLoading.has(evo.id)}
+                        actionLoading={actionLoading.has(evo.workflow_name)}
                       />
                     ) : null}
                   </div>
@@ -1120,11 +1136,15 @@ export default function EvolutionPage() {
             Completed ({completed.length})
           </h2>
           {completed.map((evo) => {
-            const scoreImprovePct = evo.baseline_score > 0
-              ? (((evo.best_score - evo.baseline_score) / evo.baseline_score) * 100).toFixed(1)
+            const baselineScore = displayNumber(evo.baseline_score);
+            const bestScore = displayNumber(evo.best_score);
+            const baselineCost = displayNumber(evo.baseline_cost);
+            const bestCost = displayNumber(evo.best_cost);
+            const scoreImprovePct = baselineScore > 0
+              ? (((bestScore - baselineScore) / baselineScore) * 100).toFixed(1)
               : "0.0";
-            const costSavingsPct = evo.baseline_cost > 0
-              ? (((evo.baseline_cost - evo.best_cost) / evo.baseline_cost) * 100).toFixed(1)
+            const costSavingsPct = baselineCost > 0
+              ? (((baselineCost - bestCost) / baselineCost) * 100).toFixed(1)
               : "0.0";
             const isExpanded = expandedId === evo.id;
             const isAccepted = evo.status === "accepted";
@@ -1198,16 +1218,16 @@ export default function EvolutionPage() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          void handleAccept(evo.id);
+                          void handleAccept(evo.workflow_name);
                         }}
-                        disabled={actionLoading.has(evo.id)}
+                        disabled={actionLoading.has(evo.workflow_name)}
                         className={cn(
                           "inline-flex items-center gap-1 rounded-md bg-success/10 border border-success/30 px-2.5 py-1.5",
                           "text-xs font-medium text-success hover:bg-success/20 transition-colors",
                           "disabled:opacity-50 disabled:cursor-not-allowed"
                         )}
                       >
-                        {actionLoading.has(evo.id) ? (
+                        {actionLoading.has(evo.workflow_name) ? (
                           <Loader2 className="h-3 w-3 animate-spin" />
                         ) : (
                           <CheckCircle2 className="h-3 w-3" />
@@ -1239,7 +1259,7 @@ export default function EvolutionPage() {
                           setExpandedId(null);
                           setDetailData(null);
                         }}
-                        actionLoading={actionLoading.has(evo.id)}
+                        actionLoading={actionLoading.has(evo.workflow_name)}
                       />
                     ) : null}
                   </div>

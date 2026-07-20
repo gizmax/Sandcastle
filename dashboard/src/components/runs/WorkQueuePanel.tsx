@@ -82,7 +82,7 @@ export function WorkQueuePanel({
   const [connected, setConnected] = useState(false);
   const attemptRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const sourceRef = useRef<EventSource | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   // Construct the absolute stream URL. /admin/environments is root-mounted.
   const url = useMemo(() => {
@@ -98,40 +98,15 @@ export function WorkQueuePanel({
 
     const connect = () => {
       if (cancelled) return;
-      // EventSource does not support custom auth headers, but the api client
-      // already configures cookies/withCredentials; fall back to query token
-      // when available. We still pass the auth headers via constructor when
-      // a future EventSourcePolyfill is installed.
-      const es = new EventSource(url, { withCredentials: true });
-      sourceRef.current = es;
+      const controller = new AbortController();
+      abortRef.current = controller;
 
-      es.addEventListener("open", () => {
-        if (cancelled) return;
-        attemptRef.current = 0;
-        setConnected(true);
-      });
-
-      es.addEventListener("work_stats", (raw) => {
-        if (cancelled) return;
-        try {
-          const data = JSON.parse((raw as MessageEvent).data) as QueueSample;
-          setSamples((prev) => {
-            const next = [...prev, data];
-            if (next.length > MAX_SAMPLES) {
-              next.splice(0, next.length - MAX_SAMPLES);
-            }
-            return next;
-          });
-        } catch {
-          // ignore malformed payloads
-        }
-      });
-
-      const onFailure = () => {
+      const reconnect = () => {
         if (cancelled) return;
         setConnected(false);
-        es.close();
-        sourceRef.current = null;
+        if (abortRef.current === controller) {
+          abortRef.current = null;
+        }
 
         const attempt = attemptRef.current + 1;
         attemptRef.current = attempt;
@@ -142,7 +117,66 @@ export function WorkQueuePanel({
         reconnectTimerRef.current = setTimeout(connect, delay);
       };
 
-      es.addEventListener("error", onFailure);
+      void (async () => {
+        try {
+          const res = await fetch(url, {
+            headers: api.authHeaders(),
+            signal: controller.signal,
+          });
+          if (!res.ok || !res.body) {
+            reconnect();
+            return;
+          }
+
+          attemptRef.current = 0;
+          setConnected(true);
+
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          let currentEvent = "message";
+          let currentData = "";
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
+
+            for (const line of lines) {
+              if (line.startsWith("event: ")) {
+                currentEvent = line.slice(7).trim();
+              } else if (line.startsWith("data: ")) {
+                currentData += (currentData ? "\n" : "") + line.slice(6);
+              } else if (line.trim() === "" && currentData) {
+                if (currentEvent === "work_stats") {
+                  try {
+                    const data = JSON.parse(currentData) as QueueSample;
+                    setSamples((prev) => {
+                      const next = [...prev, data];
+                      if (next.length > MAX_SAMPLES) {
+                        next.splice(0, next.length - MAX_SAMPLES);
+                      }
+                      return next;
+                    });
+                  } catch {
+                    // Ignore malformed payloads.
+                  }
+                }
+                currentEvent = "message";
+                currentData = "";
+              }
+            }
+          }
+
+          reconnect();
+        } catch (error: unknown) {
+          if (error instanceof DOMException && error.name === "AbortError") return;
+          reconnect();
+        }
+      })();
     };
 
     connect();
@@ -153,16 +187,12 @@ export function WorkQueuePanel({
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
       }
-      if (sourceRef.current) {
-        sourceRef.current.close();
-        sourceRef.current = null;
+      if (abortRef.current) {
+        abortRef.current.abort();
+        abortRef.current = null;
       }
     };
   }, [url]);
-
-  // Reference `api` so bundlers don't shake it: the production wiring may
-  // attach an auth token to the URL via a query param.
-  void api;
 
   if (!environmentId) return null;
 

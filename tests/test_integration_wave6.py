@@ -276,8 +276,8 @@ class TestStuckRunRecovery:
             assert "recovered" in run.error.lower()
 
     @pytest.mark.asyncio
-    async def test_queued_run_beyond_threshold_recovered(self):
-        """Runs in QUEUED state past 2x timeout should be marked FAILED."""
+    async def test_queued_run_beyond_threshold_is_not_recovered(self):
+        """Queued Redis jobs may wait under backlog and must remain queued."""
         from sandcastle.models.db import Run, RunStatus, async_session
         from sandcastle.queue.worker import _recover_stuck_runs
 
@@ -302,9 +302,9 @@ class TestStuckRunRecovery:
         async with async_session() as session:
             run = await session.get(Run, run_uuid)
             assert run is not None
-            assert run.status == RunStatus.FAILED
-            assert run.completed_at is not None
-            assert "recovered" in run.error.lower()
+            assert run.status == RunStatus.QUEUED
+            assert run.completed_at is None
+            assert run.error is None
 
     @pytest.mark.asyncio
     async def test_recent_running_run_not_recovered(self):

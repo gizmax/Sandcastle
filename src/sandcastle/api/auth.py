@@ -29,7 +29,12 @@ PUBLIC_PATHS = {
 
 # Path prefixes that don't require authentication. "/api/r/" serves public, scrubbed
 # shareable run permalinks (the run owner opts in by minting a token).
-PUBLIC_PREFIXES = ("/api/templates", "/api/r/")
+PUBLIC_PREFIXES = ("/api/templates", "/api/r")
+
+# Non-API protocol and operator endpoints that must still pass through API-key
+# authentication when it is enabled.  Keep this as path segments, not raw
+# prefixes, so similarly named paths cannot inherit their authentication mode.
+_AUTH_REQUIRED_NON_API_PATHS = ("/a2a", "/admin/environments")
 
 # Path suffixes that don't require authentication (e.g. workflow API spec)
 PUBLIC_SUFFIXES = ("/spec",)
@@ -102,12 +107,14 @@ async def auth_middleware(request: Request, call_next):
         return await call_next(request)
 
     # Skip auth for non-API paths (dashboard, static files), EXCEPT for
-    # protocol endpoints that require auth (/a2a JSON-RPC endpoint).
+    # protocol and operator endpoints that require auth.
     # /.well-known/agent.json is handled by PUBLIC_PATHS above.
-    _AUTH_REQUIRED_NON_API_PATHS = {"/a2a"}
     if (
         not request.url.path.startswith("/api")
-        and request.url.path not in _AUTH_REQUIRED_NON_API_PATHS
+        and not any(
+            request.url.path == path or request.url.path.startswith(path + "/")
+            for path in _AUTH_REQUIRED_NON_API_PATHS
+        )
     ):
         request.state._auth_checked = True
         return await call_next(request)
@@ -123,7 +130,10 @@ async def auth_middleware(request: Request, call_next):
         return await call_next(request)
 
     # Skip auth for public path prefixes (e.g. /api/templates)
-    if any(request.url.path.startswith(prefix) for prefix in PUBLIC_PREFIXES):
+    if any(
+        request.url.path == prefix or request.url.path.startswith(prefix + "/")
+        for prefix in PUBLIC_PREFIXES
+    ):
         request.state._auth_checked = True
         return await call_next(request)
 
@@ -251,9 +261,16 @@ def get_tenant_id(request: Request) -> str | None:
 def is_admin(request: Request) -> bool:
     """Return True when the request comes from an admin (no tenant scope).
 
-    Admin = auth is enabled AND the API key has no tenant_id (server operator).
+    Admin = a successfully authenticated API key with no tenant_id (server
+    operator) when auth is enabled.
     When auth is disabled everyone is treated as admin.
     """
     if not settings.auth_required:
         return True
-    return get_tenant_id(request) is None
+    tenant_id = get_tenant_id(request)
+    # A tenant-less value only identifies an operator when it was populated by
+    # a successful API-key authentication.  Non-API paths that skip auth have
+    # neither value and must never inherit operator access.
+    if tenant_id is None and getattr(request.state, "api_key_id", None) is None:
+        return False
+    return tenant_id is None
