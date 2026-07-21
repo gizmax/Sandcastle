@@ -9,6 +9,7 @@ on:
       - "scripts/update_hub_registry.py"
       - ".github/workflows/hub-validate.yml"
       - "src/sandcastle/templates/**"
+  workflow_dispatch:
 
 jobs:
   validate:
