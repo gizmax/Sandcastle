@@ -38,4 +38,3 @@ steps:
       Working brief: {steps.assess-request.output}
 
       Use concise headings, clear ownership where relevant, and explicit follow-up questions.
-

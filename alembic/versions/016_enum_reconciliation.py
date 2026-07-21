@@ -146,6 +146,21 @@ def _recreate_enum(
 
 
 def _convert_workflow_version_status_to_enum() -> None:
+    # Preflight: historical VARCHAR values must all map onto the enum labels.
+    # A direct-SQL/legacy value would otherwise fail the cast mid-migration
+    # with a cryptic error.
+    invalid = op.get_bind().execute(
+        sa.text(
+            "SELECT DISTINCT status FROM workflow_versions "
+            "WHERE UPPER(status) NOT IN ('DRAFT', 'STAGING', 'PRODUCTION', 'ARCHIVED')"
+        )
+    ).scalars().all()
+    if invalid:
+        raise RuntimeError(
+            "workflow_versions.status contains values that cannot map to "
+            f"workflowversionstatus: {invalid}. Fix or remove these rows before "
+            "running this migration."
+        )
     op.execute(
         "CREATE TYPE workflowversionstatus AS ENUM ('DRAFT', 'STAGING', 'PRODUCTION', 'ARCHIVED')"
     )
