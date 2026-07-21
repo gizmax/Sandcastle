@@ -727,6 +727,25 @@ def _resolve_model_for_tier(provider_name: str, quality_tier: str) -> str | None
 # ---------------------------------------------------------------------------
 
 # Provider configuration - configurable via env vars
+def resolve_provider_api_url(cfg: dict) -> str:
+    """Resolve a provider config's ``api_url``, expanding local-endpoint templates.
+
+    ``{omlx_base_url}`` and ``{ollama_host}`` are read at call time (not import time)
+    so Docker deployments that inject OLLAMA_HOST reach the host's server instead of
+    the container's localhost.
+    """
+    api_url = cfg.get("api_url", "")
+    if "{omlx_base_url}" in api_url:
+        from sandcastle.config import settings as _s
+
+        api_url = api_url.format(omlx_base_url=_s.omlx_base_url.rstrip("/"))
+    if "{ollama_host}" in api_url:
+        from sandcastle.engine.providers import ollama_base_url
+
+        api_url = api_url.format(ollama_host=ollama_base_url())
+    return api_url
+
+
 _PROVIDER_CONFIGS = {
     "anthropic": {
         "api_url": "https://api.anthropic.com/v1/messages",
@@ -760,7 +779,7 @@ _PROVIDER_CONFIGS = {
         },
     },
     "ollama": {
-        "api_url": "http://localhost:11434/v1/chat/completions",
+        "api_url": "{ollama_host}/v1/chat/completions",
         "model": "llama3.2",
         "api_key_env": "",  # Ollama doesn't need a key
         "region": "local",
@@ -810,11 +829,8 @@ def _get_advisor_config() -> dict:
 
     config = dict(_PROVIDER_CONFIGS[provider])
 
-    # Resolve dynamic base URL for oMLX provider
-    if "{omlx_base_url}" in config.get("api_url", ""):
-        config["api_url"] = config["api_url"].format(
-            omlx_base_url=settings.omlx_base_url.rstrip("/")
-        )
+    # Resolve dynamic base URLs for local providers
+    config["api_url"] = resolve_provider_api_url(config)
 
     model_override = os.environ.get("SANDCASTLE_ADVISOR_MODEL", "")
     if model_override:
@@ -1073,12 +1089,8 @@ async def _call_advisor_llm(
     for i, provider_name in enumerate(providers_to_try):
         cfg = dict(_PROVIDER_CONFIGS[provider_name])
         api_url = cfg["api_url"]
-        # Resolve dynamic base URL for oMLX provider
-        if "{omlx_base_url}" in api_url:
-            from sandcastle.config import settings as _settings
-            api_url = api_url.format(
-                omlx_base_url=_settings.omlx_base_url.rstrip("/")
-            )
+        # Resolve dynamic base URLs for local providers
+        api_url = resolve_provider_api_url(cfg)
         provider_region = cfg.get("region", "us")
         is_anthropic = cfg.get("api_key_env") == "ANTHROPIC_API_KEY"
 

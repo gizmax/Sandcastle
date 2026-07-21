@@ -711,10 +711,21 @@ async def get_provider_health() -> ApiResponse:
             headers = headers_fn(api_key) if headers_fn else {}
 
             if provider_name == "ollama":
-                # Ollama: check /api/tags (no auth needed)
-                url = "http://localhost:11434/api/tags"
+                # Ollama: check /api/tags (no auth needed). Respect OLLAMA_HOST so
+                # Docker deployments probe the host's server, not container localhost.
+                from sandcastle.engine.providers import ollama_base_url
+
+                url = ollama_base_url() + "/api/tags"
                 async with httpx.AsyncClient(timeout=5.0) as client:
                     resp = await client.get(url)
+                    resp.raise_for_status()
+            elif provider_name == "nim":
+                # Local NIM / vLLM (OpenAI-compatible): /v1/models answers, no auth
+                from sandcastle.config import settings as _nim_s
+
+                nim_base = (_nim_s.nim_base_url or "http://localhost:8000").rstrip("/")
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    resp = await client.get(nim_base + "/v1/models")
                     resp.raise_for_status()
             elif key_env == "ANTHROPIC_API_KEY":
                 # Anthropic: minimal messages call - 400 = reachable (bad request ok)
@@ -729,13 +740,17 @@ async def get_provider_health() -> ApiResponse:
                         resp.raise_for_status()
             else:
                 # OpenAI-compatible providers
+                from sandcastle.engine.generator import resolve_provider_api_url
+
                 body = {
                     "model": cfg.get("model", "gpt-4o-mini"),
                     "max_tokens": 1,
                     "messages": [{"role": "user", "content": "ping"}],
                 }
                 async with httpx.AsyncClient(timeout=5.0) as client:
-                    resp = await client.post(cfg["api_url"], json=body, headers=headers)
+                    resp = await client.post(
+                        resolve_provider_api_url(cfg), json=body, headers=headers
+                    )
                     if resp.status_code not in (200, 400, 404):
                         resp.raise_for_status()
 
@@ -753,6 +768,9 @@ async def get_provider_health() -> ApiResponse:
     results: dict = {}
     for name, cfg in _PROVIDER_CONFIGS.items():
         results[name] = await _check_provider(name, cfg)
+    # Local NIM / vLLM is not an advisor provider (stays out of _PROVIDER_CONFIGS)
+    # but the onboarding wizard should still discover it as a local endpoint.
+    results["nim"] = await _check_provider("nim", {"api_key_env": "", "region": "local"})
 
     # Store cache
     get_provider_health._cache = results  # type: ignore[attr-defined]
@@ -4136,12 +4154,24 @@ async def advisor_status() -> ApiResponse:
     mistral_configured = bool(settings.mistral_api_key)
     openai_configured = bool(settings.openai_api_key)
 
-    # Detect Ollama by probing localhost
+    # Detect Ollama by probing the effective host (OLLAMA_HOST-aware for Docker)
+    from sandcastle.engine.providers import ollama_base_url as _ollama_base
+
     ollama_running = False
     try:
         async with httpx.AsyncClient(timeout=1.0) as client:
-            resp = await client.get("http://localhost:11434/api/tags")
+            resp = await client.get(_ollama_base() + "/api/tags")
             ollama_running = resp.status_code == 200
+    except Exception:
+        pass
+
+    # Detect a local NIM / vLLM (OpenAI-compatible) at nim_base_url
+    nim_running = False
+    try:
+        _nim_base = (settings.nim_base_url or "http://localhost:8000").rstrip("/")
+        async with httpx.AsyncClient(timeout=1.0) as client:
+            resp = await client.get(_nim_base + "/v1/models")
+            nim_running = resp.status_code == 200
     except Exception:
         pass
 
@@ -4173,6 +4203,13 @@ async def advisor_status() -> ApiResponse:
             region="local",
             configured=ollama_running,
             status="running" if ollama_running else "not_detected",
+        ),
+        ProviderStatusEntry(
+            id="nim",
+            name="Local NIM / vLLM (OpenAI-compatible)",
+            region="local",
+            configured=nim_running,
+            status="running" if nim_running else "not_detected",
         ),
     ]
 
@@ -4212,11 +4249,13 @@ async def advisor_configure(request: AdvisorConfigureRequest) -> ApiResponse:
     # Item 6: When EU mode is enabled, verify at least one EU/local provider is configured
     if request.data_residency == "eu":
         mistral_configured = bool(settings.mistral_api_key)
-        # Detect Ollama
+        # Detect Ollama (OLLAMA_HOST-aware for Docker)
+        from sandcastle.engine.providers import ollama_base_url as _ollama_base
+
         ollama_running = False
         try:
             async with httpx.AsyncClient(timeout=1.0) as _client:
-                _r = await _client.get("http://localhost:11434/api/tags")
+                _r = await _client.get(_ollama_base() + "/api/tags")
                 ollama_running = _r.status_code == 200
         except Exception:
             pass
@@ -4298,7 +4337,9 @@ async def advisor_test_connection(req: Request) -> ApiResponse:
             ).model_dump(),
         )
 
-    api_url = cfg["api_url"]
+    from sandcastle.engine.generator import resolve_provider_api_url
+
+    api_url = resolve_provider_api_url(cfg)
     model = cfg["model"]
     headers = cfg["headers_fn"](api_key)
     # Pass is_anthropic explicitly so the request body format matches the

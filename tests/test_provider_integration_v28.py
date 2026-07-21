@@ -228,10 +228,11 @@ class TestProviderConfigs:
         """Provider API URL should match the expected pattern."""
         cfg = _PROVIDER_CONFIGS[provider]
         expected_pattern = PROVIDER_API_URLS[provider]
-        # omlx uses a template variable
-        url = cfg["api_url"]
-        if provider == "omlx":
-            url = url.replace("{omlx_base_url}", "http://localhost:8080")
+        # Local providers use template variables resolved at call time; resolve
+        # them the same way production does (with no env override this yields
+        # the localhost defaults the patterns below expect).
+        from sandcastle.engine.generator import resolve_provider_api_url
+        url = resolve_provider_api_url(cfg)
         assert expected_pattern in url, (
             f"Provider '{provider}' API URL '{url}' does not contain "
             f"expected pattern '{expected_pattern}'"

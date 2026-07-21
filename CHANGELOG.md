@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.41.2] - 2026-07-21 - "Local Discovery"
+
+### Fixed
+- Provider discovery now respects `OLLAMA_HOST` everywhere. The onboarding wizard,
+  `/health/providers`, `/advisor/status`, and the EU-residency check probed a hardcoded
+  `http://localhost:11434`, so a Docker deployment pointing at a host Ollama (e.g.
+  `host.docker.internal`) always showed "No provider detected" even though workflow
+  steps could reach it. Ollama LLM steps and the advisor test call resolve their base
+  URL the same way now.
+- The wizard and `/advisor/status` also discover a local NIM / vLLM server: any
+  OpenAI-compatible endpoint at `NIM_BASE_URL` whose `/v1/models` answers shows up as
+  a detected local provider, so a box running vLLM no longer looks empty.
+
+### Added
+- `SPARK_NIM_DEFAULT_MODEL`: the model the Spark NIM autoroute sends bare default
+  steps to (default `nim/llama-3.1-70b`). Set it to a model your local server
+  actually serves (e.g. `nim/ornith`) - the reachability probe only checks that
+  `/v1/models` answers, not that the hardcoded default exists on it.
+
 ## [0.41.1] - 2026-07-21 - "Spark, Contained"
 
 ### Fixed

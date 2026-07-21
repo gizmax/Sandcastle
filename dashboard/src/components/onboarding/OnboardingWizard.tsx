@@ -88,6 +88,40 @@ function StepConnect({ onNext, onSkip }: { onNext: () => void; onSkip: () => voi
     }
   };
 
+  // Cloud key entry is available in both states: as the fallback when nothing
+  // local is detected, and as an addition when local providers are already running.
+  const cloudKeyInput = (
+    <>
+      <label className="block text-sm font-medium text-foreground">
+        Paste an Anthropic, Mistral, or OpenAI API key
+      </label>
+      <div className="flex gap-2">
+        <input
+          type="password"
+          value={apiKey}
+          onChange={(e) => setApiKey(e.target.value)}
+          placeholder="sk-..."
+          className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent/40"
+        />
+        <button
+          onClick={() => void handleSaveKey()}
+          disabled={saving || !apiKey.trim()}
+          className={cn(
+            "rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground",
+            "hover:bg-accent-hover transition-colors",
+            "disabled:opacity-50 disabled:cursor-not-allowed"
+          )}
+        >
+          {saving ? "Saving..." : "Save"}
+        </button>
+      </div>
+      {saveError && <p className="text-xs text-error">{saveError}</p>}
+      {saveSuccess && (
+        <p className="text-xs text-success font-medium">Key saved! You can continue.</p>
+      )}
+    </>
+  );
+
   return (
     <div className="space-y-6">
       <div className="text-center">
@@ -127,6 +161,10 @@ function StepConnect({ onNext, onSkip }: { onNext: () => void; onSkip: () => voi
               <span className="text-xs font-semibold text-success">Ready!</span>
             </div>
           ))}
+          <p className="text-center text-xs text-muted-foreground">
+            or add a cloud provider
+          </p>
+          {cloudKeyInput}
         </div>
       ) : (
         <div className="space-y-3">
@@ -140,33 +178,7 @@ function StepConnect({ onNext, onSkip }: { onNext: () => void; onSkip: () => voi
             </code>
           </div>
           <p className="text-center text-xs text-muted-foreground">or use the cloud</p>
-          <label className="block text-sm font-medium text-foreground">
-            Paste an Anthropic, Mistral, or OpenAI API key
-          </label>
-          <div className="flex gap-2">
-            <input
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="sk-..."
-              className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent/40"
-            />
-            <button
-              onClick={() => void handleSaveKey()}
-              disabled={saving || !apiKey.trim()}
-              className={cn(
-                "rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground",
-                "hover:bg-accent-hover transition-colors",
-                "disabled:opacity-50 disabled:cursor-not-allowed"
-              )}
-            >
-              {saving ? "Saving..." : "Save"}
-            </button>
-          </div>
-          {saveError && <p className="text-xs text-error">{saveError}</p>}
-          {saveSuccess && (
-            <p className="text-xs text-success font-medium">Key saved! You can continue.</p>
-          )}
+          {cloudKeyInput}
         </div>
       )}
 
