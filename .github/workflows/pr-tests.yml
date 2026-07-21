@@ -110,6 +110,16 @@ jobs:
           cache-from: type=gha,scope=sandcastle-runner
           cache-to: type=gha,mode=max,scope=sandcastle-runner
 
+      - name: Build E2B sandbox image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: e2b.Dockerfile
+          load: false
+          tags: sandcastle-e2b:ci
+          cache-from: type=gha,scope=sandcastle-e2b
+          cache-to: type=gha,mode=max,scope=sandcastle-e2b
+
       - name: Start local-mode API and wait for health endpoint
         run: |
           docker run -d --name sandcastle-smoke \

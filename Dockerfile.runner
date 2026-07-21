@@ -6,7 +6,10 @@ ARG OPENAI_VERSION=6.46.0
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
-RUN useradd --uid 1000 --create-home --home-dir /home/user runner
+# Reuse the image's existing non-root `node` user (uid 1000) - creating a new
+# uid-1000 user fails because `node` already owns it. /home/user stays the
+# contract path used by backends, connectors, and templates.
+RUN mkdir -p /home/user && chown -R node:node /home/user
 
 WORKDIR /home/user
 
@@ -20,8 +23,8 @@ RUN npm install \
     && npx playwright install --with-deps chromium \
     && npm cache clean --force \
     && chmod -R a+rX /ms-playwright \
-    && chown -R runner:runner /home/user /ms-playwright
+    && chown -R node:node /home/user /ms-playwright
 
-USER runner
+USER node
 
 ENV NODE_PATH=/home/user/node_modules
