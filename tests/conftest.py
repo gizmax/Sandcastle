@@ -154,6 +154,21 @@ def _restore_process_env():
 
 
 @pytest.fixture(autouse=True)
+def _restore_settings_singleton():
+    """Restore the config settings singleton after every test.
+
+    Hundreds of tests mutate settings attributes directly (auth_required,
+    redis_url, ...) and a missing restore leaks into later tests under
+    reordered runs. Snapshot and restore per test.
+    """
+    from sandcastle.config import settings
+
+    before = dict(settings.__dict__)
+    yield
+    settings.__dict__.update(before)
+
+
+@pytest.fixture(autouse=True)
 def _reset_module_globals():
     """Clear in-memory module caches between tests.
 
