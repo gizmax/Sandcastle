@@ -338,6 +338,15 @@ async def _recover_stuck_runs() -> None:
 async def startup(ctx: dict) -> None:
     """Worker startup hook."""
     logger.info("Sandcastle worker starting up")
+    # Dashboard-managed settings (provider API keys, workflow_default_model, ...)
+    # live in the DB; without this the worker executed steps with env defaults
+    # regardless of what the user configured.
+    try:
+        from sandcastle.db_settings import restore_db_settings
+
+        await restore_db_settings()
+    except Exception as e:  # noqa: BLE001 - startup must not die on a bad setting
+        logger.warning("Could not restore DB settings on worker startup: %s", e)
     await _recover_stuck_runs()
 
 

@@ -38,6 +38,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an auth error. When the resolved provider's key is missing and a local
   `workflow_default_model` is set, the step now runs on the local default
   (with a warning). Steps whose provider is keyed run untouched.
+- The arq worker restores dashboard-managed settings from the DB at startup
+  (shared `restore_db_settings`). Provider keys and `workflow_default_model`
+  saved via the dashboard previously applied only to the API process - the
+  worker executed steps with the container env defaults regardless of what
+  the user configured. Note: the worker reads them at startup; restart it
+  after changing settings.
 - Docker: `WORKFLOWS_DIR` is now a shared, persistent volume (`app_workflows`)
   on the `sandcastle`, `scheduler`, and `worker` services. User-created and
   generated workflows previously lived in each container's own filesystem, so

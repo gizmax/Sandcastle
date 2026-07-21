@@ -67,14 +67,22 @@ class TestSettingsSecurityBoundary:
             )
 
     def test_startup_restorable_settings_match_api_mutable(self):
-        """The startup DB restore allowlist must match the API mutable settings."""
-        import inspect
+        """The DB restore allowlist (shared by API lifespan and worker startup)
+        must exist and never include security-critical settings."""
+        from sandcastle import db_settings as restore_module
         from sandcastle import main as main_module
+        import inspect
 
-        source = inspect.getsource(main_module.lifespan)
-        assert "_RESTORABLE_SETTINGS" in source, (
-            "Startup must use a _RESTORABLE_SETTINGS allowlist"
-        )
+        allowlist = restore_module._RESTORABLE_SETTINGS
+        for key in ("auth_required", "webhook_secret", "database_url", "redis_url"):
+            assert key not in allowlist, (
+                f"Security-critical setting '{key}' must NOT be restorable from DB"
+            )
+        # Both processes must actually use the shared restore
+        assert "restore_db_settings" in inspect.getsource(main_module.lifespan)
+        from sandcastle.queue import worker as worker_module
+
+        assert "restore_db_settings" in inspect.getsource(worker_module.startup)
 
 
 # ---------------------------------------------------------------------------
