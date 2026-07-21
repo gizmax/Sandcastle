@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { XCircle, GitCompareArrows, Trash2, Download, Copy, FileDown, ChevronDown, ArrowLeft, Sparkles, AlertTriangle, AlertOctagon, Shield, ChevronRight, Share2, ExternalLink, Radar, RotateCcw, FlaskConical, GitFork } from "lucide-react";
+import { API_BASE_URL } from "@/lib/constants";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useRuns } from "@/hooks/useRuns";
 import { useEventStreamContext } from "@/hooks/useEventStreamContext";
@@ -1037,6 +1038,19 @@ export default function RunDetailPage() {
                 <FileDown className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">Download</span> TXT
               </button>
+              <a
+                href={`${API_BASE_URL}/runs/${run.run_id}/output.pdf`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={cn(
+                  "flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5",
+                  "text-xs font-medium text-muted",
+                  "hover:bg-border/40 hover:text-foreground transition-colors"
+                )}
+              >
+                <FileDown className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Download</span> PDF
+              </a>
             </div>
           </div>
           <pre className="mt-3 max-h-64 overflow-auto rounded-lg bg-background p-3 font-mono text-xs text-foreground whitespace-pre-wrap">

@@ -6046,6 +6046,90 @@ async def get_run(run_id: str, req: Request) -> ApiResponse:
     )
 
 
+@router.get("/runs/{run_id}/output.pdf")
+async def download_run_output_pdf(run_id: str, req: Request):
+    """Render the run's outputs as a formatted, branded PDF."""
+    from fastapi.responses import FileResponse
+
+    from sandcastle.engine.pdf import generate_branded_pdf
+
+    tenant_id = get_tenant_id(req)
+    try:
+        run_uuid = uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_ID", message="Invalid run ID format")
+            ).model_dump(),
+        )
+
+    async with async_session() as session:
+        stmt = (
+            select(Run).options(selectinload(Run.steps)).where(Run.id == run_uuid)
+        )
+        stmt = _apply_tenant_filter(stmt, tenant_id, Run.tenant_id)
+        run = (await session.execute(stmt)).scalar_one_or_none()
+
+    if not run:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message="Run not found")
+            ).model_dump(),
+        )
+
+    # Build a markdown document from the run outputs (internal keys skipped)
+    status_val = run.status.value if hasattr(run.status, "value") else str(run.status)
+    lines = [
+        f"# {run.workflow_name}",
+        "",
+        f"Run `{str(run.id)[:8]}` - status **{status_val}** - "
+        f"cost ${run.total_cost_usd:.4f}",
+        "",
+    ]
+    outputs = run.output_data if isinstance(run.output_data, dict) else {}
+    steps_by_id = {s.step_id: s for s in (run.steps or [])}
+    for key, value in outputs.items():
+        if key.startswith("_"):
+            continue
+        lines.append(f"## {key}")
+        step = steps_by_id.get(key)
+        if step is not None and step.error:
+            lines.append(f"> Step error: {str(step.error)[:500]}")
+        if isinstance(value, str):
+            lines.append(value if value.strip() else "*(empty output)*")
+        else:
+            lines.append("```json")
+            lines.append(json.dumps(value, indent=2, ensure_ascii=False, default=str)[:20000])
+            lines.append("```")
+        lines.append("")
+    if len(lines) <= 4:
+        lines.append("*(this run produced no outputs)*")
+
+    pdf_dir = Path(settings.data_dir).resolve() / "run_pdfs"
+    pdf_dir.mkdir(parents=True, exist_ok=True)
+    pdf_path = pdf_dir / f"{run.id}.pdf"
+    try:
+        generate_branded_pdf("\n".join(lines), pdf_path)
+    except Exception as exc:
+        logger.error("Run output PDF generation failed for %s: %s", run_id, exc)
+        raise HTTPException(
+            status_code=500,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="PDF_FAILED", message="PDF generation failed"
+                )
+            ).model_dump(),
+        )
+
+    return FileResponse(
+        path=pdf_path,
+        media_type="application/pdf",
+        filename=f"{run.workflow_name}-{str(run.id)[:8]}.pdf",
+    )
+
+
 @router.get("/runs/{run_id}/steps/{step_id}/pdf")
 async def download_step_pdf(run_id: str, step_id: str, req: Request):
     """Download the PDF report artifact for a specific step."""
