@@ -496,7 +496,11 @@ class SandshoreRuntime:
             envs["ANTHROPIC_API_KEY"] = self.anthropic_api_key
         else:
             model_api_key = get_api_key(model_info)
-            envs["MODEL_API_KEY"] = model_api_key
+            # Key-less local providers (nim/ollama/omlx): the OpenAI client
+            # CONSTRUCTOR throws on an empty apiKey, crashing the runner before
+            # it can emit a single event - which surfaced as steps "completing"
+            # with empty output. Any non-empty placeholder satisfies it.
+            envs["MODEL_API_KEY"] = model_api_key or "no-key-required"
             envs["MODEL_ID"] = model_info.api_model_id
             base_url = resolve_base_url(model_info)
             if base_url:

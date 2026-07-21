@@ -2166,6 +2166,20 @@ async def _execute_step_once(
             f"output_type={type(output).__name__}, "
             f"output_len={len(str(output)) if output else 0}"
         )
+        # An empty sandbox result is a failure, not a silent success. A runner
+        # that crashes at startup (bad env, missing binary) can produce zero
+        # events - without this guard such steps "complete" with empty output
+        # and the run looks green while doing nothing.
+        if (
+            not output
+            and getattr(result, "num_turns", 0) == 0
+            and not getattr(result, "total_cost_usd", 0.0)
+        ):
+            raise RuntimeError(
+                f"Sandbox returned no output for step '{step.id}' "
+                f"(0 events, 0 turns) - the runner likely crashed at startup. "
+                f"Check the sandbox backend and runner environment."
+            )
         # Try to parse text output as JSON for downstream steps (parallel_over, etc.)
         if isinstance(output, str):
             text = output.strip()
