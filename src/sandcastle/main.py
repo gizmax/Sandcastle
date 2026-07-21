@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -23,7 +22,7 @@ from sandcastle.api.environments_admin import router as environments_admin_route
 from sandcastle.api.mesh import router as mesh_router
 from sandcastle.api.routes import router
 from sandcastle.api.security_headers import security_headers_middleware
-from sandcastle.config import Settings, settings, validate_server_bind
+from sandcastle.config import settings, validate_server_bind
 
 # Configure logging
 logging.basicConfig(
