@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.41.1] - 2026-07-21 - "Spark, Contained"
+
+### Fixed
+
+- Docker: new `docker-compose.gpu.yml` override passes the NVIDIA GPU through to the
+  `sandcastle` and `worker` containers. Without it, Spark Mode detection (which is
+  fail-closed and probes `nvidia-smi` in-process) silently reported `is_spark=False`
+  in the official compose deployment, even on a real DGX Spark. Verified on GB10
+  hardware: with the override, containers detect Spark Mode and auto-lift worker
+  concurrency. Requires nvidia-container-toolkit on the host.
+- Docker: the `worker` service now uses a process-based healthcheck. It inherited the
+  image's HTTP healthcheck but runs the arq queue worker with no HTTP server, so it
+  was reported permanently unhealthy and `docker compose up --wait` could never
+  succeed.
+
 ## [0.41.0] - 2026-07-21 - "Trust, Verified"
 
 A full adversarial audit of the engine, API, persistence, dashboard, and deployment, followed by

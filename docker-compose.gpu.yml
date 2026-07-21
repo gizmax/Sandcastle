@@ -1,0 +1,19 @@
+# GPU override for Spark Mode. nvidia-container-toolkit injects nvidia-smi only when the GPU is
+# reserved; detection is fail-closed.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+
+x-gpu: &gpu
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+
+services:
+  sandcastle:
+    <<: *gpu
+
+  worker:
+    <<: *gpu
