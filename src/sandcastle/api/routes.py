@@ -6107,11 +6107,24 @@ async def download_run_output_pdf(run_id: str, req: Request):
     if len(lines) <= 4:
         lines.append("*(this run produced no outputs)*")
 
+    # fpdf's core fonts (courier in code blocks) are latin-1 only; typographic
+    # characters from model output ("–", curly quotes, ellipsis) crash the
+    # render. Normalize the common ones, replace the rest.
+    _TYPOGRAPHIC = {
+        "–": "-", "—": "-", "‘": "'", "’": "'",
+        "“": '"', "”": '"', "…": "...", " ": " ",
+        "•": "-",
+    }
+    markdown_text = "\n".join(lines)
+    for src_ch, dst_ch in _TYPOGRAPHIC.items():
+        markdown_text = markdown_text.replace(src_ch, dst_ch)
+    markdown_text = markdown_text.encode("latin-1", errors="replace").decode("latin-1")
+
     pdf_dir = Path(settings.data_dir).resolve() / "run_pdfs"
     pdf_dir.mkdir(parents=True, exist_ok=True)
     pdf_path = pdf_dir / f"{run.id}.pdf"
     try:
-        generate_branded_pdf("\n".join(lines), pdf_path)
+        generate_branded_pdf(markdown_text, pdf_path)
     except Exception as exc:
         logger.error("Run output PDF generation failed for %s: %s", run_id, exc)
         raise HTTPException(
