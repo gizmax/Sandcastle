@@ -181,6 +181,10 @@ from sandcastle.queue.worker import enqueue_workflow
 
 logger = logging.getLogger(__name__)
 
+# Strong references to fire-and-forget tasks (evolution runs); asyncio only
+# keeps weak refs, an un-referenced task can be garbage-collected mid-flight.
+_BACKGROUND_TASKS: set = set()
+
 # Keep fire-and-forget API tasks alive until completion and surface failures.
 _background_tasks: set[asyncio.Task[Any]] = set()
 
@@ -13178,25 +13182,67 @@ async def start_evolution(req: Request) -> ApiResponse:
     # get_tenant_id is synchronous - do not await
     tenant_id = get_tenant_id(req)
 
-    from sandcastle.engine.evolution import run_evolution
+    from sandcastle.engine.eval import parse_eval_suite_string
+    from sandcastle.engine.evolution import _get_workflow_yaml, run_evolution
 
-    result = await run_evolution(
+    # Quick validations synchronously so the UI gets immediate, specific
+    # errors - then run the evolution loop in the background. With a real
+    # eval suite the loop executes many workflow runs and takes minutes;
+    # awaiting it here made the browser request time out ("Backend
+    # unreachable") while the loop kept running server-side.
+    try:
+        _get_workflow_yaml(parsed.workflow_name)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to load workflow '{parsed.workflow_name}': {exc}",
+        )
+    try:
+        import yaml as _yaml
+
+        _suite_data = _yaml.safe_load(parsed.eval_suite_yaml)
+        if isinstance(_suite_data, dict) and not _suite_data.get("workflow"):
+            _suite_data["workflow"] = parsed.workflow_name
+        _suite = parse_eval_suite_string(_yaml.safe_dump(_suite_data, sort_keys=False))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Failed to parse eval suite: {exc}")
+    if not _suite.cases:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Eval suite has no cases - evolution needs at least one eval "
+                "case (input + assertions) to score variants against."
+            ),
+        )
+
+    async def _run_in_background() -> None:
+        try:
+            result = await run_evolution(
+                workflow_name=parsed.workflow_name,
+                eval_suite_yaml=parsed.eval_suite_yaml,
+                max_iterations=parsed.max_iterations,
+                optimize_for=parsed.optimize_for,
+                budget_limit=parsed.budget_limit_usd,
+                tenant_id=tenant_id,
+            )
+            if result.get("status") == "failed":
+                logger.error(
+                    "Evolution for '%s' failed: %s",
+                    parsed.workflow_name,
+                    result.get("error"),
+                )
+        except Exception:
+            logger.exception("Evolution for '%s' crashed", parsed.workflow_name)
+
+    task = asyncio.create_task(_run_in_background())
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+
+    return ApiResponse(data=EvolutionStartResponse(
+        evolution_id="pending",
         workflow_name=parsed.workflow_name,
-        eval_suite_yaml=parsed.eval_suite_yaml,
-        max_iterations=parsed.max_iterations,
-        optimize_for=parsed.optimize_for,
-        budget_limit=parsed.budget_limit_usd,
-        tenant_id=tenant_id,
-    )
-
-    if result.get("status") == "failed":
-        raise HTTPException(status_code=400, detail=result.get("error", "Evolution failed"))
-
-    # Validate the raw dict through a typed schema before returning
-    return ApiResponse(data=EvolutionStartResponse(**{
-        k: v for k, v in result.items()
-        if k in EvolutionStartResponse.model_fields
-    }))
+        status="started",
+    ))
 
 
 @router.get("/evolution/{workflow_name}/status")
