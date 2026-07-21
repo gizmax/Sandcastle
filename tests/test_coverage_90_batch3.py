@@ -699,19 +699,23 @@ class TestValidateWorkflowInput:
         assert errors == []
         assert data["items"] == ["a", "b"]
 
-    def test_array_coercion_wrong_type(self):
+    def test_array_coercion_wraps_object(self):
+        # 0.43.0 contract: a bare JSON value is a single item
         from sandcastle.api.routes import _validate_workflow_input
         schema = {"properties": {"items": {"type": "array"}}}
-        data = {"items": '{"key": "val"}'}  # JSON object, not array
+        data = {"items": '{"key": "val"}'}
         errors = _validate_workflow_input(data, schema)
-        assert any("items" in e for e in errors)
+        assert errors == []
+        assert data["items"] == [{"key": "val"}]
 
-    def test_array_coercion_invalid_json(self):
+    def test_array_coercion_splits_plain_string(self):
+        # 0.43.0 contract: plain strings split on commas
         from sandcastle.api.routes import _validate_workflow_input
         schema = {"properties": {"items": {"type": "array"}}}
         data = {"items": "not_json"}
         errors = _validate_workflow_input(data, schema)
-        assert any("items" in e for e in errors)
+        assert errors == []
+        assert data["items"] == ["not_json"]
 
     def test_field_not_in_input_skipped(self):
         from sandcastle.api.routes import _validate_workflow_input

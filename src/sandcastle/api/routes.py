@@ -181,6 +181,10 @@ from sandcastle.queue.worker import enqueue_workflow
 
 logger = logging.getLogger(__name__)
 
+# Strong references to fire-and-forget tasks (evolution runs); asyncio only
+# keeps weak refs, an un-referenced task can be garbage-collected mid-flight.
+_BACKGROUND_TASKS: set = set()
+
 # Keep fire-and-forget API tasks alive until completion and surface failures.
 _background_tasks: set[asyncio.Task[Any]] = set()
 
@@ -356,17 +360,23 @@ def _validate_workflow_input(input_data: dict, schema: dict | None) -> list[str]
             if isinstance(value, str):
                 try:
                     parsed = json.loads(value)
-                    if not isinstance(parsed, list):
-                        errors.append(
-                            f"Input field '{field_name}' must be"
-                            f" an array, got {type(parsed).__name__}"
-                        )
-                    else:
+                    if isinstance(parsed, list):
                         input_data[field_name] = parsed
+                    else:
+                        # A bare JSON scalar ("douglas", 42) is a single item
+                        input_data[field_name] = [parsed]
                 except (json.JSONDecodeError, TypeError):
-                    errors.append(
-                        f"Input field '{field_name}' must be a valid JSON array, got '{value}'"
-                    )
+                    # Humans type comma-separated values, not JSON. Split on
+                    # commas, trim, drop empties ("douglas," -> ["douglas"]).
+                    items = [part.strip() for part in value.split(",")]
+                    items = [part for part in items if part]
+                    if items:
+                        input_data[field_name] = items
+                    else:
+                        errors.append(
+                            f"Input field '{field_name}' must be a list "
+                            f"(comma-separated values or a JSON array), got '{value}'"
+                        )
 
     return errors
 
@@ -6037,6 +6047,107 @@ async def get_run(run_id: str, req: Request) -> ApiResponse:
             signed=signed,
             audit_chain_head=audit_chain_head,
         )
+    )
+
+
+@router.get("/runs/{run_id}/output.pdf")
+async def download_run_output_pdf(run_id: str, req: Request):
+    """Render the run's outputs as a formatted, branded PDF."""
+    from fastapi.responses import FileResponse
+
+    from sandcastle.engine.pdf import generate_branded_pdf
+
+    tenant_id = get_tenant_id(req)
+    try:
+        run_uuid = uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_ID", message="Invalid run ID format")
+            ).model_dump(),
+        )
+
+    async with async_session() as session:
+        stmt = (
+            select(Run).options(selectinload(Run.steps)).where(Run.id == run_uuid)
+        )
+        stmt = _apply_tenant_filter(stmt, tenant_id, Run.tenant_id)
+        run = (await session.execute(stmt)).scalar_one_or_none()
+
+    if not run:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message="Run not found")
+            ).model_dump(),
+        )
+
+    # Build a markdown document from the run outputs (internal keys skipped)
+    status_val = run.status.value if hasattr(run.status, "value") else str(run.status)
+    lines = [
+        f"# {run.workflow_name}",
+        "",
+        f"Run `{str(run.id)[:8]}` - status **{status_val}** - "
+        f"cost ${run.total_cost_usd:.4f}",
+        "",
+    ]
+    outputs = run.output_data if isinstance(run.output_data, dict) else {}
+    steps_by_id = {s.step_id: s for s in (run.steps or [])}
+    for key, value in outputs.items():
+        if key.startswith("_"):
+            continue
+        lines.append(f"## {key}")
+        step = steps_by_id.get(key)
+        if step is not None and step.error:
+            lines.append(f"> Step error: {str(step.error)[:500]}")
+        if isinstance(value, str):
+            lines.append(value if value.strip() else "*(empty output)*")
+        else:
+            lines.append("```json")
+            lines.append(json.dumps(value, indent=2, ensure_ascii=False, default=str)[:20000])
+            lines.append("```")
+        lines.append("")
+    if len(lines) <= 4:
+        lines.append("*(this run produced no outputs)*")
+
+    # fpdf's core fonts (courier in code blocks) are latin-1 only; typographic
+    # characters from model output ("–", curly quotes, ellipsis) crash the
+    # render. Normalize the common ones, replace the rest.
+    _TYPOGRAPHIC = {
+        "–": "-", "—": "-", "‘": "'", "’": "'",
+        "“": '"', "”": '"', "…": "...", " ": " ",
+        "•": "-",
+    }
+    markdown_text = "\n".join(lines)
+    for src_ch, dst_ch in _TYPOGRAPHIC.items():
+        markdown_text = markdown_text.replace(src_ch, dst_ch)
+    markdown_text = markdown_text.encode("latin-1", errors="replace").decode("latin-1")
+    # fpdf cannot wrap an unbroken token wider than the page ("Not enough
+    # horizontal space to render a single character") - long URLs and JSON
+    # blobs are exactly that. Insert break points into any 80+ char token.
+    markdown_text = re.sub(r"(\S{80})(?=\S)", r"\1 ", markdown_text)
+
+    pdf_dir = Path(settings.data_dir).resolve() / "run_pdfs"
+    pdf_dir.mkdir(parents=True, exist_ok=True)
+    pdf_path = pdf_dir / f"{run.id}.pdf"
+    try:
+        generate_branded_pdf(markdown_text, pdf_path)
+    except Exception as exc:
+        logger.error("Run output PDF generation failed for %s: %s", run_id, exc)
+        raise HTTPException(
+            status_code=500,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="PDF_FAILED", message="PDF generation failed"
+                )
+            ).model_dump(),
+        )
+
+    return FileResponse(
+        path=pdf_path,
+        media_type="application/pdf",
+        filename=f"{run.workflow_name}-{str(run.id)[:8]}.pdf",
     )
 
 
@@ -13075,25 +13186,67 @@ async def start_evolution(req: Request) -> ApiResponse:
     # get_tenant_id is synchronous - do not await
     tenant_id = get_tenant_id(req)
 
-    from sandcastle.engine.evolution import run_evolution
+    from sandcastle.engine.eval import parse_eval_suite_string
+    from sandcastle.engine.evolution import _get_workflow_yaml, run_evolution
 
-    result = await run_evolution(
+    # Quick validations synchronously so the UI gets immediate, specific
+    # errors - then run the evolution loop in the background. With a real
+    # eval suite the loop executes many workflow runs and takes minutes;
+    # awaiting it here made the browser request time out ("Backend
+    # unreachable") while the loop kept running server-side.
+    try:
+        _get_workflow_yaml(parsed.workflow_name)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to load workflow '{parsed.workflow_name}': {exc}",
+        )
+    try:
+        import yaml as _yaml
+
+        _suite_data = _yaml.safe_load(parsed.eval_suite_yaml)
+        if isinstance(_suite_data, dict) and not _suite_data.get("workflow"):
+            _suite_data["workflow"] = parsed.workflow_name
+        _suite = parse_eval_suite_string(_yaml.safe_dump(_suite_data, sort_keys=False))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Failed to parse eval suite: {exc}")
+    if not _suite.cases:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Eval suite has no cases - evolution needs at least one eval "
+                "case (input + assertions) to score variants against."
+            ),
+        )
+
+    async def _run_in_background() -> None:
+        try:
+            result = await run_evolution(
+                workflow_name=parsed.workflow_name,
+                eval_suite_yaml=parsed.eval_suite_yaml,
+                max_iterations=parsed.max_iterations,
+                optimize_for=parsed.optimize_for,
+                budget_limit=parsed.budget_limit_usd,
+                tenant_id=tenant_id,
+            )
+            if result.get("status") == "failed":
+                logger.error(
+                    "Evolution for '%s' failed: %s",
+                    parsed.workflow_name,
+                    result.get("error"),
+                )
+        except Exception:
+            logger.exception("Evolution for '%s' crashed", parsed.workflow_name)
+
+    task = asyncio.create_task(_run_in_background())
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+
+    return ApiResponse(data=EvolutionStartResponse(
+        evolution_id="pending",
         workflow_name=parsed.workflow_name,
-        eval_suite_yaml=parsed.eval_suite_yaml,
-        max_iterations=parsed.max_iterations,
-        optimize_for=parsed.optimize_for,
-        budget_limit=parsed.budget_limit_usd,
-        tenant_id=tenant_id,
-    )
-
-    if result.get("status") == "failed":
-        raise HTTPException(status_code=400, detail=result.get("error", "Evolution failed"))
-
-    # Validate the raw dict through a typed schema before returning
-    return ApiResponse(data=EvolutionStartResponse(**{
-        k: v for k, v in result.items()
-        if k in EvolutionStartResponse.model_fields
-    }))
+        status="started",
+    ))
 
 
 @router.get("/evolution/{workflow_name}/status")

@@ -42,7 +42,6 @@ async def _validate_providers() -> None:
     providers but never blocks startup - this is informational only.
     """
     import asyncio
-    import os
     import time
 
     import httpx

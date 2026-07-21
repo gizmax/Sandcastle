@@ -822,21 +822,23 @@ class TestValidateWorkflowInput:
         assert errors == []
         assert data["items"] == ["a", "b"]
 
-    def test_array_coercion_not_list(self):
+    def test_array_coercion_wraps_object(self):
+        # 0.43.0 contract: a bare JSON value is a single item
         from sandcastle.api.routes import _validate_workflow_input
 
         data = {"items": '{"key": "val"}'}
         schema = {"properties": {"items": {"type": "array"}}}
-        errors = _validate_workflow_input(data, schema)
-        assert any("array" in e for e in errors)
+        assert _validate_workflow_input(data, schema) == []
+        assert data["items"] == [{"key": "val"}]
 
-    def test_array_coercion_invalid_json(self):
+    def test_array_coercion_splits_plain_string(self):
+        # 0.43.0 contract: plain strings split on commas
         from sandcastle.api.routes import _validate_workflow_input
 
         data = {"items": "not-json"}
         schema = {"properties": {"items": {"type": "array"}}}
-        errors = _validate_workflow_input(data, schema)
-        assert any("array" in e for e in errors)
+        assert _validate_workflow_input(data, schema) == []
+        assert data["items"] == ["not-json"]
 
 
 # ---------------------------------------------------------------------------
