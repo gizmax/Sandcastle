@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "generated_at": "2026-07-21T04:53:28Z",
+  "generated_at": "2026-07-21T13:31:59Z",
   "templates": [
     {
       "slug": "amira-dev/freelancer-proposal",
@@ -19253,7 +19253,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "760519d1b6aaf220ede2b58a3e6817703fafcba8c8513dfeabbd17d4aef1904d",
+      "sha256": "ceb1e4ab120d5247710ae59d5e6edc263485676e9c780036ce06f1fd9a187b67",
       "remix_count": 0,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -19301,7 +19301,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "83a2d1e6ebbf8276095ad2649a9307312173663cfab759ab200a2334aa2ab15b",
+      "sha256": "14ea2967164aeaa754a2b7498392acad1e53821a0eda711ed9afeddcfe26bbd2",
       "remix_count": 0,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -19349,7 +19349,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "0745181f89b4399ec7ea78e282a508458dd51fca92e36c0a41bef32ca0c0e153",
+      "sha256": "22b51581637eba021be473fc33c82ed8eb18671d52e336e16464d79ac01f9b9d",
       "remix_count": 0,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -19397,7 +19397,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "ba5f85ec8ed912303860149aa6c83ed93a129b27c4b5696888c4e9cb23244c28",
+      "sha256": "98664298e88aa0f3d2c11437b9ef250e3599514d1b45279e77487d6c2b74199c",
       "remix_count": 0,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -19445,7 +19445,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "43555ce383d8321034737171e564fe9284bd59e3b567084bd269560752069180",
+      "sha256": "095d1d545c2d8ae355555c7643c54ac2101217289abe8457997d3b236cdee8e9",
       "remix_count": 0,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -19493,7 +19493,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "cc0b5b8251e2404b20c6e8aa8980b2c877d1a62b447fb8f5361bb7eed73f1daf",
+      "sha256": "fa9fe793b4d4223166bda66d892290e9690f0b99716ed354e72ccae268c88d0b",
       "remix_count": 0,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -19541,7 +19541,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "aac5bbf9ce825b3a3062f23baa5a528a07d3a3cb4f3ce1174f439cd2db8911bc",
+      "sha256": "106c669e2d7a3f4d65ee41301d3d4a3194b421563e0a1622321cf9ecf91eea5f",
       "remix_count": 1,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -19589,7 +19589,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "3023bc14e70f7fca618e0ab72b1290ba9d9c743f1f84a890a15d9d5d097cd93b",
+      "sha256": "6d6dd8b53c7372b90db8e855b0850e23c7d6cac4e00571a489125539f2313682",
       "remix_count": 0,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -19637,7 +19637,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "6b095f50c9ca428662c6b39fe67bde6bd93ad1a88a5c79ee91a149f40b0fb05b",
+      "sha256": "702bb0dead85fb50ce7e2041d28b4433fde18f359ae7aa0c672d1ae2fa4a7da1",
       "remix_count": 0,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -19685,7 +19685,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "767506c28321304b41be6cf3ce785d74b709509d18c341b3200ff8152df03b4d",
+      "sha256": "4b9578eb3561e21dcfd896fd4d989bc1210db4cf5d18e0c1c7cfa420ba05fdcb",
       "remix_count": 1,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -19733,7 +19733,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "fa093227f690ecc42aa207952c62d3720708aeab78e9f135cc328c52f3242ff9",
+      "sha256": "1537d04dae76bc95eabcf732d53382f2b5e81e58240cd2a2f61201f87e4825ec",
       "remix_count": 1,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -19781,7 +19781,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "b69226ff0ea5c35cdfbfa5af3d226bc1a693fbc99741f4b91b4d7a5831e3e58f",
+      "sha256": "0d12071e66beb58f7849e8ba9476f78d001f34a0cc265dd376eefcea1b7d7b29",
       "remix_count": 0,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -19829,7 +19829,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "5a5f5ef4c4728a3f6730651dbaf1ecc81b78a9d8356040a39c08b26916c9e9a6",
+      "sha256": "87cc27a0cd5b5728bc5a7b72ba6e3924ecda5ab291cfdc35b3da2eb2e3dc0f62",
       "remix_count": 0,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -19877,7 +19877,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "7e637eb8a3f30534fd905da0fdfa1e4425b1016dd9a827a76652eacfc5ae95e3",
+      "sha256": "b5a405e7f805b39bc31359f960504af97c630b8ee06b1fbf767538318d5645ae",
       "remix_count": 0,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -19925,7 +19925,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "500bbb541550137859cfd4ae3ca59e17669e83ddf607004ac8dd2cf2bede4256",
+      "sha256": "ae3e08c6d027b02a6c8788ed7835dfdd55cdd2e3e059cd39c32d6394bcb3b40a",
       "remix_count": 0,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -19973,7 +19973,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "a3ac302620ea4cf4bc07daad1c7d834fb87c14ab4c688e7ada04f20362b271cc",
+      "sha256": "34c0ee98e12b20326d364c921cead9d967ee57d5cace76bab7c9e8e172852c7c",
       "remix_count": 0,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -20021,7 +20021,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "6a75e38bba84532b3d4cf0ede0186703936caf3e46aebda5bb842ff4e7aaff82",
+      "sha256": "a5fcfd39e4c24ac157425f2674b1720a6081f88c8548a99b25c98acd277d19ee",
       "remix_count": 0,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -20069,7 +20069,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "da4a5d28264d9b1d355dcc861bd8070d7f4cbac471700d9555db6b24f9a8d6b8",
+      "sha256": "1838272aeb2fe65d769ae000ffc951f0d8f4eed05940f20dc099a5d9f799c315",
       "remix_count": 0,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -20117,7 +20117,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "406bb88010112f1f0e2c25fe1c688a98a35ef15cbb325089cf2674ee71d52c51",
+      "sha256": "155fc176d3f358a6541db1cad68cb372dd19f943fb0d5ca26ab3bc9e8063e674",
       "remix_count": 1,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -20165,7 +20165,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "9896c9a3f1fb2894a215d6577d81c69c766ce9c5528d31c7de08f38f6fccb9d5",
+      "sha256": "0a882eeba2ec82c722673e284e987cd6c171854581188a6771e436871d9c38bd",
       "remix_count": 0,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -20213,7 +20213,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "1e39b7f335fd83de823f2fdc4bbe731cb65cfebb2813ea8e5fbe83e9050dfe01",
+      "sha256": "ba30aaab7774d26ea7cf0f172c3159eabcee5589ab3d8c7c93ffc6b49045c7ee",
       "remix_count": 0,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -20261,7 +20261,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "0f3a01f38adeab5bb754d5a9cfbe1618991c9595ceeaa17ce9a5a36e3c451ae0",
+      "sha256": "e29ca15d28eda2cad99143da048a028d5b469019cdf214aff695769667ee62e0",
       "remix_count": 0,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -20309,7 +20309,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "b381627fa5523e85d81f47faa524d51fd7ed72729faa31f8fbaf47e04689f3f3",
+      "sha256": "fe8fc1be68bc527d1829febdb49addebd0cf63bd5c725371bf0eb9dc41abcc5e",
       "remix_count": 0,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -20357,7 +20357,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "39d7443eba5971a8e2b50418b20737e5efa91f055af5a647a99a8e5a3bbcd416",
+      "sha256": "84c25fc04f425271dd5634aed4bd84c2bc4fe479ab1a9109cba26a6d4155babe",
       "remix_count": 0,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -20405,7 +20405,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "6962b8267a92e92f3ec531b9c997956dc964565dac8714b4798d131a633be8f3",
+      "sha256": "810ca6cf1197b44bd2e2bff2d423481382d75f94c2c9c7150b5e69d0c95d3033",
       "remix_count": 0,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -20453,7 +20453,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "8531a0dea375bd9749b06e04730aeeb1d03c716a56712c10787c68c9522b91c4",
+      "sha256": "cc92a1b9fff77eab9d8dcc0b21883ebdc2f7613ba3681ca90db08b13c1511864",
       "remix_count": 0,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -20501,7 +20501,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "47c2603a8beda4b3700fff03228b85417ace5cee45b0eeeced58bd8c765120b6",
+      "sha256": "88c05a337ec78895b90a5ee1147be262074a0b625f7855a94365736061ec60e2",
       "remix_count": 0,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -20549,7 +20549,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "7689597baa62c771ca18f938921274ae500b120acbf4d04716b535cafdc32e92",
+      "sha256": "0a90b92403b34b3a1c2936254f2b208dcff47b9555cd552230623c60e178e67f",
       "remix_count": 0,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -20597,7 +20597,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "c1d7b8bb9b999b42501d91f1770023c9838c74dc4c4b070284b0577173216136",
+      "sha256": "7ea977afb0a97d0db323172d820c3559c3fee7c476f95ae6b0abca42d381bc54",
       "remix_count": 0,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -20645,7 +20645,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "db8453b613e4d031a690e7069958f33399099cbbe5039e9fe227b5abbcaab7c9",
+      "sha256": "6053ac35b74020b63e232298abbb9dcef73e00bdf0ab5fd7cb95639359da5ad5",
       "remix_count": 0,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -20693,7 +20693,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "371b16fc6d863b81664c96ce346841b650bcdd5c49a2396cd18c62a42d2f6b3a",
+      "sha256": "af2d1f515f8a13efa12ae4dbc9d312ddb33cca884b794a79a9d5ea7c98c233c7",
       "remix_count": 0,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -20741,7 +20741,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "40d6ab0ee5ed9c0a3877924a12480a8abf510668d73c1a8fd8dd2eccafdfd569",
+      "sha256": "ea87da1c33adeeef1a2c884166b716d1264e30ea0263a6cf6b1d9f500e43bcb6",
       "remix_count": 0,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -20789,7 +20789,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "29952a004fa9c945ec9658889ed760aa512ec7efc4a7de09d3da05602e825813",
+      "sha256": "5ff32795da0f9152c7c7bc62a9bb715e2c931409276c553ea1a19a6d388fd019",
       "remix_count": 0,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -20837,7 +20837,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "72a0f0dfc3713339a45a045af09b0c0473016f4470593945350e02eb1d395813",
+      "sha256": "b0b1bd8ca41c752300decaf530a934e598c5f176ff6d394c2af0dffb552bc180",
       "remix_count": 0,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -20885,7 +20885,7 @@
         "sonnet"
       ],
       "step_count": 2,
-      "sha256": "abe5f437163471df83909bb25d92255feae4a8f8507c8122ccec760bd91c396f",
+      "sha256": "e26c02167f28b33213a260bdd744ad340e69f87abf69eb9cd7bc0b6a44db7aeb",
       "remix_count": 0,
       "estimated_cost_per_run": 0.025,
       "avg_execution_time": "~8s"
@@ -20967,7 +20967,7 @@
     "total_templates": 283,
     "total_authors": 49,
     "total_downloads": 8055,
-    "last_updated": "2026-07-21T04:53:28Z"
+    "last_updated": "2026-07-21T13:31:59Z"
   },
   "collections": [
     {
