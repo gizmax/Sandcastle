@@ -139,6 +139,21 @@ def _in_process_code_steps():
 
 
 @pytest.fixture(autouse=True)
+def _restore_process_env():
+    """Restore os.environ after every test.
+
+    Several CLI/config tests exercise .env loading, which mutates os.environ
+    directly (e.g. SANDBOX_BACKEND, ANTHROPIC_API_KEY) and leaks into later
+    tests under reordered runs. Snapshot and restore per test so env state
+    can never cascade across the suite.
+    """
+    before = os.environ.copy()
+    yield
+    os.environ.clear()
+    os.environ.update(before)
+
+
+@pytest.fixture(autouse=True)
 def _reset_module_globals():
     """Clear in-memory module caches between tests.
 
@@ -186,6 +201,16 @@ def _reset_module_globals():
         from sandcastle.engine import otel as _otel
 
         _otel._tracer = None
+    except Exception:
+        pass
+
+    # Global APScheduler: jobs added by scheduler tests must not leak into
+    # unrelated tests that iterate the shared scheduler (e.g. list_schedules).
+    try:
+        from sandcastle.queue import scheduler as _sched
+
+        if _sched._scheduler is not None:
+            _sched._scheduler.remove_all_jobs()
     except Exception:
         pass
 

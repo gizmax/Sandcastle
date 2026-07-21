@@ -601,10 +601,17 @@ def list_schedules() -> list[dict]:
     scheduler = get_scheduler()
     jobs = []
     for job in scheduler.get_jobs():
+        # Pending jobs (added while the scheduler is stopped/paused) have no
+        # computed run time; APScheduler raises AttributeError instead of
+        # returning None for those.
+        try:
+            next_run_time = job.next_run_time
+        except AttributeError:
+            next_run_time = None
         jobs.append({
             "id": job.id,
             "name": job.name,
-            "next_run_time": str(job.next_run_time) if job.next_run_time else None,
+            "next_run_time": str(next_run_time) if next_run_time else None,
             "trigger": str(job.trigger),
         })
     return jobs
