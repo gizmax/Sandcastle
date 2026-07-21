@@ -523,9 +523,14 @@ class DockerBackend:
             # Without this, a hanging container would block forever
             # since container.log(follow=True) never returns.
             await container.start()
-            logs = await container.log(
-                stdout=True, stderr=True, follow=True
-            )
+            # aiodocker API drift: log(follow=True) returns a coroutine resolving
+            # to a list in older releases, but an async generator directly in
+            # 0.27+ - awaiting the generator raises TypeError. Support both.
+            import inspect as _inspect
+
+            logs = container.log(stdout=True, stderr=True, follow=True)
+            if _inspect.isawaitable(logs):
+                logs = await logs
 
             deadline = time.monotonic() + timeout + 30.0  # 30s grace
             async for line in logs:

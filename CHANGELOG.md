@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   anonymous volume: the runner upload lands on the volume while the rootfs
   stays read-only, and `AutoRemove` cleans the volume up with the container.
   Verified on GB10: reproduces without the volume, passes with it.
+- Docker sandbox backend: log streaming crashed with "object async_generator
+  can't be used in 'await' expression" on aiodocker 0.27+, where
+  `log(follow=True)` returns an async generator instead of a coroutine.
+  Both API shapes are handled now.
 - Docker: `WORKFLOWS_DIR` is now a shared, persistent volume (`app_workflows`)
   on the `sandcastle`, `scheduler`, and `worker` services. User-created and
   generated workflows previously lived in each container's own filesystem, so
