@@ -362,6 +362,32 @@ export default function RunDetailPage() {
     URL.revokeObjectURL(url);
   }, [run, filterOutputs]);
 
+  const [pdfDownloading, setPdfDownloading] = useState(false);
+
+  const handleDownloadPdf = useCallback(async () => {
+    if (!run || pdfDownloading) return;
+    setPdfDownloading(true);
+    try {
+      // Plain <a href> sends no X-API-Key; fetch the PDF with auth headers
+      // and hand the blob to the browser instead.
+      const resp = await fetch(`${API_BASE_URL}/runs/${run.run_id}/output.pdf`, {
+        headers: api.authHeaders(),
+      });
+      if (!resp.ok) throw new Error(`PDF download failed (${resp.status})`);
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${run.workflow_name}-${run.run_id.slice(0, 8)}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error("PDF download failed");
+    } finally {
+      setPdfDownloading(false);
+    }
+  }, [run, pdfDownloading]);
+
   const handleDownloadTxt = useCallback(() => {
     if (!run) return;
     const clean = filterOutputs(run.outputs);
@@ -1038,19 +1064,22 @@ export default function RunDetailPage() {
                 <FileDown className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">Download</span> TXT
               </button>
-              <a
-                href={`${API_BASE_URL}/runs/${run.run_id}/output.pdf`}
-                target="_blank"
-                rel="noopener noreferrer"
+              <button
+                onClick={() => void handleDownloadPdf()}
+                disabled={pdfDownloading}
                 className={cn(
                   "flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5",
                   "text-xs font-medium text-muted",
-                  "hover:bg-border/40 hover:text-foreground transition-colors"
+                  "hover:bg-border/40 hover:text-foreground transition-colors",
+                  "disabled:opacity-50 disabled:cursor-not-allowed"
                 )}
               >
                 <FileDown className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Download</span> PDF
-              </a>
+                <span className="hidden sm:inline">
+                  {pdfDownloading ? "Rendering..." : "Download"}
+                </span>{" "}
+                PDF
+              </button>
             </div>
           </div>
           <pre className="mt-3 max-h-64 overflow-auto rounded-lg bg-background p-3 font-mono text-xs text-foreground whitespace-pre-wrap">
