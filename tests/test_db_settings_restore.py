@@ -74,3 +74,41 @@ class TestTemplateReplayFallback:
         monkeypatch.setattr(settings, "workflows_dir", str(tmp_path))
         with pytest.raises(FileNotFoundError):
             await _load_versioned_workflow_yaml("no-such-workflow-xyz", None)
+
+
+class TestArrayInputCoercion:
+    """Array input fields accept human comma-separated values, not just JSON."""
+
+    def _validate(self, value):
+        from sandcastle.api.routes import _validate_workflow_input
+
+        data = {"competitors": value}
+        errors = _validate_workflow_input(
+            data,
+            {"properties": {"competitors": {"type": "array"}}, "required": []},
+        )
+        return errors, data["competitors"]
+
+    def test_comma_separated_string(self):
+        errors, value = self._validate("douglas,notino, sephora")
+        assert errors == []
+        assert value == ["douglas", "notino", "sephora"]
+
+    def test_trailing_comma(self):
+        errors, value = self._validate("douglas,")
+        assert errors == []
+        assert value == ["douglas"]
+
+    def test_json_array_still_works(self):
+        errors, value = self._validate('["a", "b"]')
+        assert errors == []
+        assert value == ["a", "b"]
+
+    def test_single_value(self):
+        errors, value = self._validate("douglas")
+        assert errors == []
+        assert value == ["douglas"]
+
+    def test_empty_string_errors(self):
+        errors, _ = self._validate(",,")
+        assert len(errors) == 1

@@ -356,17 +356,23 @@ def _validate_workflow_input(input_data: dict, schema: dict | None) -> list[str]
             if isinstance(value, str):
                 try:
                     parsed = json.loads(value)
-                    if not isinstance(parsed, list):
-                        errors.append(
-                            f"Input field '{field_name}' must be"
-                            f" an array, got {type(parsed).__name__}"
-                        )
-                    else:
+                    if isinstance(parsed, list):
                         input_data[field_name] = parsed
+                    else:
+                        # A bare JSON scalar ("douglas", 42) is a single item
+                        input_data[field_name] = [parsed]
                 except (json.JSONDecodeError, TypeError):
-                    errors.append(
-                        f"Input field '{field_name}' must be a valid JSON array, got '{value}'"
-                    )
+                    # Humans type comma-separated values, not JSON. Split on
+                    # commas, trim, drop empties ("douglas," -> ["douglas"]).
+                    items = [part.strip() for part in value.split(",")]
+                    items = [part for part in items if part]
+                    if items:
+                        input_data[field_name] = items
+                    else:
+                        errors.append(
+                            f"Input field '{field_name}' must be a list "
+                            f"(comma-separated values or a JSON array), got '{value}'"
+                        )
 
     return errors
 
