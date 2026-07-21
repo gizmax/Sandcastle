@@ -137,6 +137,18 @@ def _valid_nim_id(model_str: str) -> bool:
     return bool(rest) and ".." not in rest and _NIM_ID_RE.match(rest) is not None
 
 
+def _valid_ollama_id(model_str: str) -> bool:
+    """True if *model_str* is a well-formed dynamic ``ollama/<tag>`` model string.
+
+    Ollama serves whatever models are pulled locally (``ollama pull qwen3:8b``), so
+    the catalogue is not hardcoded. Same character discipline as NIM ids.
+    """
+    if not (isinstance(model_str, str) and model_str.startswith("ollama/")):
+        return False
+    rest = model_str[len("ollama/"):]
+    return bool(rest) and ".." not in rest and _NIM_ID_RE.match(rest) is not None
+
+
 def _valid_adapter_id(model_str: str) -> bool:
     """True if *model_str* is a well-formed ``adapter/<id>`` (Self-Tune adapter)."""
     return (
@@ -161,6 +173,13 @@ def resolve_model(model_str: str) -> ModelInfo:
         return ModelInfo(
             "nim", model_str[len("nim/"):], "runner-openai.mjs",
             "NIM_API_KEY", "http://localhost:8000/v1", 0.0, 0.0, region="local",
+        )
+    if _valid_ollama_id(model_str):
+        # Dynamic ollama/<tag> - any locally pulled model. Base URL comes from
+        # resolve_base_url (OLLAMA_HOST-aware), the placeholder here is unused.
+        return ModelInfo(
+            "ollama", model_str[len("ollama/"):], "runner-openai.mjs",
+            "", "http://localhost:11434/v1", 0.0, 0.0, region="local",
         )
     if _valid_adapter_id(model_str):
         # A locally-trained LoRA adapter (Overnight Self-Tune), served by the local
@@ -258,6 +277,25 @@ def maybe_spark_nim_route(model_str: str) -> str:
     if not is_nim_reachable():
         return model_str
     return settings.spark_nim_default_model or _SPARK_NIM_DEFAULT
+
+
+def effective_model(model_str: str) -> str:
+    """Resolve the effective model for a step: user default first, then Spark autoroute.
+
+    ``"sonnet"`` is the parse-time default (StepDefinition.model), so a step without an
+    explicit ``model:`` is indistinguishable from ``model: sonnet`` here - both count as
+    "the bare default", exactly as :func:`maybe_spark_nim_route` has always treated
+    them. When ``settings.workflow_default_model`` is set, it replaces the bare default
+    (and the autoroute then no-ops, because the result is no longer "sonnet"). Explicit
+    non-default models are never touched.
+    """
+    if model_str == "sonnet":
+        from sandcastle.config import settings
+
+        configured = getattr(settings, "workflow_default_model", "") or ""
+        if configured:
+            return configured
+    return maybe_spark_nim_route(model_str)
 
 
 def get_api_key(model_info: ModelInfo) -> str:

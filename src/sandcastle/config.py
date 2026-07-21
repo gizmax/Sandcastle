@@ -64,6 +64,12 @@ class Settings(BaseSettings):
     # answers, not that this model exists on it.
     spark_nim_default_model: str = "nim/llama-3.1-70b"
 
+    # Global default model for workflow steps that don't set an explicit `model:`.
+    # Empty = the built-in default ("sonnet", plus Spark autoroute when applicable).
+    # Settable at runtime via PATCH /api/settings (validated against resolve_model)
+    # and picked in the onboarding wizard from detected local providers.
+    workflow_default_model: str = ""
+
     # Overnight Self-Tune: the evolution loop may add a LoRA fine-tune mutation that
     # trains a local adapter on a workflow's own eval data and A/B-promotes it. Off by
     # default; the trainer is a deterministic mock unless trainer_backend="gpu" (real

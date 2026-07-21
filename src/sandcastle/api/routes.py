@@ -710,6 +710,7 @@ async def get_provider_health() -> ApiResponse:
             headers_fn = cfg.get("headers_fn")
             headers = headers_fn(api_key) if headers_fn else {}
 
+            models: list[str] = []
             if provider_name == "ollama":
                 # Ollama: check /api/tags (no auth needed). Respect OLLAMA_HOST so
                 # Docker deployments probe the host's server, not container localhost.
@@ -719,6 +720,12 @@ async def get_provider_health() -> ApiResponse:
                 async with httpx.AsyncClient(timeout=5.0) as client:
                     resp = await client.get(url)
                     resp.raise_for_status()
+                    try:
+                        models = [
+                            m["name"] for m in resp.json().get("models", []) if m.get("name")
+                        ][:20]
+                    except Exception:  # noqa: BLE001 - model list is best-effort
+                        models = []
             elif provider_name == "nim":
                 # Local NIM / vLLM (OpenAI-compatible): /v1/models answers, no auth
                 from sandcastle.config import settings as _nim_s
@@ -727,6 +734,12 @@ async def get_provider_health() -> ApiResponse:
                 async with httpx.AsyncClient(timeout=5.0) as client:
                     resp = await client.get(nim_base + "/v1/models")
                     resp.raise_for_status()
+                    try:
+                        models = [
+                            m["id"] for m in resp.json().get("data", []) if m.get("id")
+                        ][:20]
+                    except Exception:  # noqa: BLE001 - model list is best-effort
+                        models = []
             elif key_env == "ANTHROPIC_API_KEY":
                 # Anthropic: minimal messages call - 400 = reachable (bad request ok)
                 body = {
@@ -755,7 +768,10 @@ async def get_provider_health() -> ApiResponse:
                         resp.raise_for_status()
 
             latency_ms = round((time.monotonic() - start) * 1000, 1)
-            return {"status": "ok", "latency_ms": latency_ms, "region": region}
+            entry: dict = {"status": "ok", "latency_ms": latency_ms, "region": region}
+            if models:
+                entry["models"] = models
+            return entry
         except Exception as exc:
             latency_ms = round((time.monotonic() - start) * 1000, 1)
             return {
@@ -9688,6 +9704,7 @@ def _mask(value: str) -> str:
 def _build_settings_response() -> SettingsResponse:
     """Build a SettingsResponse from the current runtime settings."""
     return SettingsResponse(
+        workflow_default_model=settings.workflow_default_model,
         anthropic_api_key=_mask(settings.anthropic_api_key),
         e2b_api_key=_mask(settings.e2b_api_key),
         openai_api_key=_mask(settings.openai_api_key),
@@ -9765,10 +9782,33 @@ async def update_settings(
         "default_max_cost_usd",
         "log_level",
         "max_workflow_depth",
+        "workflow_default_model",
     }
 
     # Collect non-None updates (schema already validated all constraints)
     raw_updates = {k: v for k, v in request.model_dump().items() if v is not None}
+
+    # workflow_default_model must resolve to a known/valid model string (empty clears
+    # it). Reject unknowns here so a typo never reaches the DB and breaks runs later.
+    _wdm = raw_updates.get("workflow_default_model")
+    if _wdm:
+        from sandcastle.engine.providers import resolve_model as _resolve_model
+
+        try:
+            _resolve_model(_wdm)
+        except KeyError:
+            raise HTTPException(
+                status_code=400,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="UNKNOWN_MODEL",
+                        message=(
+                            f"'{_wdm}' is not a known model. Use a registered model, "
+                            "nim/<id>, or ollama/<tag>."
+                        ),
+                    )
+                ).model_dump(),
+            )
 
     # Defense-in-depth: strip any fields not in the allowlist (should not happen
     # if SettingsUpdateRequest is kept in sync, but guards against future drift)

@@ -497,7 +497,7 @@
       <a class="brand" href="/" aria-label="Sandcastle home">
         <span class="glyph" aria-hidden="true">🏰</span>
         <span>Sandcastle</span>
-        <span class="tm">v0.41.0</span>
+        <span class="tm">v0.42.0</span>
       </a>
       <nav class="primary" aria-label="Primary">
         <a class="muted" href="/pricing/">Pricing</a>
@@ -530,9 +530,9 @@
           <aside class="latest-stamp" aria-label="Latest release">
             <div class="ls-cap"><span>Latest release</span><span class="dot" aria-hidden="true"></span></div>
             <div class="ls-body">
-              <span class="ls-ver">v0.41.0</span>
-              <div class="ls-name">Trust, Verified</div>
-              <div class="ls-meta"><span>July&nbsp;21,&nbsp;2026</span><span><a href="#v0-41-0">Read&nbsp;↓</a></span></div>
+              <span class="ls-ver">v0.42.0</span>
+              <div class="ls-name">Your Box, Your Default</div>
+              <div class="ls-meta"><span>July&nbsp;21,&nbsp;2026</span><span><a href="#v0-42-0">Read&nbsp;↓</a></span></div>
             </div>
           </aside>
         </div>
@@ -545,12 +545,51 @@
     <section class="log" aria-label="Release log">
       <div class="wrap">
 
+        <!-- ===================== v0.42.0 ===================== -->
+        <article class="entry is-latest reveal" id="v0-42-0" aria-labelledby="t-0420">
+          <div class="entry-margin">
+            <span class="ver">v0.42.0</span>
+            <span class="ver-date">July 21, 2026</span>
+            <span class="ver-tag">★ Latest</span>
+            <div class="ver-rule" aria-hidden="true"></div>
+          </div>
+          <div class="entry-body">
+            <h2 class="entry-title" id="t-0420">Your Box, Your Default</h2>
+            <p class="entry-lede">
+              Born on real hardware: deploying to an NVIDIA DGX Spark exposed how much of the local-first story assumed bare metal. Now the Docker deployment discovers what your box actually runs - a host Ollama, a local vLLM - lists its models in the onboarding wizard, and one click makes one the default for every step that doesn't name a model. Cloud keys stay one paste away, side by side.
+            </p>
+
+            <ul class="feats">
+              <li class="feat">
+                <span class="feat-chip headline">local · headline</span>
+                <div class="feat-text">
+                  <h3>Default model picker</h3>
+                  <p>New <code>workflow_default_model</code> setting: steps without an explicit <code>model:</code> use it instead of the built-in default. Pick it in the wizard from detected local models or set it via <code>PATCH /api/settings</code> - values are validated against the model registry before they can ever break a run.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">local</span>
+                <div class="feat-text">
+                  <h3>Any Ollama model, first-class</h3>
+                  <p><code>ollama/&lt;tag&gt;</code> now resolves dynamically like <code>nim/&lt;id&gt;</code> always has - any locally pulled model at <code>$0/run</code>, region local, with the same injection-safe character discipline. Base URLs honour <code>OLLAMA_HOST</code> everywhere.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">discovery</span>
+                <div class="feat-text">
+                  <h3>Docker finds your local models</h3>
+                  <p>Provider discovery (0.41.2) respects <code>OLLAMA_HOST</code> and probes <code>NIM_BASE_URL</code>, so a containerized Sandcastle detects the host&rsquo;s Ollama and any OpenAI-compatible vLLM. <code>/health/providers</code> now returns each local provider&rsquo;s model list. And Spark Mode works in Docker via the new <code>docker-compose.gpu.yml</code> override (0.41.1).</p>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </article>
+
         <!-- ===================== v0.41.0 ===================== -->
-        <article class="entry is-latest reveal" id="v0-41-0" aria-labelledby="t-0410">
+        <article class="entry reveal" id="v0-41-0" aria-labelledby="t-0410">
           <div class="entry-margin">
             <span class="ver">v0.41.0</span>
             <span class="ver-date">July 21, 2026</span>
-            <span class="ver-tag">★ Latest</span>
             <div class="ver-rule" aria-hidden="true"></div>
           </div>
           <div class="entry-body">
