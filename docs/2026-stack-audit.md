@@ -10,7 +10,7 @@ Comprehensive audit of:
 - AI provider integrations + model IDs + beta headers
 - Python backend dependencies
 - Dashboard frontend dependencies
-- 62 connectors (sampled)
+- 64 connectors (sampled)
 - Open protocols (MCP, A2A, OpenAPI, Schema.org, OTel, CSP)
 - SEO + AI bot policy
 - EU AI Act Annex IV coverage

@@ -1,6 +1,10 @@
 # Sandcastle -Technical Specification v1.0
 # Workflow Orchestrator Built on Sandstorm
 
+> **Historical design document.** This v1.0 specification describes the
+> Sandstorm-based architecture and is superseded by Sandcastle's Sandshore,
+> pluggable-backend architecture.
+
 ## OVERVIEW
 
 Sandcastle is a workflow orchestrator for autonomous agents. It uses Sandstorm

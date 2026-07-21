@@ -7,9 +7,12 @@ first. `--local` parses the workflow and drives the engine executor directly.
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
 
 from sandcastle.__main__ import _run_local
+from sandcastle.engine.executor import WorkflowResult
 
 CODE_ONLY_WORKFLOW = """name: cli-local-test
 description: A code-only workflow that runs with no server and no API keys.
@@ -46,17 +49,40 @@ def test_run_local_unknown_workflow_exits_cleanly(capsys):
     assert "not found" in capsys.readouterr().err
 
 
-def test_run_local_resolves_builtin_template_name(tmp_path, capsys):
-    """A bare built-in template name resolves (does not error as 'not found'). It may
-    fail later for lack of provider keys, but resolution + planning must succeed."""
-    # 'summarize' is a built-in template; with no key it will fail at the LLM step,
-    # which exits 2 (run failed) - never the 'not found' path (exit 1).
-    try:
+def test_run_local_resolves_builtin_template_name(capsys):
+    """A bare built-in template name resolves and is passed to the executor."""
+    from sandcastle.templates import get_template
+
+    result = WorkflowResult(
+        run_id="mock-run",
+        outputs={"summary": "mocked"},
+        total_cost_usd=0.0,
+        status="completed",
+    )
+    with (
+        patch("sandcastle.templates.get_template", wraps=get_template) as get_template_mock,
+        patch(
+            "sandcastle.models.db.init_db",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("database disabled for this unit test"),
+        ),
+        patch(
+            "sandcastle.engine.executor.execute_workflow",
+            new_callable=AsyncMock,
+            return_value=result,
+        ) as execute_workflow_mock,
+    ):
         _run_local("summarize", {"text": "hello"}, None)
-    except SystemExit as exc:
-        assert exc.code in (0, 2), f"unexpected exit code {exc.code}"
-    combined = capsys.readouterr()
-    assert "not found" not in (combined.out + combined.err)
+
+    get_template_mock.assert_called_once_with("summarize")
+    execute_workflow_mock.assert_awaited_once()
+    execution_args = execute_workflow_mock.await_args.kwargs
+    assert execution_args["workflow"].name == "text-summarizer"
+    assert execution_args["plan"].stages
+    assert execution_args["input_data"] == {"text": "hello"}
+    output = capsys.readouterr().out
+    assert "completed" in output
+    assert "mocked" in output
 
 
 # ---------------------------------------------------------------------------

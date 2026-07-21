@@ -14,8 +14,6 @@ export interface StreamEvent {
 // Reconnect with exponential backoff - starts at 1s, maxes at 30s
 const BASE_DELAY_MS = 1000;
 const MAX_DELAY_MS = 30000;
-// In mock mode, stop retrying after this many attempts to avoid log spam
-const MOCK_MAX_ATTEMPTS = 2;
 
 function getBackoffDelay(attempt: number): number {
   const delay = Math.min(BASE_DELAY_MS * Math.pow(2, attempt), MAX_DELAY_MS);
@@ -58,12 +56,6 @@ export function useEventStream() {
 
   const scheduleReconnect = useCallback((connectFn: () => void) => {
     if (unmountedRef.current) return;
-
-    if (attemptRef.current >= MOCK_MAX_ATTEMPTS) {
-      mockModeRef.current = true;
-      console.info("[Sandcastle] Event stream unavailable, stopping reconnection attempts");
-      return;
-    }
 
     const delay = getBackoffDelay(attemptRef.current);
     attemptRef.current += 1;

@@ -30,6 +30,15 @@ const STEP_LABELS = ["Welcome", "Connect", "Pick", "Configure", "Run"];
 const STORAGE_KEY = "sandcastle-onboarding-step";
 const MAX_STEP = 4;
 
+function providerSettingForKey(key: string):
+  | "anthropic_api_key"
+  | "openai_api_key"
+  | "mistral_api_key" {
+  if (key.startsWith("sk-ant-")) return "anthropic_api_key";
+  if (key.startsWith("sk-")) return "openai_api_key";
+  return "mistral_api_key";
+}
+
 // -----------------------------------------------------------------------
 // Step 1: Connect - choose local (auto-detected) or cloud (paste a key)
 // -----------------------------------------------------------------------
@@ -68,7 +77,9 @@ function StepConnect({ onNext, onSkip }: { onNext: () => void; onSkip: () => voi
     setSaving(true);
     setSaveError(null);
     try {
-      await api.post("/settings", { api_key: apiKey.trim() });
+      const key = apiKey.trim();
+      const res = await api.patch("/settings", { [providerSettingForKey(key)]: key });
+      if (res.error) throw new Error(res.error.message);
       setSaveSuccess(true);
     } catch {
       setSaveError("Could not save key. Check your connection.");

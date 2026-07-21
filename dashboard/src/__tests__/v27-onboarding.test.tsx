@@ -53,7 +53,6 @@ vi.mock("@/api/client", () => ({
     getStoredKey: vi.fn(() => null),
     storeApiKey: vi.fn(),
     authHeaders: vi.fn(() => ({})),
-    sseUrl: vi.fn((p: string) => `/api${p}`),
     isMockMode: false,
     onMockChange: vi.fn(() => () => {}),
   },

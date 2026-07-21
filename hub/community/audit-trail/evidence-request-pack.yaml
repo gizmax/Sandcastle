@@ -1,0 +1,41 @@
+name: "Audit Evidence Request Pack"
+description: "Draft a clear, scoped request list for audit evidence owners."
+version: "1.0.0"
+default_model: sonnet
+
+input_schema:
+  required:
+    - request
+  properties:
+    request:
+      type: string
+      description: "The source context to use for this audit evidence request pack for compliance grc."
+    audience:
+      type: string
+      description: "Who will use the resulting deliverable."
+      default: "internal team"
+
+steps:
+  - id: assess-request
+    type: llm
+    model: sonnet
+    prompt: |
+      Assess the request and identify the evidence, constraints, and decisions needed for audit evidence request pack for compliance grc.
+
+      Request: {input.request}
+      Intended audience: {input.audience}
+
+      Return a structured working brief that is precise about unknowns and avoids inventing facts.
+
+  - id: prepare-deliverable
+    type: llm
+    model: haiku
+    depends_on:
+      - assess-request
+    prompt: |
+      Turn this working brief into a practical audit evidence request pack deliverable.
+
+      Working brief: {steps.assess-request.output}
+
+      Use concise headings, clear ownership where relevant, and explicit follow-up questions.
+

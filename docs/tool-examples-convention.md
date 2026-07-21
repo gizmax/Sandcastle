@@ -13,7 +13,7 @@ Two numbers drove this convention:
 - **Parameter-shape accuracy: 72 percent -> 90 percent** once each tool
   carried 1 to 5 worked examples.
 
-With 62 connectors and several tools each, Sandcastle is in the regime where
+With 64 tool connectors, Sandcastle is in the regime where
 both effects compound. Skipping examples is the single fastest way to make
 your connector look broken in evals.
 
@@ -95,7 +95,7 @@ Run the linter before publishing a connector. It calls `validate_tool` on
 every entry and prints aggregated errors:
 
 ```bash
-sandcastle tools validate
+sandcastle tools validate <path-or-dir>
 ```
 
 A passing run prints `OK` and exits 0. Any tool with errors fails the

@@ -4,6 +4,10 @@ on:
   pull_request:
     paths:
       - "hub/**"
+      - "site/hub/**"
+      - "scripts/build_registry.py"
+      - "scripts/update_hub_registry.py"
+      - ".github/workflows/hub-validate.yml"
       - "src/sandcastle/templates/**"
 
 jobs:
@@ -40,36 +44,40 @@ jobs:
           schema_path = Path("hub/schema/template.schema.json")
           schema = json.loads(schema_path.read_text())
 
-          # 2. Load registry
-          registry_path = Path("hub/registry.json")
-          registry = json.loads(registry_path.read_text())
+          # 2. Load both runtime and generated-site registries.
+          registry_paths = [Path("hub/registry.json"), Path("site/hub/registry.json")]
+          template_count = 0
+          prefix = "https://raw.githubusercontent.com/gizmax/Sandcastle/main/"
+          repository_root = Path.cwd().resolve()
 
-          # 3. Validate each template entry against schema
-          for i, tmpl in enumerate(registry.get("templates", [])):
-              slug = tmpl.get("slug", f"index-{i}")
-              try:
-                  jsonschema.validate(tmpl, schema)
-              except jsonschema.ValidationError as e:
-                  errors.append(f"[{slug}] Schema validation: {e.message}")
+          # 3. Validate metadata, hashes, and raw-GitHub paths for every registry.
+          for registry_path in registry_paths:
+              registry = json.loads(registry_path.read_text())
+              template_count += len(registry.get("templates", []))
+              for i, tmpl in enumerate(registry.get("templates", [])):
+                  slug = tmpl.get("slug", f"index-{i}")
+                  label = f"{registry_path}:{slug}"
+                  try:
+                      jsonschema.validate(tmpl, schema)
+                  except jsonschema.ValidationError as e:
+                      errors.append(f"[{label}] Schema validation: {e.message}")
 
-          # 4. Verify SHA-256 checksums match local files
-          for tmpl in registry.get("templates", []):
-              slug = tmpl.get("slug", "?")
-              sha = tmpl.get("sha256")
-              dl_url = tmpl.get("download_url", "")
-
-              # Extract local path from download URL
-              prefix = "https://raw.githubusercontent.com/gizmax/Sandcastle/main/"
-              if dl_url.startswith(prefix):
-                  local_path = Path(dl_url[len(prefix):])
-                  if local_path.exists():
-                      actual = compute_sha256(local_path.read_text(encoding="utf-8"))
-                      if sha and sha != actual:
-                          errors.append(
-                              f"[{slug}] Checksum mismatch: registry={sha[:16]}... actual={actual[:16]}..."
-                          )
-                      elif not sha:
-                          errors.append(f"[{slug}] Missing sha256 in registry")
+                  sha = tmpl.get("sha256")
+                  dl_url = tmpl.get("download_url", "")
+                  if not dl_url.startswith(prefix):
+                      errors.append(f"[{label}] download_url must target this repository")
+                      continue
+                  local_path = (repository_root / dl_url[len(prefix):]).resolve()
+                  if not local_path.is_relative_to(repository_root) or not local_path.is_file():
+                      errors.append(f"[{label}] download_url target does not exist in the repository")
+                      continue
+                  actual = compute_sha256(local_path.read_text(encoding="utf-8"))
+                  if not sha:
+                      errors.append(f"[{label}] Missing sha256")
+                  elif sha != actual:
+                      errors.append(
+                          f"[{label}] Checksum mismatch: registry={sha[:16]}... actual={actual[:16]}..."
+                      )
 
           # 5. Scan all template YAML files for security issues
           template_dirs = [
@@ -93,5 +101,8 @@ jobs:
                   print(f"  - {e}")
               sys.exit(1)
           else:
-              print(f"All {len(registry.get('templates', []))} templates validated successfully.")
+              print(f"All {template_count} registry entries validated successfully.")
           SCRIPT
+
+      - name: Verify site registry is generated from canonical registry
+        run: python scripts/update_hub_registry.py --check

@@ -861,13 +861,6 @@ steps:
 class TestClassifyFallback:
     """Test that unknown category defaults to first category."""
 
-    def test_classify_fuzzy_match_partial(self):
-        """The classify step uses fuzzy matching. When exact match fails,
-        it tries partial match, then defaults to first category."""
-        # This is a unit test of the matching logic in _execute_classify_step.
-        # We test the full function with mocked API call.
-        pass  # Covered in integration test below
-
     @pytest.mark.asyncio
     async def test_classify_defaults_to_first_on_unknown(self):
         """When LLM returns an unknown category, should default to first category."""

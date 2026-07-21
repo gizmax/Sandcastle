@@ -645,7 +645,7 @@ describe("Mock router completeness", () => {
   const EXCLUDED_ENDPOINTS = [
     { method: "GET", path: "/events", reason: "SSE streaming endpoint" },
     { method: "GET", path: "/runs/test-id/stream", reason: "SSE streaming endpoint" },
-    { method: "POST", path: "/upload", reason: "File upload (handled by client.uploadFile)" },
+    { method: "POST", path: "/upload", reason: "File upload (handled by client.upload)" },
     { method: "GET", path: "/runs/test-id/steps/step1/pdf", reason: "Binary file download" },
     { method: "GET", path: "/runs/test-id/artifacts/file.txt", reason: "Binary file download" },
   ];

@@ -10,9 +10,9 @@ interface UseAgentEventsResult {
 }
 
 /**
- * Subscribes to /api/runs/{runId}/agent-stream via SSE and surfaces
- * Anthropic agent events. Falls back gracefully to status "unavailable"
- * when the backend endpoint is not yet wired up (e.g. 404).
+ * Subscribes to the existing /api/runs/{runId}/stream endpoint. That stream
+ * emits run and step progress, not Anthropic agent reasoning events, so run
+ * detail views do not mount AgentEventStream until such events are available.
  *
  * Uses fetch + ReadableStream so that auth headers can be passed (EventSource
  * does not support custom headers). AbortController is used for cleanup.
@@ -38,7 +38,7 @@ export function useAgentEvents(runId: string | null | undefined): UseAgentEvents
     const controller = new AbortController();
     abortRef.current = controller;
 
-    const url = `${API_BASE_URL}/runs/${runId}/agent-stream`;
+    const url = `${API_BASE_URL}/runs/${runId}/stream`;
 
     (async () => {
       try {

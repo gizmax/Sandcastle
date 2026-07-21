@@ -710,9 +710,10 @@ class TestScrubPatterns:
         assert "pypi-AgEIcHlwaS5vcmcCJDY4ZDVhY2Zm" not in _scrub_text(text)
 
     def test_slack_token_pattern(self):
-        # Slack tokens (xoxb-/xoxp-) tested via test_secret_scrubbing_v22.py
-        # Can't include realistic patterns here due to push protection
-        pass
+        token = "xoxb-FAKE0TEST0TOK-FAKE0TEST0TOKE"
+        scrubbed = _scrub_text(f"Slack credential: {token}")
+        assert token not in scrubbed
+        assert "[REDACTED]" in scrubbed
 
 
 # =========================================================================

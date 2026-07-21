@@ -113,6 +113,7 @@ function LayoutInner() {
   const [dlqCount, setDlqCount] = useState(0);
   const [approvalsCount, setApprovalsCount] = useState(0);
   const [isDemo, setIsDemo] = useState(api.isMockMode);
+  const [retryingConnection, setRetryingConnection] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const { subscribe } = useEventStreamContext();
@@ -141,6 +142,15 @@ function LayoutInner() {
 
   // Track mock mode changes
   useEffect(() => api.onMockChange(setIsDemo), []);
+
+  const handleRetryConnection = useCallback(async () => {
+    setRetryingConnection(true);
+    try {
+      await api.reprobeBackend();
+    } finally {
+      setRetryingConnection(false);
+    }
+  }, []);
 
   // Seed demo notifications when entering mock mode
   useEffect(() => {
@@ -237,6 +247,14 @@ function LayoutInner() {
           <div className="flex items-center justify-center gap-2 bg-warning/15 border-b border-warning/30 px-3 py-1.5 text-xs font-medium text-warning">
             Demo Mode - Backend unavailable, showing sample data.
             Run <code className="mx-1 rounded bg-warning/10 px-1.5 py-0.5 font-mono">sandcastle serve</code> to connect.
+            <button
+              type="button"
+              onClick={() => void handleRetryConnection()}
+              disabled={retryingConnection}
+              className="rounded border border-warning/40 px-2 py-0.5 font-semibold transition-colors hover:bg-warning/10 disabled:cursor-wait disabled:opacity-60"
+            >
+              {retryingConnection ? "Retrying…" : "Retry connection"}
+            </button>
           </div>
         )}
         <Header

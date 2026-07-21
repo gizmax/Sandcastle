@@ -17,7 +17,7 @@
     },
     "description": {
       "type": "string",
-      "maxLength": 500,
+      "maxLength": 2000,
       "description": "Short description of what the template does"
     },
     "author": {
@@ -36,7 +36,25 @@
     },
     "category": {
       "type": "string",
-      "enum": ["sales_crm", "marketing", "support", "engineering", "hr_legal", "general_ai"],
+      "enum": [
+        "sales_crm",
+        "marketing",
+        "support",
+        "engineering",
+        "hr_legal",
+        "general_ai",
+        "devops",
+        "data",
+        "creative",
+        "compliance_grc",
+        "healthcare",
+        "fintech_banking",
+        "llmops_ai_eng",
+        "personal",
+        "research_intel",
+        "finance_ops",
+        "automation_rpa"
+      ],
       "description": "Primary category for the template"
     },
     "tags": {

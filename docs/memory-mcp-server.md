@@ -82,33 +82,26 @@ name: support-agent-with-memory
 description: Customer support reply that recalls prior interactions.
 steps:
   - id: recall
-    type: mcp_tool
-    server: sandcastle-memory
-    tool: search
-    inputs:
-      query: "{{ message }}"
-      user_id: "user:{{ customer_id }}"
-      limit: 5
+    type: standard
+    prompt: |
+      Use the configured `sandcastle-memory` MCP server's `search` tool to
+      find up to five memories for user:{input.customer_id} about:
+      {input.message}
   - id: reply
-    type: claude
-    model: claude-haiku-4-5
-    inputs:
-      system: |
-        You are a polite support agent. Use the retrieved memories below to
-        personalise the reply. Cite memory ids when relevant.
-      user: |
-        Memories: {{ steps.recall.results }}
-        Question: {{ message }}
+    type: standard
+    depends_on: [recall]
+    prompt: |
+      You are a polite support agent. Use the retrieved memories below to
+      personalise the reply. Cite memory ids when relevant.
+      Memories: {steps.recall.output}
+      Question: {input.message}
   - id: remember
-    type: mcp_tool
-    server: sandcastle-memory
-    tool: add
-    inputs:
-      text: "{{ message }} -> {{ steps.reply.output }}"
-      user_id: "user:{{ customer_id }}"
-      metadata:
-        run_id: "{{ run_id }}"
-        kind: support-thread
+    type: standard
+    depends_on: [reply]
+    prompt: |
+      Use the configured `sandcastle-memory` MCP server's `add` tool to save
+      this support interaction for user:{input.customer_id}:
+      {input.message} -> {steps.reply.output}
 ```
 
 ## CLI

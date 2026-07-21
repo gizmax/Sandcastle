@@ -222,18 +222,15 @@ class TestRoutesNonLocalMode:
         assert response.status_code in (200, 500)
 
     def test_generate_endpoint_no_api_key(self):
-        """POST /api/generate with no API key returns 400."""
-        with patch("sandcastle.api.routes.settings") as mock_s:
-            mock_s.anthropic_api_key = ""
-            mock_s.rate_limit_enabled = False
-            mock_s.multi_tenant = False
-            import os
-            os.environ.pop("ANTHROPIC_API_KEY", None)
+        """POST /api/generate returns NO_PROVIDER when provider resolution is empty."""
+        with patch("sandcastle.engine.generator._resolve_api_key", return_value="") as mock_key:
             response = client.post(
                 "/api/generate",
                 json={"description": "create a workflow"},
             )
-        assert response.status_code in (400, 422, 500)
+        mock_key.assert_called_once_with()
+        assert response.status_code == 400
+        assert response.json()["detail"]["error"]["code"] == "NO_PROVIDER"
 
     def test_run_stream_invalid_id(self):
         """GET /api/runs/bad-id/stream returns error."""

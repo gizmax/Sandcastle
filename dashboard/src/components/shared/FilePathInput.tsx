@@ -20,7 +20,7 @@ export function FilePathInput({ value, onChange, accept }: FilePathInputProps) {
     setError(null);
     setUploading(true);
     try {
-      const res = await api.uploadFile(file);
+      const res = await api.upload(file);
       if (res.error) {
         setError(res.error.message);
       } else if (res.data) {

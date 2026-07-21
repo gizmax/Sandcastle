@@ -1,0 +1,41 @@
+name: "Renewal Brief"
+description: "Prepare a renewal conversation brief from account health, outcomes, and open risks."
+version: "1.0.0"
+default_model: sonnet
+
+input_schema:
+  required:
+    - request
+  properties:
+    request:
+      type: string
+      description: "The source context to use for this renewal brief for sales crm."
+    audience:
+      type: string
+      description: "Who will use the resulting deliverable."
+      default: "internal team"
+
+steps:
+  - id: assess-request
+    type: llm
+    model: sonnet
+    prompt: |
+      Assess the request and identify the evidence, constraints, and decisions needed for renewal brief for sales crm.
+
+      Request: {input.request}
+      Intended audience: {input.audience}
+
+      Return a structured working brief that is precise about unknowns and avoids inventing facts.
+
+  - id: prepare-deliverable
+    type: llm
+    model: haiku
+    depends_on:
+      - assess-request
+    prompt: |
+      Turn this working brief into a practical renewal brief deliverable.
+
+      Working brief: {steps.assess-request.output}
+
+      Use concise headings, clear ownership where relevant, and explicit follow-up questions.
+

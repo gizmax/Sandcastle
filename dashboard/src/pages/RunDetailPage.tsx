@@ -25,7 +25,6 @@ import { CelebrationModal } from "@/components/shared/CelebrationModal";
 import { Breadcrumb } from "@/components/shared/Breadcrumb";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { AiChatSidebar } from "@/components/runs/AiChatSidebar";
-import { AgentEventStream } from "@/components/agents/AgentEventStream";
 import { fireConfetti, playCelebrationSound } from "@/lib/confetti";
 import { detectAnomalies, detectRetryHeavy, type Anomaly } from "@/lib/anomalyDetection";
 import { formatDuration, formatCost, formatRelativeTime, parseUTC, cn, isSafeUrl } from "@/lib/utils";
@@ -969,9 +968,6 @@ export default function RunDetailPage() {
           onFork={handleFork}
         />
       </div>
-
-      {/* Agent Reasoning panel - live SSE stream of Anthropic agent events */}
-      {id && <AgentEventStream runId={id} />}
 
       {/* Generated images gallery */}
       {(() => {

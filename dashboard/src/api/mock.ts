@@ -8083,6 +8083,7 @@ const routes: MockRoute[] = [
       size_bytes: 1234567,
       storage: "local",
       url: null,
+      path: "/tmp/mock-uploads/uploaded-file.pdf",
     }),
   },
   // --- Workflow as API ---

@@ -142,45 +142,27 @@ describe("ApiClient", () => {
     });
   });
 
-  // ── sseUrl ──────────────────────────────────────────────────────────────
+  // ── authHeaders ─────────────────────────────────────────────────────────
 
-  describe("sseUrl", () => {
-    it("builds SSE URL with token when API key is set", async () => {
+  describe("authHeaders", () => {
+    it("keeps the API key in an X-API-Key header", async () => {
       globalThis.fetch = vi.fn().mockRejectedValue(new TypeError("no backend"));
 
       vi.resetModules();
       const { api } = await import("@/api/client");
       api.setApiKey("test-key-123");
 
-      const url = api.sseUrl("/events");
-      expect(url).toContain("/events");
-      expect(url).toContain("token=test-key-123");
+      expect(api.authHeaders()).toEqual({ "X-API-Key": "test-key-123" });
     });
 
-    it("builds SSE URL without token when no API key", async () => {
+    it("returns no auth header when no API key is set", async () => {
       globalThis.fetch = vi.fn().mockRejectedValue(new TypeError("no backend"));
 
       vi.resetModules();
       const { api } = await import("@/api/client");
       api.setApiKey(null);
 
-      const url = api.sseUrl("/events");
-      expect(url).not.toContain("token=");
-    });
-  });
-
-  // ── authHeaders ─────────────────────────────────────────────────────────
-
-  describe("authHeaders", () => {
-    it("includes X-API-Key when key is set", async () => {
-      globalThis.fetch = vi.fn().mockRejectedValue(new TypeError("no backend"));
-
-      vi.resetModules();
-      const { api } = await import("@/api/client");
-      api.setApiKey("my-key");
-
-      const headers = api.authHeaders();
-      expect(headers).toHaveProperty("X-API-Key", "my-key");
+      expect(api.authHeaders()).toEqual({});
     });
 
     it("does not include Content-Type", async () => {
@@ -296,6 +278,32 @@ describe("ApiClient", () => {
       expect(result.data).toEqual([{ id: 1 }]);
       // probe + first attempt + retry = 3 calls
       expect(callCount).toBe(3);
+    });
+
+    it("creates a fresh timeout signal for each GET retry", async () => {
+      let callCount = 0;
+      const requestSignals: AbortSignal[] = [];
+      globalThis.fetch = vi.fn().mockImplementation(async (_input, init?: RequestInit) => {
+        callCount++;
+        if (callCount === 1) {
+          return new Response(JSON.stringify({ data: { status: "ok" } }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (init?.signal) requestSignals.push(init.signal);
+        return new Response(JSON.stringify({ data: [] }), {
+          status: callCount === 2 ? 500 : 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      });
+
+      vi.resetModules();
+      const { api } = await import("@/api/client");
+      await api.get("/retry-with-fresh-timeout");
+
+      expect(requestSignals).toHaveLength(2);
+      expect(requestSignals[0]).not.toBe(requestSignals[1]);
     });
 
     it("does not retry POST requests on 500", async () => {

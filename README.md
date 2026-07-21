@@ -1,11 +1,11 @@
 # Sandcastle
 
-**Build once. Run anywhere.** Sandcastle is an open-source, production-ready orchestrator for AI agents. **Describe a workflow in plain English and it builds it** (or write the YAML yourself); run it on **any model** — Claude, GPT, Mistral, or a local model on your own box — and move between them with one line; deploy it **your way** — cloud, your own server, fully air-gapped, or EU-only; and it **gets better over time**, on its own. Local models run at `$0/run` with hard data-residency enforcement and a tamper-evident audit trail; the cloud is there too, with 7 providers and auto-failover, 22 step types, verified templates, and a full dashboard. Sovereign by default. European-built.
+**Build once. Run anywhere.** Sandcastle is an open-source, production-ready orchestrator for AI agents. **Describe a workflow in plain English and it builds it** (or write the YAML yourself); run it on **any model** — Claude, GPT, Mistral, or a local model on your own box — and move between them with one line; deploy it **your way** — cloud, your own server, fully air-gapped, or EU-only; and it **gets better over time**, on its own. Local models run at `$0/run` with hard data-residency enforcement and a tamper-evident audit trail; the cloud is there too, with 7 providers and auto-failover, 25 step types, verified templates, and a full dashboard. Sovereign by default. European-built.
 
 [![PyPI](https://img.shields.io/badge/PyPI-v0.40.4-blue?style=flat-square)](https://pypi.org/project/sandcastle-ai/0.40.4/)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-17900%2B%20passing-brightgreen?style=flat-square)](https://github.com/gizmax/Sandcastle/actions)
+[![Tests](https://img.shields.io/badge/tests-17154%20passing-brightgreen?style=flat-square)](https://github.com/gizmax/Sandcastle/actions)
 [![EU AI Act](https://img.shields.io/badge/EU%20AI%20Act-Compliant-009639?style=flat-square)](https://sandcastle-ai.eu/eu-ai-act/)
 [![Website](https://img.shields.io/badge/Website-sandcastle--ai.eu-blue?style=flat-square)](https://sandcastle-ai.eu)
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Dashboard-F59E0B?style=flat-square)](https://gizmax.github.io/Sandcastle/)
@@ -56,9 +56,9 @@
 - [Pluggable Sandbox Backends](#pluggable-sandbox-backends)
 - [Browser Step - LightPanda & Browserbase](#browser-step---lightpanda--browserbase)
 - [Multi-Provider Model Routing](#multi-provider-model-routing)
-- [62 Built-in Integrations](#62-built-in-integrations)
+- [64 Built-in Integrations](#64-built-in-integrations)
 - [Workflow Engine](#workflow-engine)
-- [22 Step Types](#22-step-types)
+- [25 Step Types](#25-step-types)
 - [Managed Agents](#managed-agents)
 - [Human Approval Gates](#human-approval-gates)
 - [Self-Optimizing Workflows (AutoPilot)](#self-optimizing-workflows-autopilot)
@@ -142,7 +142,7 @@ You'll need API keys for your chosen setup:
 
 Or use the `docker` backend (needs Docker installed) or `local` backend (dev only, no sandbox isolation) and skip the E2B key.
 
-Dashboard at `http://localhost:8080`, API at `http://localhost:8080/api`, 127 workflow templates included, 62 integrations ready to connect.
+Dashboard at `http://localhost:8080`, API at `http://localhost:8080/api`, 248 workflow templates included, 64 integrations ready to connect.
 
 Sandcastle auto-detects your environment. No `DATABASE_URL`? It uses SQLite. No `REDIS_URL`? Jobs run in-process. No S3 credentials? Files go to disk. **Same code, same API, same dashboard** - you just add connection strings when you're ready to scale.
 
@@ -214,10 +214,10 @@ With Redis, workflows run in background workers instead of in-process. You can r
 ```bash
 # Add to .env
 echo 'STORAGE_BACKEND=s3' >> .env
-echo 'S3_BUCKET=sandcastle-artifacts' >> .env
+echo 'STORAGE_BUCKET=sandcastle-artifacts' >> .env
 echo 'AWS_ACCESS_KEY_ID=...' >> .env
 echo 'AWS_SECRET_ACCESS_KEY=...' >> .env
-# For MinIO, also set: S3_ENDPOINT_URL=http://localhost:9000
+# For MinIO, also set: STORAGE_ENDPOINT=http://localhost:9000
 
 # Restart
 sandcastle serve
@@ -640,8 +640,8 @@ Once connected, ask your AI assistant to:
 | **Pluggable sandbox backends** (E2B, Docker, Local, Cloudflare) | Yes |
 | **Multi-provider model routing** (Claude, OpenAI, MiniMax, Google/Gemini, Mistral, Ollama, oMLX) | Yes |
 | **⚡ Spark Mode** — auto-detects NVIDIA DGX Spark, local-inference defaults, $0/run, air-gappable | Yes |
-| **62 built-in integrations** across 9 categories | Yes |
-| **22 step types** (standard, llm, http, code, race, sensor, gate, parse, managed-agent...) | Yes |
+| **64 built-in integrations** across 11 categories | Yes |
+| **25 step types** (standard, llm, http, code, race, sensor, gate, parse, managed-agent...) | Yes |
 | **Zero-config local mode** | Yes |
 | **DAG workflow orchestration** | Yes |
 | **Parallel step execution** | Yes |
@@ -662,8 +662,8 @@ Once connected, ask your AI assistant to:
 | **MCP server** (Claude Desktop, Cursor, Windsurf) | Yes |
 | **Docker one-command deploy** | Yes |
 | **Dashboard with real-time monitoring** | Yes |
-| **127 built-in workflow templates** | Yes |
-| **118 community templates** (Community Hub) | Yes |
+| **248 built-in workflow templates** | Yes |
+| **8 community-submitted templates** (Community Hub) | Yes |
 | **Visual workflow builder** | Yes |
 | **Directory input (file processing)** | Yes |
 | **CSV export per step** | Yes |
@@ -845,13 +845,13 @@ for the full list.
 
 ---
 
-## 62 Built-in Integrations
+## 64 Built-in Integrations
 
 <p align="center">
   <img src="docs/screenshots/integrations.png" alt="Integrations" width="720" />
 </p>
 
-Sandcastle ships with 62 zero-config tool connectors across 9 categories. Each integration is a lightweight JavaScript module that agents can call during workflow execution. Named connections let you wire multiple accounts (e.g. "production-slack" vs "staging-slack"), and all credentials are encrypted at rest with Fernet (AES-128-CBC + HMAC-SHA256).
+Sandcastle ships with 64 zero-config tool connectors across 11 categories. Each integration is a lightweight JavaScript module that agents can call during workflow execution. Named connections let you wire multiple accounts (e.g. "production-slack" vs "staging-slack"), and all credentials are encrypted at rest with Fernet (AES-128-CBC + HMAC-SHA256).
 
 | Category | Tools |
 |----------|-------|
@@ -980,9 +980,9 @@ For fine-grained control, you can still reference specific outputs explicitly us
 
 ---
 
-## 22 Step Types
+## 25 Step Types
 
-Sandcastle supports 22 step types for building complex workflows beyond simple LLM prompts:
+Sandcastle supports 25 step types for building complex workflows beyond simple LLM prompts:
 
 | Phase | Type | Description |
 |-------|------|-------------|
@@ -1007,6 +1007,10 @@ Sandcastle supports 22 step types for building complex workflows beyond simple L
 | **Built-in** | `browser` | Web automation with Playwright, LightPanda, or Browserbase |
 | **Built-in** | `composio` | 500+ business app actions via Composio integration |
 | **Built-in** | `report` | Generate PDF reports with charts, KPIs, and callouts |
+| **Built-in** | `agent` | Run a universal agent through the configured runtime |
+| **Built-in** | `tool` | Invoke a configured tool connector function directly |
+| **Built-in** | `computer-use` | Drive a browser or desktop with computer-use actions |
+| **Built-in** | `trajectory-replay` | Replay and evaluate a recorded execution trajectory |
 
 ```yaml
 steps:
@@ -1185,10 +1189,10 @@ HEALER_CONFIDENCE_THRESHOLD=0.8
 
 ```bash
 # Trigger a pass on demand
-curl -X POST http://localhost:8000/api/healer/run
+curl -X POST http://localhost:8080/api/healer/run
 
 # Review recent heal attempts (diagnosis, status, workflow, version)
-curl http://localhost:8000/api/healer/activity
+curl http://localhost:8080/api/healer/activity
 ```
 
 Human-in-the-loop by default: with `healer_auto_apply=false`, every patch waits for explicit approval before it goes live.
@@ -1270,12 +1274,12 @@ Built-in patterns for email, phone, SSN, and credit card numbers. Custom regex p
 
 ## Privacy Router (PII Redaction)
 
-The Privacy Router runs automatically on all step inputs and outputs, detecting and redacting sensitive data before it reaches logs, storage, or downstream steps.
+When enabled, the Privacy Router detects configured PII entities and redacts step outputs and webhook payloads selected by `apply_to`.
 
 **7 built-in PII patterns:** email addresses, phone numbers, SSNs, credit card numbers, IP addresses, IBANs, and dates of birth.
 
 **Two modes:**
-- `redact` - replaces matched values with `[REDACTED]` tokens
+- `redact` - replaces matched values with an entity token such as `[EMAIL]`
 - `audit_only` - logs the detection without modifying the data
 
 Configure per-workflow in YAML or globally via environment variables:
@@ -1283,19 +1287,26 @@ Configure per-workflow in YAML or globally via environment variables:
 ```yaml
 # Per-workflow configuration
 privacy:
+  enabled: true
   mode: redact            # "redact" | "audit_only"
-  patterns:               # optional: restrict to specific patterns
+  entities:               # optional: restrict to known entity types
     - email
     - credit_card
     - ssn
-  exclude_steps:          # optional: skip privacy check on these steps
-    - internal-analysis
+    - ip_address
+    - iban
+    - date_of_birth
+  apply_to:               # optional: defaults to outputs,webhooks
+    - outputs
+    - webhooks
+  replacement_template: "[{entity_type}]"
 ```
 
 ```bash
 # Per-server configuration (env vars)
-PRIVACY_MODE=redact
-PRIVACY_PATTERNS=email,phone,ssn,credit_card,ip,iban,dob
+PRIVACY_ENABLED=true
+PRIVACY_ENTITIES=email,phone,ssn,credit_card,ip_address,iban,date_of_birth
+PRIVACY_APPLY_TO=outputs,webhooks
 ```
 
 The Privacy Router integrates with the audit trail - every redaction event is logged with run ID, step ID, and matched pattern type (not the matched value).
@@ -1677,7 +1688,7 @@ Real-time activity stream on the dashboard: workflow runs, failures, edits, API 
   <img src="docs/screenshots/template-browser.png" alt="Template Browser" width="720" />
 </p>
 
-Sandcastle ships with 127 built-in workflow templates. The [Community Hub](https://sandcastle-ai.eu/hub) adds 118 more from the community - curated collections for marketing, sales, DevOps, and more.
+Sandcastle ships with 248 built-in workflow templates. The [Community Hub](https://sandcastle-ai.eu/hub) lists 181 templates, including 8 community-submitted templates, alongside curated collections for marketing, sales, DevOps, and more.
 
 | Category | Built-in Templates |
 |----------|-----------|
@@ -2016,7 +2027,7 @@ Visual drag-and-drop editor for building workflows. Add steps, connect dependenc
 
 ### Integrations
 
-62 tool connectors across 9 categories. Each tool shows connection status, named connections, and a configuration panel. Contextual banner highlights tools that are available but not yet configured.
+64 tool connectors across 11 categories. Each tool shows connection status, named connections, and a configuration panel. Contextual banner highlights tools that are available but not yet configured.
 
 <p align="center">
   <img src="docs/screenshots/integrations.png" alt="Integrations" width="720" />
@@ -2236,14 +2247,13 @@ First-run guided setup that walks new users through API key configuration, sandb
 |--------|----------|-------------|
 | `GET` | `/api/tools` | List all available integrations with status |
 | `GET` | `/api/tools/{id}` | Get tool detail and configuration |
-| `PUT` | `/api/tools/{id}/credentials` | Save encrypted credentials for a tool |
-| `DELETE` | `/api/tools/{id}/credentials` | Remove credentials |
+| `PUT` | `/api/tools/{tool}/credentials` | Save encrypted credentials for a tool |
+| `DELETE` | `/api/tools/{tool}/connections/{conn}` | Delete a named tool connection |
 
 ### Evaluations
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/eval/suites` | List evaluation test suites |
 | `GET` | `/api/eval/runs` | List eval runs with results |
 | `GET` | `/api/eval/stats` | Pass rates, cost stats, trends |
 
@@ -2291,8 +2301,9 @@ First-run guided setup that walks new users through API key configuration, sandb
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/memory/add` | Store memory entry |
-| `POST` | `/api/memory/search` | Semantic search |
+| `GET` | `/api/memories` | List memories for a scope (`scope_id` required) |
+| `POST` | `/api/memories` | Store memory entry |
+| `POST` | `/api/memories/search` | Semantic search |
 | `DELETE` | `/api/memories/{id}` | Delete memory |
 
 ### Advisor
@@ -2368,7 +2379,7 @@ flowchart TD
     A2A["A2A Agents"] -->|"POST /a2a"| API
     AGUI["AG-UI Clients"] -->|"GET /api/agui/stream"| API
 
-    API --> Engine["Workflow Engine\n(DAG executor, 22 step types)"]
+    API --> Engine["Workflow Engine\n(DAG executor, 25 step types)"]
 
     Engine --> Standard["Standard Steps"]
     Engine --> Sub["Sub-Workflow Steps\n(recursive execution)"]
@@ -2391,7 +2402,7 @@ flowchart TD
     CF --> Execution
     E2B2 --> Merge
 
-    Execution["Parallel Execution\n62 integrations"] --> Provider["Multi-Provider Router\nClaude / OpenAI / MiniMax / Gemini"]
+    Execution["Parallel Execution\n64 integrations"] --> Provider["Multi-Provider Router\nClaude / OpenAI / MiniMax / Gemini"]
 
     Provider --> Gate{"Approval\nGate?"}
 
@@ -2425,7 +2436,7 @@ flowchart TD
 | Storage | Local filesystem | S3 / MinIO |
 | Agent Runtime | Sandshore (E2B / Docker / Local / Cloudflare) | Sandshore (E2B / Docker / Local / Cloudflare) |
 | Model Providers | Claude, OpenAI, MiniMax, Google/Gemini | Claude, OpenAI, MiniMax, Google/Gemini |
-| Integrations | 62 tools, 9 categories | 62 tools, 9 categories |
+| Integrations | 64 tools, 11 categories | 64 tools, 11 categories |
 | Security | Fernet encryption, HMAC auth, rate limiting | + Redis rate limiting, seccomp, IP allowlists |
 | Dashboard | React 18, TypeScript, Vite, Tailwind CSS v4 | React 18, TypeScript, Vite, Tailwind CSS v4 |
 | DAG Visualization | @xyflow/react | @xyflow/react |
@@ -2520,8 +2531,9 @@ LICENSE_KEY=                   # sc_lic_... (community tier if empty)
 
 # EU AI Act / Compliance
 COMPLIANCE_MODE=               # "eu_ai_act" to enable enforcement
-PRIVACY_MODE=redact            # "redact" | "audit_only" (default: off)
-PRIVACY_PATTERNS=email,phone,ssn,credit_card,ip,iban,dob
+PRIVACY_ENABLED=false          # enable server-level PII redaction
+PRIVACY_ENTITIES=email,phone,ssn,credit_card
+PRIVACY_APPLY_TO=outputs,webhooks
 
 # OpenTelemetry (requires pip install sandcastle-ai[otel])
 OTEL_ENABLED=false
@@ -2582,11 +2594,8 @@ export OMLX_BASE_URL=http://192.168.1.100:8080
 ## Development
 
 ```bash
-# Run tests (14,600+ passing)
+# Run tests (17,154 passing)
 uv run pytest
-
-# Type check backend
-uv run mypy src/
 
 # Type check frontend
 cd dashboard && npx tsc --noEmit

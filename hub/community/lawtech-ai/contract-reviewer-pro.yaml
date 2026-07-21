@@ -1,0 +1,41 @@
+name: "Contract Reviewer Pro"
+description: "Prepare a clause-risk review and negotiation checklist for a commercial agreement."
+version: "1.0.0"
+default_model: sonnet
+
+input_schema:
+  required:
+    - request
+  properties:
+    request:
+      type: string
+      description: "The source context to use for this contract reviewer pro for hr legal."
+    audience:
+      type: string
+      description: "Who will use the resulting deliverable."
+      default: "internal team"
+
+steps:
+  - id: assess-request
+    type: llm
+    model: sonnet
+    prompt: |
+      Assess the request and identify the evidence, constraints, and decisions needed for contract reviewer pro for hr legal.
+
+      Request: {input.request}
+      Intended audience: {input.audience}
+
+      Return a structured working brief that is precise about unknowns and avoids inventing facts.
+
+  - id: prepare-deliverable
+    type: llm
+    model: haiku
+    depends_on:
+      - assess-request
+    prompt: |
+      Turn this working brief into a practical contract reviewer pro deliverable.
+
+      Working brief: {steps.assess-request.output}
+
+      Use concise headings, clear ownership where relevant, and explicit follow-up questions.
+

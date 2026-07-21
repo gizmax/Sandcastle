@@ -195,7 +195,7 @@ steps:
     retry:
       max_attempts: 2
       backoff: exponential
-      on_failure: continue
+      on_failure: skip
 
   - id: "security-audit"
     depends_on: ["scan-structure", "check-dependencies"]

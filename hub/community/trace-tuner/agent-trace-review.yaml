@@ -1,0 +1,41 @@
+name: "Agent Trace Review"
+description: "Analyze an agent trace for tool-use risks, dead ends, and practical improvements."
+version: "1.0.0"
+default_model: sonnet
+
+input_schema:
+  required:
+    - request
+  properties:
+    request:
+      type: string
+      description: "The source context to use for this agent trace review for llmops ai eng."
+    audience:
+      type: string
+      description: "Who will use the resulting deliverable."
+      default: "internal team"
+
+steps:
+  - id: assess-request
+    type: llm
+    model: sonnet
+    prompt: |
+      Assess the request and identify the evidence, constraints, and decisions needed for agent trace review for llmops ai eng.
+
+      Request: {input.request}
+      Intended audience: {input.audience}
+
+      Return a structured working brief that is precise about unknowns and avoids inventing facts.
+
+  - id: prepare-deliverable
+    type: llm
+    model: haiku
+    depends_on:
+      - assess-request
+    prompt: |
+      Turn this working brief into a practical agent trace review deliverable.
+
+      Working brief: {steps.assess-request.output}
+
+      Use concise headings, clear ownership where relevant, and explicit follow-up questions.
+

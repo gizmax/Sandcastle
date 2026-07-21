@@ -1,10 +1,20 @@
 import { API_BASE_URL } from "@/lib/constants";
-import { mockFetch } from "@/api/mock";
 
 interface ApiResponse<T = unknown> {
   data: T | null;
   error: { code: string; message: string } | null;
   meta?: { total: number; limit: number; offset: number } | null;
+}
+
+interface UploadedFile {
+  file_id: string;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  storage: string;
+  url: string | null;
+  /** Legacy path field retained by the backend for file-path workflow inputs. */
+  path: string;
 }
 
 const REQUEST_TIMEOUT = 15_000; // 15 seconds
@@ -183,12 +193,15 @@ class ApiClient {
     return h;
   }
 
-  private mock<T>(
+  private async mock<T>(
     path: string,
     params?: Record<string, string>,
     method?: string,
     body?: unknown
-  ): ApiResponse<T> {
+  ): Promise<ApiResponse<T>> {
+    // Keep the demo fixture out of the production entry chunk. It is loaded
+    // only after the backend probe has put the client into demo mode.
+    const { mockFetch } = await import("@/api/mock");
     return mockFetch(path, params, method, body) as ApiResponse<T>;
   }
 
@@ -199,11 +212,19 @@ class ApiClient {
   private async fetchWithRetry(
     input: string,
     init: RequestInit,
-    retries: number = MAX_RETRIES
+    retries: number = MAX_RETRIES,
+    timeoutMs: number = REQUEST_TIMEOUT
   ): Promise<Response> {
     let lastResponse: Response | null = null;
+    const { signal: externalSignal, ...requestInit } = init;
     for (let attempt = 0; attempt <= retries; attempt++) {
-      const res = await fetch(input, init);
+      // A timeout must be created for each attempt. Reusing a timeout signal
+      // would leave later retries with only the first attempt's remaining time.
+      const timeoutSignal = AbortSignal.timeout(timeoutMs);
+      const signal = externalSignal
+        ? AbortSignal.any([externalSignal, timeoutSignal])
+        : timeoutSignal;
+      const res = await fetch(input, { ...requestInit, signal });
       if (!isRetryableStatus(res.status) || attempt === retries) {
         return res;
       }
@@ -242,7 +263,6 @@ class ApiClient {
       try {
         const res = await this.fetchWithRetry(url.toString(), {
           headers: this.headers(),
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT),
         });
         return this.handleResponse<T>(res);
       } catch {
@@ -297,10 +317,10 @@ class ApiClient {
           method: "POST",
           headers: this.headers(),
           body: body ? JSON.stringify(body) : undefined,
-          signal: AbortSignal.timeout(timeoutMs ?? REQUEST_TIMEOUT),
         },
         // Only retry idempotent-safe requests; POST mutations get 0 retries
-        0
+        0,
+        timeoutMs ?? REQUEST_TIMEOUT
       );
       return this.handleResponse<T>(res);
     } catch {
@@ -321,7 +341,6 @@ class ApiClient {
           method: "PATCH",
           headers: this.headers(),
           body: JSON.stringify(body),
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT),
         },
         0
       );
@@ -344,7 +363,6 @@ class ApiClient {
           method: "PUT",
           headers: this.headers(),
           body: JSON.stringify(body),
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT),
         },
         0
       );
@@ -366,7 +384,6 @@ class ApiClient {
         {
           method: "DELETE",
           headers: this.headers(),
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT),
         },
         0
       );
@@ -376,39 +393,13 @@ class ApiClient {
     }
   }
 
-  async uploadFile(file: File): Promise<ApiResponse<{ path: string; filename: string; size: number }>> {
-    await this.ensureInit();
-    if (this.useMock) {
-      return {
-        data: { path: `/tmp/mock-uploads/${file.name}`, filename: file.name, size: file.size },
-        error: null,
-      };
-    }
-
-    try {
-      const form = new FormData();
-      form.append("file", file);
-      const headers: HeadersInit = {};
-      if (this.apiKey) headers["X-API-Key"] = this.apiKey;
-      // Do NOT set Content-Type - browser sets multipart boundary automatically
-      const res = await fetch(`${this.baseUrl}/upload`, {
-        method: "POST",
-        headers,
-        body: form,
-        signal: AbortSignal.timeout(60_000),
-      });
-      return this.handleResponse(res);
-    } catch {
-      return { data: null, error: { code: "NETWORK_ERROR", message: "Upload failed" } };
-    }
-  }
-
   /** Upload a file for use as a workflow input field.
    *
-   * Returns a file_id that can be stored as a field value (prefixed with @upload:).
+   * Returns the complete backend response, including a file_id for @upload:
+   * values and the legacy path for file-path workflow inputs.
    * Do NOT set Content-Type header - the browser sets the multipart boundary automatically.
    */
-  async upload(file: File): Promise<ApiResponse<{ file_id: string; filename: string; content_type: string; size_bytes: number; storage: string; url: string | null }>> {
+  async upload(file: File): Promise<ApiResponse<UploadedFile>> {
     await this.ensureInit();
     if (this.useMock) {
       return {
@@ -419,6 +410,7 @@ class ApiClient {
           size_bytes: file.size,
           storage: "local",
           url: null,
+          path: `/tmp/demo-uploads/${file.name}`,
         },
         error: null,
       };
@@ -427,12 +419,10 @@ class ApiClient {
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const headers: HeadersInit = {};
-      if (this.apiKey) headers["X-API-Key"] = this.apiKey;
       // Do NOT set Content-Type - browser sets multipart boundary automatically
       const res = await fetch(`${this.baseUrl}/upload`, {
         method: "POST",
-        headers,
+        headers: this.authHeaders(),
         body: formData,
         signal: AbortSignal.timeout(60_000),
       });
@@ -442,20 +432,7 @@ class ApiClient {
     }
   }
 
-  /**
-   * Build an SSE URL with token query parameter for auth.
-   * @deprecated Use fetch() with authHeaders() instead. This method puts the
-   * API key in the URL query string which leaks it into server logs and
-   * browser history. Kept only for backward compatibility with existing tests.
-   */
-  sseUrl(path: string): string {
-    const url = new URL(`${this.baseUrl}${path}`, window.location.origin);
-    if (this.apiKey) {
-      url.searchParams.set("token", this.apiKey);
-    }
-    return url.toString();
-  }
 }
 
 export const api = new ApiClient(API_BASE_URL);
-export type { ApiResponse };
+export type { ApiResponse, UploadedFile };

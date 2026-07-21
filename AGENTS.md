@@ -19,7 +19,7 @@ orchestrator. License BSL-1.1.
 ## Commands
 
 - Install: `pip install -e ".[dev,mcp,memory,otel,parse,report,docker,security]"` (a ready venv lives in `.venv/`, use `.venv/bin/python`)
-- Tests: `.venv/bin/python -m pytest tests/ -q --tb=short --timeout=60` (full suite ~14k tests; prefer running only the test files relevant to your change)
+- Tests: `.venv/bin/python -m pytest tests/ -q --tb=short --timeout=60` (full suite 17,154 tests; prefer running only the test files relevant to your change)
 - Lint: `.venv/bin/python -m ruff check src tests` and `.venv/bin/python -m ruff format --check src tests` (line-length 100, E501 ignored)
 - Dashboard: `cd dashboard && npm ci && npm run build` (runs `tsc` + vite build); tests via `npm test` (vitest) if present
 - Migrations check: `alembic upgrade head` against Postgres in CI (`postgres-migrations` job)

@@ -527,7 +527,6 @@ class TestWorkflowVersioning:
         assert resp.status_code == 404
 
     @pytest.mark.asyncio
-    @pytest.mark.skip(reason="Route ordering: /versions/{version:int} matches before /versions/diff")
     async def test_version_diff_one_missing(self):
         """Diff with one version missing should return 404."""
         name = f"diff-miss-{_uid()[:8]}"
@@ -540,7 +539,6 @@ class TestWorkflowVersioning:
         assert resp.status_code == 404
 
     @pytest.mark.asyncio
-    @pytest.mark.skip(reason="Route ordering: /versions/{version:int} matches before /versions/diff")
     async def test_version_diff_both_exist(self):
         """Diff between two existing versions should work."""
         name = f"diff-ok-{_uid()[:8]}"
@@ -619,8 +617,11 @@ class TestWorkflowSave:
         )
         assert resp.status_code == 422
 
-    def test_save_duplicate_name_creates_new_version(self):
+    def test_save_duplicate_name_creates_new_version(self, tmp_path, monkeypatch):
         """Saving the same workflow name again creates a new version (higher number)."""
+        from sandcastle.config import settings
+
+        monkeypatch.setattr(settings, "workflows_dir", str(tmp_path / "workflows"))
         name = f"dup-{_uid()[:8]}"
         resp1 = client.post(
             "/api/workflows",

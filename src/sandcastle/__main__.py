@@ -72,7 +72,7 @@ def _table(headers: list[str], rows: list[list[str]], *, max_col: int = 40) -> s
         return "(no data)"
 
     # Pad rows that are shorter than headers; truncate rows that are longer
-    rows = [r[:len(headers)] + [""] * max(0, len(headers) - len(r)) for r in rows]
+    rows = [r[: len(headers)] + [""] * max(0, len(headers) - len(r)) for r in rows]
 
     def _trunc(val: str) -> str:
         if len(val) > max_col:
@@ -356,8 +356,13 @@ def _wait_for_run(client: Any, run_id: str) -> dict[str, Any]:
     frames = ["|", "/", "-", "\\"]
     idx = 0
     terminal = {
-        "completed", "failed", "cancelled", "error",
-        "partial", "budget_exceeded", "awaiting_approval",
+        "completed",
+        "failed",
+        "cancelled",
+        "error",
+        "partial",
+        "budget_exceeded",
+        "awaiting_approval",
     }
     start = time.monotonic()
     max_wait = 3600
@@ -395,8 +400,13 @@ def _stream_run(client: Any, run_id: str) -> None:
     Ctrl+C prints a note that the run continues in the background.
     """
     terminal = {
-        "completed", "failed", "cancelled", "error",
-        "partial", "budget_exceeded", "awaiting_approval",
+        "completed",
+        "failed",
+        "cancelled",
+        "error",
+        "partial",
+        "budget_exceeded",
+        "awaiting_approval",
     }
     start = time.monotonic()
     max_wait = 3600
@@ -473,9 +483,9 @@ def _stream_run(client: Any, run_id: str) -> None:
                 elapsed = time.monotonic() - start
                 total_cost = r.get("total_cost_usd", 0) or 0
                 passed = sum(
-                    1 for s_raw in steps
-                    if _to_dict(s_raw).get("status", "").lower()
-                    in ("completed", "success")
+                    1
+                    for s_raw in steps
+                    if _to_dict(s_raw).get("status", "").lower() in ("completed", "success")
                 )
                 step_total = len(steps)
 
@@ -511,8 +521,10 @@ def _stream_run(client: Any, run_id: str) -> None:
             time.sleep(2)
 
     except KeyboardInterrupt:
-        print(f"\n\n{_color('Run continues in background.', _C.YELLOW)}"
-              f" Check status with: sandcastle status {run_id}")
+        print(
+            f"\n\n{_color('Run continues in background.', _C.YELLOW)}"
+            f" Check status with: sandcastle status {run_id}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -665,9 +677,7 @@ def _print_banner() -> None:
             sys.stdout.flush()
             time.sleep(0.010)
         bar_full = f"{clr}{'█' * seg}{RST}"
-        sys.stdout.write(
-            f"\r  {DIM}{name}{RST} {DIM}{dots}{RST} [{bar_full}] {GRN} OK {RST}\n"
-        )
+        sys.stdout.write(f"\r  {DIM}{name}{RST} {DIM}{dots}{RST} [{bar_full}] {GRN} OK {RST}\n")
         sys.stdout.flush()
 
     print(f"\n  {GRN}ALL SYSTEMS ONLINE{RST}\n")
@@ -775,7 +785,7 @@ def _cmd_init_inner(args: argparse.Namespace) -> None:
     # Write .env
     def _quote(val: str) -> str:
         """Wrap a value in double quotes, escaping embedded quotes."""
-        return '"' + val.replace('\\', '\\\\').replace('"', '\\"') + '"'
+        return '"' + val.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
     lines = [
         f"ANTHROPIC_API_KEY={_quote(anthropic_key)}",
@@ -791,7 +801,9 @@ def _cmd_init_inner(args: argparse.Namespace) -> None:
         "# Multi-model provider keys (optional)",
         f"MINIMAX_API_KEY={_quote(minimax_key)}" if minimax_key else "# MINIMAX_API_KEY=",
         f"OPENAI_API_KEY={_quote(openai_key)}" if openai_key else "# OPENAI_API_KEY=",
-        f"OPENROUTER_API_KEY={_quote(openrouter_key)}" if openrouter_key else "# OPENROUTER_API_KEY=",
+        f"OPENROUTER_API_KEY={_quote(openrouter_key)}"
+        if openrouter_key
+        else "# OPENROUTER_API_KEY=",
         "",
         "# License key (Pro/Enterprise)",
         f"LICENSE_KEY={_quote(license_key)}" if license_key else "# LICENSE_KEY=",
@@ -891,9 +903,7 @@ def _cmd_serve(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     if _port_in_use(port):
-        print(
-            f"\n  {_color('Port ' + str(port) + ' is already in use.', _C.YELLOW)}"
-        )
+        print(f"\n  {_color('Port ' + str(port) + ' is already in use.', _C.YELLOW)}")
 
         if not sys.stdin.isatty():
             # Non-interactive mode - cannot prompt, exit with clear message
@@ -1023,9 +1033,7 @@ async def _node_join_loop(
                 print(f"  {_color('Coordinator forgot us - re-registering', _C.YELLOW)}")
                 node_id = await _register() or node_id
             elif resp.status_code != 200:
-                print(
-                    f"  {_color('Heartbeat rejected: HTTP ' + str(resp.status_code), _C.YELLOW)}"
-                )
+                print(f"  {_color('Heartbeat rejected: HTTP ' + str(resp.status_code), _C.YELLOW)}")
 
 
 def _cmd_node(args: argparse.Namespace) -> None:
@@ -1056,9 +1064,7 @@ def _cmd_node(args: argparse.Namespace) -> None:
     settings.mesh_token = token
 
     if args.capabilities:
-        capabilities = [
-            c.strip().lower() for c in args.capabilities.split(",") if c.strip()
-        ]
+        capabilities = [c.strip().lower() for c in args.capabilities.split(",") if c.strip()]
     else:
         from sandcastle.engine.mesh import detect_local_capabilities
 
@@ -1100,9 +1106,7 @@ def _cmd_node(args: argparse.Namespace) -> None:
 
     try:
         asyncio.run(
-            _node_join_loop(
-                coordinator, token, name, base_url, capabilities, heartbeat_seconds
-            )
+            _node_join_loop(coordinator, token, name, base_url, capabilities, heartbeat_seconds)
         )
     except KeyboardInterrupt:
         print(f"\n  {_color('Node left the mesh.', _C.DIM)}")
@@ -1379,11 +1383,13 @@ def _cmd_cancel(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     if getattr(args, "json", False):
-        print(json.dumps(
-            result if isinstance(result, dict)
-            else {"cancelled": True, "run_id": args.run_id},
-            indent=2, default=str,
-        ))
+        print(
+            json.dumps(
+                result if isinstance(result, dict) else {"cancelled": True, "run_id": args.run_id},
+                indent=2,
+                default=str,
+            )
+        )
         return
 
     print(f"Cancelled run {args.run_id}")
@@ -1422,8 +1428,13 @@ def _cmd_logs(args: argparse.Namespace) -> None:
     _validate_run_id(args.run_id)
     client = _get_client(args)
     terminal_statuses = {
-        "completed", "failed", "cancelled", "error",
-        "partial", "budget_exceeded", "awaiting_approval",
+        "completed",
+        "failed",
+        "cancelled",
+        "error",
+        "partial",
+        "budget_exceeded",
+        "awaiting_approval",
     }
     try:
         for event in client.stream(args.run_id):
@@ -1709,9 +1720,7 @@ def _cmd_publish_skills(args: argparse.Namespace) -> None:
         if upload:
             api_key = os.environ.get("ANTHROPIC_API_KEY", "")
             if not api_key:
-                raise RuntimeError(
-                    "ANTHROPIC_API_KEY is required for --upload"
-                )
+                raise RuntimeError("ANTHROPIC_API_KEY is required for --upload")
             client = AnthropicSkillsClient(api_key=api_key)
         return await publish_workflows_as_skills(
             workflow_dir=workflow_dir,
@@ -1902,6 +1911,7 @@ def _cmd_doctor(args: argparse.Namespace) -> None:
             _pass("Database: PostgreSQL configured")
             try:
                 import sqlalchemy  # noqa: F401
+
                 _pass("SQLAlchemy installed")
             except ImportError:
                 _fail("SQLAlchemy not installed (needed for PostgreSQL)")
@@ -1911,6 +1921,7 @@ def _cmd_doctor(args: argparse.Namespace) -> None:
                     s.settimeout(3)
                     # Parse host:port from database URL
                     from urllib.parse import urlparse
+
                     parsed = urlparse(db_url)
                     db_host = parsed.hostname or "localhost"
                     db_port = parsed.port or 5432
@@ -1928,6 +1939,7 @@ def _cmd_doctor(args: argparse.Namespace) -> None:
         if redis_url:
             try:
                 from urllib.parse import urlparse
+
                 parsed = urlparse(redis_url)
                 redis_host = parsed.hostname or "localhost"
                 redis_port = parsed.port or 6379
@@ -2028,8 +2040,10 @@ def _cmd_doctor(args: argparse.Namespace) -> None:
                 report = diagnose_yaml(yaml_content)
 
                 risk_colors = {
-                    "LOW": _C.GREEN, "MEDIUM": _C.YELLOW,
-                    "HIGH": _C.RED, "CRITICAL": _C.RED,
+                    "LOW": _C.GREEN,
+                    "MEDIUM": _C.YELLOW,
+                    "HIGH": _C.RED,
+                    "CRITICAL": _C.RED,
                 }
                 risk_color = risk_colors.get(report.risk, _C.RESET)
                 print(f"  Workflow: {report.workflow_name}")
@@ -2103,9 +2117,7 @@ def _cmd_generate(args: argparse.Namespace) -> None:
     from sandcastle.engine.generator import generate_workflow_sync
 
     # `build`/`new` aliases pass the description positionally; `generate` uses -d.
-    description = (
-        getattr(args, "description", None) or getattr(args, "description_pos", None) or ""
-    )
+    description = getattr(args, "description", None) or getattr(args, "description_pos", None) or ""
     if not description:
         try:
             description = input(f"{_color('Describe your workflow:', _C.CYAN)} ").strip()
@@ -2169,7 +2181,7 @@ def _cmd_generate(args: argparse.Namespace) -> None:
                 )
             else:
                 print(
-                    f'\r  {_color("[OK]", _C.GREEN)} Refined '
+                    f"\r  {_color('[OK]', _C.GREEN)} Refined "
                     f'"{result.name}" ({result.steps_count} steps)'
                 )
 
@@ -2739,7 +2751,9 @@ def _print_run_detail(run: Any) -> None:
 
         # Show detailed error messages for failed steps
         failed_steps = [
-            _to_dict(s) for s in steps if _to_dict(s).get("status") == "failed" and _to_dict(s).get("error")
+            _to_dict(s)
+            for s in steps
+            if _to_dict(s).get("status") == "failed" and _to_dict(s).get("error")
         ]
         if failed_steps:
             print()
@@ -2748,7 +2762,9 @@ def _print_run_detail(run: Any) -> None:
                 step_name = fs.get("step_id", "?")
                 step_error = fs.get("error", "")
                 attempt_num = fs.get("attempt", 1)
-                print(f"    {_color('X', _C.RED)} {step_name} (attempt {attempt_num}): {step_error}")
+                print(
+                    f"    {_color('X', _C.RED)} {step_name} (attempt {attempt_num}): {step_error}"
+                )
 
     # Outputs
     outputs = r.get("outputs")
@@ -3079,9 +3095,11 @@ def _cmd_hub_install(args: argparse.Namespace) -> None:
     if target_path.exists() and not force:
         if sys.stdin.isatty():
             try:
-                answer = input(
-                    f"  File '{target_path}' already exists. Overwrite? [y/N] "
-                ).strip().lower()
+                answer = (
+                    input(f"  File '{target_path}' already exists. Overwrite? [y/N] ")
+                    .strip()
+                    .lower()
+                )
             except (KeyboardInterrupt, EOFError):
                 print("\nAborted.")
                 return
@@ -3527,8 +3545,7 @@ def _download_bundle(url: str, dest: Path) -> None:
             raw = resp.read(MAX_BUNDLE_SIZE + 1)
         if len(raw) > MAX_BUNDLE_SIZE:
             print(
-                f"{_color('Error', _C.RED)}: download exceeds size limit"
-                f" ({MAX_BUNDLE_SIZE} bytes)",
+                f"{_color('Error', _C.RED)}: download exceeds size limit ({MAX_BUNDLE_SIZE} bytes)",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -3621,8 +3638,10 @@ def _cmd_template_install(args: argparse.Namespace) -> None:
         # and the verification API re-verify from this exact archive.
         (target_dir / f"{stem}.sctpl").write_bytes(bundle_path.read_bytes())
 
-    print(f"{_color('Installed', _C.GREEN)}: {manifest['name']} v{manifest['version']}"
-          f" -> {target_path}")
+    print(
+        f"{_color('Installed', _C.GREEN)}: {manifest['name']} v{manifest['version']}"
+        f" -> {target_path}"
+    )
     print(f"  Proof cassette(s): {len(cassettes)} (kept alongside for offline replay)")
     print(f"  Run it: sandcastle run --local {target_path}")
 
@@ -3985,9 +4004,11 @@ def _cmd_keys_delete(args: argparse.Namespace) -> None:
     force = getattr(args, "force", False)
     if not force and sys.stdin.isatty():
         try:
-            answer = input(
-                f"  Deactivate API key {args.key_id}? This cannot be undone. [y/N] "
-            ).strip().lower()
+            answer = (
+                input(f"  Deactivate API key {args.key_id}? This cannot be undone. [y/N] ")
+                .strip()
+                .lower()
+            )
         except (EOFError, KeyboardInterrupt):
             print()
             sys.exit(0)
@@ -4251,12 +4272,20 @@ def _cmd_providers(args: argparse.Namespace) -> None:  # noqa: ARG001
     print(_color("AI Providers:", _C.BOLD))
     print()
 
-    region_flag = {"us": "\U0001f1fa\U0001f1f8", "eu": "\U0001f1ea\U0001f1fa", "local": "\U0001f3e0"}
+    region_flag = {
+        "us": "\U0001f1fa\U0001f1f8",
+        "eu": "\U0001f1ea\U0001f1fa",
+        "local": "\U0001f3e0",
+    }
 
     for provider_id, cfg in _PROVIDER_CONFIGS.items():
         key_env = cfg.get("api_key_env", "")
         region = cfg.get("region", "us")
-        model = model_override if (provider_id == provider_env and model_override) else cfg.get("model", "")
+        model = (
+            model_override
+            if (provider_id == provider_env and model_override)
+            else cfg.get("model", "")
+        )
         flag = region_flag.get(region, "")
 
         # Determine configured status
@@ -4267,6 +4296,7 @@ def _cmd_providers(args: argparse.Namespace) -> None:  # noqa: ARG001
             import socket
 
             from sandcastle.config import settings as _ollama_settings
+
             _ollama_raw = os.environ.get("OLLAMA_HOST") or _ollama_settings.ollama_host
             _ollama_host, _ollama_port = _parse_ollama_target(_ollama_raw)
             try:
@@ -4384,18 +4414,75 @@ def _cmd_tools_configure(args: argparse.Namespace) -> None:
         print(f"  Still missing: {_color(', '.join(missing), _C.YELLOW)}")
 
 
+def _cmd_tools_validate(args: argparse.Namespace) -> None:
+    """Validate ToolDefinition entries in a YAML connector file or directory."""
+    import yaml
+
+    from sandcastle.engine.tool_search import ToolDefinition, validate_tool
+
+    target = Path(args.path).resolve()
+    if not target.exists():
+        print(f"Error: path not found: {target}", file=sys.stderr)
+        sys.exit(1)
+
+    if target.is_dir():
+        paths = sorted(path for pattern in ("*.yaml", "*.yml") for path in target.rglob(pattern))
+    else:
+        paths = [target]
+
+    if not paths:
+        print(f"Error: no YAML files found in {target}", file=sys.stderr)
+        sys.exit(1)
+
+    errors: list[str] = []
+    validated = 0
+    for path in paths:
+        try:
+            data = yaml.safe_load(path.read_text())
+        except (OSError, yaml.YAMLError) as exc:
+            errors.append(f"{path}: unable to read YAML: {exc}")
+            continue
+
+        if not isinstance(data, dict) or not isinstance(data.get("tools"), list):
+            errors.append(f"{path}: expected a mapping with a 'tools' list")
+            continue
+
+        for index, raw_tool in enumerate(data["tools"]):
+            if not isinstance(raw_tool, dict):
+                errors.append(f"{path}: tools[{index}] must be a mapping")
+                continue
+            tool = ToolDefinition(
+                name=raw_tool.get("name", ""),
+                description=raw_tool.get("description", ""),
+                parameters=raw_tool.get("parameters", {}),
+                examples=raw_tool.get("examples", []),
+                defer_loading=raw_tool.get("defer_loading", False),
+                tags=raw_tool.get("tags", []),
+            )
+            validated += 1
+            for error in validate_tool(tool):
+                errors.append(f"{path}: tools[{index}] ({tool.name or '<unnamed>'}): {error}")
+
+    if errors:
+        print("\n".join(errors), file=sys.stderr)
+        sys.exit(1)
+
+    print(f"OK: validated {validated} tool(s) in {len(paths)} file(s).")
+
+
 def _cmd_tools(args: argparse.Namespace) -> None:
     """Route tools sub-commands."""
     action = getattr(args, "tools_action", None)
     tools_dispatch: dict[str, Any] = {
         "list": _cmd_tools_list,
         "configure": _cmd_tools_configure,
+        "validate": _cmd_tools_validate,
     }
     handler = tools_dispatch.get(action)
     if handler:
         handler(args)
     else:
-        print("Usage: sandcastle tools {list,configure}", file=sys.stderr)
+        print("Usage: sandcastle tools {list,configure,validate}", file=sys.stderr)
         sys.exit(1)
 
 
@@ -4650,6 +4737,7 @@ def _fetch_pypi_versions(timeout: int = 10) -> dict:
 def _is_prerelease(version_str: str) -> bool:
     """Return True if version looks like a pre-release (contains a/b/rc/dev)."""
     import re
+
     return bool(re.search(r"(a|b|rc|dev)\d*$", version_str))
 
 
@@ -4689,6 +4777,7 @@ def _latest_version_for_channel(pypi_data: dict, channel: str) -> str:
 def _save_previous_version(version: str) -> None:
     """Persist the current version before upgrading so rollback works."""
     import datetime
+
     d = _ensure_sandcastle_dir()
     path = os.path.join(d, "previous_version.json")
     data = {
@@ -4714,6 +4803,7 @@ def _load_previous_version() -> dict | None:
 def _backup_file(src: str, suffix: str) -> bool:
     """Copy src to src + suffix. Returns True if backup was created."""
     import shutil
+
     if os.path.isfile(src):
         dest = src + suffix
         shutil.copy2(src, dest)
@@ -4724,6 +4814,7 @@ def _backup_file(src: str, suffix: str) -> bool:
 def _restore_file(src_with_suffix: str, dest: str) -> bool:
     """Restore a backup file. Returns True if restored."""
     import shutil
+
     if os.path.isfile(src_with_suffix):
         shutil.copy2(src_with_suffix, dest)
         return True
@@ -4733,6 +4824,7 @@ def _restore_file(src_with_suffix: str, dest: str) -> bool:
 def _pip_install(package_spec: str) -> bool:
     """Run pip install and return True on success."""
     import subprocess
+
     cmd = [sys.executable, "-m", "pip", "install", "--upgrade", package_spec]
     try:
         result = subprocess.run(
@@ -4749,8 +4841,10 @@ def _pip_install(package_spec: str) -> bool:
 def _verify_installed_version() -> str | None:
     """Import sandcastle in a subprocess and return its __version__."""
     import subprocess
+
     cmd = [
-        sys.executable, "-c",
+        sys.executable,
+        "-c",
         "from sandcastle import __version__; print(__version__)",
     ]
     try:
@@ -4822,6 +4916,7 @@ def _cmd_update(args: argparse.Namespace) -> None:
 
     # Check if already up to date
     from packaging.version import Version
+
     try:
         if Version(latest) <= Version(current) and not target_version:
             print(f"\n  {_color('Already up to date!', _C.GREEN)}")
@@ -4918,6 +5013,7 @@ def _cmd_rollback(args: argparse.Namespace) -> None:
     age_str = ""
     try:
         import datetime
+
         ts = datetime.datetime.fromisoformat(prev_ts)
         now = datetime.datetime.now(datetime.timezone.utc)
         delta = now - ts
@@ -5015,22 +5111,28 @@ def _check_for_updates_on_startup() -> None:
         return
 
     from sandcastle import __version__
+
     current = __version__
 
     # Persist check timestamp
     try:
         with open(check_file, "w", encoding="utf-8") as f:
-            json.dump({
-                "last_check": now.isoformat(),
-                "latest_version": latest,
-                "current_version": current,
-            }, f, indent=2)
+            json.dump(
+                {
+                    "last_check": now.isoformat(),
+                    "latest_version": latest,
+                    "current_version": current,
+                },
+                f,
+                indent=2,
+            )
     except OSError:
         pass
 
     # Compare versions
     try:
         from packaging.version import Version
+
         if Version(latest) > Version(current):
             msg = (
                 f"Sandcastle v{latest} available (current: v{current}). "
@@ -5062,6 +5164,7 @@ def _resolve_workflow_file(name: str) -> str:
     # Try configured workflows directory
     try:
         from sandcastle.config import settings
+
         wf_dir = Path(settings.workflows_dir).resolve()
         for ext in (".yaml", ".yml"):
             candidate = wf_dir / f"{name}{ext}"
@@ -5287,16 +5390,17 @@ def _print_getting_started() -> None:
     dim = lambda s: _color(s, _C.DIM)  # noqa: E731
     print(b("Sandcastle") + " — describe a workflow, run it, then improve it.\n")
     print(b("Getting started"))
-    print(f"  1. {c('sandcastle build')} \"what your agent should do\"   "
-          + dim("# describe a workflow"))
-    print(f"  2. {c('sandcastle run')} <workflow>                       "
-          + dim("# run it"))
-    print(f"  3. {c('sandcastle ls runs')}                              "
-          + dim("# see what happened"))
+    print(
+        f'  1. {c("sandcastle build")} "what your agent should do"   '
+        + dim("# describe a workflow")
+    )
+    print(f"  2. {c('sandcastle run')} <workflow>                       " + dim("# run it"))
+    print(
+        f"  3. {c('sandcastle ls runs')}                              " + dim("# see what happened")
+    )
     print()
     print("First time here? " + c("sandcastle init") + " sets up your API keys.")
-    print("See all commands grouped by Build / Run / Improve / Operate: "
-          + c("sandcastle help"))
+    print("See all commands grouped by Build / Run / Improve / Operate: " + c("sandcastle help"))
 
 
 def _add_connection_args(parser: argparse.ArgumentParser) -> None:
@@ -5325,7 +5429,8 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--version", "-V",
+        "--version",
+        "-V",
         action="version",
         version=f"sandcastle {__version__}",
     )
@@ -5352,9 +5457,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # --- node (Sandcastle Mesh) ---
     p_node = subparsers.add_parser("node", help="Sandcastle Mesh node commands")
     node_sub = p_node.add_subparsers(dest="node_action")
-    p_node_join = node_sub.add_parser(
-        "join", help="Join a Sandcastle Mesh as a worker node"
-    )
+    p_node_join = node_sub.add_parser("join", help="Join a Sandcastle Mesh as a worker node")
     p_node_join.add_argument(
         "coordinator", help="Coordinator base URL, e.g. http://spark.local:8080"
     )
@@ -5362,12 +5465,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "--token", default="", help="Shared mesh token (or MESH_TOKEN env var)"
     )
     p_node_join.add_argument(
-        "--capabilities", default="",
+        "--capabilities",
+        default="",
         help="Comma-separated capability override (default: auto-detect)",
     )
     p_node_join.add_argument("--name", default="", help="Node name (default: hostname)")
     p_node_join.add_argument(
-        "--base-url", default="",
+        "--base-url",
+        default="",
         help="URL the coordinator uses to reach this node (default: http://<hostname>:<port>)",
     )
     p_node_join.add_argument("--host", default="0.0.0.0", help="Bind host for the node API")
@@ -5375,11 +5480,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "--port", type=int, default=8080, help="Bind port for the node API (default: 8080)"
     )
     p_node_join.add_argument(
-        "--heartbeat", type=int, default=0,
+        "--heartbeat",
+        type=int,
+        default=0,
         help="Heartbeat interval in seconds (default: MESH_HEARTBEAT_SECONDS)",
     )
     p_node_join.add_argument(
-        "--no-serve", action="store_true", default=False,
+        "--no-serve",
+        action="store_true",
+        default=False,
         help="Do not start the node API server (one is already running)",
     )
 
@@ -5438,9 +5547,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "share", help="Mint a public, scrubbed permalink for a run (or --revoke it)"
     )
     p_share.add_argument("run_id", help="Run ID to share")
-    p_share.add_argument(
-        "--revoke", action="store_true", help="Revoke the run's public share link"
-    )
+    p_share.add_argument("--revoke", action="store_true", help="Revoke the run's public share link")
     _add_connection_args(p_share)
 
     # --- logs ---
@@ -5509,6 +5616,23 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_connection_args(p_mcp)
 
+    # --- memory-mcp ---
+    p_memory_mcp = subparsers.add_parser("memory-mcp", help="Start the Memory MCP server")
+    memory_mcp_sub = p_memory_mcp.add_subparsers(dest="memory_mcp_action", required=True)
+    p_memory_mcp_serve = memory_mcp_sub.add_parser("serve", help="Start the Memory MCP server")
+    p_memory_mcp_serve.add_argument(
+        "--transport",
+        choices=["stdio", "streamable-http"],
+        default="stdio",
+        help="Transport to bind (default: stdio)",
+    )
+    p_memory_mcp_serve.add_argument(
+        "--port",
+        type=int,
+        default=8765,
+        help="Port for streamable-http transport (ignored for stdio)",
+    )
+
     # --- publish-mcp ---
     p_publish_mcp = subparsers.add_parser(
         "publish-mcp",
@@ -5540,7 +5664,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # --- doctor ---
     p_doctor = subparsers.add_parser("doctor", help="Run local diagnostics")
-    p_doctor.add_argument("workflow", nargs="?", default=None, help="Workflow YAML file to diagnose (optional)")
+    p_doctor.add_argument(
+        "workflow", nargs="?", default=None, help="Workflow YAML file to diagnose (optional)"
+    )
 
     # --- eval ---
     p_eval = subparsers.add_parser("eval", help="Run an eval suite against a workflow")
@@ -5560,19 +5686,26 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_tm.add_argument("--model", "-m", required=True, help="Target model (e.g. nim/llama-3.1-70b)")
     p_tm.add_argument("--workflow", "-w", default=None, help="Only replay this workflow")
-    p_tm.add_argument("--since", default="30d", help="Window like 30d / 12h or ISO date (default: 30d)")
+    p_tm.add_argument(
+        "--since", default="30d", help="Window like 30d / 12h or ISO date (default: 30d)"
+    )
     p_tm.add_argument(
         "--max-cassettes", type=int, default=20, help="Max recorded runs to replay (default: 20)"
     )
     p_tm.add_argument(
-        "--live", action="store_true",
+        "--live",
+        action="store_true",
         help="Re-execute steps with real API calls and judge quality (default: dry-run estimate)",
     )
     p_tm.add_argument(
-        "--budget", type=float, default=None,
+        "--budget",
+        type=float,
+        default=None,
         help="Hard cost cap in USD for --live (required with --live)",
     )
-    p_tm.add_argument("--judge", default=None, help="Judge model for quality scoring (default: haiku)")
+    p_tm.add_argument(
+        "--judge", default=None, help="Judge model for quality scoring (default: haiku)"
+    )
     p_tm.add_argument("--json", action="store_true", help="Print the full report as JSON")
 
     # --- generate (+ friendly aliases: build, new) ---
@@ -5764,6 +5897,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_connection_args(p_tools_configure)
 
+    p_tools_validate = tools_sub.add_parser(
+        "validate", help="Validate tool definitions in a YAML file or directory"
+    )
+    p_tools_validate.add_argument("path", help="Connector YAML file or directory to validate")
+
     # --- autopilot ---
     p_autopilot = subparsers.add_parser("autopilot", help="AutoPilot experiment management")
     autopilot_sub = p_autopilot.add_subparsers(dest="autopilot_action")
@@ -5785,15 +5923,22 @@ def _build_parser() -> argparse.ArgumentParser:
         "--yes", "-y", action="store_true", default=False, help="Skip confirmation prompt"
     )
     p_update.add_argument(
-        "--version", dest="target_version", default=None, metavar="X.Y.Z",
+        "--version",
+        dest="target_version",
+        default=None,
+        metavar="X.Y.Z",
         help="Install a specific version instead of latest",
     )
     p_update.add_argument(
-        "--channel", default=None, choices=["stable", "beta"],
+        "--channel",
+        default=None,
+        choices=["stable", "beta"],
         help="Override update channel (default: from config or 'stable')",
     )
     p_update.add_argument(
-        "--dry-run", action="store_true", default=False,
+        "--dry-run",
+        action="store_true",
+        default=False,
         help="Show what would happen without installing",
     )
 
@@ -5846,16 +5991,19 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_pack.add_argument("workflow", help="Workflow .yaml path or built-in template name")
     p_pack.add_argument(
-        "--cassette", "-c", action="append", required=True, dest="cassettes",
-        metavar="FILE", help="Recorded cassette file - proof-of-execution (repeatable)",
+        "--cassette",
+        "-c",
+        action="append",
+        required=True,
+        dest="cassettes",
+        metavar="FILE",
+        help="Recorded cassette file - proof-of-execution (repeatable)",
     )
     p_pack.add_argument(
         "--output", "-o", default=None, help="Output path (default: <name>-<version>.sctpl)"
     )
     p_pack.add_argument("--name", default=None, help="Bundle name (default: workflow name)")
-    p_pack.add_argument(
-        "--bundle-version", default="1.0.0", help="Bundle version (default: 1.0.0)"
-    )
+    p_pack.add_argument("--bundle-version", default="1.0.0", help="Bundle version (default: 1.0.0)")
     p_pack.add_argument(
         "--description", default=None, help="Description (default: workflow description)"
     )
@@ -5864,11 +6012,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "--license", default="MIT", dest="license_id", help="SPDX license id (default: MIT)"
     )
     p_pack.add_argument(
-        "--created-at", default=None,
+        "--created-at",
+        default=None,
         help="ISO 8601 timestamp (default: the workflow's last git commit date)",
     )
     p_pack.add_argument(
-        "--input", "-i", action="append",
+        "--input",
+        "-i",
+        action="append",
         help="Example input key=value - must match the recording (repeatable)",
     )
     p_pack.add_argument(
@@ -5895,11 +6046,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     t_install.add_argument("source", help="Path or https:// URL of a .sctpl bundle")
     t_install.add_argument(
-        "--dir", "-d", default=None,
+        "--dir",
+        "-d",
+        default=None,
         help="Target directory (default: the community templates dir the wizard reads)",
     )
     t_install.add_argument(
-        "--force", action="store_true",
+        "--force",
+        action="store_true",
         help="Install even if verification fails; overwrite an existing template",
     )
     t_install.add_argument(
@@ -5919,29 +6073,36 @@ def _build_parser() -> argparse.ArgumentParser:
         "description", help="Natural language description of the workflow to build"
     )
     p_architect.add_argument(
-        "--input", "-i", action="append",
+        "--input",
+        "-i",
+        action="append",
         help="Test input key=value for the proof run (repeatable)",
     )
     p_architect.add_argument(
         "--input-file", "-f", help="JSON file with the test inputs for the proof run"
     )
     p_architect.add_argument(
-        "--budget", type=float, default=None,
+        "--budget",
+        type=float,
+        default=None,
         help="Live-run spend cap in USD (default: architect_budget_usd)",
     )
     p_architect.add_argument(
-        "--max-iterations", type=int, default=None,
+        "--max-iterations",
+        type=int,
+        default=None,
         help="Loop bound (default: architect_max_iterations)",
     )
     p_architect.add_argument(
-        "--threshold", type=float, default=None,
+        "--threshold",
+        type=float,
+        default=None,
         help="Minimum judge score 0-1 (default: architect_score_threshold)",
     )
+    p_architect.add_argument("--output", "-o", default=None, help="Directory for the .sctpl bundle")
     p_architect.add_argument(
-        "--output", "-o", default=None, help="Directory for the .sctpl bundle"
-    )
-    p_architect.add_argument(
-        "--no-install", action="store_true",
+        "--no-install",
+        action="store_true",
         help="Do not install the proven template into the community templates dir",
     )
     p_architect.add_argument("--json", action="store_true", help="JSON output")
@@ -5953,21 +6114,15 @@ def _build_parser() -> argparse.ArgumentParser:
     p_describe.add_argument("workflow", help="Workflow name or path to .yaml file")
 
     # --- lint ---
-    p_lint = subparsers.add_parser(
-        "lint", help="Check workflow metadata completeness"
-    )
+    p_lint = subparsers.add_parser("lint", help="Check workflow metadata completeness")
     p_lint.add_argument("workflow", help="Workflow name or path to .yaml file")
 
     # --- owners ---
-    p_owners = subparsers.add_parser(
-        "owners", help="Show step ownership for a workflow"
-    )
+    p_owners = subparsers.add_parser("owners", help="Show step ownership for a workflow")
     p_owners.add_argument("workflow", help="Workflow name or path to .yaml file")
 
     # --- help (explicit grouped help command) ---
-    subparsers.add_parser(
-        "help", help="Show grouped help (Build / Run / Improve / Operate)"
-    )
+    subparsers.add_parser("help", help="Show grouped help (Build / Run / Improve / Operate)")
 
     return parser
 
@@ -6048,10 +6203,7 @@ def _cmd_timemachine(args: argparse.Namespace) -> None:
     print()
 
     # Per-workflow table
-    header = (
-        f"  {'WORKFLOW':<28} {'COST':>10} {'->':^4} {'NEW':>10} "
-        f"{'QUALITY':>9} {'LATENCY':>9}"
-    )
+    header = f"  {'WORKFLOW':<28} {'COST':>10} {'->':^4} {'NEW':>10} {'QUALITY':>9} {'LATENCY':>9}"
     print(_color(header, _C.BOLD))
     for wf in report["per_workflow"]:
         q = wf["quality_delta_pct"]
@@ -6079,8 +6231,10 @@ def _cmd_timemachine(args: argparse.Namespace) -> None:
     if report.get("quality"):
         q = report["quality"]
         if q["old_avg"] is not None:
-            print(f"  Quality (judge {report['judge_model']}): "
-                  f"{q['old_avg']:.1f} -> {q['new_avg']:.1f} ({q['delta_pct']:+.1f}%)")
+            print(
+                f"  Quality (judge {report['judge_model']}): "
+                f"{q['old_avg']:.1f} -> {q['new_avg']:.1f} ({q['delta_pct']:+.1f}%)"
+            )
     print()
     print(_color(f"  {report['verdict']}", _C.BOLD))
 
@@ -6139,6 +6293,18 @@ def main() -> None:
         else:
             print("Usage: sandcastle audit verify <run-id-or-cassette-path>", file=sys.stderr)
             sys.exit(1)
+        return
+
+    # --- memory-mcp ---
+    if args.command == "memory-mcp":
+        from sandcastle.engine.memory_mcp_server import cli_main as memory_mcp_cli_main
+
+        memory_mcp_args = [args.memory_mcp_action]
+        if args.memory_mcp_action == "serve":
+            memory_mcp_args.extend(["--transport", args.transport, "--port", str(args.port)])
+        exit_code = memory_mcp_cli_main(memory_mcp_args)
+        if exit_code:
+            sys.exit(exit_code)
         return
 
     # --- node (Sandcastle Mesh) ---

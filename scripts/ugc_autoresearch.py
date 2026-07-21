@@ -12,20 +12,27 @@ Usage:
 
 Nothing here is Sandcastle-specific; it is a standalone tuner you point at one product photo.
 """
+
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 HOME = Path.home()
-NANO_BANANA = HOME / ".bun" / "bin" / "nano-banana"
+BUN_NANO_BANANA = HOME / ".bun" / "bin" / "nano-banana"
 GEMINI_CONNECTOR = (
     Path(__file__).resolve().parent.parent
-    / "src" / "sandcastle" / "engine" / "tools" / "connectors" / "gemini.mjs"
+    / "src"
+    / "sandcastle"
+    / "engine"
+    / "tools"
+    / "connectors"
+    / "gemini.mjs"
 )
 
 # Seed recipe per mode: a base scene + swappable knobs. The loop tries knob variants
@@ -97,12 +104,34 @@ def build_prompt(recipe: dict, choice: dict[str, int]) -> str:
     return " ".join(parts)
 
 
+def nano_banana_path() -> str:
+    """Resolve nano-banana from PATH, retaining Bun's usual location as a fallback."""
+    if executable := shutil.which("nano-banana"):
+        return executable
+    if BUN_NANO_BANANA.is_file():
+        return str(BUN_NANO_BANANA)
+    raise FileNotFoundError(
+        "nano-banana was not found on PATH or at ~/.bun/bin/nano-banana; "
+        "install it or add it to PATH."
+    )
+
+
 def generate(prompt: str, photo: str, out_dir: Path, tag: str) -> str | None:
     """Generate one image via nano-banana, return its path or None."""
     out_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
-        str(NANO_BANANA), prompt, "-r", photo, "-m", "flash", "-a", "4:5",
-        "-o", tag, "-d", str(out_dir),
+        nano_banana_path(),
+        prompt,
+        "-r",
+        photo,
+        "-m",
+        "flash",
+        "-a",
+        "4:5",
+        "-o",
+        tag,
+        "-d",
+        str(out_dir),
     ]
     env = {**os.environ}
     env.setdefault("PATH", "")
@@ -114,8 +143,10 @@ def generate(prompt: str, photo: str, out_dir: Path, tag: str) -> str | None:
         return None
     for line in res.stdout.splitlines():
         line = line.strip()
-        if line.startswith("+") and "Loaded reference" not in line and line.endswith(
-            (".jpeg", ".jpg", ".png", ".webp")
+        if (
+            line.startswith("+")
+            and "Loaded reference" not in line
+            and line.endswith((".jpeg", ".jpg", ".png", ".webp"))
         ):
             return line.lstrip("+ ").strip()
     return None
@@ -127,7 +158,10 @@ def judge(image: str, photo: str) -> float:
     try:
         res = subprocess.run(
             ["node", str(GEMINI_CONNECTOR), "analyze_image", JUDGE_PROMPT, opts],
-            capture_output=True, text=True, env=os.environ, timeout=120,
+            capture_output=True,
+            text=True,
+            env=os.environ,
+            timeout=120,
         )
         payload = json.loads(res.stdout)
         return float(payload["result"].get("overall_score", 0))
@@ -135,8 +169,9 @@ def judge(image: str, photo: str) -> float:
         return 0.0
 
 
-def evaluate(recipe: dict, choice: dict[str, int], photo: str, out_dir: Path,
-             shots: int, label: str) -> float:
+def evaluate(
+    recipe: dict, choice: dict[str, int], photo: str, out_dir: Path, shots: int, label: str
+) -> float:
     """Generate `shots` images with this recipe choice and return the average judge score."""
     total, n = 0.0, 0
     for i in range(shots):
@@ -158,6 +193,11 @@ def main() -> int:
 
     if not (os.environ.get("GEMINI_API_KEY") or os.environ.get("TOOL_GEMINI_API_KEY")):
         print("Set GEMINI_API_KEY (or TOOL_GEMINI_API_KEY) first.", file=sys.stderr)
+        return 1
+    try:
+        nano_banana_path()
+    except FileNotFoundError as exc:
+        print(exc, file=sys.stderr)
         return 1
 
     recipe = SEED_RECIPES[args.mode]
@@ -187,8 +227,14 @@ def main() -> int:
         if kept:
             best_choice, best_score = trial, score
 
-        record = {"iteration": it, "knob": knob, "trial": trial,
-                  "score": score, "best_score": best_score, "kept": kept}
+        record = {
+            "iteration": it,
+            "knob": knob,
+            "trial": trial,
+            "score": score,
+            "best_score": best_score,
+            "kept": kept,
+        }
         with history_path.open("a") as f:
             f.write(json.dumps(record) + "\n")
         print(f"it{it} knob={knob} score={score} best={best_score} {'KEEP' if kept else 'revert'}")

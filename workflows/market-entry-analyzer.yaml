@@ -84,7 +84,7 @@ steps:
     retry:
       max_attempts: 2
       backoff: exponential
-      on_failure: continue
+      on_failure: skip
 
   - id: "regulatory-scan"
     parallel_over: "input.target_markets"

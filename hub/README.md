@@ -1,8 +1,8 @@
 # Sandcastle Community Hub
 
-The Community Hub is the open registry of workflow templates for [Sandcastle](https://gizmax.cz/sandcastle) - the workflow orchestrator for autonomous agents.
+The Community Hub is the open registry of workflow templates for [Sandcastle](https://sandcastle-ai.eu/hub) - the workflow orchestrator for autonomous agents.
 
-Browse, discover, and share reusable workflows at **[gizmax.cz/sandcastle/hub](https://gizmax.cz/sandcastle/hub)**.
+Browse, discover, and share reusable workflows at **[sandcastle-ai.eu/hub](https://sandcastle-ai.eu/hub)**.
 
 ## What is this?
 

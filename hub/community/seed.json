@@ -1,0 +1,597 @@
+{
+  "content-queen/content-calendar": {
+    "author": "content-queen",
+    "author_url": "https://github.com/content-queen",
+    "category": "marketing",
+    "tags": [
+      "content calendar",
+      "editorial planning",
+      "seo"
+    ],
+    "license": "MIT",
+    "rating": 4.8,
+    "review_count": 48,
+    "created_at": "2026-03-18T10:15:00Z",
+    "updated_at": "2026-04-02T14:20:00Z",
+    "downloads": 640,
+    "forked_from": null
+  },
+  "devrel-bot/release-notes-pro": {
+    "author": "devrel-bot",
+    "author_url": "https://github.com/devrel-bot",
+    "category": "engineering",
+    "tags": [
+      "release notes",
+      "developer relations",
+      "changelog"
+    ],
+    "license": "MIT",
+    "rating": 4.9,
+    "review_count": 47,
+    "created_at": "2026-04-03T11:00:00Z",
+    "updated_at": "2026-04-19T09:30:00Z",
+    "downloads": 455,
+    "forked_from": "ops-ninja/release-notes"
+  },
+  "k8s-ops/incident-responder": {
+    "author": "k8s-ops",
+    "author_url": "https://github.com/k8s-ops",
+    "category": "engineering",
+    "tags": [
+      "incident response",
+      "sre",
+      "operations"
+    ],
+    "license": "MIT",
+    "rating": 4.9,
+    "review_count": 73,
+    "created_at": "2026-03-22T08:40:00Z",
+    "updated_at": "2026-04-12T16:30:00Z",
+    "downloads": 510,
+    "forked_from": null
+  },
+  "lawtech-ai/contract-reviewer-pro": {
+    "author": "lawtech-ai",
+    "author_url": "https://github.com/lawtech-ai",
+    "category": "hr_legal",
+    "tags": [
+      "contract review",
+      "legal",
+      "risk"
+    ],
+    "license": "MIT",
+    "rating": 4.6,
+    "review_count": 29,
+    "created_at": "2026-03-08T13:10:00Z",
+    "updated_at": "2026-04-05T15:25:00Z",
+    "downloads": 390,
+    "forked_from": "gizmax/contract-review"
+  },
+  "pricewatch/pricing-tracker": {
+    "author": "pricewatch",
+    "author_url": "https://github.com/pricewatch",
+    "category": "sales_crm",
+    "tags": [
+      "pricing",
+      "competitive intelligence",
+      "sales"
+    ],
+    "license": "MIT",
+    "rating": 4.5,
+    "review_count": 26,
+    "created_at": "2026-03-15T12:00:00Z",
+    "updated_at": "2026-04-23T10:05:00Z",
+    "downloads": 580,
+    "forked_from": null
+  },
+  "sarah-ml/churn-predictor-v2": {
+    "author": "sarah-ml",
+    "author_url": "https://github.com/sarah-ml",
+    "category": "sales_crm",
+    "tags": [
+      "churn",
+      "customer success",
+      "retention"
+    ],
+    "license": "MIT",
+    "rating": 4.7,
+    "review_count": 38,
+    "created_at": "2026-04-10T10:20:00Z",
+    "updated_at": "2026-05-02T14:10:00Z",
+    "downloads": 330,
+    "forked_from": "gizmax/customer-churn-predictor"
+  },
+  "social-sage/social-repurposer": {
+    "author": "social-sage",
+    "author_url": "https://github.com/social-sage",
+    "category": "marketing",
+    "tags": [
+      "social media",
+      "content repurposing",
+      "brand voice"
+    ],
+    "license": "MIT",
+    "rating": 4.5,
+    "review_count": 31,
+    "created_at": "2026-03-28T09:00:00Z",
+    "updated_at": "2026-04-18T17:45:00Z",
+    "downloads": 470,
+    "forked_from": null
+  },
+  "supportflow/multi-channel-router": {
+    "author": "supportflow",
+    "author_url": "https://github.com/supportflow",
+    "category": "support",
+    "tags": [
+      "support routing",
+      "customer service",
+      "triage"
+    ],
+    "license": "MIT",
+    "rating": 4.7,
+    "review_count": 36,
+    "created_at": "2026-04-06T15:30:00Z",
+    "updated_at": "2026-05-01T11:00:00Z",
+    "downloads": 410,
+    "forked_from": null
+  },
+  "demand-weaver/campaign-brief-studio": {
+    "author": "demand-weaver",
+    "author_url": "https://github.com/demand-weaver",
+    "category": "marketing",
+    "tags": [
+      "campaigns",
+      "briefs",
+      "demand generation"
+    ],
+    "license": "MIT",
+    "rating": 4.4,
+    "review_count": 18,
+    "created_at": "2026-04-14T10:00:00Z",
+    "updated_at": "2026-05-05T13:10:00Z",
+    "downloads": 245,
+    "forked_from": null
+  },
+  "seo-orbit/keyword-cluster-planner": {
+    "author": "seo-orbit",
+    "author_url": "https://github.com/seo-orbit",
+    "category": "marketing",
+    "tags": [
+      "seo",
+      "keywords",
+      "content strategy"
+    ],
+    "license": "MIT",
+    "rating": 4.5,
+    "review_count": 21,
+    "created_at": "2026-04-22T08:30:00Z",
+    "updated_at": "2026-05-12T16:40:00Z",
+    "downloads": 218,
+    "forked_from": null
+  },
+  "api-forge/api-change-review": {
+    "author": "api-forge",
+    "author_url": "https://github.com/api-forge",
+    "category": "engineering",
+    "tags": [
+      "api design",
+      "developer experience",
+      "release management"
+    ],
+    "license": "MIT",
+    "rating": 4.6,
+    "review_count": 22,
+    "created_at": "2026-04-16T12:25:00Z",
+    "updated_at": "2026-05-06T09:15:00Z",
+    "downloads": 260,
+    "forked_from": null
+  },
+  "test-harbor/flaky-test-triage": {
+    "author": "test-harbor",
+    "author_url": "https://github.com/test-harbor",
+    "category": "engineering",
+    "tags": [
+      "testing",
+      "ci",
+      "debugging"
+    ],
+    "license": "MIT",
+    "rating": 4.4,
+    "review_count": 17,
+    "created_at": "2026-04-25T11:45:00Z",
+    "updated_at": "2026-05-14T15:30:00Z",
+    "downloads": 195,
+    "forked_from": null
+  },
+  "pipeline-mate/renewal-brief": {
+    "author": "pipeline-mate",
+    "author_url": "https://github.com/pipeline-mate",
+    "category": "sales_crm",
+    "tags": [
+      "renewals",
+      "account management",
+      "customer success"
+    ],
+    "license": "MIT",
+    "rating": 4.6,
+    "review_count": 14,
+    "created_at": "2026-05-21T09:15:00Z",
+    "updated_at": "2026-05-24T16:20:00Z",
+    "downloads": 126,
+    "forked_from": "pricewatch/pricing-tracker"
+  },
+  "prospect-lens/account-research": {
+    "author": "prospect-lens",
+    "author_url": "https://github.com/prospect-lens",
+    "category": "sales_crm",
+    "tags": [
+      "prospecting",
+      "account research",
+      "sales"
+    ],
+    "license": "MIT",
+    "rating": 4.3,
+    "review_count": 16,
+    "created_at": "2026-04-30T14:00:00Z",
+    "updated_at": "2026-05-16T10:35:00Z",
+    "downloads": 176,
+    "forked_from": null
+  },
+  "people-ops/coaching-summary": {
+    "author": "people-ops",
+    "author_url": "https://github.com/people-ops",
+    "category": "hr_legal",
+    "tags": [
+      "people operations",
+      "coaching",
+      "management"
+    ],
+    "license": "MIT",
+    "rating": 4.5,
+    "review_count": 19,
+    "created_at": "2026-04-18T09:45:00Z",
+    "updated_at": "2026-05-08T13:00:00Z",
+    "downloads": 187,
+    "forked_from": null
+  },
+  "talent-mesh/interview-loop-kit": {
+    "author": "talent-mesh",
+    "author_url": "https://github.com/talent-mesh",
+    "category": "hr_legal",
+    "tags": [
+      "hiring",
+      "interviews",
+      "structured hiring"
+    ],
+    "license": "MIT",
+    "rating": 4.4,
+    "review_count": 15,
+    "created_at": "2026-04-27T10:10:00Z",
+    "updated_at": "2026-05-15T12:50:00Z",
+    "downloads": 165,
+    "forked_from": null
+  },
+  "care-desk/escalation-summarizer": {
+    "author": "care-desk",
+    "author_url": "https://github.com/care-desk",
+    "category": "support",
+    "tags": [
+      "escalations",
+      "support operations",
+      "customer context"
+    ],
+    "license": "MIT",
+    "rating": 4.5,
+    "review_count": 12,
+    "created_at": "2026-05-19T08:20:00Z",
+    "updated_at": "2026-05-20T15:00:00Z",
+    "downloads": 89,
+    "forked_from": null
+  },
+  "voice-of-user/feedback-theme-miner": {
+    "author": "voice-of-user",
+    "author_url": "https://github.com/voice-of-user",
+    "category": "support",
+    "tags": [
+      "voice of customer",
+      "feedback",
+      "product insights"
+    ],
+    "license": "MIT",
+    "rating": 4.6,
+    "review_count": 20,
+    "created_at": "2026-04-21T13:30:00Z",
+    "updated_at": "2026-05-11T09:10:00Z",
+    "downloads": 202,
+    "forked_from": null
+  },
+  "helpstack/knowledge-gap-finder": {
+    "author": "helpstack",
+    "author_url": "https://github.com/helpstack",
+    "category": "support",
+    "tags": [
+      "knowledge base",
+      "self service",
+      "support"
+    ],
+    "license": "MIT",
+    "rating": 4.3,
+    "review_count": 13,
+    "created_at": "2026-04-29T11:20:00Z",
+    "updated_at": "2026-05-17T14:40:00Z",
+    "downloads": 155,
+    "forked_from": null
+  },
+  "ledger-lark/cash-reconciliation": {
+    "author": "ledger-lark",
+    "author_url": "https://github.com/ledger-lark",
+    "category": "fintech_banking",
+    "tags": [
+      "cash reconciliation",
+      "finance",
+      "operations"
+    ],
+    "license": "MIT",
+    "rating": 4.4,
+    "review_count": 18,
+    "created_at": "2026-04-12T10:05:00Z",
+    "updated_at": "2026-05-03T11:30:00Z",
+    "downloads": 230,
+    "forked_from": null
+  },
+  "risk-ledger/vendor-control-check": {
+    "author": "risk-ledger",
+    "author_url": "https://github.com/risk-ledger",
+    "category": "fintech_banking",
+    "tags": [
+      "vendor risk",
+      "controls",
+      "third party"
+    ],
+    "license": "MIT",
+    "rating": 4.6,
+    "review_count": 11,
+    "created_at": "2026-05-20T09:00:00Z",
+    "updated_at": "2026-05-23T14:15:00Z",
+    "downloads": 104,
+    "forked_from": "compliance-craft/policy-gap-scan"
+  },
+  "treasury-tide/covenant-monitor": {
+    "author": "treasury-tide",
+    "author_url": "https://github.com/treasury-tide",
+    "category": "fintech_banking",
+    "tags": [
+      "treasury",
+      "covenants",
+      "financial risk"
+    ],
+    "license": "MIT",
+    "rating": 4.5,
+    "review_count": 16,
+    "created_at": "2026-04-24T15:10:00Z",
+    "updated_at": "2026-05-13T08:50:00Z",
+    "downloads": 180,
+    "forked_from": null
+  },
+  "compliance-craft/policy-gap-scan": {
+    "author": "compliance-craft",
+    "author_url": "https://github.com/compliance-craft",
+    "category": "compliance_grc",
+    "tags": [
+      "compliance",
+      "policy",
+      "controls"
+    ],
+    "license": "MIT",
+    "rating": 4.5,
+    "review_count": 24,
+    "created_at": "2026-04-09T12:15:00Z",
+    "updated_at": "2026-05-04T16:25:00Z",
+    "downloads": 275,
+    "forked_from": null
+  },
+  "audit-trail/evidence-request-pack": {
+    "author": "audit-trail",
+    "author_url": "https://github.com/audit-trail",
+    "category": "compliance_grc",
+    "tags": [
+      "audit",
+      "evidence",
+      "governance"
+    ],
+    "license": "MIT",
+    "rating": 4.4,
+    "review_count": 17,
+    "created_at": "2026-04-20T09:25:00Z",
+    "updated_at": "2026-05-10T14:05:00Z",
+    "downloads": 198,
+    "forked_from": null
+  },
+  "privacy-map/dpia-starter": {
+    "author": "privacy-map",
+    "author_url": "https://github.com/privacy-map",
+    "category": "compliance_grc",
+    "tags": [
+      "privacy",
+      "dpia",
+      "gdpr"
+    ],
+    "license": "MIT",
+    "rating": 4.6,
+    "review_count": 19,
+    "created_at": "2026-04-28T13:40:00Z",
+    "updated_at": "2026-05-18T10:20:00Z",
+    "downloads": 148,
+    "forked_from": null
+  },
+  "health-navigator/intake-summary": {
+    "author": "health-navigator",
+    "author_url": "https://github.com/health-navigator",
+    "category": "healthcare",
+    "tags": [
+      "patient intake",
+      "clinical operations",
+      "care coordination"
+    ],
+    "license": "MIT",
+    "rating": 4.5,
+    "review_count": 23,
+    "created_at": "2026-04-17T08:55:00Z",
+    "updated_at": "2026-05-07T15:10:00Z",
+    "downloads": 224,
+    "forked_from": null
+  },
+  "clinic-ops/referral-prioritizer": {
+    "author": "clinic-ops",
+    "author_url": "https://github.com/clinic-ops",
+    "category": "healthcare",
+    "tags": [
+      "referrals",
+      "care coordination",
+      "clinical operations"
+    ],
+    "license": "MIT",
+    "rating": 4.4,
+    "review_count": 10,
+    "created_at": "2026-05-22T10:30:00Z",
+    "updated_at": "2026-05-26T13:45:00Z",
+    "downloads": 118,
+    "forked_from": null
+  },
+  "care-path/visit-brief": {
+    "author": "care-path",
+    "author_url": "https://github.com/care-path",
+    "category": "healthcare",
+    "tags": [
+      "visit preparation",
+      "care coordination",
+      "patient experience"
+    ],
+    "license": "MIT",
+    "rating": 4.5,
+    "review_count": 9,
+    "created_at": "2026-05-27T09:40:00Z",
+    "updated_at": "2026-05-29T12:15:00Z",
+    "downloads": 76,
+    "forked_from": "health-navigator/intake-summary"
+  },
+  "promptwright/eval-runbook": {
+    "author": "promptwright",
+    "author_url": "https://github.com/promptwright",
+    "category": "llmops_ai_eng",
+    "tags": [
+      "llm evaluation",
+      "prompt engineering",
+      "quality"
+    ],
+    "license": "MIT",
+    "rating": 4.7,
+    "review_count": 13,
+    "created_at": "2026-05-25T11:15:00Z",
+    "updated_at": "2026-05-28T16:30:00Z",
+    "downloads": 92,
+    "forked_from": "devrel-bot/release-notes-pro"
+  },
+  "model-garden/prompt-regression-check": {
+    "author": "model-garden",
+    "author_url": "https://github.com/model-garden",
+    "category": "llmops_ai_eng",
+    "tags": [
+      "prompt testing",
+      "llmops",
+      "regression"
+    ],
+    "license": "MIT",
+    "rating": 4.5,
+    "review_count": 16,
+    "created_at": "2026-04-26T09:50:00Z",
+    "updated_at": "2026-05-15T11:40:00Z",
+    "downloads": 172,
+    "forked_from": null
+  },
+  "trace-tuner/agent-trace-review": {
+    "author": "trace-tuner",
+    "author_url": "https://github.com/trace-tuner",
+    "category": "llmops_ai_eng",
+    "tags": [
+      "agent observability",
+      "traces",
+      "llmops"
+    ],
+    "license": "MIT",
+    "rating": 4.6,
+    "review_count": 8,
+    "created_at": "2026-05-30T14:20:00Z",
+    "updated_at": "2026-06-01T10:00:00Z",
+    "downloads": 57,
+    "forked_from": null
+  },
+  "research-rover/decision-memo": {
+    "author": "research-rover",
+    "author_url": "https://github.com/research-rover",
+    "category": "general_ai",
+    "tags": [
+      "decision making",
+      "research",
+      "executive communication"
+    ],
+    "license": "MIT",
+    "rating": 4.5,
+    "review_count": 10,
+    "created_at": "2026-05-30T09:10:00Z",
+    "updated_at": "2026-06-01T15:30:00Z",
+    "downloads": 65,
+    "forked_from": null
+  },
+  "community-catalyst/volunteer-brief": {
+    "author": "community-catalyst",
+    "author_url": "https://github.com/community-catalyst",
+    "category": "general_ai",
+    "tags": [
+      "community",
+      "volunteers",
+      "operations"
+    ],
+    "license": "MIT",
+    "rating": 4.4,
+    "review_count": 7,
+    "created_at": "2026-06-01T08:35:00Z",
+    "updated_at": "2026-06-01T09:00:00Z",
+    "downloads": 42,
+    "forked_from": null
+  },
+  "studio-spark/meeting-to-action": {
+    "author": "studio-spark",
+    "author_url": "https://github.com/studio-spark",
+    "category": "general_ai",
+    "tags": [
+      "meetings",
+      "action items",
+      "productivity"
+    ],
+    "license": "MIT",
+    "rating": 4.3,
+    "review_count": 15,
+    "created_at": "2026-04-23T10:45:00Z",
+    "updated_at": "2026-05-12T15:00:00Z",
+    "downloads": 190,
+    "forked_from": null
+  },
+  "solopreneur-kit/client-onboarding": {
+    "author": "solopreneur-kit",
+    "author_url": "https://github.com/solopreneur-kit",
+    "category": "general_ai",
+    "tags": [
+      "client onboarding",
+      "services",
+      "operations"
+    ],
+    "license": "MIT",
+    "rating": 4.5,
+    "review_count": 11,
+    "created_at": "2026-05-28T12:00:00Z",
+    "updated_at": "2026-06-01T13:20:00Z",
+    "downloads": 81,
+    "forked_from": null
+  }
+}
