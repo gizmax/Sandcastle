@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Sparkles, X, Send } from "lucide-react";
 import { api } from "@/api/client";
-import { cn, formatDuration, formatCost } from "@/lib/utils";
+import { cn, formatDuration, formatCost, randomId } from "@/lib/utils";
 
 interface Step {
   step_id: string;
@@ -306,7 +306,7 @@ export function AiChatSidebar({ open, onClose, run }: AiChatSidebarProps) {
       if (!text.trim() || typing) return;
       const question = text.trim();
       const userMsg: ChatMessage = {
-        id: crypto.randomUUID(),
+        id: randomId(),
         role: "user",
         text: question,
         timestamp: new Date(),
@@ -334,7 +334,7 @@ export function AiChatSidebar({ open, onClose, run }: AiChatSidebarProps) {
           response = generateResponse(question, run);
         }
         const assistantMsg: ChatMessage = {
-          id: crypto.randomUUID(),
+          id: randomId(),
           role: "assistant",
           text: response,
           timestamp: new Date(),
