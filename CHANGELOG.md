@@ -30,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OpenAI-compatible runner: when the model ends on an empty final message, the
   step result falls back to the last non-empty assistant text instead of
   reporting an empty output as success.
+- The official image includes the `memory` extras (mem0ai, fastembed): the
+  Agent Memory page failed with "No module named 'mem0'" in Docker
+  deployments.
 - Docker: `WORKFLOWS_DIR` is now a shared, persistent volume (`app_workflows`)
   on the `sandcastle`, `scheduler`, and `worker` services. User-created and
   generated workflows previously lived in each container's own filesystem, so

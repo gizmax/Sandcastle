@@ -26,7 +26,11 @@ COPY --from=dashboard-builder /dashboard/dist dashboard/dist/
 # Build a wheel and install into a virtual environment
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
-RUN pip install --no-cache-dir ".[docker]"
+# docker: aiodocker for the docker sandbox backend. memory: mem0ai + fastembed
+# for Agent Memory - the dashboard ships the Memory page, so the official image
+# must be able to back it (a missing module surfaced as "Failed to initialize
+# local Mem0 backend" at runtime).
+RUN pip install --no-cache-dir ".[docker,memory]"
 
 
 # -- Runtime stage --
