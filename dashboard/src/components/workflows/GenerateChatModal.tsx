@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { X, Wand2, Loader2, CheckCircle, AlertTriangle, Send, ChevronDown, ChevronRight, MessageSquare, Plus } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, randomId } from "@/lib/utils";
 import { api } from "@/api/client";
 
 interface GenerateResult {
@@ -80,7 +80,7 @@ export function GenerateChatModal({ open, onClose, onSelect, existingYaml }: Gen
     const text = input.trim();
     if (!text || loading) return;
 
-    const userMsg: ChatMessage = { id: crypto.randomUUID(), role: "user", content: text };
+    const userMsg: ChatMessage = { id: randomId(), role: "user", content: text };
     const newMessages = [...messages, userMsg];
     setMessages(newMessages);
     setInput("");
@@ -126,12 +126,12 @@ export function GenerateChatModal({ open, onClose, onSelect, existingYaml }: Gen
         setCurrentYaml(data.yaml_content);
         setMessages((prev) => [
           ...prev,
-          { id: crypto.randomUUID(), role: "assistant", content: data.message, yaml: yamlResult },
+          { id: randomId(), role: "assistant", content: data.message, yaml: yamlResult },
         ]);
       } else {
         setMessages((prev) => [
           ...prev,
-          { id: crypto.randomUUID(), role: "assistant", content: data.message },
+          { id: randomId(), role: "assistant", content: data.message },
         ]);
       }
     }
@@ -168,7 +168,7 @@ export function GenerateChatModal({ open, onClose, onSelect, existingYaml }: Gen
     setInput(text);
     // Use a microtask to allow state to update before sending
     setTimeout(() => {
-      const userMsg: ChatMessage = { id: crypto.randomUUID(), role: "user", content: text };
+      const userMsg: ChatMessage = { id: randomId(), role: "user", content: text };
       const currentMessages = messagesRef.current;
       const newMessages = [...currentMessages, userMsg];
       setMessages(newMessages);
@@ -210,12 +210,12 @@ export function GenerateChatModal({ open, onClose, onSelect, existingYaml }: Gen
             setCurrentYaml(data.yaml_content);
             setMessages((prev) => [
               ...prev,
-              { id: crypto.randomUUID(), role: "assistant", content: data.message, yaml: yamlResult },
+              { id: randomId(), role: "assistant", content: data.message, yaml: yamlResult },
             ]);
           } else {
             setMessages((prev) => [
               ...prev,
-              { id: crypto.randomUUID(), role: "assistant", content: data.message },
+              { id: randomId(), role: "assistant", content: data.message },
             ]);
           }
         }

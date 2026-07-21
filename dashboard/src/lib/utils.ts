@@ -129,3 +129,21 @@ export function formatHeartbeatAge(seconds: number | null): string {
   if (hours < 24) return `${hours}h ago`;
   return `${Math.floor(hours / 24)}d ago`;
 }
+
+/**
+ * Random id for client-side keys. crypto.randomUUID only exists in secure
+ * contexts (https / localhost) - a dashboard served over plain http from a
+ * LAN box (http://192.168.x.x:8080) has crypto but no randomUUID, and calling
+ * it throws, silently killing every handler that minted an id. Fall back to
+ * getRandomValues, then Math.random.
+ */
+export function randomId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  return `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
+}

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.42.1] - 2026-07-21 - "Assistant, Actually"
+
+### Fixed
+- The Run Assistant is now a real assistant. The dashboard sidebar previously
+  answered from client-side English keyword patterns with no model behind it,
+  so non-English questions (and any question outside the patterns) got canned
+  replies. New `POST /api/runs/{run_id}/assistant` serializes the run
+  (status, steps, errors, output tails - secret-scrubbed, tenant-scoped) and
+  answers via the advisor LLM, which on a local-first box means your own
+  model. Answers follow the language of the question. The old heuristics
+  remain only as an offline fallback when no provider is configured
+  (the endpoint says NO_PROVIDER explicitly).
+
 ## [0.42.0] - 2026-07-21 - "Your Box, Your Default"
 
 ### Added

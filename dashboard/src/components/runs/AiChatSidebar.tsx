@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Sparkles, X, Send } from "lucide-react";
-import { cn, formatDuration, formatCost } from "@/lib/utils";
+import { api } from "@/api/client";
+import { cn, formatDuration, formatCost, randomId } from "@/lib/utils";
 
 interface Step {
   step_id: string;
@@ -303,30 +304,46 @@ export function AiChatSidebar({ open, onClose, run }: AiChatSidebarProps) {
   const sendMessage = useCallback(
     (text: string) => {
       if (!text.trim() || typing) return;
+      const question = text.trim();
       const userMsg: ChatMessage = {
-        id: crypto.randomUUID(),
+        id: randomId(),
         role: "user",
-        text: text.trim(),
+        text: question,
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, userMsg]);
       setInput("");
       setTyping(true);
 
-      const delay = 500 + Math.random() * 300;
-      setTimeout(() => {
-        const response = generateResponse(text, run);
+      void (async () => {
+        // Ask the advisor-backed Run Assistant; fall back to the local
+        // heuristics when no provider is configured or the call fails.
+        let response: string;
+        try {
+          const history = messages.slice(-10).map((m) => ({
+            role: m.role,
+            text: m.text,
+          }));
+          const res = await api.post<{ answer: string }>(
+            `/runs/${run.run_id}/assistant`,
+            { question, history }
+          );
+          if (res.error || !res.data?.answer) throw new Error(res.error?.message);
+          response = res.data.answer;
+        } catch {
+          response = generateResponse(question, run);
+        }
         const assistantMsg: ChatMessage = {
-          id: crypto.randomUUID(),
+          id: randomId(),
           role: "assistant",
           text: response,
           timestamp: new Date(),
         };
         setMessages((prev) => [...prev, assistantMsg]);
         setTyping(false);
-      }, delay);
+      })();
     },
-    [run, typing]
+    [run, typing, messages]
   );
 
   const handleSubmit = useCallback(
