@@ -65,8 +65,14 @@ async def _validate_providers() -> None:
                 base = settings.omlx_base_url.rstrip("/")
                 health_url = f"{base}/v1/models"  # OpenAI-compatible endpoint
                 unreachable_msg = f"omlx server not running at {base}"
+            elif provider_name == "nim":
+                base = (settings.nim_base_url or "http://localhost:8000").rstrip("/")
+                health_url = f"{base}/v1/models"  # OpenAI-compatible endpoint
+                unreachable_msg = f"NIM/vLLM server not running at {base}"
             else:
-                base = settings.ollama_host.rstrip("/")
+                from sandcastle.engine.providers import ollama_base_url
+
+                base = ollama_base_url()
                 health_url = f"{base}/api/tags"
                 unreachable_msg = f"Ollama not running at {base}"
             start = time.monotonic()

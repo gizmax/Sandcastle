@@ -23,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `/health/providers` includes a `models` list for reachable local providers
   (up to 20 each), which is what the wizard picker renders.
 
+### Fixed
+- The workflow generator ("describe it in plain English") no longer demands a
+  cloud API key on a box that runs local models. Advisor provider resolution
+  picks, in order: `SANDCASTLE_ADVISOR_PROVIDER`, any cloud provider with a
+  configured key, the local provider named by `workflow_default_model`, and on
+  a Spark a reachable local NIM/vLLM. Local generation calls use the model you
+  picked (e.g. `ornith`), not a hardcoded catalogue name.
+
 ### Changed
 - A step whose model is the bare default now resolves: `workflow_default_model`
   (when set) -> Spark NIM autoroute (when applicable) -> `sonnet`. Explicit

@@ -784,9 +784,6 @@ async def get_provider_health() -> ApiResponse:
     results: dict = {}
     for name, cfg in _PROVIDER_CONFIGS.items():
         results[name] = await _check_provider(name, cfg)
-    # Local NIM / vLLM is not an advisor provider (stays out of _PROVIDER_CONFIGS)
-    # but the onboarding wizard should still discover it as a local endpoint.
-    results["nim"] = await _check_provider("nim", {"api_key_env": "", "region": "local"})
 
     # Store cache
     get_provider_health._cache = results  # type: ignore[attr-defined]
@@ -4353,10 +4350,14 @@ async def advisor_test_connection(req: Request) -> ApiResponse:
             ).model_dump(),
         )
 
-    from sandcastle.engine.generator import resolve_provider_api_url
+    from sandcastle.engine.generator import _local_advisor_model, resolve_provider_api_url
 
     api_url = resolve_provider_api_url(cfg)
-    model = cfg["model"]
+    model = (
+        (_local_advisor_model(provider, cfg) or cfg["model"])
+        if provider in ("nim", "ollama")
+        else cfg["model"]
+    )
     headers = cfg["headers_fn"](api_key)
     # Pass is_anthropic explicitly so the request body format matches the
     # provider being tested, not the currently configured global provider.

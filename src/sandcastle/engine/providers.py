@@ -198,8 +198,13 @@ def resolve_model(model_str: str) -> ModelInfo:
 
 
 def is_known_model(model_str: str) -> bool:
-    """True if registered, a valid ``nim/<id>``, or an ``adapter/<id>`` string."""
-    return model_str in KNOWN_MODELS or _valid_nim_id(model_str) or _valid_adapter_id(model_str)
+    """True if registered, a valid ``nim/<id>``/``ollama/<tag>``, or an ``adapter/<id>``."""
+    return (
+        model_str in KNOWN_MODELS
+        or _valid_nim_id(model_str)
+        or _valid_ollama_id(model_str)
+        or _valid_adapter_id(model_str)
+    )
 
 
 # --- Spark Mode: auto-route the default model to a local NIM ------------------
