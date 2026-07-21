@@ -20,6 +20,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   can't be used in 'await' expression" on aiodocker 0.27+, where
   `log(follow=True)` returns an async generator instead of a coroutine.
   Both API shapes are handled now.
+- Sandboxed agent steps honour `workflow_default_model`: bare-default steps in
+  the docker/e2b sandbox previously picked the Claude runner even when the
+  default points at a local model, failing with "Not logged in" on boxes
+  without an Anthropic key.
+- Runner image ships `curl` (+ ca-certificates, jq). Agents had no way to
+  reach the web from bash steps at all - observed trying curl, wget, python3,
+  and apt-get in turn, then finishing with an empty result.
+- OpenAI-compatible runner: when the model ends on an empty final message, the
+  step result falls back to the last non-empty assistant text instead of
+  reporting an empty output as success.
 - Docker: `WORKFLOWS_DIR` is now a shared, persistent volume (`app_workflows`)
   on the `sandcastle`, `scheduler`, and `worker` services. User-created and
   generated workflows previously lived in each container's own filesystem, so

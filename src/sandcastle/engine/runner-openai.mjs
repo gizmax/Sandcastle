@@ -194,6 +194,18 @@ function trackUsage(usage) {
   totalOutputTokens += usage.completion_tokens || 0;
 }
 
+
+// Final answer: the model sometimes ends on an empty message (e.g. after tool
+// flailing). Fall back to the last non-empty assistant text so the step never
+// reports an empty result when the agent actually said something along the way.
+function finalResult(messages, content) {
+  if (content) return content;
+  const prior = messages
+    .filter((m) => m.role === "assistant" && typeof m.content === "string" && m.content.trim())
+    .pop();
+  return prior ? prior.content : "";
+}
+
 function totalCost() {
   return totalInputTokens * inputPrice + totalOutputTokens * outputPrice;
 }
@@ -327,7 +339,7 @@ async function run() {
       // No tool calls - agent is done
       emit({
         type: "result",
-        result: msg.content || "",
+        result: finalResult(messages, msg.content),
         total_cost_usd: totalCost(),
         num_turns: turn,
       });
@@ -372,7 +384,7 @@ async function run() {
     if (choice.finish_reason === "stop") {
       emit({
         type: "result",
-        result: msg.content || "",
+        result: finalResult(messages, msg.content),
         total_cost_usd: totalCost(),
         num_turns: turn,
       });
@@ -384,7 +396,7 @@ async function run() {
   const lastAssistant = messages.filter((m) => m.role === "assistant").pop();
   emit({
     type: "result",
-    result: lastAssistant?.content || "",
+    result: finalResult(messages, lastAssistant?.content),
     total_cost_usd: totalCost(),
     num_turns: turn,
   });

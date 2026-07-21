@@ -6,6 +6,13 @@ ARG OPENAI_VERSION=6.46.0
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
+# Basic fetch/parse tools for agent bash steps. Without curl the sandbox has
+# no way to reach the web at all: agents were observed trying curl, wget,
+# python3, and apt-get in turn, then giving up with an empty result.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates jq \
+    && rm -rf /var/lib/apt/lists/*
+
 # Reuse the image's existing non-root `node` user (uid 1000) - creating a new
 # uid-1000 user fails because `node` already owns it. /home/user stays the
 # contract path used by backends, connectors, and templates.
