@@ -1237,20 +1237,25 @@ def _render_markdown(
             text = num_match.group(2)
             num_label = re.match(r"(\d+[.)])", stripped)
             pdf.set_font(fn, size=9)
-            x_off = 14 + indent * 8
+            # Deep indents can push x_off so far right that no character fits
+            # (fpdf: "Not enough horizontal space") - clamp the bullet column.
+            x_off = min(14 + indent * 8, pdf.w - 60)
             pdf.set_x(x_off)
             pdf.set_text_color(*_ACCENT)
             pdf.set_font(fn, "B", 9)
             pdf.cell(8, _LINE_H, num_label.group(1) if num_label else "1.")
             pdf.set_text_color(*_BODY_COLOR)
             pdf.set_font(fn, "", 9)
-            pdf.multi_cell(pdf.w - x_off - 18, _LINE_H, _strip_inline_md(text))
+            pdf.multi_cell(max(pdf.w - x_off - 18, 40), _LINE_H, _strip_inline_md(text))
             i += 1
             continue
 
         # Regular paragraph
         pdf.set_font(fn, size=9)
         pdf.set_text_color(*_BODY_COLOR)
+        # A preceding cell() can leave x near the right edge; multi_cell(0)
+        # then has no room for a single character. Always start at the margin.
+        pdf.set_x(pdf.l_margin)
         pdf.multi_cell(0, _LINE_H, _strip_inline_md(stripped))
         i += 1
 
