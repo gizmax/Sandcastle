@@ -7,6 +7,107 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-07-21 - "Trust, Verified"
+
+A full adversarial audit of the engine, API, persistence, dashboard, and deployment, followed by
+a hardening pass on everything it found. 17,000+ tests, three consecutive randomized-order soak
+runs, zero flakes.
+
+### ⚠️ Upgrade notes (read before upgrading)
+
+- **Database: plan a short maintenance window.** Migrations 015–017 create the missing tables
+  and columns, convert legacy lowercase PostgreSQL enum labels to the ORM's member names
+  (`running` → `RUNNING`, …), convert JSON columns to JSONB, and add indexes. These take strong
+  table locks on `runs`, `run_steps`, `approval_requests`, and `autopilot_experiments` and are
+  **not** rolling-deploy safe. Quiesce API/worker/scheduler, back up, then run
+  `sandcastle db migrate` (or let the Docker CMD do it) before starting 0.41.0 everywhere.
+  Sandcastle < 0.41 cannot read the migrated enum labels. If you ever wrote to
+  `workflow_versions` with direct SQL, verify `SELECT DISTINCT status FROM workflow_versions`
+  only contains draft/staging/production/archived values — the migration preflights this and
+  stops with a clear error listing the offending values.
+- **`sandcastle serve` now binds `127.0.0.1` by default**, and binding a non-loopback host with
+  `AUTH_REQUIRED=false` is refused (exit 2) unless you set `SANDCASTLE_ALLOW_INSECURE_BIND=true`.
+  Docker/compose deployments pass the host explicitly and are unaffected.
+- **HTTP step `@file:` references now require an admin-trusted run** and stay confined to
+  `DATA_DIR`. Non-admin workflows using `@file:` will fail the step.
+- **Published MCP workflow tools now call the authenticated API** instead of executing in
+  process; the MCP server needs a reachable Sandcastle API and a valid key. The MCP manifest is
+  stdio-only (the never-served `streamable-http` claim and HTTP discovery route are gone).
+- **`retry:` is now honored by every step type** (`http`, `code`, `llm`, …), including
+  `on_failure: fallback` — workflows that always had retry configured will now actually retry,
+  which means more attempts (and cost) than before. Deterministic failures (4xx, validation,
+  trust, SSRF, residency) are no longer retried at all.
+- **Docker image defaults to a single Uvicorn worker** (`UVICORN_WORKERS:-1`), because every
+  worker runs the full application lifespan. Scale out with more containers, or set
+  `UVICORN_WORKERS` deliberately with `SCHEDULER_ENABLED=false`.
+- **Agent webhooks without `ANTHROPIC_WEBHOOK_SECRET` are rejected (403)** whenever
+  `AUTH_REQUIRED=true`; set the secret or disable auth for local development.
+- **A2A `tasks/send` returns `submitted` immediately** and enqueues the run; clients must poll
+  `tasks/get` instead of expecting inline completion. `tasks/cancel` now signals the worker
+  instead of forcing the DB status.
+- **Tool connectors receive a minimal environment** (PATH/HOME/locale/temp) plus only their own
+  registered `TOOL_*` credentials — connectors relying on inherited provider keys or other
+  variables must declare them.
+- **Code-step subprocess failures fail closed** by default; set
+  `SANDCASTLE_CODE_STEPS_ALLOW_INPROCESS_FALLBACK=true` to restore the legacy in-process
+  fallback.
+- **Run SSE streams end after 600s** with an error event; long-lived clients should reconnect.
+- **Runner/E2B images run as the base image's `node` user** (still uid/gid 1000); scripts
+  referencing the `runner` username must use `node`.
+
+### Security
+- Closed an authentication bypass on `/admin/environments/*` (root-mounted router skipped the
+  auth middleware and `is_admin()` returned true for any caller), with real-middleware
+  regression tests; `is_admin()` now requires a successfully authenticated API key.
+- `@file:` confinement (resolve + `is_relative_to(data_dir)`, off-loop reads) and the
+  admin-trusted gate above; the HTTP step no longer sends an env var *name* as the Bearer token
+  when the variable is unset.
+- Webhook delivery resolves once, validates, and pins the TCP connection to that exact IP (TLS
+  SNI preserved) — the DNS-rebinding TOCTOU is closed on the webhook path too.
+- Tool connectors no longer inherit the full process environment (DB URLs, provider keys, other
+  tools' credentials); code-subprocess infrastructure failures fail closed by default.
+- Self-update uses `sys.executable` instead of PATH-resolved `pip`/`python`, verifies the
+  installed version strictly, and stores `.env` backups under `data_dir/backups/` with `0600`.
+- `context_source: custom` shell execution, code steps, and `@file:` all sit behind the same
+  `admin_trusted` flag, persisted on the run row so restarts/resumes keep it.
+
+### Fixed
+- **PostgreSQL production installs**: 10 unmigrated tables + missing columns (migration 015),
+  enum labels reconciled with the ORM (016), JSON→JSONB + index alignment (017); `alembic check`
+  with `compare_type`/`compare_server_default` and a live enum round-trip smoke test now run in
+  CI.
+- Engine cost accounting: LLM cost survives post-query failures and aggregates across retries;
+  `WorkflowPaused` carries accrued cost and completed siblings are checkpointed, so approval
+  resumes no longer double-pay. Sub-workflow/delegate fan-out splits the budget across children.
+- API robustness: idempotency race returns the existing run instead of 5xx; batch polling honors
+  all terminal statuses; uploads stream in bounded chunks; background tasks keep strong refs;
+  run/result persistence is JSON-coerced (`datetime`, `UUID`, custom objects can't lose a run).
+- Queue/scheduler: startup cleanup re-enqueues Redis-queued runs with their versioned YAML and
+  trust flag; approval-timeout retries with a bounded sweep; audit hash chain serializes appends
+  per scope and failed audit writes roll back via SAVEPOINT; local-mode jobs get the same
+  timeout arq enforces; `list_schedules` tolerates pending jobs.
+- Dashboard: Evolution page matches the real API (tenant filters everywhere, latest-wins
+  status); admin SSE uses authenticated fetch; WorkflowBuilder YAML is escaped via js-yaml;
+  SSE chunk-boundary parsing fixed; mock fixtures lazy-loaded out of the production bundle; CSV
+  formula-injection guard.
+- Docker: runner/E2B image builds (uid collision with the `node` user), compose scheduler port,
+  `DATA_DIR`/`WORKFLOWS_DIR` container defaults, cookbook blockers; CI now builds all three
+  images and boots the API against `/api/health`.
+
+### Added
+- `llm_config.temperature` / `max_tokens` per-step overrides (parsed, validated, sent to both
+  provider families).
+- `GET /api/evolution` (tenant-scoped, admin-gated) and real frontend↔backend contract tests
+  (`tests/test_dashboard_api_contract.py`, `tests/test_workflows_valid.py` — every shipped and
+  community workflow must parse+validate).
+- `sandcastle memory-mcp serve` and `sandcastle tools validate` (documented but previously
+  unwired).
+- Hub: canonical `hub/registry.json` (283 templates) with the site registry generated from it;
+  seeded community gallery restored with 35 real workflows; CI validates both registries
+  (schema, sha256, dead links).
+- Test infrastructure: randomized-order soak hardening (per-test `os.environ`, settings
+  singleton, and scheduler job isolation) — three consecutive 17k-test clean runs.
+
 ## [0.40.4] - 2026-07-18 - "Fresh Install Fixed"
 
 ### Fixed

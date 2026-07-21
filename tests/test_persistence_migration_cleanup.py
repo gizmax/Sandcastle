@@ -137,7 +137,12 @@ def test_persistence_drift_adds_deploying_to_postgresql_enum():
     """The new experiment status is emitted only for PostgreSQL."""
     module = _migration_module()
     operations = MagicMock()
-    operations.get_bind.return_value = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+    operations.get_bind.return_value = SimpleNamespace(
+        dialect=SimpleNamespace(name="postgresql"),
+        execute=lambda *_args, **_kwargs: SimpleNamespace(
+            scalars=lambda: SimpleNamespace(all=lambda: [])
+        ),
+    )
 
     with patch.object(module, "op", operations):
         module._add_deploying_experimentstatus()
@@ -183,7 +188,12 @@ def test_enum_reconciliation_uses_uppercase_orm_member_names_on_postgresql():
         status.name for status in WorkflowVersionStatus
     )
     operations = MagicMock()
-    operations.get_bind.return_value = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+    operations.get_bind.return_value = SimpleNamespace(
+        dialect=SimpleNamespace(name="postgresql"),
+        execute=lambda *_args, **_kwargs: SimpleNamespace(
+            scalars=lambda: SimpleNamespace(all=lambda: [])
+        ),
+    )
 
     with patch.object(module, "op", operations):
         module.upgrade()
@@ -235,7 +245,12 @@ def test_pg_drift_reconciliation_converts_json_and_creates_missing_indexes():
     """PostgreSQL gets jsonb columns and the model-declared performance indexes."""
     module = _migration_module("017")
     operations = MagicMock()
-    operations.get_bind.return_value = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+    operations.get_bind.return_value = SimpleNamespace(
+        dialect=SimpleNamespace(name="postgresql"),
+        execute=lambda *_args, **_kwargs: SimpleNamespace(
+            scalars=lambda: SimpleNamespace(all=lambda: [])
+        ),
+    )
 
     with patch.object(module, "op", operations):
         module.upgrade()

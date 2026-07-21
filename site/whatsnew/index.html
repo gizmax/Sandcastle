@@ -497,7 +497,7 @@
       <a class="brand" href="/" aria-label="Sandcastle home">
         <span class="glyph" aria-hidden="true">🏰</span>
         <span>Sandcastle</span>
-        <span class="tm">v0.40.0</span>
+        <span class="tm">v0.41.0</span>
       </a>
       <nav class="primary" aria-label="Primary">
         <a class="muted" href="/pricing/">Pricing</a>
@@ -530,9 +530,9 @@
           <aside class="latest-stamp" aria-label="Latest release">
             <div class="ls-cap"><span>Latest release</span><span class="dot" aria-hidden="true"></span></div>
             <div class="ls-body">
-              <span class="ls-ver">v0.40.0</span>
-              <div class="ls-name">Build Once, Run Anywhere</div>
-              <div class="ls-meta"><span>June&nbsp;11,&nbsp;2026</span><span><a href="#v0-40-0">Read&nbsp;↓</a></span></div>
+              <span class="ls-ver">v0.41.0</span>
+              <div class="ls-name">Trust, Verified</div>
+              <div class="ls-meta"><span>July&nbsp;21,&nbsp;2026</span><span><a href="#v0-41-0">Read&nbsp;↓</a></span></div>
             </div>
           </aside>
         </div>
@@ -545,12 +545,72 @@
     <section class="log" aria-label="Release log">
       <div class="wrap">
 
+        <!-- ===================== v0.41.0 ===================== -->
+        <article class="entry is-latest reveal" id="v0-41-0" aria-labelledby="t-0410">
+          <div class="entry-margin">
+            <span class="ver">v0.41.0</span>
+            <span class="ver-date">July 21, 2026</span>
+            <span class="ver-tag">★ Latest</span>
+            <div class="ver-rule" aria-hidden="true"></div>
+          </div>
+          <div class="entry-body">
+            <h2 class="entry-title" id="t-0410">Trust, Verified</h2>
+            <p class="entry-lede">
+              A full adversarial audit of the engine, API, persistence, dashboard, and deployment — and a hardening pass on everything it found. Closed an authentication bypass on admin endpoints, made workflow file reads tenant-safe, reconciled the PostgreSQL schema with the ORM down to enum labels, made retries honest about what they cost, and put the whole suite on randomized-order soak: <strong>17,000+ tests, three consecutive clean runs, zero flakes</strong>. Includes breaking changes — read the <a href="https://github.com/gizmax/Sandcastle/blob/main/CHANGELOG.md">upgrade notes</a> and plan a short maintenance window for the database migration.
+            </p>
+
+            <ul class="feats">
+              <li class="feat">
+                <span class="feat-chip headline">security · headline</span>
+                <div class="feat-text">
+                  <h3>Admin surface locked down</h3>
+                  <p><code>/admin/environments</code> no longer bypasses API-key auth, <code>is_admin</code> requires a genuinely authenticated key, and the server refuses to bind a public interface without <code>AUTH_REQUIRED=true</code> unless you explicitly opt out. Tool connectors and code steps run with minimal, credential-scoped environments.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">security</span>
+                <div class="feat-text">
+                  <h3>Tenant-safe file reads</h3>
+                  <p>HTTP step <code>@file:</code> references now require an admin-trusted run and stay confined to <code>DATA_DIR</code> — no more cross-tenant artifact reads via injected workflow bodies. Webhook delivery pins the validated IP at connect time, closing the DNS-rebinding window for good.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">engine</span>
+                <div class="feat-text">
+                  <h3>Honest retries, honest budgets</h3>
+                  <p><code>retry:</code> now works on every step type, fatal errors (4xx, validation, policy) stop retrying instead of re-paying for doomed calls, and paid LLM cost is counted even when a step fails after the API call — budget limits hold to the cent, including across approval pauses and resumes.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">db</span>
+                <div class="feat-text">
+                  <h3>PostgreSQL reconciled</h3>
+                  <p>Migrations 015–017 create the missing tables and columns, convert legacy lowercase enum labels to the ORM's member names, and align JSONB and indexes. <code>alembic check</code> runs in CI against a live Postgres with an enum round-trip smoke test, so schema drift can't ship silently again.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">dashboard</span>
+                <div class="feat-text">
+                  <h3>Dashboard that matches the backend</h3>
+                  <p>Evolution page speaks the real API (tenant-scoped <code>GET /api/evolution</code>), admin SSE streams authenticate properly, generated YAML is injection-safe, and a contract test fails CI if the frontend ever calls an endpoint that doesn't exist.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">ci</span>
+                <div class="feat-text">
+                  <h3>Soak-tested, Docker-built</h3>
+                  <p>The suite now runs randomized-order in development (three environment/state pollution classes fixed at the root), and CI builds the main, runner, and E2B images and boots the API against a health check on every change.</p>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </article>
+
         <!-- ===================== v0.40.0 ===================== -->
-        <article class="entry is-latest reveal" id="v0-40-0" aria-labelledby="t-0400">
+        <article class="entry reveal" id="v0-40-0" aria-labelledby="t-0400">
           <div class="entry-margin">
             <span class="ver">v0.40.0</span>
             <span class="ver-date">June 11, 2026</span>
-            <span class="ver-tag">★ Latest</span>
             <div class="ver-rule" aria-hidden="true"></div>
           </div>
           <div class="entry-body">
