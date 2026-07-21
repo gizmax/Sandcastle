@@ -96,6 +96,13 @@ services:
     <<: [*sandcastle-build, *sandcastle-env]
     restart: unless-stopped
     command: ["arq", "sandcastle.queue.worker.WorkerSettings"]
+    # The arq worker serves no HTTP, so the image HEALTHCHECK can never pass.
+    healthcheck:
+      test: ["CMD-SHELL", "grep -aq arq /proc/1/cmdline"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     depends_on:
       redis:
         condition: service_healthy

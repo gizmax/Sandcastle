@@ -2,7 +2,7 @@
 
 **Build once. Run anywhere.** Sandcastle is an open-source, production-ready orchestrator for AI agents. **Describe a workflow in plain English and it builds it** (or write the YAML yourself); run it on **any model** — Claude, GPT, Mistral, or a local model on your own box — and move between them with one line; deploy it **your way** — cloud, your own server, fully air-gapped, or EU-only; and it **gets better over time**, on its own. Local models run at `$0/run` with hard data-residency enforcement and a tamper-evident audit trail; the cloud is there too, with 7 providers and auto-failover, 25 step types, verified templates, and a full dashboard. Sovereign by default. European-built.
 
-[![PyPI](https://img.shields.io/badge/PyPI-v0.41.0-blue?style=flat-square)](https://pypi.org/project/sandcastle-ai/0.41.0/)
+[![PyPI](https://img.shields.io/badge/PyPI-v0.41.1-blue?style=flat-square)](https://pypi.org/project/sandcastle-ai/0.41.1/)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-17154%20passing-brightgreen?style=flat-square)](https://github.com/gizmax/Sandcastle/actions)
@@ -255,6 +255,13 @@ OLLAMA_HOST=http://localhost:11434 sandcastle serve   # Spark Mode auto-detects 
 
 Override detection anytime with `SANDCASTLE_SPARK_MODE=on|off`. On any non-Spark machine nothing
 changes — detection is fail-closed.
+
+**Spark Mode in Docker.** The plain `docker-compose.yml` does not pass the GPU through, so Spark
+Mode stays off in containers. With nvidia-container-toolkit installed on the Spark host, run:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+```
 
 **Overnight Self-Tune** goes one step further: with `pip install 'sandcastle-ai[training]'`,
 `TRAINER_BACKEND=gpu`, and `EVOLUTION_AUTO_FINETUNE=true`, the evolution loop fine-tunes a real
