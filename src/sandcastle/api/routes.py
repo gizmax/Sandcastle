@@ -6123,6 +6123,10 @@ async def download_run_output_pdf(run_id: str, req: Request):
     for src_ch, dst_ch in _TYPOGRAPHIC.items():
         markdown_text = markdown_text.replace(src_ch, dst_ch)
     markdown_text = markdown_text.encode("latin-1", errors="replace").decode("latin-1")
+    # fpdf cannot wrap an unbroken token wider than the page ("Not enough
+    # horizontal space to render a single character") - long URLs and JSON
+    # blobs are exactly that. Insert break points into any 80+ char token.
+    markdown_text = re.sub(r"(\S{80})(?=\S)", r"\1 ", markdown_text)
 
     pdf_dir = Path(settings.data_dir).resolve() / "run_pdfs"
     pdf_dir.mkdir(parents=True, exist_ok=True)
