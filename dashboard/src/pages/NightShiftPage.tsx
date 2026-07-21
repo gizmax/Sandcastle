@@ -56,7 +56,8 @@ interface SelfTuneNightsData {
   total_adapters: number;
 }
 
-const DOCS_URL = "https://github.com/gizmax/Sandcastle#readme";
+const DOCS_URL =
+  "https://github.com/gizmax/Sandcastle/blob/main/docs/overnight-self-tune-spark.md";
 
 // --- Hero ---
 

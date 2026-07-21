@@ -1,4 +1,7 @@
-# Overnight Self-Tune on a DGX Spark — real LoRA training
+# Night Shift — Overnight Self-Tune on a DGX Spark (real LoRA training)
+
+> This is the feature the dashboard calls **Night Shift** (Night Shift page ->
+> "Read the docs" lands here).
 
 Sandcastle's evolution loop can fine-tune a **task-specific LoRA adapter** on a workflow's
 own eval data and route the workflow to it — for $0, entirely on-box. This page covers the
