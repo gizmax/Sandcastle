@@ -894,6 +894,7 @@ class OptimizerStatsResponse(BaseModel):
 class SettingsResponse(BaseModel):
     """Current server settings."""
 
+    workflow_default_model: str = ""
     # Credentials (masked - only last 4 chars shown)
     anthropic_api_key: str = ""
     e2b_api_key: str = ""
@@ -939,6 +940,10 @@ class SettingsUpdateRequest(BaseModel):
     default_max_cost_usd: float | None = Field(None, ge=0)
     log_level: str | None = Field(None, pattern="^(debug|info|warning|error)$", max_length=50)
     max_workflow_depth: int | None = Field(None, ge=1, le=20)
+    # Global default model for steps without an explicit `model:`. Empty string
+    # clears it (back to the built-in default). Validated against resolve_model
+    # in the route so an unknown model never reaches the DB.
+    workflow_default_model: str | None = Field(None, max_length=200)
 
 
 # --- Tool Registry ---

@@ -117,3 +117,151 @@ class TestGeneratorApiUrlResolution:
 
         url = resolve_provider_api_url(_PROVIDER_CONFIGS["anthropic"])
         assert url == "https://api.anthropic.com/v1/messages"
+
+
+class TestWorkflowDefaultModel:
+    """0.42: workflow_default_model setting + effective_model + dynamic ollama/<tag>."""
+
+    def test_effective_model_replaces_bare_default(self, monkeypatch):
+        from sandcastle.engine.providers import effective_model
+
+        monkeypatch.setattr(settings, "workflow_default_model", "nim/ornith")
+        assert effective_model("sonnet") == "nim/ornith"
+
+    def test_effective_model_respects_explicit(self, monkeypatch):
+        from sandcastle.engine.providers import effective_model
+
+        monkeypatch.setattr(settings, "workflow_default_model", "nim/ornith")
+        assert effective_model("opus") == "opus"
+        assert effective_model("mistral/large") == "mistral/large"
+
+    def test_effective_model_empty_falls_through_to_autoroute(self, monkeypatch):
+        import sandcastle.engine.providers as providers
+
+        monkeypatch.setattr(settings, "workflow_default_model", "")
+        monkeypatch.setattr(
+            providers, "maybe_spark_nim_route", lambda m: "AUTOROUTED" if m == "sonnet" else m
+        )
+        assert providers.effective_model("sonnet") == "AUTOROUTED"
+
+    def test_dynamic_ollama_model_resolves(self):
+        from sandcastle.engine.providers import resolve_model
+
+        info = resolve_model("ollama/qwen3:8b")
+        assert info.provider == "ollama"
+        assert info.api_model_id == "qwen3:8b"
+        assert info.region == "local"
+        assert info.input_price_per_m == 0.0
+
+    def test_dynamic_ollama_rejects_traversal(self):
+        from sandcastle.engine.providers import resolve_model
+
+        with pytest.raises(KeyError):
+            resolve_model("ollama/../etc/passwd")
+
+    def test_settings_patch_rejects_unknown_model(self):
+        client = _make_client()
+        resp = client.patch(
+            "/settings", json={"workflow_default_model": "definitely-not-a-model"}
+        )
+        assert resp.status_code == 400
+        assert "UNKNOWN_MODEL" in resp.text
+
+    def test_settings_patch_accepts_dynamic_models(self, monkeypatch):
+        client = _make_client()
+        for model in ("nim/ornith", "ollama/qwen3:8b", "opus"):
+            resp = client.patch("/settings", json={"workflow_default_model": model})
+            assert resp.status_code == 200, f"{model}: {resp.text}"
+            assert resp.json()["data"]["workflow_default_model"] == model
+        # empty string clears it
+        resp = client.patch("/settings", json={"workflow_default_model": ""})
+        assert resp.status_code == 200
+
+    def test_health_providers_includes_models_list(self, monkeypatch):
+        """Local provider entries carry a models list when the probe returns one."""
+        client = _make_client()
+        _clear_health_cache()
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.raise_for_status = MagicMock()
+            mock_resp.json = MagicMock(
+                return_value={
+                    "models": [{"name": "qwen3:8b"}, {"name": "gpt-oss:120b"}],
+                    "data": [{"id": "ornith"}, {"id": "aeon"}],
+                }
+            )
+            mock_instance = AsyncMock()
+            mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+            mock_instance.__aexit__ = AsyncMock(return_value=False)
+            mock_instance.post = AsyncMock(return_value=mock_resp)
+            mock_instance.get = AsyncMock(return_value=mock_resp)
+            mock_client_cls.return_value = mock_instance
+            resp = client.get("/health/providers")
+        data = resp.json()["data"]
+        assert data["ollama"]["models"] == ["qwen3:8b", "gpt-oss:120b"]
+        assert data["nim"]["models"] == ["ornith", "aeon"]
+
+
+class TestAdvisorProviderResolution:
+    """0.42: the generator picks a usable provider instead of hardcoding Anthropic."""
+
+    def _clear_provider_env(self, monkeypatch):
+        for var in (
+            "SANDCASTLE_ADVISOR_PROVIDER", "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+            "MISTRAL_API_KEY", "OPENROUTER_API_KEY", "MINIMAX_API_KEY",
+        ):
+            monkeypatch.delenv(var, raising=False)
+        for attr in (
+            "anthropic_api_key", "openai_api_key", "mistral_api_key",
+            "openrouter_api_key", "minimax_api_key",
+        ):
+            monkeypatch.setattr(settings, attr, "")
+
+    def test_explicit_env_always_wins(self, monkeypatch):
+        from sandcastle.engine.generator import _resolve_provider_name
+
+        monkeypatch.setenv("SANDCASTLE_ADVISOR_PROVIDER", "mistral")
+        assert _resolve_provider_name() == "mistral"
+
+    def test_cloud_key_beats_local_default(self, monkeypatch):
+        from sandcastle.engine.generator import _resolve_provider_name
+
+        self._clear_provider_env(monkeypatch)
+        monkeypatch.setattr(settings, "anthropic_api_key", "sk-ant-test")
+        monkeypatch.setattr(settings, "workflow_default_model", "nim/ornith")
+        assert _resolve_provider_name() == "anthropic"
+
+    def test_local_default_model_selects_nim(self, monkeypatch):
+        from sandcastle.engine.generator import _resolve_provider_name
+
+        self._clear_provider_env(monkeypatch)
+        monkeypatch.setattr(settings, "workflow_default_model", "nim/ornith")
+        assert _resolve_provider_name() == "nim"
+
+    def test_local_default_model_selects_ollama(self, monkeypatch):
+        from sandcastle.engine.generator import _resolve_provider_name
+
+        self._clear_provider_env(monkeypatch)
+        monkeypatch.setattr(settings, "workflow_default_model", "ollama/qwen3:8b")
+        assert _resolve_provider_name() == "ollama"
+
+    def test_no_provider_defaults_to_anthropic_off_spark(self, monkeypatch):
+        from sandcastle.engine.generator import _resolve_provider_name
+
+        self._clear_provider_env(monkeypatch)
+        monkeypatch.setattr(settings, "workflow_default_model", "")
+        monkeypatch.setenv("SANDCASTLE_SPARK_MODE", "off")
+        assert _resolve_provider_name() == "anthropic"
+
+    def test_nim_advisor_uses_user_model(self, monkeypatch):
+        from sandcastle.engine.generator import _get_advisor_config
+
+        self._clear_provider_env(monkeypatch)
+        monkeypatch.setattr(settings, "workflow_default_model", "nim/ornith")
+        monkeypatch.setattr(settings, "nim_base_url", "http://host.docker.internal:18000")
+        monkeypatch.setattr(settings, "data_residency", "")
+        monkeypatch.delenv("SANDCASTLE_ADVISOR_MODEL", raising=False)
+        cfg = _get_advisor_config()
+        assert cfg["model"] == "ornith"
+        assert cfg["api_url"] == "http://host.docker.internal:18000/v1/chat/completions"

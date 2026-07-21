@@ -707,6 +707,13 @@ ADVISOR_MODEL_TIERS: dict[str, dict[str, str]] = {
         "medium": "MiniMax-M2.5",
         "low": "MiniMax-M2.5",
     },
+    "nim": {
+        # A local vLLM serves user-selected models; the user's workflow_default_model
+        # (resolved via _local_advisor_model) takes precedence over these fallbacks.
+        "high": "llama-3.1-70b",
+        "medium": "llama-3.1-70b",
+        "low": "llama-3.1-70b",
+    },
 }
 
 
@@ -743,6 +750,11 @@ def resolve_provider_api_url(cfg: dict) -> str:
         from sandcastle.engine.providers import ollama_base_url
 
         api_url = api_url.format(ollama_host=ollama_base_url())
+    if "{nim_base_url}" in api_url:
+        from sandcastle.config import settings as _s
+
+        _nim_base = getattr(_s, "nim_base_url", "") or "http://localhost:8000"
+        api_url = api_url.format(nim_base_url=str(_nim_base).rstrip("/"))
     return api_url
 
 
@@ -806,7 +818,38 @@ _PROVIDER_CONFIGS = {
         "region": "local",
         "headers_fn": lambda _: {"Content-Type": "application/json"},
     },
+    "nim": {
+        # Local NIM / vLLM (OpenAI-compatible). Model is resolved at call time
+        # from workflow_default_model / spark_nim_default_model - a vLLM serves
+        # whatever --served-model-name it was started with.
+        "api_url": "{nim_base_url}/v1/chat/completions",
+        "model": "llama-3.1-70b",
+        "api_key_env": "",  # local inference needs no key
+        "region": "local",
+        "headers_fn": lambda _: {"Content-Type": "application/json"},
+    },
 }
+
+
+def _local_advisor_model(provider: str, cfg: dict) -> str:
+    """User-selected model id for a local provider's advisor/generation calls.
+
+    Returns the id from ``workflow_default_model`` when it belongs to *provider*,
+    else the Spark NIM default (for nim) when set, else "" - callers fall back to
+    SLO tiers / the config's static default. Strict isinstance checks keep test
+    doubles (MagicMock settings) from leaking truthy non-strings in here.
+    """
+    from sandcastle.config import settings
+
+    wdm = getattr(settings, "workflow_default_model", "")
+    prefix = provider + "/"
+    if isinstance(wdm, str) and wdm.startswith(prefix):
+        return wdm[len(prefix):]
+    if provider == "nim":
+        spark_default = getattr(settings, "spark_nim_default_model", "")
+        if isinstance(spark_default, str) and spark_default.startswith("nim/"):
+            return spark_default[len("nim/"):]
+    return ""
 
 
 def _get_advisor_config() -> dict:
@@ -823,14 +866,16 @@ def _get_advisor_config() -> dict:
 
     from sandcastle.config import settings
 
-    provider = os.environ.get("SANDCASTLE_ADVISOR_PROVIDER", "anthropic").lower()
-    if provider not in _PROVIDER_CONFIGS:
-        provider = "anthropic"
+    provider = _resolve_provider_name()
 
     config = dict(_PROVIDER_CONFIGS[provider])
 
     # Resolve dynamic base URLs for local providers
     config["api_url"] = resolve_provider_api_url(config)
+
+    # Local providers serve user-selected models; resolve at call time.
+    if provider in ("nim", "ollama"):
+        config["model"] = _local_advisor_model(provider, config) or config.get("model", "")
 
     model_override = os.environ.get("SANDCASTLE_ADVISOR_MODEL", "")
     if model_override:
@@ -964,12 +1009,54 @@ _TIMEOUT = 60
 
 
 def _resolve_provider_name() -> str:
-    """Return the current advisor provider name (e.g. 'anthropic', 'mistral')."""
+    """Return the current advisor provider name (e.g. 'anthropic', 'mistral').
+
+    SANDCASTLE_ADVISOR_PROVIDER always wins. Without it, prefer a provider that
+    is actually usable instead of hardcoding Anthropic: first a cloud provider
+    with a configured key, then the local provider the user picked as
+    workflow_default_model, then a reachable local NIM or Ollama. A box running
+    only local models (e.g. a DGX Spark) can generate workflows out of the box.
+    """
     import os
-    provider = os.environ.get("SANDCASTLE_ADVISOR_PROVIDER", "anthropic").lower()
-    if provider not in _PROVIDER_CONFIGS:
-        return "anthropic"
-    return provider
+
+    provider = os.environ.get("SANDCASTLE_ADVISOR_PROVIDER", "").lower()
+    if provider in _PROVIDER_CONFIGS:
+        return provider
+
+    # 1) Cloud providers with a configured key, historical default first. The
+    #    isinstance check keeps MagicMock auto-attributes (test doubles) from
+    #    counting as configured keys.
+    for name in ("anthropic", "mistral", "openai", "minimax", "google"):
+        cfg = _PROVIDER_CONFIGS.get(name, {})
+        key_env = cfg.get("api_key_env", "")
+        if key_env:
+            key = _resolve_api_key_for_provider(name)
+            if isinstance(key, str) and key:
+                return name
+
+    # 2) The user's chosen default model, when it names a local provider.
+    #    Strict type checks: settings may be a test double whose auto-attributes
+    #    are truthy non-strings, and this path must stay deterministic.
+    from sandcastle.config import settings as _s
+
+    wdm = getattr(_s, "workflow_default_model", "")
+    if isinstance(wdm, str):
+        if wdm.startswith("nim/"):
+            return "nim"
+        if wdm == "ollama" or wdm.startswith("ollama/"):
+            return "ollama"
+
+    # 3) On a Spark, a reachable local NIM/vLLM serves as the generator. The probe
+    #    is Spark-gated so off-Spark resolution stays deterministic (no network
+    #    calls in the default path, no cache-dependent test behavior).
+    if getattr(_s, "spark_mode", False) is True:
+        from sandcastle.engine.providers import is_nim_reachable
+
+        if is_nim_reachable():
+            return "nim"
+
+    # 4) Nothing usable - keep the historical default; callers surface NO_PROVIDER.
+    return "anthropic"
 
 
 def _resolve_api_key_for_provider(provider_name: str) -> str:
@@ -1099,8 +1186,18 @@ async def _call_advisor_llm(
             model = model_override
             model_selected_by = "user_override"
         else:
+            local_model = (
+                _local_advisor_model(provider_name, cfg)
+                if provider_name in ("nim", "ollama")
+                else ""
+            )
             tier_model = _resolve_model_for_tier(provider_name, quality_tier)
-            if tier_model:
+            if local_model:
+                # The user's workflow_default_model wins for local providers - a
+                # vLLM serves only its --served-model-name, not tier-map defaults.
+                model = local_model
+                model_selected_by = "local_default"
+            elif tier_model:
                 model = tier_model
                 model_selected_by = "slo_routing"
             else:

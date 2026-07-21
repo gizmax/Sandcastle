@@ -667,6 +667,60 @@ describe("OnboardingWizard (guided beginner flow)", () => {
     expect(screen.getByText("Ready!")).toBeInTheDocument();
   });
 
+  it("Connect keeps the cloud key input when local providers are detected", async () => {
+    mockApi.get.mockResolvedValue(okResponse({
+      ollama: { status: "running", latency_ms: 8, region: "local" },
+    }));
+
+    await act(async () => {
+      renderWizard(mockOnFinish);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText("Get Started"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Ready!")).toBeInTheDocument();
+    });
+    expect(screen.getByText("or add a cloud provider")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("sk-...")).toBeInTheDocument();
+  });
+
+  it("Connect lets the user pick a default model from detected providers", async () => {
+    mockApi.get.mockResolvedValue(okResponse({
+      ollama: { status: "running", latency_ms: 8, region: "local", models: ["qwen3:8b"] },
+      nim: { status: "ok", latency_ms: 4, region: "local", models: ["ornith"] },
+    }));
+    mockApi.patch.mockResolvedValue(okResponse({ workflow_default_model: "nim/ornith" }));
+
+    await act(async () => {
+      renderWizard(mockOnFinish);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText("Get Started"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Pick a default model")).toBeInTheDocument();
+    });
+    expect(screen.getByText("ollama/qwen3:8b")).toBeInTheDocument();
+    expect(screen.getByText("nim/ornith")).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("nim/ornith"));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText("Set as default"));
+    });
+
+    await waitFor(() => {
+      expect(mockApi.patch).toHaveBeenCalledWith("/settings", {
+        workflow_default_model: "nim/ornith",
+      });
+      expect(screen.getByText("Default model set!")).toBeInTheDocument();
+    });
+  });
+
   it("Skip selects Everything density and marks onboarding done", async () => {
     mockApi.get.mockResolvedValue(okResponse({}));
 

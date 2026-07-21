@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-07-21 - "Your Box, Your Default"
+
+### Added
+- **Default model picker.** New `workflow_default_model` setting: steps without an
+  explicit `model:` use it instead of the built-in default. Settable from the
+  onboarding wizard - detected local providers now list their models (Ollama tags,
+  vLLM/NIM served ids) and one click makes one the default - or via
+  `PATCH /api/settings {"workflow_default_model": "nim/ornith"}`. Values are
+  validated against the model registry at write time; unknown strings are rejected
+  with `UNKNOWN_MODEL` before they can break a run. Empty string clears it.
+- **Dynamic `ollama/<tag>` models.** Any locally pulled Ollama model resolves like
+  `nim/<id>` always has (`ollama/qwen3:8b`, region `local`, $0), with the same
+  character discipline against injection. The base URL honours `OLLAMA_HOST`.
+- `/health/providers` includes a `models` list for reachable local providers
+  (up to 20 each), which is what the wizard picker renders.
+
+### Fixed
+- The workflow generator ("describe it in plain English") no longer demands a
+  cloud API key on a box that runs local models. Advisor provider resolution
+  picks, in order: `SANDCASTLE_ADVISOR_PROVIDER`, any cloud provider with a
+  configured key, the local provider named by `workflow_default_model`, and on
+  a Spark a reachable local NIM/vLLM. Local generation calls use the model you
+  picked (e.g. `ornith`), not a hardcoded catalogue name.
+
+### Changed
+- A step whose model is the bare default now resolves: `workflow_default_model`
+  (when set) -> Spark NIM autoroute (when applicable) -> `sonnet`. Explicit
+  non-default models are never rewritten. Note that `model: sonnet` written
+  explicitly counts as the bare default - the same convention the Spark autoroute
+  has used since 0.33.
+- The onboarding wizard keeps the cloud API key entry visible when local
+  providers are detected (was either/or), so you can add Anthropic, Mistral, or
+  OpenAI keys alongside a local model.
+
 ## [0.41.2] - 2026-07-21 - "Local Discovery"
 
 ### Fixed

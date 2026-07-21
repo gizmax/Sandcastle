@@ -2834,16 +2834,16 @@ async def _execute_llm_step(
     import httpx
 
     from sandcastle.engine.providers import (
+        effective_model,
         get_api_key,
-        maybe_spark_nim_route,
         resolve_base_url,
         resolve_model,
     )
 
     started_at = time.monotonic()
-    # Spark Mode: route the bare default model to a reachable local NIM ($0, on-box).
-    # No-op off-Spark / when disabled / when NIM is down (see maybe_spark_nim_route).
-    model_info = resolve_model(maybe_spark_nim_route(step.model))
+    # Bare-default steps use the configured workflow_default_model (if any), then the
+    # Spark NIM autoroute. Explicit models pass through untouched (see effective_model).
+    model_info = resolve_model(effective_model(step.model))
     _enforce_data_residency(model_info)
     api_key = get_api_key(model_info)
 
@@ -4882,7 +4882,12 @@ async def _execute_report_step(
     import httpx
 
     from sandcastle.engine.dag import ReportConfig
-    from sandcastle.engine.providers import get_api_key, resolve_base_url, resolve_model
+    from sandcastle.engine.providers import (
+        effective_model,
+        get_api_key,
+        resolve_base_url,
+        resolve_model,
+    )
 
     started_at = time.monotonic()
     cfg = step.report_config or ReportConfig()
@@ -4907,8 +4912,8 @@ async def _execute_report_step(
         "Start directly with ## sections."
     )
 
-    # LLM call to generate report content
-    model_info = resolve_model(step.model)
+    # LLM call to generate report content (bare default honours workflow_default_model)
+    model_info = resolve_model(effective_model(step.model))
     _enforce_data_residency(model_info)
     api_key = get_api_key(model_info)
 
@@ -7084,12 +7089,12 @@ async def _browser_computer_use_mode(
 
     import httpx
 
-    from sandcastle.engine.providers import get_api_key, resolve_model
+    from sandcastle.engine.providers import effective_model, get_api_key, resolve_model
 
     if replay_screenshots is None:
         replay_screenshots = []
 
-    model_info = resolve_model(step.model)
+    model_info = resolve_model(effective_model(step.model))
     _enforce_data_residency(model_info)
     api_key = get_api_key(model_info)
 

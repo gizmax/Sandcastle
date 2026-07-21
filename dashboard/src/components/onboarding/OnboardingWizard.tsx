@@ -19,7 +19,19 @@ export interface SelectedTemplate {
 }
 
 interface HealthProviders {
-  [key: string]: { status: string; latency_ms: number | null; region: string };
+  [key: string]: {
+    status: string;
+    latency_ms: number | null;
+    region: string;
+    models?: string[];
+  };
+}
+
+/** Model string the backend expects for a provider's model (nim/<id>, ollama/<tag>). */
+function modelStringFor(providerId: string, model: string): string {
+  if (providerId === "ollama") return `ollama/${model}`;
+  if (providerId === "nim") return `nim/${model}`;
+  return model;
 }
 
 interface OnboardingWizardProps {
@@ -50,6 +62,10 @@ function StepConnect({ onNext, onSkip }: { onNext: () => void; onSkip: () => voi
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  const [savedModel, setSavedModel] = useState<string | null>(null);
+  const [modelSaving, setModelSaving] = useState(false);
+  const [modelError, setModelError] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -71,6 +87,21 @@ function StepConnect({ onNext, onSkip }: { onNext: () => void; onSkip: () => voi
     : [];
   const hasReady = readyProviders.length > 0;
   const hasLocal = readyProviders.some(([, v]) => v.region === "local");
+
+  const handleSaveModel = async () => {
+    if (!selectedModel) return;
+    setModelSaving(true);
+    setModelError(null);
+    try {
+      const res = await api.patch("/settings", { workflow_default_model: selectedModel });
+      if (res.error) throw new Error(res.error.message);
+      setSavedModel(selectedModel);
+    } catch {
+      setModelError("Could not save the default model.");
+    } finally {
+      setModelSaving(false);
+    }
+  };
 
   const handleSaveKey = async () => {
     if (!apiKey.trim()) return;
@@ -161,6 +192,70 @@ function StepConnect({ onNext, onSkip }: { onNext: () => void; onSkip: () => voi
               <span className="text-xs font-semibold text-success">Ready!</span>
             </div>
           ))}
+          {readyProviders.some(([, info]) => info.models?.length) && (
+            <div className="rounded-xl border border-border bg-background p-3 space-y-2">
+              <p className="text-sm font-medium text-foreground">
+                Pick a default model
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Steps without an explicit <code>model:</code> will use it. You can
+                always override per step in the workflow YAML.
+              </p>
+              <div className="space-y-1.5 max-h-44 overflow-y-auto">
+                {readyProviders.flatMap(([id, info]) =>
+                  (info.models ?? []).map((m) => {
+                    const value = modelStringFor(id, m);
+                    return (
+                      <label
+                        key={value}
+                        className={cn(
+                          "flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm cursor-pointer transition-colors",
+                          selectedModel === value
+                            ? "border-accent bg-accent/10 text-foreground"
+                            : "border-border text-muted-foreground hover:border-accent/40"
+                        )}
+                      >
+                        <input
+                          type="radio"
+                          name="default-model"
+                          className="accent-current"
+                          checked={selectedModel === value}
+                          onChange={() => setSelectedModel(value)}
+                        />
+                        <span className="font-mono text-xs">{value}</span>
+                        <span className="ml-auto text-[10px] uppercase tracking-wide text-muted-foreground">
+                          {id}
+                        </span>
+                      </label>
+                    );
+                  })
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => void handleSaveModel()}
+                  disabled={modelSaving || !selectedModel || savedModel === selectedModel}
+                  className={cn(
+                    "rounded-lg bg-accent px-4 py-1.5 text-sm font-medium text-accent-foreground",
+                    "hover:bg-accent-hover transition-colors",
+                    "disabled:opacity-50 disabled:cursor-not-allowed"
+                  )}
+                >
+                  {modelSaving
+                    ? "Saving..."
+                    : savedModel === selectedModel && savedModel
+                      ? "Saved"
+                      : "Set as default"}
+                </button>
+                {savedModel && savedModel === selectedModel && (
+                  <span className="text-xs text-success font-medium">
+                    Default model set!
+                  </span>
+                )}
+              </div>
+              {modelError && <p className="text-xs text-error">{modelError}</p>}
+            </div>
+          )}
           <p className="text-center text-xs text-muted-foreground">
             or add a cloud provider
           </p>
