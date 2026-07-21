@@ -23,7 +23,7 @@ from sandcastle.api.environments_admin import router as environments_admin_route
 from sandcastle.api.mesh import router as mesh_router
 from sandcastle.api.routes import router
 from sandcastle.api.security_headers import security_headers_middleware
-from sandcastle.config import Settings, settings, validate_server_bind
+from sandcastle.config import settings, validate_server_bind
 
 # Configure logging
 logging.basicConfig(
@@ -43,7 +43,6 @@ async def _validate_providers() -> None:
     providers but never blocks startup - this is informational only.
     """
     import asyncio
-    import os
     import time
 
     import httpx

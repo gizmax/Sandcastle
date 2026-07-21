@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-07-22 - "Polish Under Pressure"
+
+A day-two batch from live usage on the DGX Spark box: one new feature and a
+string of fixes found by actually clicking through the product.
+
+### Added
+- **Download PDF for run outputs.** `GET /runs/{run_id}/output.pdf` renders the
+  run's outputs as a branded PDF (title, run meta, one section per output key,
+  JSON fenced, step errors quoted); the Run Detail page gains a Download PDF
+  button next to JSON/TXT that fetches with auth headers.
+
+### Changed
+- `/evolution/start` validates fast and runs the loop in the background (202 +
+  the existing status endpoint), instead of holding the HTTP request through
+  the whole mutation+eval loop until the browser gave up.
+
+### Fixed
+- Array input fields accept comma-separated values ("douglas,notino") and bare
+  scalars; JSON arrays keep working. Only a value with no items errors.
+- Onboarding wizard: content taller than the viewport (templates with many
+  inputs) was clipped at the top and unreachable by scroll.
+- Evolution: eval suites without a `workflow` field get it injected (evolution
+  already knows the workflow), and empty suites are refused loudly instead of
+  burning iterations on 0.0 scores.
+- PDF renderer: latin-1 font sanitization, break points for 80+ char tokens
+  (long URLs), left-margin reset and width clamps in the markdown renderer -
+  numbered lists of long links crashed the render with "Not enough horizontal
+  space".
+- Night Shift "Read the docs" opens the actual Overnight Self-Tune document
+  instead of the repo README.
+
 ## [0.42.2] - 2026-07-21 - "Workflows That Stay"
 
 ### Fixed
