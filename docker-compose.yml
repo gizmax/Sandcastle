@@ -74,6 +74,11 @@ services:
       SCHEDULER_ENABLED: "false"
     volumes:
       - app_data:/app/data
+      # WORKFLOWS_DIR must be a shared, persistent volume: user-created workflows
+      # otherwise live in the container filesystem and silently vanish on every
+      # rebuild (breaking replay), and the API/worker/scheduler would each see a
+      # different copy.
+      - app_workflows:/app/workflows
 
   scheduler:
     <<: [*sandcastle-build, *sandcastle-env]
@@ -91,6 +96,11 @@ services:
       SCHEDULER_ENABLED: "true"
     volumes:
       - app_data:/app/data
+      # WORKFLOWS_DIR must be a shared, persistent volume: user-created workflows
+      # otherwise live in the container filesystem and silently vanish on every
+      # rebuild (breaking replay), and the API/worker/scheduler would each see a
+      # different copy.
+      - app_workflows:/app/workflows
 
   worker:
     <<: [*sandcastle-build, *sandcastle-env]
@@ -113,8 +123,14 @@ services:
       ADMIN_API_KEY: ""
     volumes:
       - app_data:/app/data
+      # WORKFLOWS_DIR must be a shared, persistent volume: user-created workflows
+      # otherwise live in the container filesystem and silently vanish on every
+      # rebuild (breaking replay), and the API/worker/scheduler would each see a
+      # different copy.
+      - app_workflows:/app/workflows
 
 volumes:
   pg_data:
   redis_data:
   app_data:
+  app_workflows:

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.42.2] - 2026-07-21 - "Workflows That Stay"
+
+### Fixed
+- Docker: `WORKFLOWS_DIR` is now a shared, persistent volume (`app_workflows`)
+  on the `sandcastle`, `scheduler`, and `worker` services. User-created and
+  generated workflows previously lived in each container's own filesystem, so
+  they silently vanished on every rebuild - after which "Replay from Step"
+  failed with `WORKFLOW_NOT_FOUND` - and the API, worker, and scheduler could
+  each see a different copy. Existing deployments: workflows created before
+  this fix were stored inside the old containers and cannot be recovered;
+  re-save or re-generate them once, after which they persist.
+
 ## [0.42.1] - 2026-07-21 - "Assistant, Actually"
 
 ### Fixed

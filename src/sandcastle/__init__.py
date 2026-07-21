@@ -1,6 +1,6 @@
 """Sandcastle - Production-ready workflow orchestrator for AI agents."""
 
-__version__ = "0.42.1"
+__version__ = "0.42.2"
 
 __all__ = ["SandcastleClient", "AsyncSandcastleClient", "__version__"]
 
