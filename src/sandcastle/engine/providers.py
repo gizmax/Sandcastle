@@ -187,6 +187,21 @@ def is_known_model(model_str: str) -> bool:
 
 # The local model the Spark auto-route targets (a static nim/* registry entry).
 _SPARK_NIM_DEFAULT = "nim/llama-3.1-70b"
+
+
+def ollama_base_url() -> str:
+    """Effective Ollama base URL - live OLLAMA_HOST env wins, then settings, then localhost.
+
+    The live env check matters in Docker: the settings singleton is created at import
+    time, and detection endpoints must see an OLLAMA_HOST injected later (tests, exec).
+    """
+    from sandcastle.config import settings
+
+    return (
+        os.environ.get("OLLAMA_HOST")
+        or getattr(settings, "ollama_host", "")
+        or "http://localhost:11434"
+    ).rstrip("/")
 # Cache the reachability probe per base_url with a short TTL so the hot path is
 # cheap but a NIM that starts after Sandcastle is still picked up.
 _NIM_REACHABLE_CACHE: dict[str, tuple[bool, float]] = {}
@@ -242,7 +257,7 @@ def maybe_spark_nim_route(model_str: str) -> str:
         return model_str
     if not is_nim_reachable():
         return model_str
-    return _SPARK_NIM_DEFAULT
+    return settings.spark_nim_default_model or _SPARK_NIM_DEFAULT
 
 
 def get_api_key(model_info: ModelInfo) -> str:
@@ -284,6 +299,10 @@ def resolve_base_url(model_info: ModelInfo) -> str:
         from sandcastle.config import settings
         base = settings.omlx_base_url or "http://localhost:8080"
         return base.rstrip("/") + "/v1"
+    if model_info.provider == "ollama":
+        # Respect OLLAMA_HOST / settings.ollama_host so Docker deployments where
+        # Ollama runs on the host (not in the container) reach the right endpoint.
+        return ollama_base_url() + "/v1"
     if model_info.provider == "nim":
         from sandcastle.config import settings
         base = settings.nim_base_url or "http://localhost:8000"

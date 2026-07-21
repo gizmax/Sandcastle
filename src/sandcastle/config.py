@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     # AUTOROUTE=false. nim_probe_timeout_ms bounds the reachability probe.
     spark_nim_autoroute: bool = True
     nim_probe_timeout_ms: int = 2000
+    # Model the autoroute sends bare default steps to. Must be a model id the local
+    # OpenAI-compatible server actually serves - e.g. "nim/ornith" for a vLLM started
+    # with --served-model-name ornith. The reachability probe only checks /v1/models
+    # answers, not that this model exists on it.
+    spark_nim_default_model: str = "nim/llama-3.1-70b"
 
     # Overnight Self-Tune: the evolution loop may add a LoRA fine-tune mutation that
     # trains a local adapter on a workflow's own eval data and A/B-promotes it. Off by

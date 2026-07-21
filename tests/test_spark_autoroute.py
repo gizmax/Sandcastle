@@ -85,3 +85,37 @@ def test_noop_when_unreachable(monkeypatch):
 def test_noop_under_eu_residency(monkeypatch):
     _spark(monkeypatch, residency="eu")
     assert maybe_spark_nim_route("sonnet") == "sonnet"
+
+
+def test_configurable_default_model(monkeypatch):
+    _spark(monkeypatch)
+    monkeypatch.setattr(settings, "spark_nim_default_model", "nim/ornith")
+    assert maybe_spark_nim_route("sonnet") == "nim/ornith"
+
+
+def test_empty_default_model_falls_back(monkeypatch):
+    _spark(monkeypatch)
+    monkeypatch.setattr(settings, "spark_nim_default_model", "")
+    assert maybe_spark_nim_route("sonnet") == "nim/llama-3.1-70b"
+
+
+# ---- ollama_base_url --------------------------------------------------------
+
+
+def test_ollama_base_url_env_wins(monkeypatch):
+    monkeypatch.setenv("OLLAMA_HOST", "http://host.docker.internal:11434/")
+    assert providers.ollama_base_url() == "http://host.docker.internal:11434"
+
+
+def test_ollama_base_url_settings_fallback(monkeypatch):
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    monkeypatch.setattr(settings, "ollama_host", "http://myhost:11434")
+    assert providers.ollama_base_url() == "http://myhost:11434"
+
+
+def test_ollama_resolve_base_url_respects_host(monkeypatch):
+    from sandcastle.engine.providers import resolve_base_url, resolve_model
+
+    monkeypatch.setenv("OLLAMA_HOST", "http://host.docker.internal:11434")
+    info = resolve_model("ollama")
+    assert resolve_base_url(info) == "http://host.docker.internal:11434/v1"

@@ -120,11 +120,12 @@ class TestProviderConfigs:
         for name, cfg in _PROVIDER_CONFIGS.items():
             assert "api_url" in cfg, f"{name} missing api_url"
             url = cfg["api_url"]
-            # oMLX uses a runtime-resolved placeholder ({omlx_base_url}/...)
-            # so it doesn't start with http. Strip the placeholder before
-            # validating the rest of the URL shape.
-            if "{omlx_base_url}" in url:
-                url = url.replace("{omlx_base_url}", "http://localhost:8000")
+            # Local providers use runtime-resolved placeholders ({omlx_base_url},
+            # {ollama_host}) so they don't start with http. Resolve them the same
+            # way production does before validating the URL shape.
+            if "{" in url:
+                from sandcastle.engine.generator import resolve_provider_api_url
+                url = resolve_provider_api_url(cfg)
             assert url.startswith("http"), f"{name} api_url invalid"
 
     def test_all_providers_have_model(self):
