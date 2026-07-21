@@ -168,7 +168,14 @@ async def test_approval_timeout_skip_retries_then_fails_at_the_bound():
             approval = await session.get(ApprovalRequest, approval_id)
             run = await session.get(Run, run_id)
 
-    assert resume.await_count == 2
+    # Other tests may leave timed-out approvals behind in the shared test DB;
+    # count only the attempts made for this test's approval.
+    own_attempts = [
+        call
+        for call in resume.await_args_list
+        if call.args and getattr(call.args[0], "id", None) == approval_id
+    ]
+    assert len(own_attempts) == 2
     assert approval.status == ApprovalStatus.TIMED_OUT
     assert run.status == RunStatus.FAILED
     assert "could not resume after 2 attempts" in run.error

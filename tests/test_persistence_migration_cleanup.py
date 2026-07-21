@@ -14,11 +14,17 @@ import sqlalchemy as sa
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 
+_MIGRATION_FILENAMES = {
+    "015": "persistence_drift",
+    "016": "enum_reconciliation",
+    "017": "pg_drift_reconciliation",
+}
+
 
 def _migration_module(revision: str = "015"):
     path = (
         Path(__file__).parents[1] / f"alembic/versions/{revision}_"
-        f"{'persistence_drift' if revision == '015' else 'enum_reconciliation'}.py"
+        f"{_MIGRATION_FILENAMES[revision]}.py"
     )
     spec = importlib.util.spec_from_file_location(f"migration_{revision}", path)
     assert spec and spec.loader
@@ -208,6 +214,41 @@ def test_enum_reconciliation_uses_uppercase_orm_member_names_on_postgresql():
         "USING UPPER(status)::workflowversionstatus" in statement for statement in statements
     )
     operations.add_column.assert_called_once()
+
+
+def test_pg_drift_reconciliation_is_a_noop_on_sqlite(tmp_path):
+    """SQLite keeps its JSON columns and indexes under ORM metadata management."""
+    engine = sa.create_engine(f"sqlite:///{tmp_path / 'pg-drift-reconciliation.sqlite'}")
+    module = _migration_module("017")
+
+    with engine.begin() as connection:
+        _baseline_schema(connection)
+        _run_revision(module, connection, "upgrade")
+        _run_revision(module, connection, "downgrade")
+
+        assert "ix_api_keys_is_active" not in {
+            index["name"] for index in sa.inspect(connection).get_indexes("api_keys")
+        }
+
+
+def test_pg_drift_reconciliation_converts_json_and_creates_missing_indexes():
+    """PostgreSQL gets jsonb columns and the model-declared performance indexes."""
+    module = _migration_module("017")
+    operations = MagicMock()
+    operations.get_bind.return_value = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+
+    with patch.object(module, "op", operations):
+        module.upgrade()
+
+    statements = [call.args[0] for call in operations.execute.call_args_list]
+    assert sum(" TYPE JSONB USING " in statement for statement in statements) == len(
+        module._JSON_COLUMNS
+    )
+    assert "CREATE INDEX IF NOT EXISTS ix_api_keys_is_active ON api_keys (is_active)" in statements
+    assert (
+        "CREATE INDEX IF NOT EXISTS ix_run_steps_run_step_parallel "
+        "ON run_steps (run_id, step_id, parallel_index)"
+    ) in statements
 
 
 def test_sqlite_missing_column_repair_adds_admin_trusted(tmp_path):

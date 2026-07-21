@@ -75,6 +75,31 @@ _NOT_NULL_COLUMNS = (
     ("workflow_versions", "created_at", "CURRENT_TIMESTAMP"),
 )
 
+# Partial indexes whose predicates reference enum literals. PostgreSQL cannot
+# rewrite the predicate across an enum type swap (no cross-type operator), so
+# they must be dropped before the conversion and recreated against the new
+# type with the relabeled literal.
+_ENUM_PARTIAL_INDEXES: dict[str, tuple[tuple[str, str, list[str], str, str], ...]] = {
+    "stepstatus": (
+        (
+            "ix_run_steps_perf",
+            "run_steps",
+            ["step_id", "cost_usd", "duration_seconds"],
+            "status = '{lit}'",
+            "completed",
+        ),
+    ),
+    "approvalstatus": (
+        (
+            "ix_approval_requests_timeout",
+            "approval_requests",
+            ["timeout_at"],
+            "status = '{lit}' AND timeout_at IS NOT NULL",
+            "pending",
+        ),
+    ),
+}
+
 
 def _is_postgresql() -> bool:
     return op.get_bind().dialect.name == "postgresql"
@@ -89,6 +114,12 @@ def _recreate_enum(
     transform: str,
 ) -> None:
     """Replace an enum type while preserving its values and column default."""
+    # Drop partial indexes with enum-literal predicates first: PostgreSQL has
+    # no operator between the old and new types to rewrite the predicate.
+    partial_indexes = _ENUM_PARTIAL_INDEXES.get(enum_name, ())
+    for index_name, index_table, _columns, _where, _lit in partial_indexes:
+        op.drop_index(index_name, table_name=index_table)
+
     old_name = f"{enum_name}_old"
     label_sql = ", ".join(f"'{label}'" for label in labels)
     op.execute(f"ALTER TYPE {enum_name} RENAME TO {old_name}")
@@ -102,6 +133,16 @@ def _recreate_enum(
         f"ALTER TABLE {table_name} ALTER COLUMN {column_name} SET DEFAULT '{default}'::{enum_name}"
     )
     op.execute(f"DROP TYPE {old_name}")
+
+    # Recreate the partial indexes with the literal in the new type's casing.
+    relabel = str.upper if transform == "UPPER" else str.lower
+    for index_name, index_table, columns, where_template, literal in partial_indexes:
+        op.create_index(
+            index_name,
+            index_table,
+            columns,
+            postgresql_where=sa.text(where_template.format(lit=relabel(literal))),
+        )
 
 
 def _convert_workflow_version_status_to_enum() -> None:

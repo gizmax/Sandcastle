@@ -7,8 +7,6 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
-from fastapi.routing import APIRoute
-
 from sandcastle.main import app
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -96,12 +94,18 @@ def _dashboard_paths() -> Iterator[DashboardPath]:
 
 
 def _fastapi_paths() -> set[tuple[str, str]]:
+    """Collect (method, path) pairs from the app's OpenAPI schema.
+
+    The schema is used instead of ``app.routes`` because FastAPI 0.139+
+    represents included routers as ``_IncludedRouter`` objects rather than
+    flattened ``APIRoute`` entries, so route-table introspection is not
+    version-stable. The OpenAPI document covers every schema-visible API
+    route on both generations.
+    """
     paths: set[tuple[str, str]] = set()
-    for route in app.routes:
-        if not isinstance(route, APIRoute):
-            continue
-        for method in route.methods or ():
-            paths.add((method, _normalise_path(route.path)))
+    for path, operations in app.openapi()["paths"].items():
+        for method in operations:
+            paths.add((method.upper(), _normalise_path(path)))
     return paths
 
 

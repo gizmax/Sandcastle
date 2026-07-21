@@ -26,10 +26,13 @@ from sqlalchemy import (
     text,
     true,
 )
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncAttrs, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from sandcastle.config import settings
+
+JSONB_PG = JSON().with_variant(postgresql.JSONB, "postgresql")
 
 
 class Base(AsyncAttrs, DeclarativeBase):
@@ -82,9 +85,15 @@ class Run(Base):
         Index("ix_runs_tenant_status_created", "tenant_id", "status", "created_at"),
         Index("ix_runs_parent_run_id", "parent_run_id"),
         Index("ix_runs_api_key_id", "api_key_id"),
+        Index(
+            "ix_runs_tenant_idempotency_key",
+            "tenant_id",
+            "idempotency_key",
+            unique=True,
+            postgresql_where=text("idempotency_key IS NOT NULL"),
+        ),
         CheckConstraint("total_cost_usd >= 0", name="ck_runs_total_cost_non_negative"),
         CheckConstraint("depth >= 0", name="ck_runs_depth_non_negative"),
-        UniqueConstraint("tenant_id", "idempotency_key", name="uq_tenant_idempotency_key"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -97,8 +106,8 @@ class Run(Base):
         default=RunStatus.QUEUED,
         server_default=RunStatus.QUEUED.name,
     )
-    input_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    output_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    input_data: Mapped[dict | None] = mapped_column(JSONB_PG, nullable=True)
+    output_data: Mapped[dict | None] = mapped_column(JSONB_PG, nullable=True)
     total_cost_usd: Mapped[float] = mapped_column(Float, default=0.0, server_default="0.0")
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -111,7 +120,7 @@ class Run(Base):
         Uuid, ForeignKey("runs.id", ondelete="SET NULL"), nullable=True
     )
     replay_from_step: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    fork_changes: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    fork_changes: Mapped[dict | None] = mapped_column(JSONB_PG, nullable=True)
     sub_workflow_of_step: Mapped[str | None] = mapped_column(String(255), nullable=True)
     workflow_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     depth: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
@@ -153,6 +162,13 @@ class RunStep(Base):
         Index("ix_run_steps_run_step_parallel", "run_id", "step_id", "parallel_index"),
         Index("ix_run_steps_run_id_status", "run_id", "status"),
         Index("ix_run_steps_model", "model"),
+        Index(
+            "ix_run_steps_perf",
+            "step_id",
+            "cost_usd",
+            "duration_seconds",
+            postgresql_where=text("status = 'COMPLETED'"),
+        ),
         CheckConstraint("cost_usd >= 0", name="ck_run_steps_cost_non_negative"),
         CheckConstraint("duration_seconds >= 0", name="ck_run_steps_duration_non_negative"),
         CheckConstraint("attempt >= 1", name="ck_run_steps_attempt_positive"),
@@ -173,15 +189,15 @@ class RunStep(Base):
         server_default=StepStatus.PENDING.name,
     )
     input_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
-    output_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    output_data: Mapped[dict | None] = mapped_column(JSONB_PG, nullable=True)
     cost_usd: Mapped[float] = mapped_column(Float, default=0.0, server_default="0.0")
     duration_seconds: Mapped[float] = mapped_column(Float, default=0.0, server_default="0.0")
     attempt: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     model: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    sub_run_ids: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    sub_run_ids: Mapped[dict | None] = mapped_column(JSONB_PG, nullable=True)
     policy_violations_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
-    policy_actions: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    policy_actions: Mapped[dict | None] = mapped_column(JSONB_PG, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -204,8 +220,8 @@ class Schedule(Base):
     )
     workflow_name: Mapped[str] = mapped_column(String(255), nullable=False)
     cron_expression: Mapped[str] = mapped_column(String(255), nullable=False)
-    input_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    notify: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    input_data: Mapped[dict | None] = mapped_column(JSONB_PG, nullable=True)
+    notify: Mapped[dict | None] = mapped_column(JSONB_PG, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
     tenant_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     last_run_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -221,6 +237,7 @@ class ApiKey(Base):
 
     __tablename__ = "api_keys"
     __table_args__ = (
+        Index("ix_api_keys_key_hash", "key_hash", unique=True),
         Index("ix_api_keys_tenant_id", "tenant_id"),
         Index("ix_api_keys_is_active", "is_active"),
     )
@@ -238,8 +255,8 @@ class ApiKey(Base):
     max_cost_per_run_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     rotated_from_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
-    allowed_cidrs: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    allowed_workflows: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    allowed_cidrs: Mapped[list | None] = mapped_column(JSONB_PG, nullable=True)
+    allowed_workflows: Mapped[list | None] = mapped_column(JSONB_PG, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
     )
@@ -251,7 +268,13 @@ class DeadLetterItem(Base):
 
     __tablename__ = "dead_letter_queue"
     __table_args__ = (
+        Index("ix_dead_letter_queue_run_id", "run_id"),
         Index("ix_dead_letter_run_id", "run_id"),
+        Index(
+            "ix_dead_letter_queue_unresolved",
+            "resolved_at",
+            postgresql_where=text("resolved_at IS NULL"),
+        ),
         Index("ix_dead_letter_resolved_at", "resolved_at"),
     )
 
@@ -264,7 +287,7 @@ class DeadLetterItem(Base):
     step_id: Mapped[str] = mapped_column(String(255), nullable=False)
     parallel_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    input_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    input_data: Mapped[dict | None] = mapped_column(JSONB_PG, nullable=True)
     attempts: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
@@ -287,6 +310,7 @@ class AutoPilotExperiment(Base):
 
     __tablename__ = "autopilot_experiments"
     __table_args__ = (
+        Index("ix_autopilot_experiments_active", "workflow_name", "step_id", "status"),
         Index("ix_autopilot_experiments_workflow_step", "workflow_name", "step_id"),
     )
 
@@ -304,7 +328,7 @@ class AutoPilotExperiment(Base):
     optimize_for: Mapped[str] = mapped_column(
         String(50), nullable=False, default="quality", server_default="quality"
     )
-    config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    config: Mapped[dict | None] = mapped_column(JSONB_PG, nullable=True)
     deployed_variant_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
@@ -323,8 +347,11 @@ class AutoPilotSample(Base):
 
     __tablename__ = "autopilot_samples"
     __table_args__ = (
+        Index("ix_autopilot_perf", "experiment_id", "variant_id", "quality_score", "cost_usd"),
+        Index("ix_autopilot_samples_experiment", "experiment_id"),
         Index("ix_autopilot_samples_experiment_id", "experiment_id"),
         Index("ix_autopilot_samples_run_id", "run_id"),
+        Index("ix_autopilot_samples_variant", "experiment_id", "variant_id"),
         CheckConstraint("cost_usd >= 0", name="ck_autopilot_samples_cost_non_negative"),
         CheckConstraint("duration_seconds >= 0", name="ck_autopilot_samples_duration_non_negative"),
     )
@@ -341,8 +368,8 @@ class AutoPilotSample(Base):
         Uuid, ForeignKey("runs.id", ondelete="SET NULL"), nullable=True
     )
     variant_id: Mapped[str] = mapped_column(String(255), nullable=False)
-    variant_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    output_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    variant_config: Mapped[dict | None] = mapped_column(JSONB_PG, nullable=True)
+    output_data: Mapped[dict | None] = mapped_column(JSONB_PG, nullable=True)
     quality_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     cost_usd: Mapped[float] = mapped_column(Float, default=0.0, server_default="0.0")
     duration_seconds: Mapped[float] = mapped_column(Float, default=0.0, server_default="0.0")
@@ -361,6 +388,11 @@ class ApprovalRequest(Base):
         Index("ix_approval_requests_run_id", "run_id"),
         Index("ix_approval_requests_status", "status"),
         Index("ix_approval_requests_status_timeout", "status", "timeout_at"),
+        Index(
+            "ix_approval_requests_timeout",
+            "timeout_at",
+            postgresql_where=text("status = 'PENDING' AND timeout_at IS NOT NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -376,8 +408,8 @@ class ApprovalRequest(Base):
         default=ApprovalStatus.PENDING,
         server_default=ApprovalStatus.PENDING.name,
     )
-    request_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    response_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    request_data: Mapped[dict | None] = mapped_column(JSONB_PG, nullable=True)
+    response_data: Mapped[dict | None] = mapped_column(JSONB_PG, nullable=True)
     message: Mapped[str] = mapped_column(
         Text, nullable=False, default="", server_default=text("''")
     )
@@ -403,6 +435,7 @@ class RoutingDecision(Base):
     __table_args__ = (
         Index("ix_routing_decisions_run_id", "run_id"),
         Index("ix_routing_decisions_step_id", "step_id"),
+        Index("ix_routing_decisions_created_at", "created_at"),
         Index("ix_routing_decisions_created_model", "created_at", "selected_model"),
         CheckConstraint("confidence >= 0 AND confidence <= 1", name="ck_routing_confidence_range"),
         CheckConstraint("budget_pressure >= 0", name="ck_routing_budget_pressure_non_negative"),
@@ -420,8 +453,8 @@ class RoutingDecision(Base):
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     budget_pressure: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
     confidence: Mapped[float] = mapped_column(Float, default=0.1, server_default="0.1")
-    alternatives: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    slo: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    alternatives: Mapped[dict | None] = mapped_column(JSONB_PG, nullable=True)
+    slo: Mapped[dict | None] = mapped_column(JSONB_PG, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
     )
@@ -436,6 +469,7 @@ class PolicyViolation(Base):
     __table_args__ = (
         Index("ix_policy_violations_run_id", "run_id"),
         Index("ix_policy_violations_created_at", "created_at"),
+        Index("ix_policy_violations_severity", "severity"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -475,7 +509,7 @@ class RunCheckpoint(Base):
     )
     step_id: Mapped[str] = mapped_column(String(255), nullable=False)
     stage_index: Mapped[int] = mapped_column(Integer, nullable=False)
-    context_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False)
+    context_snapshot: Mapped[dict] = mapped_column(JSONB_PG, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
     )
@@ -498,7 +532,7 @@ class StepCache(Base):
     )
     step_id: Mapped[str] = mapped_column(String(200), nullable=False)
     model: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    output_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    output_data: Mapped[dict | None] = mapped_column(JSONB_PG, nullable=True)
     cost_usd: Mapped[float] = mapped_column(Float, default=0.0, server_default="0.0")
     hit_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(
@@ -521,7 +555,7 @@ class ToolConnection(Base):
     tool_name: Mapped[str] = mapped_column(String(100), nullable=False)
     connection_name: Mapped[str] = mapped_column(String(100), nullable=False)
     credentials: Mapped[dict] = mapped_column(
-        JSON, nullable=False, default=dict, server_default=text("'{}'")
+        JSONB_PG, nullable=False, default=dict, server_default=text("'{}'")
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
@@ -612,7 +646,7 @@ class EvalCaseResult(Base):
     )
     cost_usd: Mapped[float] = mapped_column(Float, default=0.0, server_default="0.0")
     duration_seconds: Mapped[float] = mapped_column(Float, default=0.0, server_default="0.0")
-    assertions: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    assertions: Mapped[dict | None] = mapped_column(JSONB_PG, nullable=True)
     output_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -684,8 +718,8 @@ class GoldenCase(Base):
     case_label: Mapped[str] = mapped_column(
         String(255), nullable=False, default="", server_default=text("''")
     )
-    input_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    expected_output: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    input_data: Mapped[dict | None] = mapped_column(JSONB_PG, nullable=True)
+    expected_output: Mapped[dict | None] = mapped_column(JSONB_PG, nullable=True)
     expected_score_min: Mapped[float] = mapped_column(Float, default=0.7, server_default="0.7")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
@@ -776,7 +810,7 @@ class AuditEvent(Base):
     actor_id: Mapped[str] = mapped_column(String(255), nullable=False)
     actor_key_prefix: Mapped[str | None] = mapped_column(String(8), nullable=True)
     source_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
-    payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    payload: Mapped[dict | None] = mapped_column(JSONB_PG, nullable=True)
     prev_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     entry_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -811,17 +845,19 @@ class HubSubmission(Base):
     category: Mapped[str] = mapped_column(
         String(100), nullable=False, default="general_ai", server_default="general_ai"
     )
-    tags: Mapped[list] = mapped_column(JSON, nullable=False, default=list, server_default=text("'[]'"))
+    tags: Mapped[list] = mapped_column(
+        JSONB_PG, nullable=False, default=list, server_default=text("'[]'")
+    )
     author: Mapped[str] = mapped_column(String(255), nullable=False)
     # pending | approved | rejected
     status: Mapped[str] = mapped_column(
         String(50), nullable=False, default="pending", server_default="pending"
     )
     models_used: Mapped[list] = mapped_column(
-        JSON, nullable=False, default=list, server_default=text("'[]'")
+        JSONB_PG, nullable=False, default=list, server_default=text("'[]'")
     )
     tools_used: Mapped[list] = mapped_column(
-        JSON, nullable=False, default=list, server_default=text("'[]'")
+        JSONB_PG, nullable=False, default=list, server_default=text("'[]'")
     )
     step_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     downloads: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
@@ -907,7 +943,7 @@ class EvolutionIteration(Base):
     mutation_type: Mapped[str] = mapped_column(String(50), nullable=False)
     # prompt, model, tools, step_order, simplify
     mutation_description: Mapped[str] = mapped_column(String(500), nullable=False)
-    mutation_diff: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    mutation_diff: Mapped[dict | None] = mapped_column(JSONB_PG, nullable=True)
     # [{step_id, field, from, to}]
 
     # Results
@@ -993,7 +1029,7 @@ class MeshNode(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     base_url: Mapped[str] = mapped_column(String(2048), nullable=False)
     # Capability manifest, e.g. ["gpu", "spark", "browser", "docker", "code"]
-    capabilities: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    capabilities: Mapped[list | None] = mapped_column(JSONB_PG, nullable=True)
     last_heartbeat: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
