@@ -33,6 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The official image includes the `memory` extras (mem0ai, fastembed): the
   Agent Memory page failed with "No module named 'mem0'" in Docker
   deployments.
+- Key-less rescue for explicit cloud models: hub templates hardcode models
+  like `haiku`, so on a box with no cloud keys every template step died with
+  an auth error. When the resolved provider's key is missing and a local
+  `workflow_default_model` is set, the step now runs on the local default
+  (with a warning). Steps whose provider is keyed run untouched.
 - Docker: `WORKFLOWS_DIR` is now a shared, persistent volume (`app_workflows`)
   on the `sandcastle`, `scheduler`, and `worker` services. User-created and
   generated workflows previously lived in each container's own filesystem, so

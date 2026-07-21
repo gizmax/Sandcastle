@@ -8,12 +8,15 @@ OpenAI-compatible runner (runner-openai.mjs).
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import threading
 import time
 from dataclasses import dataclass
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -284,6 +287,39 @@ def maybe_spark_nim_route(model_str: str) -> str:
     return settings.spark_nim_default_model or _SPARK_NIM_DEFAULT
 
 
+def runnable_model(model_str: str) -> str:
+    """Rescue a step whose resolved provider has no API key configured.
+
+    Applied AFTER :func:`effective_model`. When the resolved model needs a key
+    that is absent (e.g. a hub template's explicit ``haiku`` on a box with no
+    Anthropic key) and the user has picked a local ``workflow_default_model``,
+    the step runs on that local model instead of failing with a guaranteed
+    auth error. Steps whose provider is keyed or key-less local run untouched -
+    this never downgrades a working configuration, it only rescues a doomed one.
+    """
+    from sandcastle.config import settings
+
+    fallback = getattr(settings, "workflow_default_model", "")
+    if not (isinstance(fallback, str) and fallback) or model_str == fallback:
+        return model_str
+    try:
+        info = resolve_model(model_str)
+    except KeyError:
+        return model_str
+    if info.region == "local" or not info.api_key_env:
+        return model_str
+    if get_api_key(info):
+        return model_str
+    logger.warning(
+        "Model '%s' needs %s which is not configured - running the step on the "
+        "local default '%s' instead",
+        model_str,
+        info.api_key_env,
+        fallback,
+    )
+    return fallback
+
+
 def effective_model(model_str: str) -> str:
     """Resolve the effective model for a step: user default first, then Spark autoroute.
 
@@ -300,7 +336,9 @@ def effective_model(model_str: str) -> str:
         configured = getattr(settings, "workflow_default_model", "") or ""
         if configured:
             return configured
-    return maybe_spark_nim_route(model_str)
+    # Rescue explicit models whose provider has no key configured (hub templates
+    # hardcode cloud models; on a key-less local-first box they would all fail).
+    return runnable_model(maybe_spark_nim_route(model_str))
 
 
 def get_api_key(model_info: ModelInfo) -> str:
