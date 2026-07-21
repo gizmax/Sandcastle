@@ -44,6 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   worker executed steps with the container env defaults regardless of what
   the user configured. Note: the worker reads them at startup; restart it
   after changing settings.
+- "Replay from Step" works for runs started from hub templates: the workflow
+  loader falls back to the template catalog (matched by the YAML's declared
+  `name:`) when the workflow is not in the user's workflows directory.
 - Docker: `WORKFLOWS_DIR` is now a shared, persistent volume (`app_workflows`)
   on the `sandcastle`, `scheduler`, and `worker` services. User-created and
   generated workflows previously lived in each container's own filesystem, so

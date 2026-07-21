@@ -42,3 +42,35 @@ async def test_invalid_value_ignored(monkeypatch):
     await _seed("max_workflow_depth", "not-a-number")
     await restore_db_settings()
     assert settings.max_workflow_depth == before
+
+
+class TestTemplateReplayFallback:
+    """Replay of runs started from hub templates loads YAML from the catalog."""
+
+    def test_find_template_by_declared_name(self):
+        from sandcastle.templates import find_template_yaml_by_workflow_name
+
+        yaml_content = find_template_yaml_by_workflow_name("seo-content-writer")
+        assert yaml_content is not None
+        assert "name: seo-content-writer" in yaml_content
+
+    def test_unknown_name_returns_none(self):
+        from sandcastle.templates import find_template_yaml_by_workflow_name
+
+        assert find_template_yaml_by_workflow_name("no-such-workflow-xyz") is None
+
+    @pytest.mark.asyncio
+    async def test_versioned_loader_falls_back_to_template(self, monkeypatch, tmp_path):
+        from sandcastle.api.routes import _load_versioned_workflow_yaml
+
+        monkeypatch.setattr(settings, "workflows_dir", str(tmp_path))  # empty dir
+        yaml_content = await _load_versioned_workflow_yaml("seo-content-writer", None)
+        assert "name: seo-content-writer" in yaml_content
+
+    @pytest.mark.asyncio
+    async def test_versioned_loader_still_raises_for_unknown(self, monkeypatch, tmp_path):
+        from sandcastle.api.routes import _load_versioned_workflow_yaml
+
+        monkeypatch.setattr(settings, "workflows_dir", str(tmp_path))
+        with pytest.raises(FileNotFoundError):
+            await _load_versioned_workflow_yaml("no-such-workflow-xyz", None)
