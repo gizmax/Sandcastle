@@ -470,6 +470,11 @@ class DockerBackend:
                 "Env": [f"{k}={v}" for k, v in envs.items()],
                 "WorkingDir": "/home/user",
                 "User": "1000:1000",
+                # Anonymous volume: put_archive into a ReadonlyRootfs container is
+                # rejected by newer Docker daemons ("container rootfs is marked
+                # read-only"); a volume-backed /home/user stays writable while the
+                # rootfs stays read-only. AutoRemove cleans anonymous volumes up.
+                "Volumes": {"/home/user": {}},
                 "NetworkMode": "bridge",
                 "HostConfig": {
                     "AutoRemove": True,

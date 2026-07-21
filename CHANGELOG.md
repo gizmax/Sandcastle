@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.42.2] - 2026-07-21 - "Workflows That Stay"
 
 ### Fixed
+- Docker sandbox backend: every step failed with `[400] container rootfs is
+  marked read-only` on newer Docker daemons (verified on 29.2.1), which reject
+  `put_archive` into a `ReadonlyRootfs` container. `/home/user` is now an
+  anonymous volume: the runner upload lands on the volume while the rootfs
+  stays read-only, and `AutoRemove` cleans the volume up with the container.
+  Verified on GB10: reproduces without the volume, passes with it.
 - Docker: `WORKFLOWS_DIR` is now a shared, persistent volume (`app_workflows`)
   on the `sandcastle`, `scheduler`, and `worker` services. User-created and
   generated workflows previously lived in each container's own filesystem, so
