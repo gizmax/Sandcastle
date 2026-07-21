@@ -77,6 +77,9 @@ jobs:
               print(f"{name}: {', '.join(sorted(services))}")
           PY
 
+      - name: Lint (same gate as publish.yml - keep them in sync)
+        run: ruff check src/
+
       - name: Run pytest
         run: |
           python -m pytest tests/ -q --tb=line --timeout=60
