@@ -1391,8 +1391,11 @@ class TestValidateWorkflowInputEdgeCases:
         assert self._validate(data, {"properties": {"count": {"type": "integer"}}}) == []
         assert data["count"] == 42
 
-    def test_array_string_not_json(self):
-        assert any("JSON array" in e for e in self._validate({"items": "not json"}, {"properties": {"items": {"type": "array"}}}))
+    def test_array_string_not_json_splits(self):
+        # 0.43.0 contract: plain strings split on commas into items
+        data = {"items": "not json"}
+        assert self._validate(data, {"properties": {"items": {"type": "array"}}}) == []
+        assert data["items"] == ["not json"]
 
     def test_multiple_required_fields_missing(self):
         assert len(self._validate({}, {"required": ["a", "b", "c"], "properties": {}})) == 3
