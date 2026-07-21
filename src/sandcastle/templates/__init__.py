@@ -124,6 +124,37 @@ def list_templates() -> list[TemplateInfo]:
     return templates
 
 
+def find_template_yaml_by_workflow_name(workflow_name: str) -> str | None:
+    """Return a template's YAML whose declared workflow ``name:`` matches.
+
+    Runs started from a hub template record the workflow name declared inside
+    the YAML (e.g. ``seo-content-writer``), which need not match the template
+    file stem (``seo_content.yaml``). Replay uses this as a fallback when the
+    workflow is not in the user's workflows directory. Returns None when no
+    template declares that name.
+    """
+    import re as _re
+
+    if not workflow_name:
+        return None
+    pattern = _re.compile(
+        r"^name:\s*['\"]?" + _re.escape(workflow_name) + r"['\"]?\s*$", _re.M
+    )
+    search_dirs = [_TEMPLATES_DIR]
+    community_dir = _TEMPLATES_DIR / "community"
+    if community_dir.is_dir():
+        search_dirs.append(community_dir)
+    for dir_path in search_dirs:
+        for path in sorted([*dir_path.glob("*.yaml"), *dir_path.glob("*.yml")]):
+            try:
+                content = path.read_text()
+            except OSError:
+                continue
+            if pattern.search(content):
+                return content
+    return None
+
+
 def get_template(name: str) -> tuple[str, TemplateInfo]:
     """Get a template's raw YAML content and metadata by name.
 

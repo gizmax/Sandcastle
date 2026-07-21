@@ -129,9 +129,12 @@ class TestWorkflowDefaultModel:
         assert effective_model("sonnet") == "nim/ornith"
 
     def test_effective_model_respects_explicit(self, monkeypatch):
+        """Explicit models with a configured key are never rewritten."""
         from sandcastle.engine.providers import effective_model
 
         monkeypatch.setattr(settings, "workflow_default_model", "nim/ornith")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+        monkeypatch.setenv("MISTRAL_API_KEY", "test-key")
         assert effective_model("opus") == "opus"
         assert effective_model("mistral/large") == "mistral/large"
 
@@ -265,3 +268,40 @@ class TestAdvisorProviderResolution:
         cfg = _get_advisor_config()
         assert cfg["model"] == "ornith"
         assert cfg["api_url"] == "http://host.docker.internal:18000/v1/chat/completions"
+
+
+class TestRunnableModelRescue:
+    """0.42.2: explicit cloud models without a key fall back to the local default."""
+
+    def test_unkeyed_explicit_model_rescued(self, monkeypatch):
+        from sandcastle.engine.providers import effective_model
+
+        monkeypatch.setattr(settings, "workflow_default_model", "nim/ornith")
+        monkeypatch.setattr(settings, "anthropic_api_key", "")
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.setenv("SANDCASTLE_SPARK_MODE", "off")
+        assert effective_model("haiku") == "nim/ornith"
+
+    def test_keyed_explicit_model_untouched(self, monkeypatch):
+        from sandcastle.engine.providers import effective_model
+
+        monkeypatch.setattr(settings, "workflow_default_model", "nim/ornith")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+        monkeypatch.setenv("SANDCASTLE_SPARK_MODE", "off")
+        assert effective_model("haiku") == "haiku"
+
+    def test_local_models_never_rescued(self, monkeypatch):
+        from sandcastle.engine.providers import effective_model
+
+        monkeypatch.setattr(settings, "workflow_default_model", "nim/ornith")
+        monkeypatch.setenv("SANDCASTLE_SPARK_MODE", "off")
+        assert effective_model("ollama/qwen3:8b") == "ollama/qwen3:8b"
+
+    def test_no_default_no_rescue(self, monkeypatch):
+        from sandcastle.engine.providers import effective_model
+
+        monkeypatch.setattr(settings, "workflow_default_model", "")
+        monkeypatch.setattr(settings, "anthropic_api_key", "")
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.setenv("SANDCASTLE_SPARK_MODE", "off")
+        assert effective_model("haiku") == "haiku"

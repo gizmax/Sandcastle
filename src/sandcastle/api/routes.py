@@ -422,7 +422,18 @@ async def _load_versioned_workflow_yaml(
                 workflow_name,
                 workflow_version,
             )
-    return _load_workflow_yaml(workflow_name)
+    try:
+        return _load_workflow_yaml(workflow_name)
+    except FileNotFoundError:
+        # Runs started from a hub template have no file in workflows_dir; the
+        # template catalog is the source of truth for them (finding: replay of
+        # template runs failed with WORKFLOW_NOT_FOUND).
+        from sandcastle.templates import find_template_yaml_by_workflow_name
+
+        template_yaml = find_template_yaml_by_workflow_name(workflow_name)
+        if template_yaml is not None:
+            return template_yaml
+        raise
 
 
 async def _resolve_workflow_request(request: WorkflowRunRequest) -> tuple[str, int | None]:

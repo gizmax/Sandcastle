@@ -323,89 +323,14 @@ async def lifespan(app: FastAPI):
             "Sandcastle starting in production mode (PostgreSQL + Redis + S3)"
         )
 
-    # Load saved settings from DB
+    # Load saved settings from DB (shared with the arq worker startup, which
+    # must see dashboard-managed settings too - see sandcastle/db_settings.py)
     from sqlalchemy import select as sa_select
 
-    from sandcastle.models.db import ApiKey, Setting, async_session
+    from sandcastle.db_settings import restore_db_settings
+    from sandcastle.models.db import ApiKey, async_session
 
-    async with async_session() as session:
-        result = await session.execute(sa_select(Setting))
-        saved = {s.key: s.value for s in result.scalars().all()}
-
-        # Only restore settings that are safe to change at runtime.
-        # Security-critical settings (auth, encryption, DB, Redis) must come
-        # from environment variables and cannot be overridden from the DB.
-        _RESTORABLE_SETTINGS = {
-            "anthropic_api_key", "e2b_api_key", "openai_api_key",
-            "mistral_api_key", "minimax_api_key", "openrouter_api_key",
-            "default_max_cost_usd", "log_level", "max_workflow_depth",
-            "workflow_default_model",
-        }
-        # Keys in restorable settings that may be stored encrypted
-        _ENCRYPTED_RESTORABLE = {
-            "anthropic_api_key", "e2b_api_key", "openai_api_key",
-            "mistral_api_key", "minimax_api_key", "openrouter_api_key",
-        }
-        for key, value in saved.items():
-            if key not in _RESTORABLE_SETTINGS:
-                if hasattr(settings, key):
-                    logger.debug(
-                        "Skipping non-restorable saved setting '%s'", key
-                    )
-                continue
-            if hasattr(settings, key):
-                # Decrypt encrypted credential values from DB
-                if key in _ENCRYPTED_RESTORABLE and isinstance(value, str) and value.startswith("gAAAAA"):
-                    try:
-                        from sandcastle.engine.crypto import decrypt_credentials
-                        decrypted = decrypt_credentials(value)
-                        if isinstance(decrypted, dict) and "v" in decrypted:
-                            value = decrypted["v"]
-                    except Exception:
-                        logger.warning("Could not decrypt saved setting '%s', skipping", key)
-                        continue
-                field_type = type(getattr(settings, key))
-                try:
-                    if field_type is bool:
-                        coerced = value.lower() in ("true", "1", "yes")
-                    elif field_type is int:
-                        coerced = int(value)
-                    elif field_type is float:
-                        coerced = float(value)
-                    else:
-                        coerced = value
-                    # Validate through Pydantic to enforce field validators
-                    validated = Settings.model_validate(
-                        {**settings.model_dump(), key: coerced}
-                    )
-                    setattr(settings, key, getattr(validated, key))
-                except Exception as e:
-                    # Never log the value - it may be an API key or secret
-                    logger.warning(
-                        f"Ignoring invalid saved setting {key}=<redacted>: {e}"
-                    )
-
-        if saved:
-            logger.info(f"Loaded {len(saved)} saved settings from database")
-
-        # Restore tool credentials (TOOL_* keys) into os.environ so connectors work
-        tool_cred_count = 0
-        for key, value in saved.items():
-            if key.startswith("TOOL_") and value:
-                # Decrypt if encrypted
-                if isinstance(value, str) and value.startswith("gAAAAA"):
-                    try:
-                        from sandcastle.engine.crypto import decrypt_credentials
-                        decrypted = decrypt_credentials(value)
-                        if isinstance(decrypted, dict) and "v" in decrypted:
-                            value = decrypted["v"]
-                    except Exception:
-                        logger.warning("Could not decrypt tool credential '%s', skipping", key)
-                        continue
-                os.environ[key] = value
-                tool_cred_count += 1
-        if tool_cred_count:
-            logger.info(f"Restored {tool_cred_count} tool credential(s) from database")
+    await restore_db_settings()
 
     failed_count, reenqueued_count = await _cleanup_orphaned_runs()
     if failed_count or reenqueued_count:

@@ -265,6 +265,10 @@ class TestDockerBackendHardening:
         assert host_config.get("ReadonlyRootfs") is True
         assert host_config.get("MemorySwap") == host_config.get("Memory")
         assert "/tmp" in host_config.get("Tmpfs", {})
+        # put_archive into a ReadonlyRootfs container is rejected by newer Docker
+        # daemons unless the target path is volume-backed; /home/user must be an
+        # anonymous volume or every step fails with "rootfs is marked read-only".
+        assert "/home/user" in captured_config.get("Volumes", {})
 
     @pytest.mark.asyncio
     async def test_docker_config_has_no_new_privileges(self, tmp_path):

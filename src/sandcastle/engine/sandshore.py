@@ -456,12 +456,16 @@ class SandshoreRuntime:
         Returns (envs, runner_file, use_claude_runner, tool_files).
         """
         from sandcastle.engine.providers import (
+            effective_model,
             get_api_key,
             resolve_base_url,
             resolve_model,
         )
 
-        model_str = request.get("model", "sonnet")
+        # Bare-default steps honour workflow_default_model / Spark autoroute here
+        # too - sandboxed agent steps otherwise pick the Claude runner on a box
+        # whose default is a local model, and fail without an Anthropic login.
+        model_str = effective_model(request.get("model", "sonnet"))
         try:
             model_info = resolve_model(model_str)
         except KeyError:
