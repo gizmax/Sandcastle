@@ -18,7 +18,7 @@ docker build -t sandcastle/worker:latest deploy/cookbooks/docker/
 ```
 
 Override pinned versions via `--build-arg PYTHON_VERSION=3.12`,
-`NODE_VERSION=22`, `ANT_VERSION=v1.17.0`. Browsers (Playwright, LightPanda)
+`NODE_VERSION=22`, `ANT_VERSION=1.15.0`. Browsers (Playwright, LightPanda)
 are pre-baked so per-session containers do not pay first-run cost.
 
 ## 2. Create your env file
@@ -42,12 +42,17 @@ EOF
 ```sh
 docker compose up -d
 docker compose logs -f sandcastle-worker
-curl -fsS http://localhost:8081/healthz
 ```
 
 The compose file creates a `session-net` bridge that `spawn.sh` attaches
-per-session containers to, and mounts the Docker socket so the poller
-can launch siblings.
+per-session containers to, and mounts the Docker socket so the poller can
+launch siblings. The `ant` poller does not expose an HTTP health endpoint.
+From a separate shell with an organization API key, verify it is connected:
+
+```sh
+ANTHROPIC_API_KEY=... ant beta:environments:work stats \
+  --environment-id "$ANTHROPIC_ENVIRONMENT_ID"
+```
 
 ## 4. Trigger work from a managed-agent step
 

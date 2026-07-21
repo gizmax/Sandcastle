@@ -180,7 +180,9 @@ async def run_workflow_job(
                         output_with_report = dict(result.outputs) if result.outputs else {}
                         if getattr(result, "token_report", None):
                             output_with_report["_token_report"] = result.token_report
-                        run.output_data = output_with_report
+                        from sandcastle.engine.json_utils import json_safe
+
+                        run.output_data = json_safe(output_with_report)
                         run.total_cost_usd = result.total_cost_usd
                         # Don't set completed_at for paused workflows
                         if result.status != "awaiting_approval":

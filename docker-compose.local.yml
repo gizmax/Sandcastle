@@ -1,6 +1,14 @@
 # Local development override - runs Sandcastle in local mode (SQLite + in-process queue).
 # Usage: docker compose -f docker-compose.local.yml up
 services:
+  runner-image:
+    image: sandcastle-runner:local
+    build:
+      context: .
+      dockerfile: Dockerfile.runner
+    command: ["node", "--version"]
+    restart: "no"
+
   sandcastle:
     build: .
     restart: unless-stopped
@@ -13,7 +21,10 @@ services:
       AUTH_REQUIRED: "false"
       # Intentional local-dev opt-out for the published 0.0.0.0 Docker port.
       SANDCASTLE_ALLOW_INSECURE_BIND: "true"
-      SANDBOX_BACKEND: local
+      # The app image intentionally contains no Node/Agent SDK runtime. Use the
+      # hardened runner image through this Compose project's Docker daemon.
+      SANDBOX_BACKEND: docker
+      DOCKER_IMAGE: sandcastle-runner:local
       STORAGE_BACKEND: local
       DATA_DIR: /app/data
       WORKFLOWS_DIR: /app/workflows
@@ -22,6 +33,15 @@ services:
     volumes:
       - local_data:/app/data
       - ./workflows:/app/workflows
+      - /var/run/docker.sock:/var/run/docker.sock
+    # On Linux set DOCKER_GID to the socket group, e.g.
+    # DOCKER_GID=$(stat -c '%g' /var/run/docker.sock) docker compose -f docker-compose.local.yml up
+    user: "1000:${DOCKER_GID:-1000}"
+    group_add:
+      - "${DOCKER_GID:-1000}"
+    depends_on:
+      runner-image:
+        condition: service_completed_successfully
 
 volumes:
   local_data:

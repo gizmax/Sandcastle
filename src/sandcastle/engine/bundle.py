@@ -576,7 +576,9 @@ def _replay_one(
                             str(getattr(wf_result, "status", "")), RunStatus.FAILED
                         )
                         db_run.total_cost_usd = getattr(wf_result, "total_cost_usd", 0.0)
-                        db_run.output_data = getattr(wf_result, "outputs", {})
+                        from sandcastle.engine.json_utils import json_safe
+
+                        db_run.output_data = json_safe(getattr(wf_result, "outputs", {}))
                         db_run.error = getattr(wf_result, "error", None)
                         await session.commit()
             except Exception:

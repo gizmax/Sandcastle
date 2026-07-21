@@ -21,6 +21,14 @@ _test_db_fd, _test_db_path = tempfile.mkstemp(suffix=".sqlite", prefix="sandcast
 os.close(_test_db_fd)
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_test_db_path}"
 
+# Never let the test suite talk to the production Sentry project. The app boots
+# through its lifespan, which calls init_sentry(), and the repo .env carries a
+# real DSN — without this scrub every local suite run ships test fixtures
+# (AsyncMock payloads, ok.com webhooks) as "production" errors. Set before any
+# sandcastle import so the Settings singleton picks up the empty value; child
+# processes spawned by tests inherit it too.
+os.environ["SENTRY_DSN"] = ""
+
 # Run code steps in-process during the whole test suite for speed. Production
 # defaults to out-of-process isolation, but spawning a Python subprocess per code
 # step (~170ms each) across ~17k tests pushes the suite past the CI job timeout.

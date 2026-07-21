@@ -13,9 +13,15 @@ data/
 test-results/
 .pytest_cache
 .ruff_cache
+.mypy_cache
+.hypothesis
+.coverage
+htmlcov/
 *.egg-info
 dist/
 build/
+.sous-chef
+.scratch
 site/
 scripts/
 tests/

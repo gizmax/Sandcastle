@@ -143,6 +143,7 @@ from sandcastle.config import Settings, settings
 from sandcastle.engine.audit import verify_audit_chain
 from sandcastle.engine.dag import build_plan, parse_yaml_string, validate
 from sandcastle.engine.executor import execute_workflow
+from sandcastle.engine.json_utils import json_safe
 from sandcastle.engine.sandshore import SandshoreRuntime, get_sandshore_runtime  # noqa: F401
 from sandcastle.engine.storage import create_storage
 from sandcastle.models.db import (
@@ -5288,6 +5289,9 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
     output_with_report = dict(result.outputs) if result.outputs else {}
     if result.token_report:
         output_with_report["_token_report"] = result.token_report
+    # Outputs may hold non-JSON-native objects; coerce once so persistence can
+    # never fail on serialization (a finished run must stay durable).
+    output_with_report = json_safe(output_with_report)
     db_persist_ok = False
     for _attempt in range(3):
         try:
@@ -11054,7 +11058,7 @@ async def run_workflow_api(workflow_name: str, req: Request) -> ApiResponse:
                 output_with_report = dict(result.outputs) if result.outputs else {}
                 if result.token_report:
                     output_with_report["_token_report"] = result.token_report
-                db_run.output_data = output_with_report
+                db_run.output_data = json_safe(output_with_report)
                 db_run.total_cost_usd = result.total_cost_usd
                 if result.status != "awaiting_approval":
                     db_run.completed_at = result.completed_at

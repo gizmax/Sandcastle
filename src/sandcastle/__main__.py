@@ -1228,7 +1228,9 @@ def _run_local(
                             str(_attr(wf_result, "status", "")), RunStatus.COMPLETED
                         )
                         db_run.total_cost_usd = _attr(wf_result, "total_cost_usd", 0.0)
-                        db_run.output_data = _attr(wf_result, "outputs", {})
+                        from sandcastle.engine.json_utils import json_safe
+
+                        db_run.output_data = json_safe(_attr(wf_result, "outputs", {}))
                         db_run.error = _attr(wf_result, "error", None)
                         await session.commit()
             except Exception:

@@ -6,8 +6,7 @@
 # container running `ant beta:worker run`, isolated on the
 # `session-net` network and given a tmpfs /workspace.
 #
-# Requires: docker CLI, /bin/sh (POSIX), GNU/BSD coreutils.
-# Does NOT require bash - keep it portable.
+# Requires: Docker CLI and GNU coreutils (for timeout). /bin/sh is sufficient.
 #
 # Inputs (env):
 #   ANTHROPIC_SESSION_ID         (required) - session being routed here
@@ -27,7 +26,7 @@
 # Cleanup: a trap on EXIT removes the per-session named volume even when
 # docker run fails or the session times out, so we never leak disk.
 
-set -euo pipefail
+set -eu
 
 BASE_URL="${ANTHROPIC_BASE_URL:-https://api.anthropic.com}"
 WORKER_IMAGE="${SANDCASTLE_WORKER_IMAGE:-sandcastle/worker:latest}"
@@ -67,14 +66,14 @@ docker volume create "$VOLUME" >/dev/null
 # --rm so the container is auto-removed (we still rm -f in trap for the
 # kill paths). --network=session-net pins traffic to the segregated
 # bridge defined in docker-compose.yml. tmpfs /workspace gives the agent
-# fast scratch space that disappears on container exit.
+# a private scratch space that disappears on container exit.
 set +e
 timeout --signal=TERM --kill-after=15 "$TIMEOUT_S" \
     docker run \
         --rm \
         --name "$CONTAINER" \
         --network=session-net \
-        --tmpfs /workspace:rw,exec,size=2g \
+        --tmpfs /workspace:rw,exec,uid=10001,gid=10001,mode=700,size=2g \
         --mount "type=volume,source=${VOLUME},target=/mnt/session/outputs" \
         --env "ANTHROPIC_SESSION_ID=${ANTHROPIC_SESSION_ID}" \
         --env "ANTHROPIC_WORK_ID=${ANTHROPIC_WORK_ID}" \
@@ -85,9 +84,7 @@ timeout --signal=TERM --kill-after=15 "$TIMEOUT_S" \
         --security-opt=no-new-privileges \
         --cap-drop=ALL \
         "$WORKER_IMAGE" \
-        ant beta:worker run \
-            --session-id "$ANTHROPIC_SESSION_ID" \
-            --work-id "$ANTHROPIC_WORK_ID"
+        ant beta:worker run
 RC=$?
 set -e
 

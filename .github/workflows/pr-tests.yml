@@ -81,6 +81,57 @@ jobs:
         run: |
           python -m pytest tests/ -q --tb=line --timeout=60
 
+  docker-build:
+    name: Docker images + API smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build application image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          load: true
+          tags: sandcastle-ai:ci
+          cache-from: type=gha,scope=sandcastle-main
+          cache-to: type=gha,mode=max,scope=sandcastle-main
+
+      - name: Build sandbox runner image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.runner
+          load: true
+          tags: sandcastle-runner:ci
+          cache-from: type=gha,scope=sandcastle-runner
+          cache-to: type=gha,mode=max,scope=sandcastle-runner
+
+      - name: Start local-mode API and wait for health endpoint
+        run: |
+          docker run -d --name sandcastle-smoke \
+            -p 127.0.0.1:18080:8080 \
+            -e SANDCASTLE_ALLOW_INSECURE_BIND=true \
+            -e AUTO_UPDATE_CHECK=false \
+            sandcastle-ai:ci
+          for attempt in $(seq 1 45); do
+            if curl --fail --silent --show-error http://127.0.0.1:18080/api/health >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs sandcastle-smoke
+          exit 1
+
+      - name: Collect smoke-test logs and clean up
+        if: always()
+        run: |
+          docker logs sandcastle-smoke || true
+          docker rm --force sandcastle-smoke || true
+
   postgres-migrations:
     name: PostgreSQL migrations
     runs-on: ubuntu-latest

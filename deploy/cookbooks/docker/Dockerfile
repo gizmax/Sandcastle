@@ -1,9 +1,10 @@
 # syntax=docker/dockerfile:1.7
 #
-# Sandcastle self-hosted sandbox worker image. Two stages:
+# Sandcastle self-hosted sandbox worker image. Three stages:
 #
-#   1. builder  - pulls Python deps + ant CLI + Node 22 into a fat image
-#   2. runtime  - slim, non-root, pre-baked with Playwright + LightPanda
+#   1. docker-cli - provides only the host-Daemon client used by spawn.sh
+#   2. builder    - pulls Python deps + ant CLI + Node 22 into a fat image
+#   3. runtime    - slim, drops to an unprivileged worker, pre-baked with Playwright + LightPanda
 #
 # This mirrors the layout Anthropic's docker/ cookbook ships at
 # https://github.com/anthropics/claude-cookbooks/tree/main/managed_agents/self_hosted_sandboxes/docker
@@ -15,17 +16,22 @@
 # Override versions:
 #   docker build --build-arg PYTHON_VERSION=3.12 \
 #                --build-arg NODE_VERSION=22 \
-#                --build-arg ANT_VERSION=v1.17.0 \
+#                --build-arg ANT_VERSION=1.15.0 \
 #                -t sandcastle/worker:custom deploy/cookbooks/docker/
 
 ARG PYTHON_VERSION=3.12
 ARG NODE_VERSION=22
-ARG ANT_VERSION=v1.17.0
+ARG ANT_VERSION=1.15.0
 ARG PLAYWRIGHT_VERSION=1.61.1
 ARG LIGHTPANDA_VERSION=nightly
+ARG DOCKER_CLI_VERSION=27
+
+# The poller invokes spawn.sh, which talks to the host daemon through its
+# mounted socket. Copy only the client, never a daemon, into the worker image.
+FROM docker:${DOCKER_CLI_VERSION}-cli AS docker-cli
 
 # ---------------------------------------------------------------------------
-# Stage 1: builder
+# Stage 2: builder
 # ---------------------------------------------------------------------------
 FROM python:${PYTHON_VERSION}-slim-bookworm AS builder
 
@@ -53,20 +59,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node ${NODE_VERSION} from NodeSource (LTS line).
-RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_VERSION}.x" | bash - \
+RUN curl -fsSL -o /tmp/nodesource.sh "https://deb.nodesource.com/setup_${NODE_VERSION}.x" \
+    && bash /tmp/nodesource.sh \
     && apt-get install -y --no-install-recommends nodejs \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* /tmp/nodesource.sh
 
 # Install the official Anthropic ant CLI release.
 RUN mkdir -p /tmp/ant \
-    && ANT_VERSION_NO_V="${ANT_VERSION#v}" \
     && case "${TARGETARCH:-$(dpkg --print-architecture)}" in \
         amd64|x86_64) ANT_ARCH="amd64" ;; \
         arm64|aarch64) ANT_ARCH="arm64" ;; \
         *) echo "Unsupported ant arch: ${TARGETARCH:-$(dpkg --print-architecture)}"; exit 1 ;; \
     esac \
     && curl -fsSL -o /tmp/ant/ant.tar.gz \
-        "https://github.com/anthropics/anthropic-cli/releases/download/${ANT_VERSION}/ant_${ANT_VERSION_NO_V}_linux_${ANT_ARCH}.tar.gz" \
+        "https://github.com/anthropics/anthropic-cli/releases/download/v${ANT_VERSION}/ant_${ANT_VERSION}_linux_${ANT_ARCH}.tar.gz" \
     && tar -xzf /tmp/ant/ant.tar.gz -C /tmp/ant \
     && install -m 0755 /tmp/ant/ant /usr/local/bin/ant \
     && ant --version \
@@ -79,7 +85,8 @@ RUN pip install --prefix=/install httpx pydantic
 # Pre-bake Playwright browsers so per-session containers do not download
 # them on first run.
 RUN pip install --prefix=/install "playwright==${PLAYWRIGHT_VERSION}" \
-    && PYTHONPATH=/install/lib/python${PYTHON_VERSION%.*}/site-packages \
+    && mkdir -p /root/.cache/ms-playwright
+RUN PYTHONPATH=/install/lib/python${PYTHON_VERSION%.*}/site-packages \
        /install/bin/playwright install --with-deps chromium || true
 
 # LightPanda is pulled in as a static binary for headless browsing.
@@ -95,7 +102,7 @@ RUN mkdir -p /opt/lightpanda \
     || echo "LightPanda fetch failed; runtime will skip browser tool"
 
 # ---------------------------------------------------------------------------
-# Stage 2: runtime
+# Stage 3: runtime
 # ---------------------------------------------------------------------------
 FROM python:${PYTHON_VERSION}-slim-bookworm AS runtime
 
@@ -111,15 +118,19 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN apt-get update && apt-get install -y --no-install-recommends \
         bash \
         ca-certificates \
+        coreutils \
         curl \
         tar \
         tini \
         unzip \
+        util-linux \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system --gid 10001 sandcastle \
     && useradd --system --uid 10001 --gid 10001 \
         --home-dir /workspace --no-create-home \
-        --shell /bin/bash sandcastle
+        --shell /bin/bash sandcastle \
+    && mkdir -p /workspace /mnt/session/outputs \
+    && chown -R 10001:10001 /workspace /mnt/session/outputs
 
 # Copy pre-baked Python, Node, ant, browsers from the builder.
 COPY --from=builder /install /install
@@ -129,17 +140,18 @@ COPY --from=builder /usr/bin/npm /usr/bin/npm
 COPY --from=builder /usr/lib/node_modules /usr/lib/node_modules
 COPY --from=builder /opt/lightpanda /opt/lightpanda
 COPY --from=builder /root/.cache/ms-playwright /home/sandcastle/.cache/ms-playwright
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
+COPY spawn.sh /usr/local/bin/spawn.sh
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 
 RUN ant --version \
-    && chown -R 10001:10001 /home/sandcastle
+    && chown -R 10001:10001 /home/sandcastle \
+    && chmod 0755 /usr/local/bin/spawn.sh /usr/local/bin/entrypoint.sh
 
 WORKDIR /workspace
-USER 10001
+VOLUME ["/mnt/session/outputs"]
 
-# Health-check shim hits the in-process ant status endpoint when the
-# worker is run as the long-running poller.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD curl -fsS http://localhost:8081/healthz || exit 1
-
-ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["ant", "beta:worker", "poll"]
+# The entrypoint fixes ownership of mounted volumes as root, then drops to the
+# unprivileged worker before running ant.
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
+CMD ["ant", "beta:worker", "poll", "--on-work", "/usr/local/bin/spawn.sh"]

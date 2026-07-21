@@ -25,30 +25,19 @@ services:
       dockerfile: Dockerfile
     container_name: sandcastle-worker
     restart: unless-stopped
-    # Poller needs the Docker socket so it can spawn per-session
-    # containers via spawn.sh. Mount it read-write (Docker API has no
-    # finer-grained scoping); pair this with the user namespace mapping
-    # below in production.
+    # Poller needs the Docker socket so it can spawn per-session containers
+    # via the baked-in spawn.sh. Mount it read-write (Docker API has no
+    # finer-grained scoping).
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./spawn.sh:/usr/local/bin/spawn.sh:ro
     environment:
       ANTHROPIC_ENVIRONMENT_ID: "${ANTHROPIC_ENVIRONMENT_ID:?set in .env}"
       ANTHROPIC_ENVIRONMENT_KEY: "${ANTHROPIC_ENVIRONMENT_KEY:?set in .env}"
       ANTHROPIC_BASE_URL: "${ANTHROPIC_BASE_URL:-https://api.anthropic.com}"
       SANDCASTLE_WORKER_IMAGE: "sandcastle/worker:latest"
       SANDCASTLE_SESSION_TIMEOUT: "${SANDCASTLE_SESSION_TIMEOUT:-1800}"
-      SANDCASTLE_SPAWN_SCRIPT: "/usr/local/bin/spawn.sh"
     networks:
       - session-net
-    ports:
-      - "8081:8081"  # /healthz
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8081/healthz"]
-      interval: 30s
-      timeout: 5s
-      start_period: 20s
-      retries: 3
     deploy:
       resources:
         limits:
