@@ -187,19 +187,21 @@ class TestValidateWorkflowInput:
         assert errors == []
         assert data["items"] == [1, 2, 3]
 
-    def test_array_coercion_not_array(self):
+    def test_array_coercion_wraps_json_object_as_single_item(self):
+        # 0.43.0: a bare JSON value is one item (arrays of objects are valid)
         schema = {"properties": {"items": {"type": "array"}}}
         data = {"items": '{"key": "val"}'}
         errors = _validate_workflow_input(data, schema)
-        assert len(errors) == 1
-        assert "array" in errors[0]
+        assert errors == []
+        assert data["items"] == [{"key": "val"}]
 
-    def test_array_coercion_invalid_json(self):
+    def test_array_coercion_splits_plain_string(self):
+        # 0.43.0: humans type comma-separated values; plain strings split
         schema = {"properties": {"items": {"type": "array"}}}
         data = {"items": "not-json"}
         errors = _validate_workflow_input(data, schema)
-        assert len(errors) == 1
-        assert "JSON array" in errors[0]
+        assert errors == []
+        assert data["items"] == ["not-json"]
 
     def test_missing_optional_field_no_error(self):
         schema = {"required": [], "properties": {"name": {"type": "string"}}}
