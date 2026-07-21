@@ -271,6 +271,20 @@ class GenerateChatRequest(BaseModel):
     )
 
 
+class RunAssistantTurn(BaseModel):
+    """One prior turn of the Run Assistant conversation."""
+
+    role: str = Field(..., pattern="^(user|assistant)$")
+    text: str = Field(..., min_length=1, max_length=4000)
+
+
+class RunAssistantRequest(BaseModel):
+    """Ask the Run Assistant a question about a specific run."""
+
+    question: str = Field(..., min_length=1, max_length=4000)
+    history: list[RunAssistantTurn] = Field(default_factory=list, max_length=20)
+
+
 class ExplainErrorRequest(BaseModel):
     """Request to explain a step failure using AI."""
 

@@ -1831,6 +1831,53 @@ Guidelines:
 """
 
 
+_RUN_ASSISTANT_SYSTEM = """You are the Run Assistant for Sandcastle, an AI workflow
+orchestration platform. The user is looking at one specific workflow run and asks
+questions about it. You are given the full run context (status, steps, errors,
+outputs, cost, timing) below.
+
+Guidelines:
+- Ground every statement in the provided run data. Never invent steps, errors, or
+  numbers that are not in the context.
+- Answer in the same language the user asks in.
+- Be concise and concrete. When the user asks why something failed, quote the
+  failing step id and its actual error, then explain the likely cause and a fix.
+- When the run succeeded, say so plainly instead of hunting for problems.
+- Plain text or minimal markdown (bold, lists). No JSON, no code fences unless
+  quoting an error verbatim."""
+
+
+async def run_assistant_answer(
+    question: str,
+    run_context: str,
+    history: list[dict] | None = None,
+) -> str:
+    """Answer a user question about a specific run via the advisor LLM.
+
+    *run_context* is a pre-serialized, secret-scrubbed description of the run.
+    *history* carries prior turns as [{"role": "user"|"assistant", "text": ...}].
+    Raises on provider failure - the caller decides the fallback.
+    """
+    convo: list[str] = []
+    for turn in (history or [])[-10:]:
+        role = "User" if turn.get("role") == "user" else "Assistant"
+        text = str(turn.get("text", ""))[:1000]
+        if text:
+            convo.append(f"{role}: {text}")
+    history_block = ("\n\nConversation so far:\n" + "\n".join(convo)) if convo else ""
+
+    user_msg = (
+        f"RUN CONTEXT:\n{run_context}{history_block}\n\nUser question: {question}"
+    )
+    # SLO routing: purpose="chat" -> high tier (a local workflow_default_model wins)
+    return await _call_advisor_llm(
+        system=_RUN_ASSISTANT_SYSTEM,
+        user=user_msg,
+        max_tokens=1024,
+        purpose="chat",
+    )
+
+
 async def explain_error(
     step_id: str,
     step_type: str,

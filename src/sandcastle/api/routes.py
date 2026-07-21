@@ -89,6 +89,7 @@ from sandcastle.api.schemas import (
     ProviderStatusEntry,
     ReplayRequest,
     RoutingDecisionResponse,
+    RunAssistantRequest,
     RunCompareResponse,
     RunEstimateRequest,
     RunForkResponse,
@@ -4158,6 +4159,103 @@ async def advisor_explain_error(req: Request, request: ExplainErrorRequest) -> A
             ).model_dump(),
         )
     return ApiResponse(data=result)
+
+
+@router.post("/runs/{run_id}/assistant")
+async def run_assistant(run_id: str, req: Request, request: RunAssistantRequest) -> ApiResponse:
+    """Answer a question about a specific run via the advisor LLM (Run Assistant)."""
+    await execution_limiter.check(req)
+    from sandcastle.engine.generator import _resolve_api_key, _scrub_secrets, run_assistant_answer
+
+    tenant_id = get_tenant_id(req)
+    try:
+        run_uuid = uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(code="INVALID_ID", message="Invalid run ID format")
+            ).model_dump(),
+        )
+
+    async with async_session() as session:
+        stmt = (
+            select(Run)
+            .options(selectinload(Run.steps))
+            .where(Run.id == run_uuid)
+        )
+        stmt = _apply_tenant_filter(stmt, tenant_id, Run.tenant_id)
+        result = await session.execute(stmt)
+        run = result.scalar_one_or_none()
+
+    if not run:
+        raise HTTPException(
+            status_code=404,
+            detail=ApiResponse(
+                error=ErrorResponse(code="NOT_FOUND", message="Run not found")
+            ).model_dump(),
+        )
+
+    # No usable provider: tell the client explicitly so it can fall back to its
+    # local heuristics instead of surfacing an opaque 502.
+    try:
+        _has_provider = bool(_resolve_api_key())
+    except Exception:
+        _has_provider = False
+    if not _has_provider:
+        raise HTTPException(
+            status_code=400,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="NO_PROVIDER",
+                    message=(
+                        "No AI provider is configured. Add a provider key or run a "
+                        "local model to enable the Run Assistant."
+                    ),
+                )
+            ).model_dump(),
+        )
+
+    # Serialize the run for the LLM - secret-scrubbed, output tails truncated.
+    lines = [
+        f"Workflow: {run.workflow_name}",
+        f"Run id: {run.id}",
+        f"Status: {run.status.value if hasattr(run.status, 'value') else run.status}",
+        f"Started: {run.started_at} | Completed: {run.completed_at}",
+        f"Total cost USD: {run.total_cost_usd}",
+    ]
+    if run.error:
+        lines.append(f"Run-level error: {_scrub_secrets(str(run.error)[:2000])}")
+    steps = list(run.steps or [])
+    lines.append(f"Steps ({len(steps)}):")
+    for s in steps:
+        status = s.status.value if hasattr(s.status, "value") else s.status
+        entry = f"- {s.step_id} [{status}] attempt={s.attempt}"
+        if s.error:
+            entry += f" error: {_scrub_secrets(str(s.error)[:1500])}"
+        if s.output_data and str(status).lower() == "completed":
+            entry += f" output_tail: {_scrub_secrets(str(s.output_data)[-500:])}"
+        lines.append(entry)
+    run_context = "\n".join(lines)
+
+    try:
+        answer = await run_assistant_answer(
+            question=request.question,
+            run_context=run_context,
+            history=[t.model_dump() for t in request.history],
+        )
+    except Exception as exc:
+        logger.error("Run assistant failed for %s: %s", run_id, exc)
+        raise HTTPException(
+            status_code=502,
+            detail=ApiResponse(
+                error=ErrorResponse(
+                    code="ASSISTANT_FAILED",
+                    message="Run assistant could not generate an answer",
+                )
+            ).model_dump(),
+        )
+    return ApiResponse(data={"answer": answer})
 
 
 @router.get("/advisor/status")
