@@ -752,6 +752,17 @@ async def run_evolution(
             "error": f"Failed to parse eval suite: {exc}",
             "status": "failed",
         }
+    if not suite.cases:
+        # Without eval cases every variant scores 0.0 and the whole evolution
+        # is a no-op that still burns iterations - refuse loudly instead.
+        return {
+            "error": (
+                "Eval suite has no cases - evolution needs at least one eval "
+                "case (input + assertions) to score variants against. Add "
+                "cases to the eval suite before starting."
+            ),
+            "status": "failed",
+        }
 
     # --- Create DB record ---
     evolution_record = WorkflowEvolution(
