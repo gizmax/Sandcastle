@@ -127,7 +127,7 @@ export function generateInsights(data: AdvisorData): Insight[] {
       severity: "critical",
       title: "Runtime is down",
       description: "The sandbox runtime is unreachable. Workflows cannot execute.",
-      link: "/system",
+      link: "/system-health",
       icon: "ServerCrash",
     });
   }

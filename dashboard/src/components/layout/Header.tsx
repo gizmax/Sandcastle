@@ -77,22 +77,26 @@ function useAdvisorProviderBadge(): string | null {
 
 /** Fetch the Spark Mode flag once and cache in module scope. */
 let _cachedSparkMode: boolean | null = null;
+let _cachedSparkGpu: string | null = null;
 
-function useSparkModeBadge(): boolean {
+function useSparkModeBadge(): { sparkMode: boolean; sparkGpu: string | null } {
   const [sparkMode, setSparkMode] = useState<boolean>(_cachedSparkMode ?? false);
+  const [sparkGpu, setSparkGpu] = useState<string | null>(_cachedSparkGpu);
   useEffect(() => {
     if (_cachedSparkMode !== null) return;
     api
-      .get<{ spark_mode: boolean }>("/runtime")
+      .get<{ spark_mode: boolean; spark_gpu?: string | null }>("/runtime")
       .then((res) => {
         if (res.data?.spark_mode !== undefined) {
           _cachedSparkMode = res.data.spark_mode;
+          _cachedSparkGpu = res.data.spark_gpu ?? null;
+          setSparkGpu(_cachedSparkGpu);
           setSparkMode(res.data.spark_mode);
         }
       })
       .catch(() => undefined);
   }, []);
-  return sparkMode;
+  return { sparkMode, sparkGpu };
 }
 
 const CONNECTION_LABEL: Record<string, string> = {
@@ -165,7 +169,7 @@ export function Header({
   const location = useLocation();
   const navigate = useNavigate();
   const advisorProvider = useAdvisorProviderBadge();
-  const sparkMode = useSparkModeBadge();
+  const { sparkMode, sparkGpu } = useSparkModeBadge();
   const update = useUpdateCheck();
   const [bannerDismissed, setBannerDismissed] = useState(isBannerDismissed);
 
@@ -285,7 +289,7 @@ export function Header({
                 className="inline-flex items-center gap-1 rounded-full border border-purple-500/30 bg-purple-500/15 px-2 py-1 text-[10px] font-medium text-purple-600 dark:text-purple-400"
                 title="Running on a DGX Spark — local models, $0/run, data stays on-box"
               >
-                ⚡ Spark
+                ⚡ {sparkGpu ?? "Spark"}
               </span>
             )}
           </div>

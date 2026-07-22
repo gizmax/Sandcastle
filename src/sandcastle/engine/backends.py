@@ -533,25 +533,45 @@ class DockerBackend:
                 logs = await logs
 
             deadline = time.monotonic() + timeout + 30.0  # 30s grace
-            async for line in logs:
+            # aiodocker's follow stream yields CHUNKS, not lines: a multi-KB
+            # result JSON arrives fragmented, and parsing fragments as lines
+            # silently dropped every large step output. Buffer and split.
+            _line_buf = ""
+            _timed_out = False
+
+            def _parse_lines(text: str) -> list[SSEEvent]:
+                out: list[SSEEvent] = []
+                for raw in text.splitlines():
+                    raw = raw.strip()
+                    if not raw:
+                        continue
+                    try:
+                        parsed = json.loads(raw)
+                        out.append(
+                            SSEEvent(event=parsed.get("type", "message"), data=parsed)
+                        )
+                    except (json.JSONDecodeError, ValueError):
+                        logger.debug("Non-JSON docker output: %s", raw[:200])
+                return out
+
+            async for chunk in logs:
                 if time.monotonic() > deadline:
                     logger.warning(
                         "Docker container exceeded deadline "
                         "(%.0fs + 30s grace), stopping",
                         timeout,
                     )
+                    _timed_out = True
                     break
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    parsed = json.loads(line)
-                    yield SSEEvent(
-                        event=parsed.get("type", "message"),
-                        data=parsed,
-                    )
-                except (json.JSONDecodeError, ValueError):
-                    logger.debug("Non-JSON docker output: %s", line[:200])
+                _line_buf += chunk
+                while "\n" in _line_buf:
+                    line, _line_buf = _line_buf.split("\n", 1)
+                    for ev in _parse_lines(line):
+                        yield ev
+            if not _timed_out and _line_buf.strip():
+                # Flush a trailing line without a final newline
+                for ev in _parse_lines(_line_buf):
+                    yield ev
 
         finally:
             if container:

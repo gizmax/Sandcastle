@@ -537,6 +537,7 @@ class LicenseInfoResponse(BaseModel):
 class RuntimeInfoResponse(BaseModel):
     """Runtime mode information."""
 
+    spark_gpu: str | None = None  # detected GPU name on a Spark (e.g. "NVIDIA GB10")
     mode: str  # "local" or "production"
     database: str  # "sqlite" or "postgresql"
     queue: str  # "in-process" or "redis"

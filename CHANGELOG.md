@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.43.1] - 2026-07-22 - "First Impressions"
+
+### Changed
+- **A fresh install starts with an empty Workflows page.** The 17 bundled sample
+  workflows moved from `WORKFLOWS_DIR` into the template hub - the Workflows page
+  now holds only what the user creates (the wizard saves its first workflow
+  there), and the samples remain one click away in the hub. Support directories
+  ship under `example-workflows/` in the image.
+- The header Spark badge shows the detected GPU name (e.g. "NVIDIA GB10")
+  instead of a generic label; `/api/runtime` gains `spark_gpu`.
+- Workflow health badges judge the last run first: a workflow whose latest run
+  completed shows Healthy/Degraded by lifetime rate instead of a permanent
+  "Failing" from historical failures.
+
+### Fixed
+- Onboarding wizard's first run: correct `input` field (was silently dropped),
+  the workflow is saved so it appears on the Workflows page, and the queued run
+  is polled to a terminal state instead of pretending instant success.
+- Docker sandbox: aiodocker's follow stream yields chunks, not lines - large
+  step outputs fragmented and were silently dropped, so big results came back
+  empty while small ones worked. Line-buffered now, with a trailing flush.
+- Sandbox health check constructs the runtime with the configured backend -
+  docker-backend boxes no longer report "Runtime is down" forever (and the
+  insight card links to /system-health, not a 404).
+- Steps record the model that actually ran (after default/autoroute/rescue),
+  not the declared one - runs on local models no longer all claim "sonnet".
+- Czech and other diacritics render in PDF exports: DejaVu ships in the image,
+  the latin-1 squash applies only when no Unicode font is available, and the
+  markdown renderer got x-position/width guards for long link lists.
+
 ## [0.43.0] - 2026-07-22 - "Polish Under Pressure"
 
 A day-two batch from live usage on the DGX Spark box: one new feature and a

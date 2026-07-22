@@ -36,6 +36,11 @@ RUN pip install --no-cache-dir ".[docker,memory]"
 # -- Runtime stage --
 FROM python:3.12-slim
 
+# DejaVu gives the PDF renderer a Unicode font - without it non-latin-1
+# text (Czech, Polish, ...) degrades to '?' via the Helvetica fallback.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
 LABEL maintainer="Tomas Pflanzer @gizmax"
 
 # Create non-root user
@@ -56,7 +61,10 @@ WORKDIR /app
 COPY alembic.ini ./
 COPY alembic/ alembic/
 COPY src/ src/
-COPY workflows/ workflows/
+# Example workflows ship OUTSIDE the live WORKFLOWS_DIR: a fresh install starts
+# with an empty Workflows page (plus what the wizard saves); the samples moved
+# into the template hub (src/sandcastle/templates). Support dirs stay as examples.
+COPY workflows/ example-workflows/
 
 # Create data directory for local storage
 RUN mkdir -p /app/data && chown -R sandcastle:sandcastle /app
