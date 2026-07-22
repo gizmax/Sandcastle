@@ -66,6 +66,10 @@ class StepResult:
     error: str | None = None
     attempt: int = 1
     input_prompt: str | None = None  # Resolved prompt sent to the LLM
+    # The model that actually ran (after workflow_default_model / Spark
+    # autoroute / key-less rescue) - the UI shows this instead of the declared
+    # one, so a local-first box no longer claims every step ran on "sonnet".
+    model: str | None = None
     # Deterministic failures must not spend the configured retry budget.  Step
     # implementations may set this directly; the retry wrappers also infer it
     # from known fatal error messages for legacy implementations.
@@ -1526,7 +1530,7 @@ async def execute_step_with_retry(
                     cost_usd=result.cost_usd,
                     duration_seconds=result.duration_seconds,
                     attempt=attempt,
-                    model=step.model,
+                    model=result.model or step.model,
                     input_prompt=result.input_prompt,
                 )
 
@@ -1637,7 +1641,7 @@ async def execute_step_with_retry(
                     duration_seconds=result.duration_seconds,
                     attempt=attempt,
                     error=result.error,
-                    model=step.model,
+                    model=result.model or step.model,
                     input_prompt=result.input_prompt,
                 )
 
@@ -1951,7 +1955,9 @@ async def _execute_step_once(
     try:
         # SLO-based model selection (optimizer)
         routing_decision = None
-        effective_model = step.model
+        from sandcastle.engine.providers import effective_model as _resolve_effective
+
+        effective_model = _resolve_effective(step.model)
         effective_max_turns = step.max_turns
         if hasattr(step, "slo") and step.slo and hasattr(step, "model_pool") and step.model_pool:
             try:
@@ -2428,6 +2434,7 @@ async def _execute_step_once(
             status="completed",
             attempt=attempt,
             input_prompt=resolved_input_prompt,
+            model=effective_model,
         )
 
     except WorkflowPaused as paused:
@@ -8011,6 +8018,8 @@ async def _prepare_and_run_step(
         *,
         model: str | None = None,
     ) -> None:
+        # Prefer the model the step actually ran on over the declared one.
+        model = result.model or model
         if result.status == "completed":
             # Apply PII redaction to output if privacy router is active and
             # "outputs" is in the apply_to list.

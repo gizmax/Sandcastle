@@ -304,12 +304,6 @@ function StepConnect({ onNext, onSkip }: { onNext: () => void; onSkip: () => voi
 // Step 4: Run the chosen template (best-effort) and finish into Standard density
 // -----------------------------------------------------------------------
 
-interface RunResult {
-  run_id?: string;
-  status?: string;
-  outputs?: Record<string, unknown>;
-}
-
 function firstOutput(outputs?: Record<string, unknown>): string | null {
   if (!outputs) return null;
   const vals = Object.values(outputs);
@@ -347,19 +341,58 @@ function StepRun({
       for (const [k, v] of Object.entries(inputs)) {
         if (v !== undefined && v !== null && String(v).trim() !== "") cleanInputs[k] = v;
       }
-      // Built-in templates only resolve by name for user workflows, so fetch the
-      // template's YAML and run it inline; fall back to running by name.
-      let body: Record<string, unknown> = { workflow_name: template.name, inputs: cleanInputs };
+      // The API's field is `input` - `inputs` was silently dropped, so the run
+      // started with no input data and failed required-field validation.
+      let body: Record<string, unknown> = { workflow_name: template.name, input: cleanInputs };
       try {
         const tpl = await api.get<{ content?: string }>(
           `/templates/${encodeURIComponent(template.name)}`
         );
-        if (tpl.data?.content) body = { workflow: tpl.data.content, inputs: cleanInputs };
+        if (tpl.data?.content) {
+          // Save the workflow first so the user's first workflow actually
+          // appears on the Workflows page; run it inline either way.
+          try {
+            await api.post("/workflows", {
+              name: template.name,
+              content: tpl.data.content,
+            });
+          } catch {
+            // Already exists or save denied - the run below still works.
+          }
+          body = { workflow: tpl.data.content, input: cleanInputs };
+        }
       } catch {
         // Keep the workflow_name fallback.
       }
-      const res = await api.post<RunResult>("/workflows/run", body);
-      setOutput(firstOutput(res.data?.outputs) || "Workflow completed successfully.");
+      // 202 = queued: poll the run until it reaches a terminal state instead
+      // of pretending an immediately-queued run already completed.
+      const res = await api.post<{ run_id?: string; outputs?: Record<string, unknown> }>(
+        "/workflows/run",
+        body
+      );
+      if (res.error) throw new Error(res.error.message);
+      const runId = res.data?.run_id;
+      if (runId) {
+        const deadline = Date.now() + 180_000;
+        let final: { status?: string; outputs?: Record<string, unknown>; error?: string | null } = {};
+        while (Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 3000));
+          const st = await api.get<{ status?: string; outputs?: Record<string, unknown>; error?: string | null }>(
+            `/runs/${runId}`
+          );
+          final = st.data ?? {};
+          if (final.status === "completed" || final.status === "failed") break;
+        }
+        if (final.status === "failed") {
+          throw new Error(final.error || "Run failed");
+        }
+        if (final.status !== "completed") {
+          throw new Error("Run is taking longer than expected - check the Runs page");
+        }
+        setOutput(firstOutput(final.outputs) || "Workflow completed successfully.");
+      } else {
+        setOutput(firstOutput(res.data?.outputs) || "Workflow completed successfully.");
+      }
       setStatus("done");
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : "");
