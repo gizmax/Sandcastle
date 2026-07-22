@@ -141,12 +141,12 @@ from sandcastle.api.schemas import (
     WorkflowVersionResponse,
 )
 from sandcastle.config import Settings, settings
-from sandcastle.engine.spark import get_spark_info
 from sandcastle.engine.audit import verify_audit_chain
 from sandcastle.engine.dag import build_plan, parse_yaml_string, validate
 from sandcastle.engine.executor import execute_workflow
 from sandcastle.engine.json_utils import json_safe
 from sandcastle.engine.sandshore import SandshoreRuntime, get_sandshore_runtime  # noqa: F401
+from sandcastle.engine.spark import get_spark_info
 from sandcastle.engine.storage import create_storage
 from sandcastle.models.db import (
     ApiKey,
