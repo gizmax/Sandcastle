@@ -1410,7 +1410,7 @@ class EvolutionStartRequest(BaseModel):
     eval_suite_yaml: str = Field(..., min_length=1, max_length=500000)
     max_iterations: int = Field(20, ge=1, le=100)
     optimize_for: str = Field("balanced", pattern="^(quality|cost|latency|balanced)$")
-    budget_limit_usd: float | None = Field(None, ge=0)
+    budget_limit_usd: float | None = Field(None, gt=0)
 
 
 class EvolutionIterationResponse(BaseModel):
@@ -1450,6 +1450,7 @@ class EvolutionStatusResponse(BaseModel):
     budget_limit_usd: float | None = None
     created_at: datetime | None = None
     completed_at: datetime | None = None
+    error: str | None = None
     iterations: list[EvolutionIterationResponse] = Field(default_factory=list)
 
 
@@ -1473,6 +1474,7 @@ class EvolutionListItemResponse(BaseModel):
     budget_limit_usd: float | None = None
     created_at: datetime | None = None
     completed_at: datetime | None = None
+    error: str | None = None
 
 
 class EvolutionAcceptRequest(BaseModel):
@@ -1670,7 +1672,7 @@ class AdvisorTestConnectionResponse(BaseModel):
 
 
 class EvolutionStartResponse(BaseModel):
-    """Response from /evolution/start after the evolution loop completes."""
+    """Response from /evolution/start after the background run is scheduled."""
 
     evolution_id: str
     workflow_name: str

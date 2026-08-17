@@ -34,6 +34,9 @@ class ToolDefinition:
     # Env vars that are NOT required (the tool works without them) but, if set,
     # upgrade it - e.g. a free key that lifts a keyless tool's rate limit.
     optional_credential_env_vars: list[str] = field(default_factory=list)
+    # Alternative complete credential sets. A tool is configured when either
+    # every primary credential above or every credential in one group is set.
+    alternative_credential_env_vars: list[list[str]] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -3640,6 +3643,9 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
             ),
         ],
         credential_env_vars=["TOOL_AZURE_STORAGE_CONNECTION_STRING"],
+        alternative_credential_env_vars=[
+            ["TOOL_AZURE_STORAGE_ACCOUNT", "TOOL_AZURE_STORAGE_KEY"],
+        ],
         connector_file="azure-blob.mjs",
         icon="azure",
     ),

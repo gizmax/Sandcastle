@@ -1700,7 +1700,19 @@ class TestNotifyStepExecutor:
         )
 
     @pytest.mark.asyncio
-    async def test_notify_success(self, context):
+    async def test_notify_success(self, context, monkeypatch):
+        delivered_step: StepDefinition | None = None
+
+        async def fake_tool_delivery(step, _context):
+            nonlocal delivered_step
+            delivered_step = step
+            return StepResult(
+                step_id=step.id,
+                status="completed",
+                output={"ok": True, "ts": "123"},
+            )
+
+        monkeypatch.setattr(_executor_mod, "_execute_tool_step", fake_tool_delivery)
         step = StepDefinition(
             id="alert",
             type="notify",
@@ -1715,8 +1727,112 @@ class TestNotifyStepExecutor:
         assert result.output["service"] == "slack"
         assert result.output["channel"] == "#builds"
         assert "Build passed" in result.output["message"]
-        assert result.output["status"] == "logged"
+        assert result.output["status"] == "delivered"
+        assert result.output["delivery"]["ok"] is True
+        assert delivered_step is not None
+        assert delivered_step.tool_config.tool == "slack"
+        assert delivered_step.tool_config.function == "send_message"
+        assert delivered_step.tool_config.arguments == ["#builds", "Result: Build passed"]
         assert result.cost_usd == 0.0
+
+    @pytest.mark.asyncio
+    async def test_notify_dry_run_is_explicit(self, context):
+        step = StepDefinition(
+            id="alert",
+            type="notify",
+            notify_config=NotifyConfig(
+                service="slack",
+                channel="#builds",
+                message="Build passed",
+                dry_run=True,
+            ),
+        )
+
+        result = await _execute_notify_step(step, context)
+
+        assert result.status == "completed"
+        assert result.output["status"] == "logged"
+        assert result.output["dry_run"] is True
+
+    @pytest.mark.asyncio
+    async def test_notify_unsupported_service_fails_without_retry(self, context):
+        step = StepDefinition(
+            id="alert",
+            type="notify",
+            notify_config=NotifyConfig(
+                service="carrier-pigeon",
+                channel="roof",
+                message="Build passed",
+            ),
+        )
+
+        result = await _execute_notify_step(step, context)
+
+        assert result.status == "failed"
+        assert "Unsupported notify service" in result.error
+        assert result.retryable is False
+
+    @pytest.mark.asyncio
+    async def test_email_notify_maps_recipient_subject_and_body(
+        self, context, monkeypatch
+    ):
+        delivered_step: StepDefinition | None = None
+
+        async def fake_tool_delivery(step, _context):
+            nonlocal delivered_step
+            delivered_step = step
+            return StepResult(
+                step_id=step.id,
+                status="completed",
+                output={"ok": True},
+            )
+
+        monkeypatch.setattr(_executor_mod, "_execute_tool_step", fake_tool_delivery)
+        step = StepDefinition(
+            id="email",
+            type="notify",
+            notify_config=NotifyConfig(
+                service="email",
+                channel="ops@example.com",
+                subject="Build report",
+                message="Build passed",
+            ),
+        )
+
+        result = await _execute_notify_step(step, context)
+
+        assert result.status == "completed"
+        assert delivered_step is not None
+        assert delivered_step.tool_config.tool == "gmail"
+        assert delivered_step.tool_config.arguments == [
+            "ops@example.com",
+            "Build report",
+            "Build passed",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_webhook_notify_uses_secure_dispatcher(self, context):
+        step = StepDefinition(
+            id="hook",
+            type="notify",
+            notify_config=NotifyConfig(
+                service="webhook",
+                channel="https://events.example.com/hook",
+                message="Build passed",
+            ),
+        )
+
+        with patch(
+            "sandcastle.webhooks.dispatcher.dispatch_webhook",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as dispatch:
+            result = await _execute_notify_step(step, context)
+
+        assert result.status == "completed"
+        assert result.output["status"] == "delivered"
+        dispatch.assert_awaited_once()
+        assert dispatch.await_args.kwargs["max_retries"] == 1
 
     @pytest.mark.asyncio
     async def test_notify_missing_config(self, context):

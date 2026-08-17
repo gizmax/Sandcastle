@@ -56,6 +56,95 @@ async def test_mutate_finetune_skips_when_too_few_samples():
 
 
 @pytest.mark.asyncio
+async def test_mutate_finetune_keeps_valid_falsey_training_values():
+    evals = [
+        {"input": "", "expected": "empty input"},
+        {"input": 0, "expected": 0},
+        {"input": False, "expected": False},
+    ]
+
+    new_yaml, desc = await mutate_finetune(WF, evals, min_samples=3)
+
+    assert new_yaml != WF
+    assert "on 3 samples" in desc
+
+
+@pytest.mark.asyncio
+async def test_mutate_finetune_excludes_failed_generated_outputs(monkeypatch):
+    captured_pairs = []
+
+    class _CapturingTrainer:
+        async def train(self, _base_model, pairs, _settings):
+            from sandcastle.engine.training.trainer import TrainingResult
+
+            captured_pairs.extend(pairs)
+            return TrainingResult(
+                adapter_id="safe-training-data",
+                base_model="sonnet",
+                samples=len(pairs),
+                metrics={"eval_score": 1.0},
+                lora_config={},
+            )
+
+    monkeypatch.setattr(
+        "sandcastle.engine.training.trainer.get_trainer",
+        lambda: _CapturingTrainer(),
+    )
+    evals = [
+        {"input": "good", "output": "accepted", "passed": True},
+        {"input": "bad", "output": "known wrong answer", "passed": False},
+        {
+            "input": "ground truth",
+            "expected": "correct answer",
+            "output": "wrong answer",
+            "passed": False,
+        },
+    ]
+
+    new_yaml, desc = await mutate_finetune(WF, evals, min_samples=2)
+
+    assert new_yaml != WF
+    assert "on 2 samples" in desc
+    assert captured_pairs == [
+        {"input": "good", "output": "accepted"},
+        {"input": "ground truth", "output": "correct answer"},
+    ]
+
+
+def test_mutation_context_includes_original_eval_inputs():
+    from sandcastle.engine.eval import CaseResult, parse_eval_suite_string
+    from sandcastle.engine.evolution import _build_mutation_eval_results
+
+    suite = parse_eval_suite_string(
+        """
+workflow: t
+cases:
+  - name: first
+    input:
+      query: hello
+    assertions:
+      - type: not_empty
+"""
+    )
+    context = _build_mutation_eval_results(
+        suite.cases,
+        [CaseResult(name="first", passed=True, output="world")],
+    )
+
+    assert context == [
+        {
+            "name": "first",
+            "input": {"query": "hello"},
+            "passed": True,
+            "error": None,
+            "output": "world",
+            "cost_usd": 0.0,
+            "duration_seconds": 0.0,
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_mutate_finetune_graceful_on_trainer_failure(monkeypatch):
     class _BoomTrainer:
         async def train(self, *a, **k):

@@ -987,7 +987,7 @@ class TestNotifyStep:
     @pytest.mark.asyncio
     async def test_basic_notify(self):
         ctx = _ctx(input={"channel": "#general"})
-        step = _step(id="notify", type="notify", notify_config=NotifyConfig(service="slack", channel="{input.channel}", message="Hello!"))
+        step = _step(id="notify", type="notify", notify_config=NotifyConfig(service="slack", channel="{input.channel}", message="Hello!", dry_run=True))
         r = await _execute_notify_step(step, ctx)
         assert r.status == "completed"
         assert r.output["service"] == "slack"

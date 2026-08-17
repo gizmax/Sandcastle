@@ -869,6 +869,7 @@ class TestDelegateStepSignature:
                 service="slack",
                 channel="#monitoring",
                 message="Brand {input.brand} scan complete in {input.country}",
+                dry_run=True,
             ),
         )
         c = ctx(input={"brand": "Sephora", "country": "SK"})

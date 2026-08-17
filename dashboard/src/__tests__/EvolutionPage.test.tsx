@@ -52,6 +52,7 @@ const latestEvolution = {
   budget_limit_usd: null,
   created_at: "2026-07-20T12:00:00Z",
   completed_at: null,
+  error: null,
 };
 
 const supersededEvolution = {
@@ -113,5 +114,42 @@ describe("EvolutionPage", () => {
     await waitFor(() => {
       expect(apiPost).toHaveBeenCalledWith(`/evolution/${encodeURIComponent(workflowName)}/cancel`);
     });
+  });
+
+  it("keeps failed evolutions visible with their diagnostic", async () => {
+    apiGet.mockImplementation((path: string) => {
+      if (path === "/evolution") {
+        return Promise.resolve({
+          data: [{
+            ...latestEvolution,
+            id: "failed",
+            status: "failed",
+            completed_at: "2026-07-20T12:05:00Z",
+            error: "Provider unavailable",
+          }],
+          error: null,
+        });
+      }
+      if (path === "/evolution/stats") {
+        return Promise.resolve({
+          data: {
+            total_evolutions: 1,
+            active_evolutions: 0,
+            completed_evolutions: 0,
+            total_improvements: 0,
+            avg_improvement: null,
+            top_workflows: [],
+          },
+          error: null,
+        });
+      }
+      if (path === "/workflows") return Promise.resolve({ data: [], error: null });
+      return Promise.resolve({ data: null, error: null });
+    });
+
+    render(<EvolutionPage />);
+
+    expect(await screen.findByText("Stopped (1)")).toBeInTheDocument();
+    expect(screen.getByText("Provider unavailable")).toBeInTheDocument();
   });
 });

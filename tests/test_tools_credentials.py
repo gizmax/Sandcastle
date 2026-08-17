@@ -51,6 +51,23 @@ class TestGetToolCredentials:
         assert "TOOL_JIRA_API_TOKEN" in creds
         assert "TOOL_JIRA_BASE_URL" not in creds
 
+    def test_optional_credentials_are_injected_when_present(self, monkeypatch):
+        monkeypatch.setenv("TOOL_JINA_API_KEY", "jina-key")
+
+        creds = get_tool_credentials(["websearch"])
+
+        assert creds["TOOL_JINA_API_KEY"] == "jina-key"
+
+    def test_alternative_azure_credentials_are_injected(self, monkeypatch):
+        monkeypatch.delenv("TOOL_AZURE_STORAGE_CONNECTION_STRING", raising=False)
+        monkeypatch.setenv("TOOL_AZURE_STORAGE_ACCOUNT", "storage-account")
+        monkeypatch.setenv("TOOL_AZURE_STORAGE_KEY", "storage-key")
+
+        creds = get_tool_credentials(["azure-blob"])
+
+        assert creds["TOOL_AZURE_STORAGE_ACCOUNT"] == "storage-account"
+        assert creds["TOOL_AZURE_STORAGE_KEY"] == "storage-key"
+
 
 class TestValidateToolCredentials:
     """Tests for validate_tool_credentials()."""
@@ -78,6 +95,20 @@ class TestValidateToolCredentials:
         # since len(credential_env_vars) == 0
         result = validate_tool_credentials(["webhook"])
         assert result["webhook"]["configured"] is False
+
+    def test_alternative_azure_credentials_count_as_configured(self, monkeypatch):
+        monkeypatch.delenv("TOOL_AZURE_STORAGE_CONNECTION_STRING", raising=False)
+        monkeypatch.setenv("TOOL_AZURE_STORAGE_ACCOUNT", "storage-account")
+        monkeypatch.setenv("TOOL_AZURE_STORAGE_KEY", "storage-key")
+
+        result = validate_tool_credentials(["azure-blob"])["azure-blob"]
+
+        assert result["configured"] is True
+        assert result["missing"] == []
+        assert result["present"] == [
+            "TOOL_AZURE_STORAGE_ACCOUNT",
+            "TOOL_AZURE_STORAGE_KEY",
+        ]
 
 
 class TestMaskCredential:

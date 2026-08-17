@@ -8,6 +8,8 @@ import os
 import threading
 from datetime import datetime, timezone
 
+from arq.worker import func
+
 from sandcastle.config import settings
 
 logger = logging.getLogger(__name__)
@@ -177,7 +179,17 @@ async def run_workflow_job(
                     run = await session.get(Run, run_uuid)
                     if run:
                         run.status = status_map.get(result.status, RunStatus.FAILED)
-                        output_with_report = dict(result.outputs) if result.outputs else {}
+                        storage_outputs = getattr(result, "storage_outputs", None)
+                        persisted_outputs = (
+                            storage_outputs
+                            if isinstance(storage_outputs, dict)
+                            else result.outputs
+                        )
+                        output_with_report = (
+                            dict(persisted_outputs)
+                            if persisted_outputs
+                            else {}
+                        )
                         if getattr(result, "token_report", None):
                             output_with_report["_token_report"] = result.token_report
                         from sandcastle.engine.json_utils import json_safe
@@ -233,6 +245,7 @@ async def run_workflow_job(
             duration = 0.0
             if result.started_at and result.completed_at:
                 duration = (result.completed_at - result.started_at).total_seconds()
+            result_webhook_outputs = getattr(result, "webhook_outputs", None)
 
             await dispatch_webhook(
                 url=webhook_url,
@@ -240,7 +253,11 @@ async def run_workflow_job(
                 run_id=run_id,
                 workflow=workflow.name,
                 status=result.status,
-                outputs=result.outputs,
+                outputs=(
+                    result_webhook_outputs
+                    if isinstance(result_webhook_outputs, dict)
+                    else result.outputs
+                ),
                 costs=result.total_cost_usd,
                 duration_seconds=duration,
                 error=result.error,
@@ -285,6 +302,65 @@ async def run_workflow_job(
                 logger.error(f"Failed to dispatch failure webhook to {url}: {wh_err}")
 
         return {"run_id": run_id, "status": "failed", "error": str(e)}
+
+
+async def run_evolution_job(
+    ctx: dict,
+    evolution_id: str,
+    workflow_name: str,
+    eval_suite_yaml: str,
+    max_iterations: int,
+    optimize_for: str,
+    budget_limit: float | None = None,
+    tenant_id: str | None = None,
+) -> dict:
+    """Arq job: execute a persisted workflow evolution experiment."""
+    import uuid as _uuid
+
+    from sandcastle.engine.evolution import run_evolution
+    from sandcastle.models.db import WorkflowEvolution, async_session
+
+    evolution_uuid = _uuid.UUID(evolution_id)
+    async with async_session() as session:
+        evolution = await session.get(WorkflowEvolution, evolution_uuid)
+        if evolution is None:
+            logger.error("Evolution %s not found in database, cannot execute", evolution_id)
+            return {
+                "evolution_id": evolution_id,
+                "status": "failed",
+                "error": "Evolution record not found",
+            }
+        if evolution.status not in ("queued", "running"):
+            logger.info(
+                "Evolution %s is already in state %s; skipping queued execution",
+                evolution_id,
+                evolution.status,
+            )
+            return {"evolution_id": evolution_id, "status": evolution.status}
+        evolution.status = "running"
+        await session.commit()
+
+    try:
+        result = await run_evolution(
+            workflow_name=workflow_name,
+            eval_suite_yaml=eval_suite_yaml,
+            max_iterations=max_iterations,
+            optimize_for=optimize_for,
+            budget_limit=budget_limit,
+            tenant_id=tenant_id,
+            evolution_id=evolution_uuid,
+            record_exists=True,
+        )
+        if result.get("status") == "failed":
+            await _mark_evolution_failed(evolution_id, result.get("error"))
+        return result
+    except asyncio.CancelledError:
+        await _mark_evolution_failed(evolution_id, "Evolution job was interrupted")
+        raise
+    except Exception as exc:
+        logger.exception("Evolution job %s failed", evolution_id)
+        await _mark_evolution_failed(evolution_id, str(exc))
+        return {"evolution_id": evolution_id, "status": "failed", "error": str(exc)}
 
 
 async def _recover_stuck_runs() -> None:
@@ -335,6 +411,41 @@ async def _recover_stuck_runs() -> None:
         logger.error("Failed to recover stuck runs on startup: %s", e)
 
 
+async def _recover_stuck_evolutions() -> None:
+    """Fail evolution jobs left running beyond twice their configured timeout."""
+    from datetime import timedelta
+
+    from sqlalchemy import update
+
+    from sandcastle.models.db import WorkflowEvolution, async_session
+
+    cutoff = datetime.now(timezone.utc) - timedelta(
+        seconds=2 * settings.evolution_job_timeout
+    )
+    try:
+        async with async_session() as session:
+            result = await session.execute(
+                update(WorkflowEvolution)
+                .where(
+                    WorkflowEvolution.status == "running",
+                    WorkflowEvolution.created_at <= cutoff,
+                )
+                .values(
+                    status="failed",
+                    completed_at=datetime.now(timezone.utc),
+                    error="Worker crashed or evolution job timed out",
+                )
+            )
+            if result.rowcount:
+                await session.commit()
+                logger.warning(
+                    "Recovered %d stuck evolution job(s)",
+                    result.rowcount,
+                )
+    except Exception as exc:
+        logger.error("Failed to recover stuck evolutions on startup: %s", exc)
+
+
 async def startup(ctx: dict) -> None:
     """Worker startup hook."""
     logger.info("Sandcastle worker starting up")
@@ -348,6 +459,7 @@ async def startup(ctx: dict) -> None:
     except Exception as e:  # noqa: BLE001 - startup must not die on a bad setting
         logger.warning("Could not restore DB settings on worker startup: %s", e)
     await _recover_stuck_runs()
+    await _recover_stuck_evolutions()
 
 
 async def shutdown(ctx: dict) -> None:
@@ -363,7 +475,10 @@ async def shutdown(ctx: dict) -> None:
 class WorkerSettings:
     """Arq worker settings (only used with Redis)."""
 
-    functions = [run_workflow_job]
+    functions = [
+        run_workflow_job,
+        func(run_evolution_job, timeout=settings.evolution_job_timeout),
+    ]
     on_startup = startup
     on_shutdown = shutdown
     max_jobs = int(os.environ.get("SANDCASTLE_WORKER_MAX_JOBS", "10"))
@@ -492,6 +607,117 @@ async def enqueue_workflow(
         )
         _background_tasks.add(task)
         task.add_done_callback(_task_done_callback)
+
+
+async def enqueue_evolution(
+    evolution_id: str,
+    workflow_name: str,
+    eval_suite_yaml: str,
+    max_iterations: int,
+    optimize_for: str,
+    budget_limit: float | None = None,
+    tenant_id: str | None = None,
+    mark_failed_on_error: bool = True,
+) -> None:
+    """Enqueue a persisted evolution via Redis or the in-process local queue."""
+    global _enqueue_redis_pool
+
+    if uses_redis_queue():
+        from arq import create_pool
+
+        try:
+            if _enqueue_redis_pool is None:
+                async with _get_enqueue_lock():
+                    if _enqueue_redis_pool is None:
+                        _enqueue_redis_pool = await create_pool(
+                            _parse_redis_url(settings.redis_url)
+                        )
+            await _enqueue_redis_pool.enqueue_job(
+                "run_evolution_job",
+                evolution_id,
+                workflow_name,
+                eval_suite_yaml,
+                max_iterations,
+                optimize_for,
+                budget_limit=budget_limit,
+                tenant_id=tenant_id,
+                _job_id=f"evolution-{evolution_id}",
+            )
+        except Exception as enqueue_err:
+            logger.error(
+                "Failed to enqueue evolution %s to Redis: %s",
+                evolution_id,
+                enqueue_err,
+            )
+            if mark_failed_on_error:
+                await _mark_evolution_failed(
+                    evolution_id,
+                    f"Redis enqueue failed: {enqueue_err}",
+                )
+            raise
+    else:
+        logger.info("Local mode: executing evolution %s in-process", evolution_id)
+
+        async def run_with_timeout() -> None:
+            try:
+                await asyncio.wait_for(
+                    run_evolution_job(
+                        {},
+                        evolution_id,
+                        workflow_name,
+                        eval_suite_yaml,
+                        max_iterations,
+                        optimize_for,
+                        budget_limit=budget_limit,
+                        tenant_id=tenant_id,
+                    ),
+                    timeout=settings.evolution_job_timeout,
+                )
+            except asyncio.TimeoutError:
+                logger.error(
+                    "Local evolution %s exceeded timeout of %d seconds",
+                    evolution_id,
+                    settings.evolution_job_timeout,
+                )
+                await _mark_evolution_failed(
+                    evolution_id,
+                    (
+                        "Evolution job timed out after "
+                        f"{settings.evolution_job_timeout} seconds"
+                    ),
+                )
+
+        task = asyncio.create_task(
+            run_with_timeout(),
+            name=f"evolution-{evolution_id}",
+        )
+        _background_tasks.add(task)
+        task.add_done_callback(_task_done_callback)
+
+
+async def _mark_evolution_failed(
+    evolution_id: str,
+    error_message: str | None = None,
+) -> None:
+    """Mark an active evolution failed without overriding cancellation."""
+    import uuid as _uuid
+
+    from sandcastle.models.db import WorkflowEvolution, async_session
+
+    try:
+        async with async_session() as session:
+            evolution = await session.get(WorkflowEvolution, _uuid.UUID(evolution_id))
+            if evolution and evolution.status in ("queued", "running"):
+                evolution.status = "failed"
+                evolution.completed_at = datetime.now(timezone.utc)
+                evolution.error = error_message
+                await session.commit()
+    except Exception as db_err:
+        logger.error(
+            "Failed to mark evolution %s as failed: %s",
+            evolution_id,
+            db_err,
+        )
 
 
 async def _mark_run_failed(run_id: str, error_message: str) -> None:

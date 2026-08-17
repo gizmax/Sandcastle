@@ -75,6 +75,7 @@ class Settings(BaseSettings):
     # default; the trainer is a deterministic mock unless trainer_backend="gpu" (real
     # SFT - needs the [training] extras + a CUDA GPU, e.g. a DGX Spark). See
     # engine/training/ and docs/overnight-self-tune-spark.md.
+    evolution_job_timeout: int = Field(default=3600, ge=60, le=86400)
     evolution_auto_finetune: bool = False
     evolution_finetune_min_samples: int = 10
     trainer_backend: str = "mock"  # "mock" | "gpu"

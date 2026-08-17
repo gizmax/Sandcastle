@@ -9,6 +9,7 @@ const TOKEN = process.env.TOOL_SLACK_BOT_TOKEN || "";
 const BASE = "https://slack.com/api";
 
 async function api(method, body = {}) {
+  if (!TOKEN) throw new Error("TOOL_SLACK_BOT_TOKEN is not configured");
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 30000);
   const resp = await fetch(`${BASE}/${method}`, {

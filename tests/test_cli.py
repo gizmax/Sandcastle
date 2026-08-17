@@ -464,6 +464,32 @@ class TestNewCommandParsing:
         assert args.json is True
         assert args.command == "templates"
 
+    def test_global_json_flag_after_command(self):
+        """'templates --json' should work like a regular command option."""
+        parser = _build_parser()
+        args = parser.parse_args(["templates", "--json"])
+
+        assert args.json is True
+        assert args.command == "templates"
+
+    def test_parent_json_flag_is_not_overwritten_by_child_default(self):
+        """A nested parser must preserve --json parsed by its parent."""
+        parser = _build_parser()
+        args = parser.parse_args(["--json", "template", "verify", "bundle.sctpl"])
+
+        assert args.json is True
+        assert args.command == "template"
+        assert args.template_action == "verify"
+
+    def test_global_json_flag_after_nested_command(self):
+        """Nested commands should also accept --json at the end."""
+        parser = _build_parser()
+        args = parser.parse_args(["runs", "compare", "run-a", "run-b", "--json"])
+
+        assert args.json is True
+        assert args.command == "runs"
+        assert args.runs_action == "compare"
+
     def test_global_json_flag_default_false(self):
         """By default --json should be False."""
         parser = _build_parser()

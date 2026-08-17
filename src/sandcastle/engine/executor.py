@@ -24,6 +24,7 @@ from sandcastle.engine.dag import (
     ExecutionPlan,
     ManagedAgentConfig,
     StepDefinition,
+    ToolConfig,
     WorkflowDefinition,
 )
 from sandcastle.engine.events import event_bus
@@ -70,6 +71,8 @@ class StepResult:
     # implementations may set this directly; the retry wrappers also infer it
     # from known fatal error messages for legacy implementations.
     retryable: bool = True
+    policy_outputs: dict[str, Any] = field(default_factory=dict)
+    policies_applied: bool = False
 
 
 @dataclass
@@ -112,6 +115,10 @@ class RunContext:
     # recorded outputs offline at zero cost. See engine/cassette.py.
     cassette: Any = field(default=None, repr=False)
     cassette_mode: str | None = field(default=None, repr=False)  # "record" | "replay" | None
+    policy_target_outputs: dict[str, dict[str, Any]] = field(
+        default_factory=dict,
+        repr=False,
+    )
 
     def with_item(self, item: Any, index: int) -> RunContext:
         """Create a child context for a parallel_over item.
@@ -145,6 +152,7 @@ class RunContext:
             tenant_id=self.tenant_id,
             cassette=self.cassette,
             cassette_mode=self.cassette_mode,
+            policy_target_outputs=copy.deepcopy(self.policy_target_outputs),
         )
 
     @property
@@ -153,13 +161,22 @@ class RunContext:
 
     def snapshot(self) -> dict:
         """Create a serializable snapshot of the context for checkpointing."""
-        return {
+        snapshot = {
             "run_id": self.run_id,
             "input": self.input,
             "step_outputs": self.step_outputs,
             "costs": self.costs,
             "total_cost": self.total_cost,
         }
+        if self.policy_target_outputs:
+            snapshot["policy_target_outputs"] = self.policy_target_outputs
+        return snapshot
+
+    def outputs_for(self, target: str) -> dict[str, Any]:
+        """Return workflow outputs with target-specific policy variants."""
+        outputs = dict(self.step_outputs)
+        outputs.update(self.policy_target_outputs.get(target, {}))
+        return outputs
 
 
 @dataclass
@@ -174,6 +191,8 @@ class WorkflowResult:
     started_at: datetime | None = None
     completed_at: datetime | None = None
     token_report: dict[str, Any] | None = None
+    storage_outputs: dict[str, Any] | None = None
+    webhook_outputs: dict[str, Any] | None = None
 
 
 _UNRESOLVED = object()
@@ -1357,6 +1376,34 @@ def _write_pdf_report(
         return None
 
 
+_HYBRID_STEP_TYPES = {
+    "llm",
+    "http",
+    "code",
+    "condition",
+    "classify",
+    "loop",
+    "race",
+    "sensor",
+    "gate",
+    "transform",
+    "notify",
+    "delegate",
+    "approval",
+    "browser",
+    "sub_workflow",
+    "composio",
+    "openclaw",
+    "parse",
+    "report",
+    "managed-agent",
+    "agent",
+    "trajectory-replay",
+    "computer-use",
+    "tool",
+}
+
+
 async def execute_step_with_retry(
     step: StepDefinition,
     context: RunContext,
@@ -1364,6 +1411,8 @@ async def execute_step_with_retry(
     storage: StorageBackend,
     parallel_index: int | None = None,
     step_overrides: dict | None = None,
+    workflow: WorkflowDefinition | None = None,
+    depth: int = 0,
 ) -> StepResult:
     """Execute a step with retry logic and exponential backoff."""
     # Apply step overrides for fork (use dataclasses.replace to preserve all fields)
@@ -1388,14 +1437,40 @@ async def execute_step_with_retry(
                 apply_variant,
                 get_or_create_experiment,
                 pick_variant,
+                should_use_winner,
             )
 
-            if random.random() <= step.autopilot.sample_rate:
-                experiment = await get_or_create_experiment(
-                    workflow_name=context.workflow_name,
-                    step_id=step.id,
-                    config=step.autopilot,
+            experiment = await get_or_create_experiment(
+                workflow_name=context.workflow_name,
+                step_id=step.id,
+                config=step.autopilot,
+            )
+            status = getattr(experiment.status, "value", experiment.status)
+            if status in {"deploying", "completed"}:
+                winner_id = experiment.deployed_variant_id
+                winner = next(
+                    (variant for variant in step.autopilot.variants if variant.id == winner_id),
+                    None,
                 )
+                rollout_stage = (
+                    "full" if status == "completed" else experiment.rollout_stage
+                )
+                if winner and should_use_winner(rollout_stage):
+                    step = apply_variant(step, winner)
+                    logger.info(
+                        "AutoPilot: step '%s' using deployed winner '%s' (%s)",
+                        step.id,
+                        winner.id,
+                        rollout_stage,
+                    )
+                elif winner is None:
+                    logger.error(
+                        "AutoPilot: deployed winner '%s' for step '%s' is not "
+                        "present in the current workflow; using baseline",
+                        winner_id,
+                        step.id,
+                    )
+            elif random.random() <= step.autopilot.sample_rate:
                 autopilot_experiment = experiment
                 variant = await pick_variant(experiment.id, step.autopilot.variants)
                 if variant:
@@ -1451,7 +1526,44 @@ async def execute_step_with_retry(
 
     try:
         for attempt in range(1, max_attempts + 1):
-            result = await _execute_step_once(step, context, sandbox, storage, parallel_index, attempt)
+            try:
+                if step.type in _HYBRID_STEP_TYPES:
+                    result = await _execute_step_by_type(
+                        step,
+                        context,
+                        sandbox,
+                        storage,
+                        workflow=workflow,
+                        depth=depth,
+                    )
+                    result.parallel_index = parallel_index
+                    result.attempt = attempt
+                else:
+                    result = await _execute_step_once(
+                        step,
+                        context,
+                        sandbox,
+                        storage,
+                        parallel_index,
+                        attempt,
+                    )
+            except (WorkflowPaused, StepBlocked):
+                raise
+            except Exception as exc:
+                result = StepResult(
+                    step_id=step.id,
+                    parallel_index=parallel_index,
+                    status="failed",
+                    error=str(exc),
+                    attempt=attempt,
+                )
+            if result.status == "completed" and not result.policies_applied:
+                result = await _apply_step_policies(step, context, result)
+                result.output = _truncate_output(result.output)
+                result.policy_outputs = {
+                    target: _truncate_output(target_output)
+                    for target, target_output in result.policy_outputs.items()
+                }
             total_attempt_cost_usd += result.cost_usd
 
             if result.status == "completed":
@@ -1514,15 +1626,20 @@ async def execute_step_with_retry(
                         duration_seconds=result.duration_seconds,
                         status=result.status,
                         attempt=result.attempt,
+                        policy_outputs=result.policy_outputs,
+                        policies_applied=result.policies_applied,
                     )
 
+                storage_output = result.policy_outputs.get(
+                    "storage", result.output
+                )
                 # Record step completion
                 await _save_run_step(
                     run_id=context.run_id,
                     step_id=step.id,
                     status="completed",
                     parallel_index=parallel_index,
-                    output=result.output,
+                    output=storage_output,
                     cost_usd=result.cost_usd,
                     duration_seconds=result.duration_seconds,
                     attempt=attempt,
@@ -1531,7 +1648,10 @@ async def execute_step_with_retry(
                 )
 
                 # Broadcast step.completed event (truncate large outputs for event bus)
-                _evt_output = result.output
+                _evt_output = result.policy_outputs.get(
+                    "logs",
+                    result.policy_outputs.get("webhook", result.output),
+                )
                 if isinstance(_evt_output, str) and len(_evt_output) > 4096:
                     _evt_output = _evt_output[:4096] + "...[truncated]"
                 event_bus.publish(
@@ -1582,7 +1702,7 @@ async def execute_step_with_retry(
             # remaining budget.  Fallback routing remains available in all
             # three cases, matching the classic on_failure semantics.
             if attempt >= max_attempts or not retryable or budget_status == "exceeded":
-                on_failure = step.retry.on_failure if step.retry else "abort"
+                on_failure = getattr(step.retry, "on_failure", "abort")
 
                 # Try fallback prompt if configured
                 if on_failure == "fallback" and step.fallback and step.fallback.prompt:
@@ -1591,12 +1711,27 @@ async def execute_step_with_retry(
                         step, context, sandbox, storage, parallel_index, attempt
                     )
                     if fallback_result.status == "completed":
+                        fallback_result = await _apply_step_policies(
+                            step,
+                            context,
+                            fallback_result,
+                        )
+                        fallback_result.output = _truncate_output(
+                            fallback_result.output
+                        )
+                        fallback_result.policy_outputs = {
+                            target: _truncate_output(target_output)
+                            for target, target_output
+                            in fallback_result.policy_outputs.items()
+                        }
                         await _save_run_step(
                             run_id=context.run_id,
                             step_id=step.id,
                             status="completed",
                             parallel_index=parallel_index,
-                            output=fallback_result.output,
+                            output=fallback_result.policy_outputs.get(
+                                "storage", fallback_result.output
+                            ),
                             cost_usd=total_attempt_cost_usd + fallback_result.cost_usd,
                             duration_seconds=result.duration_seconds + fallback_result.duration_seconds,
                             attempt=attempt,
@@ -1935,6 +2070,155 @@ async def _save_to_cache(
         logger.debug(f"Cache save failed: {e}")
 
 
+async def _apply_step_policies(
+    step: StepDefinition,
+    context: RunContext,
+    result: StepResult,
+) -> StepResult:
+    """Apply credential and declarative policies to any completed step type."""
+    if result.status != "completed":
+        return result
+
+    output = result.output
+    policy_outputs = dict(result.policy_outputs)
+    effective_tools = (
+        step.tools if step.tools is not None else context.default_tools
+    )
+
+    if effective_tools:
+        try:
+            from sandcastle.engine.policy import (
+                PolicyEngine,
+                create_tool_credential_policy,
+            )
+
+            credential_policy = create_tool_credential_policy(effective_tools)
+            if credential_policy:
+                credential_result = await PolicyEngine(
+                    [credential_policy]
+                ).evaluate(
+                    step_id=step.id,
+                    output=output,
+                    context={
+                        "step_id": step.id,
+                        "run_id": context.run_id,
+                    },
+                )
+                if credential_result.violations:
+                    output = credential_result.modified_output
+                    policy_outputs.update(
+                        credential_result.target_outputs
+                    )
+                    logger.warning(
+                        "Step '%s': redacted %d credential pattern(s) from output",
+                        step.id,
+                        len(credential_result.violations),
+                    )
+        except Exception as exc:
+            logger.warning(
+                "Credential redaction failed for step '%s': %s",
+                step.id,
+                exc,
+            )
+
+    if step.policies:
+        try:
+            from sandcastle.engine.policy import (
+                PolicyEngine,
+                resolve_step_policies,
+            )
+
+            applicable = resolve_step_policies(step.policies, [])
+            if applicable:
+                eval_result = await PolicyEngine(applicable).evaluate(
+                    step_id=step.id,
+                    output=output,
+                    context={
+                        "step_id": step.id,
+                        "run_id": context.run_id,
+                        "total_cost_usd": context.total_cost,
+                        "input": context.input,
+                    },
+                    step_cost_usd=result.cost_usd,
+                )
+                if eval_result.violations:
+                    await _save_policy_violations(
+                        context.run_id,
+                        step.id,
+                        eval_result.violations,
+                    )
+
+                if eval_result.should_block:
+                    raise StepBlocked(
+                        step_id=step.id,
+                        reason=eval_result.block_reason or "Policy blocked",
+                    )
+
+                if eval_result.should_inject_approval:
+                    from sandcastle.models.db import (
+                        ApprovalRequest,
+                        ApprovalStatus,
+                        Run,
+                        RunStatus,
+                    )
+                    from sandcastle.models.db import (
+                        async_session as db_session,
+                    )
+
+                    config = eval_result.approval_config or {}
+                    async with db_session() as session:
+                        approval = ApprovalRequest(
+                            run_id=uuid.UUID(context.run_id),
+                            step_id=step.id,
+                            status=ApprovalStatus.PENDING,
+                            request_data=(
+                                output
+                                if isinstance(output, dict)
+                                else {"result": output}
+                            ),
+                            message=config.get(
+                                "message", "Policy requires approval"
+                            ),
+                            timeout_at=None,
+                            on_timeout=config.get("on_timeout", "abort"),
+                            allow_edit=False,
+                        )
+                        if config.get("timeout_hours"):
+                            approval.timeout_at = (
+                                datetime.now(timezone.utc)
+                                + timedelta(hours=config["timeout_hours"])
+                            )
+                        session.add(approval)
+                        run = await session.get(
+                            Run, uuid.UUID(context.run_id)
+                        )
+                        if run:
+                            run.status = RunStatus.AWAITING_APPROVAL
+                        await session.commit()
+                        await session.refresh(approval)
+                        approval_id = str(approval.id)
+                    raise WorkflowPaused(
+                        approval_id=approval_id,
+                        run_id=context.run_id,
+                    )
+
+                output = eval_result.modified_output
+                policy_outputs.update(eval_result.target_outputs)
+        except (StepBlocked, WorkflowPaused):
+            raise
+        except Exception as exc:
+            logger.warning(
+                "Policy evaluation failed for step '%s': %s",
+                step.id,
+                exc,
+            )
+
+    result.output = output
+    result.policy_outputs = policy_outputs
+    result.policies_applied = True
+    return result
+
+
 async def _execute_step_once(
     step: StepDefinition,
     context: RunContext,
@@ -2217,114 +2501,39 @@ async def _execute_step_once(
                 f"Step '{step.id}' returned empty output"
             )
 
-        # Auto-inject credential redaction policy when tools are used
-        if effective_tools:
-            try:
-                from sandcastle.engine.policy import create_tool_credential_policy
-
-                cred_policy = create_tool_credential_policy(effective_tools)
-                if cred_policy:
-                    from sandcastle.engine.policy import PolicyEngine as _CredPE
-
-                    cred_engine = _CredPE([cred_policy])
-                    cred_result = await cred_engine.evaluate(
-                        step_id=step.id,
-                        output=output,
-                        context={"step_id": step.id, "run_id": context.run_id},
-                    )
-                    if cred_result.violations:
-                        output = cred_result.modified_output
-                        logger.warning(
-                            "Step '%s': redacted %d credential pattern(s) from output",
-                            step.id,
-                            len(cred_result.violations),
-                        )
-            except Exception as e:
-                logger.warning("Credential redaction failed for step '%s': %s", step.id, e)
-
-        # Policy evaluation
-        if hasattr(step, "policies") and step.policies is not None:
-            try:
-                from sandcastle.engine.policy import PolicyEngine, resolve_step_policies
-
-                applicable = resolve_step_policies(step.policies, [])
-                if applicable:
-                    engine = PolicyEngine(applicable)
-                    eval_result = await engine.evaluate(
-                        step_id=step.id,
-                        output=output,
-                        context={
-                            "step_id": step.id,
-                            "run_id": context.run_id,
-                            "total_cost_usd": context.total_cost,
-                            "input": context.input,
-                        },
-                        step_cost_usd=result.total_cost_usd,
-                    )
-                    if eval_result.violations:
-                        await _save_policy_violations(
-                            context.run_id, step.id, eval_result.violations
-                        )
-
-                    if eval_result.should_block:
-                        raise StepBlocked(
-                            step_id=step.id,
-                            reason=eval_result.block_reason or "Policy blocked",
-                        )
-
-                    if eval_result.should_inject_approval:
-                        # Reuse approval gate mechanism
-                        from sandcastle.models.db import (
-                            ApprovalRequest,
-                            ApprovalStatus,
-                            Run,
-                            RunStatus,
-                        )
-                        from sandcastle.models.db import (
-                            async_session as db_session,
-                        )
-
-                        config = eval_result.approval_config or {}
-                        async with db_session() as session:
-                            approval = ApprovalRequest(
-                                run_id=uuid.UUID(context.run_id),
-                                step_id=step.id,
-                                status=ApprovalStatus.PENDING,
-                                request_data=(
-                                    output if isinstance(output, dict) else {"result": output}
-                                ),
-                                message=config.get("message", "Policy requires approval"),
-                                timeout_at=None,
-                                on_timeout=config.get("on_timeout", "abort"),
-                                allow_edit=False,
-                            )
-                            if config.get("timeout_hours"):
-                                from datetime import timedelta
-
-                                approval.timeout_at = datetime.now(timezone.utc) + timedelta(
-                                    hours=config["timeout_hours"]
-                                )
-                            session.add(approval)
-                            run = await session.get(Run, uuid.UUID(context.run_id))
-                            if run:
-                                run.status = RunStatus.AWAITING_APPROVAL
-                            await session.commit()
-                            await session.refresh(approval)
-                            approval_id = str(approval.id)
-                        raise WorkflowPaused(approval_id=approval_id, run_id=context.run_id)
-
-                    # Use modified output (after redactions)
-                    output = eval_result.modified_output
-            except (StepBlocked, WorkflowPaused):
-                raise
-            except Exception as e:
-                logger.warning(f"Policy evaluation failed for step '{step.id}': {e}")
+        policy_result = await _apply_step_policies(
+            step,
+            context,
+            StepResult(
+                step_id=step.id,
+                parallel_index=parallel_index,
+                output=output,
+                cost_usd=result.total_cost_usd,
+                duration_seconds=duration,
+                status="completed",
+                attempt=attempt,
+                input_prompt=resolved_input_prompt,
+            ),
+        )
+        output = policy_result.output
 
         # Truncate oversized outputs to prevent memory exhaustion
         output = _truncate_output(output)
+        policy_result.policy_outputs = {
+            target: _truncate_output(target_output)
+            for target, target_output in policy_result.policy_outputs.items()
+        }
 
         # Save to cache - skip empty, failed, or memory-injected outputs
-        if not _step_reads_memory and _is_cacheable_output(output):
+        storage_policy_differs = (
+            "storage" in policy_result.policy_outputs
+            and policy_result.policy_outputs["storage"] != output
+        )
+        if (
+            not _step_reads_memory
+            and not storage_policy_differs
+            and _is_cacheable_output(output)
+        ):
             await _save_to_cache(
                 cache_key=cache_key,
                 workflow_name=context.workflow_name,
@@ -2343,7 +2552,16 @@ async def _execute_step_once(
                     step_id=step.id,
                 )
         elif not _step_reads_memory:
-            logger.info(f"Step '{step.id}' output not cached (empty or failed)")
+            reason = (
+                "target-specific storage redaction"
+                if storage_policy_differs
+                else "empty or failed output"
+            )
+            logger.info(
+                "Step '%s' output not cached (%s)",
+                step.id,
+                reason,
+            )
 
         # Write step output to agent memory if configured
         if context._memory_scope_id and step.memory and step.memory.write and output:
@@ -2428,6 +2646,8 @@ async def _execute_step_once(
             status="completed",
             attempt=attempt,
             input_prompt=resolved_input_prompt,
+            policy_outputs=policy_result.policy_outputs,
+            policies_applied=True,
         )
 
     except WorkflowPaused as paused:
@@ -5671,6 +5891,8 @@ async def _execute_loop_step(
                     child_context,
                     sandbox,
                     storage,
+                    workflow=workflow,
+                    depth=depth,
                 )
                 child_context.step_outputs[sub_step_id] = sub_result.output
                 child_context.step_results[sub_step_id] = sub_result
@@ -5804,6 +6026,9 @@ async def _execute_race_step(
                 tenant_id=context.tenant_id,
                 cassette=context.cassette,
                 cassette_mode=context.cassette_mode,
+                policy_target_outputs=copy.deepcopy(
+                    context.policy_target_outputs
+                ),
             )
             branch_cost = 0.0
             last_output = None
@@ -5818,6 +6043,8 @@ async def _execute_race_step(
                         branch_context,
                         sandbox,
                         storage,
+                        workflow=workflow,
+                        depth=depth,
                     )
                 except asyncio.CancelledError as cancelled:
                     branch_costs[branch_idx] = branch_cost + getattr(
@@ -6391,7 +6618,7 @@ async def _execute_notify_step(
     step: StepDefinition,
     context: RunContext,
 ) -> StepResult:
-    """Execute a notification step - resolve message and log notification. $0 cost."""
+    """Deliver a notification through a configured connector or secure webhook."""
     import time
 
     started_at = time.monotonic()
@@ -6401,32 +6628,117 @@ async def _execute_notify_step(
 
     try:
         message = resolve_templates(cfg.message, context, step.depends_on)
+        service = resolve_templates(cfg.service, context).strip().lower()
         # Channel is a target identifier (Slack channel, email, webhook URL)
         # and should NOT have dependency context auto-injected into it.
         channel = resolve_templates(cfg.channel, context) if cfg.channel else ""
+        subject = resolve_templates(cfg.subject, context, step.depends_on)
 
         logger.info(
             "Notify step '%s': service=%s channel=%s message=%s",
             step.id,
-            cfg.service,
+            service,
             channel,
             message[:200],
         )
 
-        output = {
-            "service": cfg.service,
-            "channel": channel,
-            "message": message,
-            "status": "logged",
-            "note": "Notification logged only - no delivery connector configured",
-        }
+        if cfg.dry_run or service == "log":
+            output = {
+                "service": service,
+                "channel": channel,
+                "message": message,
+                "status": "logged",
+                "dry_run": True,
+            }
+            return StepResult(
+                step_id=step.id,
+                output=output,
+                cost_usd=0.0,
+                duration_seconds=time.monotonic() - started_at,
+                status="completed",
+            )
 
-        duration = time.monotonic() - started_at
+        if not channel:
+            return StepResult(
+                step_id=step.id,
+                status="failed",
+                error=f"Notify service '{service}' requires a channel or recipient",
+                duration_seconds=time.monotonic() - started_at,
+                retryable=False,
+            )
+
+        if service == "webhook":
+            from sandcastle.webhooks.dispatcher import dispatch_webhook
+
+            delivered = await dispatch_webhook(
+                url=channel,
+                event="workflow.notification",
+                run_id=context.run_id,
+                workflow=context.workflow_name,
+                status="completed",
+                outputs={"step_id": step.id, "message": message},
+                max_retries=1,
+            )
+            if not delivered:
+                return StepResult(
+                    step_id=step.id,
+                    status="failed",
+                    error="Webhook notification delivery failed",
+                    duration_seconds=time.monotonic() - started_at,
+                )
+            delivery: Any = {"ok": True}
+            cost = 0.0
+        else:
+            connector: tuple[str, str, list[Any]]
+            if service == "slack":
+                connector = ("slack", "send_message", [channel, message])
+            elif service == "teams":
+                connector = ("teams", "send_message", [message, subject])
+            elif service in {"gmail", "email"}:
+                connector = ("gmail", "send_email", [channel, subject, message])
+            else:
+                return StepResult(
+                    step_id=step.id,
+                    status="failed",
+                    error=(
+                        f"Unsupported notify service '{service}'. "
+                        "Supported services: slack, teams, gmail, webhook, log"
+                    ),
+                    duration_seconds=time.monotonic() - started_at,
+                    retryable=False,
+                )
+
+            tool_name, function, arguments = connector
+            tool_step = dataclasses.replace(
+                step,
+                type="tool",
+                tool_config=ToolConfig(
+                    tool=tool_name,
+                    function=function,
+                    arguments=arguments,
+                ),
+            )
+            tool_result = await _execute_tool_step(tool_step, context)
+            if tool_result.status != "completed":
+                return dataclasses.replace(
+                    tool_result,
+                    step_id=step.id,
+                    duration_seconds=time.monotonic() - started_at,
+                )
+            delivery = tool_result.output
+            cost = tool_result.cost_usd
+
         return StepResult(
             step_id=step.id,
-            output=output,
-            cost_usd=0.0,
-            duration_seconds=duration,
+            output={
+                "service": service,
+                "channel": channel,
+                "message": message,
+                "status": "delivered",
+                "delivery": delivery,
+            },
+            cost_usd=cost,
+            duration_seconds=time.monotonic() - started_at,
             status="completed",
         )
     except Exception as e:
@@ -7954,6 +8266,86 @@ async def _browser_browserbase_mode(
     return result
 
 
+async def _execute_step_by_type(
+    step: StepDefinition,
+    context: RunContext,
+    sandbox: Any,
+    storage: StorageBackend,
+    *,
+    workflow: WorkflowDefinition | None,
+    depth: int,
+) -> StepResult:
+    """Dispatch a non-standard step through its dedicated implementation.
+
+    This module-level dispatcher is shared by top-level, fan-out, loop, and
+    race execution so composite steps cannot accidentally send hybrid step
+    definitions to the generic sandbox query path.
+    """
+    if step.type == "llm":
+        return await _execute_llm_step(step, context, storage)
+    if step.type == "http":
+        return await _execute_http_step(step, context)
+    if step.type == "code":
+        return await _execute_code_step(step, context)
+    if step.type == "condition":
+        return await _execute_condition_step(step, context)
+    if step.type == "classify":
+        return await _execute_classify_step(step, context, storage)
+    if step.type in {"loop", "race"} and workflow is None:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=f"{step.type} step requires its parent workflow",
+            retryable=False,
+        )
+    if step.type == "loop":
+        return await _execute_loop_step(
+            step, context, sandbox, storage, workflow, depth
+        )
+    if step.type == "race":
+        return await _execute_race_step(
+            step, context, sandbox, storage, workflow, depth
+        )
+    if step.type == "sensor":
+        return await _execute_sensor_step(step, context)
+    if step.type == "gate":
+        return await _execute_gate_step(step, context, storage)
+    if step.type == "transform":
+        return await _execute_transform_step(step, context)
+    if step.type == "notify":
+        return await _execute_notify_step(step, context)
+    if step.type == "delegate":
+        return await _execute_delegate_step(step, context, storage, depth=depth)
+    if step.type == "approval":
+        await _execute_approval_step(step, context, 0)
+        raise AssertionError("Approval step returned without pausing")
+    if step.type == "browser":
+        return await _execute_browser_step(step, context, sandbox, storage)
+    if step.type == "sub_workflow":
+        return await _execute_sub_workflow_step(
+            step, context, storage, depth=depth
+        )
+    if step.type == "composio":
+        return await _execute_composio_step(step, context)
+    if step.type == "openclaw":
+        return await _execute_openclaw_step(step, context)
+    if step.type == "parse":
+        return await _execute_parse_step(step, context)
+    if step.type == "report":
+        return await _execute_report_step(step, context, storage)
+    if step.type == "managed-agent":
+        return await _execute_managed_agent_step(step, context, storage)
+    if step.type == "agent":
+        return await _execute_agent_step(step, context, storage)
+    if step.type == "trajectory-replay":
+        return await _execute_trajectory_replay_step(step, context, storage)
+    if step.type == "computer-use":
+        return await _execute_computer_use_step(step, context, storage)
+    if step.type == "tool":
+        return await _execute_tool_step(step, context)
+    raise StepExecutionError(f"Unknown hybrid type '{step.type}'")
+
+
 async def _prepare_and_run_step(
     step_id: str,
     workflow: WorkflowDefinition,
@@ -8038,11 +8430,15 @@ async def _prepare_and_run_step(
                 context.costs.append(result.cost_usd)
                 context.step_results[step_id] = result
                 context.step_outputs[step_id] = output
+                for target, target_output in result.policy_outputs.items():
+                    context.policy_target_outputs.setdefault(
+                        target, {}
+                    )[step_id] = target_output
             await _save_run_step(
                 run_id=context.run_id,
                 step_id=step.id,
                 status="completed",
-                output=output,
+                output=result.policy_outputs.get("storage", output),
                 cost_usd=result.cost_usd,
                 duration_seconds=result.duration_seconds,
                 model=model,
@@ -8060,7 +8456,7 @@ async def _prepare_and_run_step(
                 error=result.error,
                 model=model,
             )
-            on_fail = step.retry.on_failure if step.retry else "abort"
+            on_fail = getattr(step.retry, "on_failure", "abort")
             # A between-attempt budget stop must surface as the workflow's
             # budget_exceeded status, rather than being converted to a normal
             # abort failure before the scheduler sees the accumulated cost.
@@ -8111,144 +8507,6 @@ async def _prepare_and_run_step(
             return
         # _mesh_target is None: local machine satisfies `requires` - fall through.
 
-    # --- Helper to dispatch hybrid step types ---
-    _HYBRID_TYPES = {
-        "llm", "http", "code", "condition", "classify", "loop",
-        "race", "sensor", "gate", "transform", "notify", "delegate",
-        "browser", "sub_workflow", "composio", "openclaw", "parse",
-        "report", "managed-agent", "agent",
-        "trajectory-replay", "computer-use", "tool",
-    }
-
-    async def _run_hybrid(s: StepDefinition, ctx: RunContext) -> StepResult:
-        """Dispatch a single hybrid step type and return its result."""
-        if s.type == "llm":
-            return await _execute_llm_step(s, ctx, storage)
-        if s.type == "http":
-            return await _execute_http_step(s, ctx)
-        if s.type == "code":
-            return await _execute_code_step(s, ctx)
-        if s.type == "condition":
-            return await _execute_condition_step(s, ctx)
-        if s.type == "classify":
-            return await _execute_classify_step(s, ctx, storage)
-        if s.type == "loop":
-            return await _execute_loop_step(
-                s, ctx, sandbox, storage, workflow, depth,
-            )
-        if s.type == "race":
-            return await _execute_race_step(
-                s, ctx, sandbox, storage, workflow, depth,
-            )
-        if s.type == "sensor":
-            return await _execute_sensor_step(s, ctx)
-        if s.type == "gate":
-            return await _execute_gate_step(s, ctx, storage)
-        if s.type == "transform":
-            return await _execute_transform_step(s, ctx)
-        if s.type == "notify":
-            return await _execute_notify_step(s, ctx)
-        if s.type == "delegate":
-            return await _execute_delegate_step(
-                s, ctx, storage, depth=depth,
-            )
-        if s.type == "browser":
-            return await _execute_browser_step(s, ctx, sandbox, storage)
-        if s.type == "sub_workflow":
-            return await _execute_sub_workflow_step(
-                s, ctx, storage, depth=depth,
-            )
-        if s.type == "composio":
-            return await _execute_composio_step(s, ctx)
-        if s.type == "openclaw":
-            return await _execute_openclaw_step(s, ctx)
-        if s.type == "parse":
-            return await _execute_parse_step(s, ctx)
-        if s.type == "report":
-            return await _execute_report_step(s, ctx, storage)
-        if s.type == "managed-agent":
-            return await _execute_managed_agent_step(s, ctx, storage)
-        if s.type == "agent":
-            return await _execute_agent_step(s, ctx, storage)
-        if s.type == "trajectory-replay":
-            return await _execute_trajectory_replay_step(s, ctx, storage)
-        if s.type == "computer-use":
-            return await _execute_computer_use_step(s, ctx, storage)
-        if s.type == "tool":
-            return await _execute_tool_step(s, ctx)
-        raise StepExecutionError(f"Unknown hybrid type '{s.type}'")
-
-    async def _run_hybrid_with_retry(
-        s: StepDefinition,
-        ctx: RunContext,
-        parallel_index: int | None = None,
-    ) -> StepResult:
-        """Run a hybrid step with the classic retry and fallback semantics.
-
-        Hybrid implementations already return ``StepResult`` values, so they
-        cannot use ``execute_step_with_retry``'s standard-step dispatcher.
-        Keep their retry accounting equivalent here without changing the
-        individual implementations or their existing persistence behavior.
-        """
-        max_attempts = s.retry.max_attempts if s.retry else 1
-        backoff = s.retry.backoff if s.retry else "exponential"
-        total_attempt_cost_usd = 0.0
-
-        for attempt in range(1, max_attempts + 1):
-            try:
-                result = await _run_hybrid(s, ctx)
-            except WorkflowPaused:
-                raise
-            except StepBlocked:
-                raise
-            except Exception as exc:
-                result = StepResult(
-                    step_id=s.id,
-                    parallel_index=parallel_index,
-                    status="failed",
-                    error=str(exc),
-                    retryable=_is_retryable_step_failure(
-                        StepResult(step_id=s.id, status="failed", error=str(exc))
-                    ),
-                )
-
-            result.parallel_index = parallel_index
-            result.attempt = attempt
-            total_attempt_cost_usd += result.cost_usd
-            if result.status == "completed":
-                result.cost_usd = total_attempt_cost_usd
-                return result
-
-            retryable = _is_retryable_step_failure(result)
-            if not retryable:
-                result.retryable = False
-            budget_status = _check_budget(ctx, total_attempt_cost_usd)
-
-            if attempt >= max_attempts or not retryable or budget_status == "exceeded":
-                on_failure = s.retry.on_failure if s.retry else "abort"
-                if on_failure == "fallback" and s.fallback and s.fallback.prompt:
-                    fallback_result = await _execute_fallback(
-                        s, ctx, sandbox, storage, parallel_index, attempt
-                    )
-                    if fallback_result.status == "completed":
-                        fallback_result.cost_usd += total_attempt_cost_usd
-                        fallback_result.duration_seconds += result.duration_seconds
-                        return fallback_result
-
-                result.cost_usd = total_attempt_cost_usd
-                return result
-
-            delay = _backoff_delay(attempt, backoff)
-            logger.info(
-                "Hybrid step '%s' attempt %d failed, retrying in %ss...",
-                s.id,
-                attempt,
-                delay,
-            )
-            await asyncio.sleep(delay)
-
-        return result  # pragma: no cover - loop always returns above
-
     # --- Fan-out (parallel_over) - must come BEFORE type dispatch ---
     # so that hybrid types (llm, http, etc.) also get per-item contexts.
     if step.parallel_over:
@@ -8268,32 +8526,26 @@ async def _prepare_and_run_step(
             child.max_cost_usd = child_budget
             return child
 
-        is_hybrid = step.type in _HYBRID_TYPES
+        is_hybrid = step.type in _HYBRID_STEP_TYPES
         logger.info(
             "Fan-out step '%s' (type=%s, hybrid=%s): %d items",
             step_id, step.type, is_hybrid, len(items),
         )
-        if is_hybrid:
-            tasks = [
-                asyncio.create_task(
-                    _run_hybrid_with_retry(step, child_context(item, i), i)
+        tasks = [
+            asyncio.create_task(
+                execute_step_with_retry(
+                    step,
+                    child_context(item, i),
+                    sandbox,
+                    storage,
+                    parallel_index=i,
+                    step_overrides=overrides,
+                    workflow=workflow,
+                    depth=depth,
                 )
-                for i, item in enumerate(items)
-            ]
-        else:
-            tasks = [
-                asyncio.create_task(
-                    execute_step_with_retry(
-                        step,
-                        child_context(item, i),
-                        sandbox,
-                        storage,
-                        parallel_index=i,
-                        step_overrides=overrides,
-                    )
-                )
-                for i, item in enumerate(items)
-            ]
+            )
+            for i, item in enumerate(items)
+        ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         fan_out_items: list = []
@@ -8311,6 +8563,7 @@ async def _prepare_and_run_step(
                     status="failed",
                     error=str(result),
                 )
+                results[i] = result
             else:
                 logger.info(
                     "Fan-out step '%s' item %d: status=%s output_type=%s",
@@ -8322,7 +8575,7 @@ async def _prepare_and_run_step(
             fan_out_cost += result.cost_usd
             if result.status == "failed":
                 fan_out_failed += 1
-                on_fail = step.retry.on_failure if step.retry else "abort"
+                on_fail = getattr(step.retry, "on_failure", "abort")
                 if _check_budget(context) == "exceeded":
                     fan_out_items.append(None)
                 elif use_dead_letter:
@@ -8344,6 +8597,26 @@ async def _prepare_and_run_step(
             else:
                 fan_out_items.append(result.output)
 
+        fan_out_policy_outputs: dict[str, list[Any]] = {}
+        policy_targets = {
+            target
+            for result in results
+            if isinstance(result, StepResult)
+            for target in result.policy_outputs
+        }
+        for target in policy_targets:
+            fan_out_policy_outputs[target] = [
+                (
+                    result.policy_outputs.get(target, runtime_output)
+                    if isinstance(result, StepResult)
+                    and result.status == "completed"
+                    else runtime_output
+                )
+                for result, runtime_output in zip(
+                    results, fan_out_items, strict=True
+                )
+            ]
+
         # Persist an aggregate run step and record a step result, mirroring the
         # single-step _handle_step_result path. Without this there is no run-step
         # row for the fan-out step and downstream steps.X.status references
@@ -8355,15 +8628,20 @@ async def _prepare_and_run_step(
             cost_usd=fan_out_cost,
             duration_seconds=time.monotonic() - fan_out_started,
             status=aggregate_status,
+            policy_outputs=fan_out_policy_outputs,
         )
         async with context._lock:
             context.step_outputs[step_id] = fan_out_items
             context.step_results[step_id] = aggregate
+            for target, target_output in fan_out_policy_outputs.items():
+                context.policy_target_outputs.setdefault(
+                    target, {}
+                )[step_id] = target_output
         await _save_run_step(
             run_id=context.run_id,
             step_id=step_id,
             status=aggregate_status,
-            output=fan_out_items,
+            output=fan_out_policy_outputs.get("storage", fan_out_items),
             cost_usd=fan_out_cost,
             duration_seconds=aggregate.duration_seconds,
             error=(
@@ -8374,8 +8652,16 @@ async def _prepare_and_run_step(
         return
 
     # --- Hybrid step types (single execution, no parallel_over) ---
-    if step.type in _HYBRID_TYPES:
-        result = await _run_hybrid_with_retry(step, context)
+    if step.type in _HYBRID_STEP_TYPES:
+        result = await execute_step_with_retry(
+            step,
+            context,
+            sandbox,
+            storage,
+            step_overrides=overrides,
+            workflow=workflow,
+            depth=depth,
+        )
         model = step.model if step.type in ("llm", "browser") else None
         await _handle_step_result(result, model=model)
         return
@@ -8399,7 +8685,7 @@ async def _prepare_and_run_step(
         context.costs.append(result.cost_usd)
         context.step_results[step_id] = result
     if result.status == "failed":
-        on_fail = step.retry.on_failure if step.retry else "abort"
+        on_fail = getattr(step.retry, "on_failure", "abort")
         if _check_budget(context) == "exceeded":
             async with context._lock:
                 context.step_outputs[step_id] = None
@@ -8423,6 +8709,10 @@ async def _prepare_and_run_step(
     else:
         async with context._lock:
             context.step_outputs[step_id] = result.output
+            for target, target_output in result.policy_outputs.items():
+                context.policy_target_outputs.setdefault(
+                    target, {}
+                )[step_id] = target_output
 
 
 # Text file extensions that should be inlined as plain text content
@@ -8777,6 +9067,9 @@ async def execute_workflow(
     # Restore context from checkpoint if doing replay/fork
     if initial_context:
         context.step_outputs = initial_context.get("step_outputs", {})
+        context.policy_target_outputs = initial_context.get(
+            "policy_target_outputs", {}
+        )
         context.costs = initial_context.get("costs", [])
 
     # Resolve global policies from workflow definition
@@ -8940,6 +9233,8 @@ async def execute_workflow(
                 return WorkflowResult(
                     run_id=run_id,
                     outputs=context.step_outputs,
+                    storage_outputs=context.outputs_for("storage"),
+                    webhook_outputs=context.outputs_for("webhook"),
                     total_cost_usd=context.total_cost,
                     status="cancelled",
                     started_at=started_at,
@@ -8956,6 +9251,8 @@ async def execute_workflow(
                 return WorkflowResult(
                     run_id=run_id,
                     outputs=context.step_outputs,
+                    storage_outputs=context.outputs_for("storage"),
+                    webhook_outputs=context.outputs_for("webhook"),
                     total_cost_usd=cost,
                     status="budget_exceeded",
                     error=f"Budget exceeded: ${cost:.4f} >= ${limit:.4f}",
@@ -9066,6 +9363,8 @@ async def execute_workflow(
         return WorkflowResult(
             run_id=run_id,
             outputs=context.step_outputs,
+            storage_outputs=context.outputs_for("storage"),
+            webhook_outputs=context.outputs_for("webhook"),
             total_cost_usd=context.total_cost,
             status="completed",
             started_at=started_at,
@@ -9090,6 +9389,8 @@ async def execute_workflow(
         return WorkflowResult(
             run_id=run_id,
             outputs=context.step_outputs,
+            storage_outputs=context.outputs_for("storage"),
+            webhook_outputs=context.outputs_for("webhook"),
             total_cost_usd=context.total_cost,
             status="awaiting_approval",
             error=None,
@@ -9116,6 +9417,8 @@ async def execute_workflow(
         return WorkflowResult(
             run_id=run_id,
             outputs=context.step_outputs,
+            storage_outputs=context.outputs_for("storage"),
+            webhook_outputs=context.outputs_for("webhook"),
             total_cost_usd=context.total_cost,
             status="failed",
             error=f"Policy blocked: {e}",
@@ -9142,6 +9445,8 @@ async def execute_workflow(
         return WorkflowResult(
             run_id=run_id,
             outputs=context.step_outputs,
+            storage_outputs=context.outputs_for("storage"),
+            webhook_outputs=context.outputs_for("webhook"),
             total_cost_usd=context.total_cost,
             status="failed",
             error=str(e),
@@ -9169,6 +9474,8 @@ async def execute_workflow(
         return WorkflowResult(
             run_id=run_id,
             outputs=context.step_outputs,
+            storage_outputs=context.outputs_for("storage"),
+            webhook_outputs=context.outputs_for("webhook"),
             total_cost_usd=context.total_cost,
             status="failed",
             error=str(e),

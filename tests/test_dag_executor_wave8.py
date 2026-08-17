@@ -1211,6 +1211,7 @@ class TestNotifyStepEdgeCases:
                 service="slack",
                 channel="#general",
                 message="Build completed: {input.status}",
+                dry_run=True,
             ),
         )
         ctx = _make_context(inputs={"status": "success"})
@@ -1230,6 +1231,7 @@ class TestNotifyStepEdgeCases:
                 service="email",
                 channel="",
                 message="Alert!",
+                dry_run=True,
             ),
         )
         ctx = _make_context()
@@ -1257,6 +1259,7 @@ class TestNotifyStepEdgeCases:
                 service="webhook",
                 channel="{input.webhook_url}",
                 message="Step1 output: {steps.step1.output}",
+                dry_run=True,
             ),
         )
         ctx = _make_context(

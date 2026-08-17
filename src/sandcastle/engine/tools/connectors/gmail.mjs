@@ -8,23 +8,23 @@
  * For production, consider nodemailer.
  */
 
-import { createTransport } from "node:net";
-
 const SMTP_HOST = process.env.TOOL_SMTP_HOST || "smtp.gmail.com";
 const SMTP_PORT = parseInt(process.env.TOOL_SMTP_PORT || "587", 10);
 const SMTP_USER = process.env.TOOL_SMTP_USER || "";
 const SMTP_PASSWORD = process.env.TOOL_SMTP_PASSWORD || "";
 
 /**
- * Minimal SMTP send using Bash (available in all sandbox environments).
- * This approach avoids requiring nodemailer as a dependency.
+ * Minimal SMTP send using curl without a shell.
+ * This approach avoids requiring nodemailer while keeping user-controlled
+ * recipient, subject, and body values out of command strings.
  */
-import { execSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 
 export async function send_email(to, subject, body, html = false) {
+  if (!SMTP_USER || !SMTP_PASSWORD) {
+    throw new Error("TOOL_SMTP_USER and TOOL_SMTP_PASSWORD are not configured");
+  }
   const contentType = html ? "text/html" : "text/plain";
-  const boundary = `----=_Part_${Date.now()}`;
-
   // Build raw email
   const email = [
     `From: ${SMTP_USER}`,
@@ -36,25 +36,23 @@ export async function send_email(to, subject, body, html = false) {
     body,
   ].join("\r\n");
 
-  // Use curl to send via SMTP
-  const cmd = [
-    "curl", "--ssl-reqd",
-    `--url "smtp://${SMTP_HOST}:${SMTP_PORT}"`,
-    `--user "${SMTP_USER}:${SMTP_PASSWORD}"`,
-    `--mail-from "${SMTP_USER}"`,
-    `--mail-rcpt "${to}"`,
-    "--upload-file -",
-  ].join(" ");
-
-  try {
-    execSync(`echo '${email.replace(/'/g, "'\\''")}' | ${cmd}`, {
+  const result = spawnSync("curl", [
+    "--ssl-reqd",
+    "--url", `smtp://${SMTP_HOST}:${SMTP_PORT}`,
+    "--user", `${SMTP_USER}:${SMTP_PASSWORD}`,
+    "--mail-from", SMTP_USER,
+    "--mail-rcpt", to,
+    "--upload-file", "-",
+  ], {
+      input: email,
       timeout: 30000,
       encoding: "utf-8",
-    });
-    return { ok: true, to, subject };
-  } catch (err) {
-    throw new Error(`SMTP send failed: ${err.message}`);
+  });
+  if (result.error || result.status !== 0) {
+    const detail = result.error?.message || result.stderr || `curl exited ${result.status}`;
+    throw new Error(`SMTP send failed: ${String(detail).slice(0, 500)}`);
   }
+  return { ok: true, to, subject };
 }
 
 export async function search_emails(query, limit = 10) {

@@ -257,6 +257,8 @@ class NotifyConfig:
     service: str = ""  # Tool connector name (slack, teams, gmail, etc.)
     channel: str = ""  # Target channel/recipient
     message: str = ""  # Message template with {steps.X.output} vars
+    subject: str = "Sandcastle notification"  # Email subject / Teams card title
+    dry_run: bool = False  # Explicitly log without delivering
 
 
 @dataclass
@@ -1174,6 +1176,8 @@ def _parse_notify_config(data: dict | None) -> NotifyConfig | None:
         service=data.get("service", ""),
         channel=data.get("channel", ""),
         message=data.get("message", ""),
+        subject=data.get("subject", "Sandcastle notification"),
+        dry_run=bool(data.get("dry_run", False)),
     )
 
 

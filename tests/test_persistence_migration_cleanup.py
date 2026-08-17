@@ -18,6 +18,7 @@ _MIGRATION_FILENAMES = {
     "015": "persistence_drift",
     "016": "enum_reconciliation",
     "017": "pg_drift_reconciliation",
+    "018": "evolution_error",
 }
 
 
@@ -80,7 +81,10 @@ def test_persistence_drift_revision_upgrades_and_downgrades_sqlite(tmp_path):
         for table_name in new_tables:
             columns = inspector.get_columns(table_name)
             model_table = Base.metadata.tables[table_name]
-            assert {column["name"] for column in columns} == set(model_table.columns.keys())
+            expected_columns = set(model_table.columns.keys())
+            if table_name == "workflow_evolutions":
+                expected_columns.remove("error")
+            assert {column["name"] for column in columns} == expected_columns
             assert {column["name"] for column in columns if not column["nullable"]} == {
                 column.name for column in model_table.columns if not column.nullable
             }
@@ -264,6 +268,32 @@ def test_pg_drift_reconciliation_converts_json_and_creates_missing_indexes():
         "CREATE INDEX IF NOT EXISTS ix_run_steps_run_step_parallel "
         "ON run_steps (run_id, step_id, parallel_index)"
     ) in statements
+
+
+def test_evolution_error_revision_is_reversible(tmp_path):
+    """Evolution failures gain a durable diagnostic without rewriting old migrations."""
+    engine = sa.create_engine(f"sqlite:///{tmp_path / 'evolution-error.sqlite'}")
+    module = _migration_module("018")
+    metadata = sa.MetaData()
+    sa.Table(
+        "workflow_evolutions",
+        metadata,
+        sa.Column("id", sa.Uuid(), primary_key=True),
+    )
+
+    with engine.begin() as connection:
+        metadata.create_all(connection)
+        _run_revision(module, connection, "upgrade")
+        assert "error" in {
+            column["name"]
+            for column in sa.inspect(connection).get_columns("workflow_evolutions")
+        }
+
+        _run_revision(module, connection, "downgrade")
+        assert "error" not in {
+            column["name"]
+            for column in sa.inspect(connection).get_columns("workflow_evolutions")
+        }
 
 
 def test_sqlite_missing_column_repair_adds_admin_trusted(tmp_path):

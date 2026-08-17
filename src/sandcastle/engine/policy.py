@@ -21,6 +21,9 @@ logger = logging.getLogger(__name__)
 
 # Valid severity levels for policy definitions
 VALID_SEVERITIES = frozenset({"critical", "high", "medium", "low"})
+VALID_REDACTION_TARGETS = frozenset(
+    {"output", "outputs", "storage", "webhook", "logs"}
+)
 
 
 # --- Built-in regex patterns ---
@@ -95,6 +98,7 @@ class PolicyEvalResult:
     violations: list[PolicyViolation] = field(default_factory=list)
     modified_output: Any = None
     redacted_output: Any = None  # Version for storage/webhooks
+    target_outputs: dict[str, Any] = field(default_factory=dict)
     should_inject_approval: bool = False
     approval_config: dict | None = None
     should_block: bool = False
@@ -121,6 +125,15 @@ class PolicyEngine:
                     f"Invalid severity '{policy.severity}' for policy '{policy.id}'. "
                     f"Must be one of: {', '.join(sorted(VALID_SEVERITIES))}"
                 )
+            if policy.action.type == "redact" and policy.action.apply_to:
+                invalid_targets = (
+                    set(policy.action.apply_to) - VALID_REDACTION_TARGETS
+                )
+                if invalid_targets:
+                    raise ValueError(
+                        f"Invalid redaction target(s) for policy '{policy.id}': "
+                        f"{', '.join(sorted(invalid_targets))}"
+                    )
 
     def _compile_patterns(self) -> None:
         """Pre-compile all regex patterns for performance."""
@@ -152,9 +165,7 @@ class PolicyEngine:
         approval_config = None
         should_block = False
         block_reason = None
-
-        # Track which apply_to targets need redaction
-        redact_targets: set[str] = set()
+        target_outputs: dict[str, Any] = {}
 
         for policy in self.policies:
             matched, details = self._check_trigger(
@@ -172,13 +183,26 @@ class PolicyEngine:
             )
 
             if policy.action.type == "redact":
-                modified_output = self._apply_redaction(
-                    modified_output, policy.trigger.patterns, policy.action,
-                    policy_id=policy.id,
+                targets = set(
+                    policy.action.apply_to
+                    or ("output", "storage", "webhook", "logs")
                 )
+                if "outputs" in targets:
+                    targets.remove("outputs")
+                    targets.add("output")
+                for target in targets:
+                    target_output = target_outputs.get(
+                        target, copy.deepcopy(output)
+                    )
+                    target_outputs[target] = self._apply_redaction(
+                        target_output,
+                        policy.trigger.patterns,
+                        policy.action,
+                        policy_id=policy.id,
+                    )
+                if "output" in targets:
+                    modified_output = target_outputs["output"]
                 violation.output_modified = True
-                if policy.action.apply_to:
-                    redact_targets.update(policy.action.apply_to)
 
             elif policy.action.type == "inject_approval":
                 should_inject_approval = True
@@ -201,6 +225,15 @@ class PolicyEngine:
                         PolicyAction(type="redact", replacement="[BLOCKED]"),
                         policy_id=policy.id,
                     )
+                    for target in ("output", "storage", "webhook", "logs"):
+                        target_outputs[target] = self._apply_redaction(
+                            target_outputs.get(target, copy.deepcopy(output)),
+                            policy.trigger.patterns,
+                            PolicyAction(
+                                type="redact", replacement="[BLOCKED]"
+                            ),
+                            policy_id=policy.id,
+                        )
                     violation.output_modified = True
 
             elif policy.action.type == "alert":
@@ -213,23 +246,16 @@ class PolicyEngine:
 
             violations.append(violation)
 
-        # Build redacted output for storage/webhooks
-        redacted_output = modified_output
-        if redact_targets:
-            # If any redact policy has apply_to targets, build a separately
-            # redacted version from the original output
-            redacted_output = copy.deepcopy(output)
-            for p in self.policies:
-                if p.action.type == "redact" and p.trigger.patterns:
-                    redacted_output = self._apply_redaction(
-                        redacted_output, p.trigger.patterns, p.action,
-                        policy_id=p.id,
-                    )
+        redacted_output = target_outputs.get(
+            "storage",
+            target_outputs.get("webhook", modified_output),
+        )
 
         return PolicyEvalResult(
             violations=violations,
             modified_output=modified_output,
             redacted_output=redacted_output,
+            target_outputs=target_outputs,
             should_inject_approval=should_inject_approval,
             approval_config=approval_config,
             should_block=should_block,
@@ -543,5 +569,41 @@ def resolve_step_policies(
                 logger.warning(f"Policy '{item}' not found in global policies")
         elif isinstance(item, PolicyDefinition):
             result.append(item)
+        elif all(
+            hasattr(item, attr)
+            for attr in ("id", "trigger", "action")
+        ):
+            trigger = item.trigger
+            action = item.action
+            result.append(
+                PolicyDefinition(
+                    id=item.id,
+                    trigger=PolicyTrigger(
+                        type=trigger.type,
+                        patterns=(
+                            [
+                                PolicyPattern(
+                                    type=pattern.type,
+                                    pattern=pattern.pattern,
+                                )
+                                for pattern in trigger.patterns
+                            ]
+                            if trigger.patterns
+                            else None
+                        ),
+                        expression=trigger.expression,
+                    ),
+                    action=PolicyAction(
+                        type=action.type,
+                        replacement=action.replacement,
+                        apply_to=action.apply_to,
+                        approval_config=action.approval_config,
+                        message=action.message,
+                        notify=action.notify,
+                    ),
+                    description=getattr(item, "description", None),
+                    severity=getattr(item, "severity", "medium"),
+                )
+            )
 
     return result

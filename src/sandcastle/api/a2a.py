@@ -144,7 +144,7 @@ def _build_agent_card(base_url: str) -> dict[str, Any]:
         },
         "documentationUrl": "https://github.com/gizmax/Sandcastle/blob/main/README.md",
         "capabilities": {
-            "streaming": True,
+            "streaming": False,
             "pushNotifications": False,
             "stateTransitionHistory": True,
         },

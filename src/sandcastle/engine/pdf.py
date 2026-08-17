@@ -1221,12 +1221,15 @@ def _render_markdown(
             indent = len(bullet_match.group(1)) // 2
             text = bullet_match.group(2)
             pdf.set_font(fn, size=9)
-            x_off = 14 + indent * 8
+            # Clamp deeply nested bullets just like numbered lists. Without
+            # this, indentation can move x beyond the page and FPDF raises
+            # "Not enough horizontal space to render a single character".
+            x_off = min(14 + indent * 8, pdf.w - 60)
             pdf.set_x(x_off)
             pdf.set_text_color(*_ACCENT)
             pdf.cell(5, _LINE_H, pdf.bullet)
             pdf.set_text_color(*_BODY_COLOR)
-            pdf.multi_cell(pdf.w - x_off - 15, _LINE_H, _strip_inline_md(text))
+            pdf.multi_cell(max(pdf.w - x_off - 15, 40), _LINE_H, _strip_inline_md(text))
             i += 1
             continue
 

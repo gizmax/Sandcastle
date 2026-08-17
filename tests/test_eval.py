@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import yaml
@@ -379,6 +379,19 @@ class TestEvalExecution:
 
     @pytest.mark.asyncio
     @patch("sandcastle.engine.eval.run_eval_case")
+    async def test_run_suite_propagates_tenant(self, mock_run_case):
+        mock_run_case.return_value = CaseResult(name="test", passed=True)
+        suite = EvalSuiteDef(
+            workflow="test-workflow",
+            cases=[EvalCase(name="case1", input={})],
+        )
+
+        await run_eval_suite(suite, tenant_id="tenant-a")
+
+        assert mock_run_case.await_args.kwargs["tenant_id"] == "tenant-a"
+
+    @pytest.mark.asyncio
+    @patch("sandcastle.engine.eval.run_eval_case")
     async def test_run_suite_mixed_results(self, mock_run_case):
         results = [
             CaseResult(
@@ -519,3 +532,42 @@ class TestEvalDataclasses:
         assert s.total == 0
         assert s.passed == 0
         assert s.cases == []
+
+
+@pytest.mark.asyncio
+async def test_eval_endpoint_propagates_tenant_to_execution(monkeypatch):
+    """Tenant-scoped eval API runs execute every case in the same tenant context."""
+    from sandcastle.api import routes
+    from sandcastle.api.schemas import EvalSuiteRunRequest
+
+    suite = EvalSuiteDef(workflow="test-workflow", cases=[], description="Tenant eval")
+    result = SuiteResult(suite_name="Tenant eval", workflow="test-workflow")
+    run_suite = AsyncMock(return_value=result)
+
+    session = MagicMock()
+    session.__aenter__ = AsyncMock(return_value=session)
+    session.__aexit__ = AsyncMock(return_value=False)
+    session.add = MagicMock()
+    session.get = AsyncMock(return_value=MagicMock())
+    session.commit = AsyncMock()
+
+    monkeypatch.setattr(routes, "_require_admin", lambda _req: None)
+    monkeypatch.setattr(routes, "get_tenant_id", lambda _req: "tenant-a")
+    monkeypatch.setattr(routes, "async_session", MagicMock(return_value=session))
+
+    with (
+        patch("sandcastle.engine.eval.parse_eval_suite_string", return_value=suite),
+        patch("sandcastle.engine.eval.run_eval_suite", run_suite),
+    ):
+        await routes.run_eval_suite_endpoint(
+            MagicMock(),
+            EvalSuiteRunRequest(
+                suite_yaml="workflow: test-workflow\ncases: []",
+                concurrency=2,
+            ),
+        )
+
+    assert run_suite.await_args.kwargs == {
+        "concurrency": 2,
+        "tenant_id": "tenant-a",
+    }

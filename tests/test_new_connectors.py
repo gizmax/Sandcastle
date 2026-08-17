@@ -108,8 +108,13 @@ class TestRegistryMetadata:
         assert "TOOL_GCS_PROJECT_ID" in creds
 
     def test_azure_blob_credentials(self):
-        creds = self.registry["azure-blob"].credential_env_vars
+        tool = self.registry["azure-blob"]
+        creds = tool.credential_env_vars
         assert "TOOL_AZURE_STORAGE_CONNECTION_STRING" in creds
+        assert [
+            "TOOL_AZURE_STORAGE_ACCOUNT",
+            "TOOL_AZURE_STORAGE_KEY",
+        ] in tool.alternative_credential_env_vars
 
     def test_exa_credentials(self):
         creds = self.registry["exa"].credential_env_vars

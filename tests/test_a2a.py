@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi.testclient import TestClient
@@ -35,7 +34,7 @@ class TestAgentCard:
         response = client.get("/.well-known/agent.json")
         data = response.json()
         caps = data["capabilities"]
-        assert caps["streaming"] is True
+        assert caps["streaming"] is False
         assert caps["pushNotifications"] is False
 
     def test_agent_card_skills(self):

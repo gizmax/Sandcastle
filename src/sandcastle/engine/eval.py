@@ -351,6 +351,7 @@ def _check_schema_match(assertion: AssertionDef, output: Any) -> AssertionResult
 async def run_eval_case(
     case: EvalCase,
     workflow_name: str,
+    tenant_id: str | None = None,
 ) -> CaseResult:
     """Execute a workflow with the given input and check all assertions."""
     start_time = time.monotonic()
@@ -371,6 +372,7 @@ async def run_eval_case(
             input_data=case.input,
             run_id=run_id,
             storage=storage,
+            tenant_id=tenant_id,
         )
 
         duration = time.monotonic() - start_time
@@ -420,6 +422,7 @@ async def run_eval_suite(
     suite: EvalSuiteDef,
     tag_filter: list[str] | None = None,
     concurrency: int | None = None,
+    tenant_id: str | None = None,
 ) -> SuiteResult:
     """Run all cases in an eval suite with concurrency control."""
     cases = suite.cases
@@ -432,7 +435,9 @@ async def run_eval_suite(
 
     async def _run_with_semaphore(case: EvalCase) -> CaseResult:
         async with semaphore:
-            return await run_eval_case(case, suite.workflow)
+            if tenant_id is None:
+                return await run_eval_case(case, suite.workflow)
+            return await run_eval_case(case, suite.workflow, tenant_id=tenant_id)
 
     tasks = [asyncio.create_task(_run_with_semaphore(c)) for c in cases]
     results = await asyncio.gather(*tasks, return_exceptions=True)

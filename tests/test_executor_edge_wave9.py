@@ -37,6 +37,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from sandcastle.engine.dag import (
+    AutoPilotConfig,
     CodeConfig,
     CompletionConfig,
     ConditionConfig,
@@ -51,6 +52,7 @@ from sandcastle.engine.dag import (
     StepDefinition,
     StepMemoryConfig,
     TransformConfig,
+    VariantConfig,
     WorkflowDefinition,
 )
 from sandcastle.engine.executor import (
@@ -72,6 +74,12 @@ from sandcastle.engine.executor import (
     execute_workflow,
     resolve_templates,
     resolve_variable,
+)
+from sandcastle.engine.policy import (
+    PolicyAction,
+    PolicyDefinition,
+    PolicyPattern,
+    PolicyTrigger,
 )
 
 
@@ -490,6 +498,221 @@ class TestRaceStepEdgeCases:
 
         assert result.status == "completed"
 
+    @pytest.mark.asyncio
+    async def test_race_dispatches_hybrid_branch_to_transform_handler(self):
+        """Hybrid branch steps must not fall through to sandbox.query."""
+        from sandcastle.engine.executor import _execute_race_step
+
+        wf = make_workflow([
+            step(
+                id="transform_branch",
+                type="transform",
+                transform_config=TransformConfig(template="{input.value}"),
+            ),
+            step(
+                id="race1",
+                type="race",
+                race_config=RaceConfig(branches=[["transform_branch"]]),
+            ),
+        ])
+        sandbox = MagicMock()
+        sandbox.query = AsyncMock()
+        handler_result = StepResult(
+            step_id="transform_branch",
+            status="completed",
+            output="handled",
+        )
+
+        with patch(
+            "sandcastle.engine.executor._execute_transform_step",
+            new_callable=AsyncMock,
+            return_value=handler_result,
+        ) as transform_handler:
+            result = await _execute_race_step(
+                wf.get_step("race1"),
+                ctx(input={"value": "x"}),
+                sandbox,
+                MagicMock(),
+                wf,
+                0,
+            )
+
+        assert result.status == "completed"
+        assert result.output == "handled"
+        transform_handler.assert_awaited_once()
+        sandbox.query.assert_not_awaited()
+
+
+# ================================================================
+# 2b. SHARED HYBRID POLICY LIFECYCLE
+# ================================================================
+
+
+class TestHybridPolicyLifecycle:
+    @pytest.mark.asyncio
+    async def test_global_storage_policy_applies_to_hybrid_step(self):
+        from sandcastle.engine.executor import _prepare_and_run_step
+
+        transform_step = step(
+            id="transform1",
+            type="transform",
+            transform_config=TransformConfig(template="{input.value}"),
+        )
+        wf = make_workflow([transform_step])
+        context = ctx(input={"value": "user@example.com"})
+        policy = PolicyDefinition(
+            id="storage-email",
+            trigger=PolicyTrigger(
+                type="output_contains",
+                patterns=[PolicyPattern(type="email")],
+            ),
+            action=PolicyAction(
+                type="redact",
+                replacement="[PRIVATE]",
+                apply_to=["storage"],
+            ),
+        )
+        handler_result = StepResult(
+            step_id="transform1",
+            status="completed",
+            output="user@example.com",
+        )
+
+        with patch(
+            "sandcastle.engine.executor._execute_transform_step",
+            new_callable=AsyncMock,
+            return_value=handler_result,
+        ):
+            await _prepare_and_run_step(
+                "transform1",
+                wf,
+                context,
+                MagicMock(),
+                MagicMock(),
+                [policy],
+                None,
+                0,
+            )
+
+        assert context.step_outputs["transform1"] == "user@example.com"
+        assert (
+            context.policy_target_outputs["storage"]["transform1"]
+            == "[PRIVATE]"
+        )
+
+
+# ================================================================
+# 2c. AUTOPILOT DEPLOYED WINNER ROUTING
+# ================================================================
+
+
+class TestAutoPilotWinnerRouting:
+    @pytest.fixture
+    def autopilot_step(self):
+        return dataclasses.replace(
+            step(id="optimize", model="baseline", prompt="baseline prompt"),
+            autopilot=AutoPilotConfig(
+                enabled=True,
+                variants=[
+                    VariantConfig(
+                        id="winner",
+                        model="winner-model",
+                        prompt="winner prompt",
+                    )
+                ],
+                sample_rate=1.0,
+            ),
+        )
+
+    @pytest.mark.asyncio
+    async def test_completed_winner_receives_all_traffic(self, autopilot_step):
+        experiment = MagicMock(
+            id=uuid.uuid4(),
+            status="completed",
+            deployed_variant_id="winner",
+            rollout_stage="full",
+        )
+        executed_steps: list[StepDefinition] = []
+
+        async def execute_once(selected_step, *_args, **_kwargs):
+            executed_steps.append(selected_step)
+            return StepResult(
+                step_id=selected_step.id,
+                status="completed",
+                output="ok",
+                policies_applied=True,
+            )
+
+        with (
+            patch(
+                "sandcastle.engine.autopilot.get_or_create_experiment",
+                new_callable=AsyncMock,
+                return_value=experiment,
+            ),
+            patch(
+                "sandcastle.engine.autopilot.pick_variant",
+                new_callable=AsyncMock,
+            ) as pick_variant,
+            patch(
+                "sandcastle.engine.executor._execute_step_once",
+                side_effect=execute_once,
+            ),
+        ):
+            result = await execute_step_with_retry(
+                autopilot_step,
+                ctx(),
+                MagicMock(),
+                MagicMock(),
+            )
+
+        assert result.status == "completed"
+        assert executed_steps[0].model == "winner-model"
+        assert executed_steps[0].prompt == "winner prompt"
+        assert executed_steps[0].autopilot is None
+        pick_variant.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_canary_baseline_traffic_stays_on_baseline(self, autopilot_step):
+        experiment = MagicMock(
+            id=uuid.uuid4(),
+            status="deploying",
+            deployed_variant_id="winner",
+            rollout_stage="canary",
+        )
+        executed_steps: list[StepDefinition] = []
+
+        async def execute_once(selected_step, *_args, **_kwargs):
+            executed_steps.append(selected_step)
+            return StepResult(
+                step_id=selected_step.id,
+                status="completed",
+                output="ok",
+                policies_applied=True,
+            )
+
+        with (
+            patch(
+                "sandcastle.engine.autopilot.get_or_create_experiment",
+                new_callable=AsyncMock,
+                return_value=experiment,
+            ),
+            patch("sandcastle.engine.autopilot.should_use_winner", return_value=False),
+            patch(
+                "sandcastle.engine.executor._execute_step_once",
+                side_effect=execute_once,
+            ),
+        ):
+            result = await execute_step_with_retry(
+                autopilot_step,
+                ctx(),
+                MagicMock(),
+                MagicMock(),
+            )
+
+        assert result.status == "completed"
+        assert executed_steps[0].model == "baseline"
+        assert executed_steps[0].prompt == "baseline prompt"
+
 
 # ================================================================
 # 3. DELEGATE / SUB-WORKFLOW DEPTH
@@ -695,6 +918,53 @@ class TestLoopEdgeCases:
 
         assert result.status == "completed"
         assert len(result.output) == 3
+
+    @pytest.mark.asyncio
+    async def test_loop_dispatches_hybrid_substep_to_transform_handler(self):
+        """Hybrid loop sub-steps must not fall through to sandbox.query."""
+        from sandcastle.engine.executor import _execute_loop_step
+
+        wf = make_workflow([
+            step(
+                id="transform_item",
+                type="transform",
+                transform_config=TransformConfig(template="{input._item}"),
+            ),
+            step(
+                id="loop1",
+                type="loop",
+                loop_config=LoopConfig(
+                    over="{input.items}",
+                    step_ids=["transform_item"],
+                ),
+            ),
+        ])
+        sandbox = MagicMock()
+        sandbox.query = AsyncMock()
+        handler_result = StepResult(
+            step_id="transform_item",
+            status="completed",
+            output="handled",
+        )
+
+        with patch(
+            "sandcastle.engine.executor._execute_transform_step",
+            new_callable=AsyncMock,
+            return_value=handler_result,
+        ) as transform_handler:
+            result = await _execute_loop_step(
+                wf.get_step("loop1"),
+                ctx(input={"items": ["a", "b"]}),
+                sandbox,
+                MagicMock(),
+                wf,
+                0,
+            )
+
+        assert result.status == "completed"
+        assert result.output == ["handled", "handled"]
+        assert transform_handler.await_count == 2
+        sandbox.query.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_loop_empty_items_succeeds(self):
