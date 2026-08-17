@@ -764,6 +764,13 @@ describe("OnboardingWizard (guided beginner flow)", () => {
       if (url.startsWith("/templates/")) {
         return Promise.resolve(okResponse({ content: "name: x\nsteps: []\n" }));
       }
+      // 0.43.x: StepRun polls the queued run until it completes.
+      if (url.startsWith("/runs/")) {
+        return Promise.resolve(okResponse({
+          status: "completed",
+          outputs: { summary: "A concise summary." },
+        }));
+      }
       return Promise.resolve({ data: null, error: null });
     });
     mockApi.post.mockResolvedValue(okResponse({
@@ -814,7 +821,10 @@ describe("OnboardingWizard (guided beginner flow)", () => {
     await act(async () => {
       fireEvent.click(screen.getByText("Run workflow"));
     });
-    await waitFor(() => expect(screen.getByText("Done!")).toBeInTheDocument());
+    // The run is queued and polled (3s interval) before Done! appears.
+    await waitFor(() => expect(screen.getByText("Done!")).toBeInTheDocument(), {
+      timeout: 10000,
+    });
 
     // Finish into the dashboard
     await act(async () => {

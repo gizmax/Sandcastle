@@ -148,6 +148,7 @@ from sandcastle.engine.dag import build_plan, parse_yaml_string, validate
 from sandcastle.engine.executor import execute_workflow
 from sandcastle.engine.json_utils import json_safe
 from sandcastle.engine.sandshore import SandshoreRuntime, get_sandshore_runtime  # noqa: F401
+from sandcastle.engine.spark import get_spark_info
 from sandcastle.engine.storage import create_storage
 from sandcastle.models.db import (
     ApiKey,
@@ -658,9 +659,18 @@ def _extract_step_configs(yaml_content: str) -> dict[str, dict]:
 async def health_check() -> ApiResponse:
     """Check health of Sandcastle and its dependencies."""
     try:
+        # Pass the full backend config - the bare-keys call fell back to the
+        # e2b default, so a docker-backend box reported "Runtime is down"
+        # forever (and the wizard's health card lied about executability).
         runtime = get_sandshore_runtime(
             anthropic_api_key=settings.anthropic_api_key or "",
             e2b_api_key=settings.e2b_api_key or "",
+            template=settings.e2b_template,
+            max_concurrent=settings.max_concurrent_sandboxes,
+            sandbox_backend=settings.sandbox_backend,
+            docker_image=settings.docker_image,
+            docker_url=settings.docker_url or None,
+            cloudflare_worker_url=settings.cloudflare_worker_url,
         )
         runtime_ok = await runtime.health()
     except Exception:
@@ -868,6 +878,9 @@ async def runtime_info() -> ApiResponse:
             version=__version__,
             license=license_info,
             spark_mode=settings.spark_mode,
+            spark_gpu=(
+                get_spark_info().gpu_name if settings.spark_mode else None
+            ),
         )
     )
 
@@ -6152,7 +6165,13 @@ async def download_run_output_pdf(run_id: str, req: Request):
     markdown_text = "\n".join(lines)
     for src_ch, dst_ch in _TYPOGRAPHIC.items():
         markdown_text = markdown_text.replace(src_ch, dst_ch)
-    markdown_text = markdown_text.encode("latin-1", errors="replace").decode("latin-1")
+    # Only squash to latin-1 when no Unicode TTF is available (Helvetica
+    # fallback crashes on non-latin-1). With DejaVu in the image, Czech and
+    # other diacritics render properly instead of degrading to '?'.
+    from sandcastle.engine.pdf import has_unicode_font
+
+    if not has_unicode_font():
+        markdown_text = markdown_text.encode("latin-1", errors="replace").decode("latin-1")
     # fpdf cannot wrap an unbroken token wider than the page ("Not enough
     # horizontal space to render a single character") - long URLs and JSON
     # blobs are exactly that. Insert break points into any 80+ char token.

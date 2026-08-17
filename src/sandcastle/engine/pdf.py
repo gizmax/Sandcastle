@@ -1272,6 +1272,12 @@ def _render_markdown(
 
 # -- Public API -------------------------------------------------------------
 
+def has_unicode_font() -> bool:
+    """True when a Unicode TTF is available - callers can skip latin-1 squashing."""
+    regular, _b, _i, _m = _find_unicode_font()
+    return regular is not None
+
+
 def generate_branded_pdf(
     markdown_text: str,
     output_path: str | Path,

@@ -17,7 +17,13 @@ export interface WorkflowStats {
 
 type HealthLevel = "healthy" | "degraded" | "failing";
 
-function deriveHealth(successRate: number): HealthLevel {
+function deriveHealth(successRate: number, lastRunStatus?: string | null): HealthLevel {
+  // The lifetime rate carries scar tissue (e.g. runs that failed on since-fixed
+  // engine bugs). A workflow whose LAST run completed is not "Failing" - judge
+  // recency first, the historical rate second.
+  if (lastRunStatus === "completed") {
+    return successRate >= 90 ? "healthy" : "degraded";
+  }
   if (successRate >= 90) return "healthy";
   if (successRate >= 70) return "degraded";
   return "failing";
@@ -74,7 +80,7 @@ export const WorkflowCard = memo(function WorkflowCard({
   onViewDag,
   onViewVersions,
 }: WorkflowCardProps) {
-  const health = stats ? deriveHealth(stats.successRate) : null;
+  const health = stats ? deriveHealth(stats.successRate, stats.lastRunStatus) : null;
   const hc = health ? healthConfig[health] : null;
   const [pinBounce, setPinBounce] = useState(false);
 
