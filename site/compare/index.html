@@ -1,0 +1,1247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sandcastle vs LangGraph, n8n, Temporal &amp; Dify</title>
+  <meta name="description" content="Honest comparison of AI workflow orchestrators: Sandcastle vs LangGraph, n8n, Temporal, Airflow and Dify - including when to pick something else.">
+  <meta name="keywords" content="Sandcastle vs LangGraph, Sandcastle vs n8n, AI workflow orchestrator comparison, LangGraph alternative, n8n alternative, self-hosted AI orchestration">
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+  <meta name="author" content="Tomas Pflanzer">
+  <link rel="canonical" href="https://sandcastle-ai.eu/compare/">
+  <link rel="alternate" hreflang="en" href="https://sandcastle-ai.eu/compare/">
+  <link rel="alternate" hreflang="x-default" href="https://sandcastle-ai.eu/compare/">
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="Sandcastle vs LangGraph, n8n, Temporal &amp; Dify">
+  <meta property="og:description" content="Nine tools, three different jobs. An honest comparison of AI workflow orchestrators - including the cases where Sandcastle is the wrong answer.">
+  <meta property="og:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
+  <meta property="og:url" content="https://sandcastle-ai.eu/compare/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Sandcastle">
+  <meta property="og:locale" content="en_US">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Sandcastle vs LangGraph, n8n, Temporal &amp; Dify">
+  <meta name="twitter:description" content="Nine tools, three different jobs. An honest comparison - including when to pick something else.">
+  <meta name="twitter:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
+  <meta name="twitter:creator" content="@iuditg">
+
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏰</text></svg>">
+
+  <!-- Structured data -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "BreadcrumbList",
+        "@id": "https://sandcastle-ai.eu/compare/#breadcrumb",
+        "itemListElement": [
+          { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://sandcastle-ai.eu/" },
+          { "@type": "ListItem", "position": 2, "name": "Compare", "item": "https://sandcastle-ai.eu/compare/" }
+        ]
+      },
+      {
+        "@type": "WebPage",
+        "@id": "https://sandcastle-ai.eu/compare/#webpage",
+        "url": "https://sandcastle-ai.eu/compare/",
+        "name": "Sandcastle vs LangGraph, n8n, Temporal & Dify",
+        "description": "Honest comparison of AI workflow orchestrators, including the cases where Sandcastle is the wrong answer.",
+        "inLanguage": "en",
+        "datePublished": "2026-08-17",
+        "dateModified": "2026-08-17",
+        "isPartOf": { "@id": "https://sandcastle-ai.eu/#website" },
+        "about": { "@id": "https://sandcastle-ai.eu/#software" },
+        "publisher": { "@id": "https://sandcastle-ai.eu/#organization" },
+        "breadcrumb": { "@id": "https://sandcastle-ai.eu/compare/#breadcrumb" }
+      },
+      {
+        "@type": "FAQPage",
+        "@id": "https://sandcastle-ai.eu/compare/#faq",
+        "isPartOf": { "@id": "https://sandcastle-ai.eu/compare/#webpage" },
+        "mainEntity": [
+          { "@type": "Question", "name": "Is Sandcastle open source?",
+            "acceptedAnswer": { "@type": "Answer", "text": "The source is public and you can read, fork and modify it, but BSL 1.1 is not an OSI-approved open source licence - source-available is the accurate term. It converts to Apache 2.0 on 24 February 2030." } },
+          { "@type": "Question", "name": "Can I replace LangGraph with Sandcastle?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Only if your graph is fixed. LangGraph exists so a model can pick its own route through a problem; Sandcastle runs a route you defined. Workflows with known steps port over well. Open-ended agent loops do not." } },
+          { "@type": "Question", "name": "What happens if the server dies mid-run?",
+            "acceptedAnswer": { "@type": "Answer", "text": "The run is marked failed and you decide what to do - replay it from any completed step, or fork it with different inputs. It is not resumed automatically. If you need automatic resumption across failures, Temporal is built for exactly that." } },
+          { "@type": "Question", "name": "How does this compare to n8n on integrations?",
+            "acceptedAnswer": { "@type": "Answer", "text": "It does not. Sandcastle ships 64 connectors covering 229 operations; n8n's catalogue is far larger. Sandcastle's argument is the workflow format, cost control and residency - not catalogue size." } },
+          { "@type": "Question", "name": "Who is behind Sandcastle and how big is the project?",
+            "acceptedAnswer": { "@type": "Answer", "text": "It is a young project - five months old at the time of writing, with one main author and a small contributor base. If your procurement process weighs bus factor and community size, weigh them honestly here." } },
+          { "@type": "Question", "name": "Do I have to use cloud models?",
+            "acceptedAnswer": { "@type": "Answer", "text": "No. Local inference through ollama, vLLM and MLX is a first-class path in the runtime, and workflows run with no cloud API key present at all." } }
+        ]
+      }
+    ]
+  }
+  </script>
+
+  <!-- Google Analytics -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-ZN1K4G2TCZ"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-ZN1K4G2TCZ');
+  </script>
+
+  <!-- Performance hints -->
+  <link rel="dns-prefetch" href="https://www.googletagmanager.com">
+
+  <!-- Display: Bricolage Grotesque (characterful grotesk) · Mono: IBM Plex Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <style>
+    /* ============================================================
+       SANDCASTLE — MANIFESTO · PRICING
+       Swiss-brutalist editorial. Paper & ink. One accent.
+       ============================================================ */
+
+    :root{
+      --paper:      #F7F3EC;   /* warm sand off-white */
+      --paper-2:    #EFE9DD;   /* slightly deeper paper for blocks */
+      --ink:        #1C1814;   /* near-black warm ink */
+      --ink-soft:   #5B524A;   /* muted ink for body */
+      --ink-faint:  #8A8076;   /* captions / hairlines text */
+      --amber:      #F59E0B;   /* THE single accent */
+      --amber-ink:  #8A5500;   /* amber that passes AA on paper */
+      --rule:       #1C1814;
+      --hair:       rgba(28,24,20,.16);
+
+      --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+      --display: "Bricolage Grotesque", "Bricolage", system-ui, sans-serif;
+
+      /* baseline rhythm unit */
+      --u: 8px;
+      --maxw: 1320px;
+      --gutter: clamp(20px, 5vw, 80px);
+    }
+
+    @media (prefers-color-scheme: dark){
+      :root{
+        --paper:    #14110D;
+        --paper-2:  #1B1712;
+        --ink:      #F4EEE3;
+        --ink-soft: #BBB0A2;
+        --ink-faint:#897F71;
+        --rule:     #F4EEE3;
+        --hair:     rgba(244,238,227,.18);
+        --amber-ink:#F5B53C;
+      }
+    }
+
+    *,*::before,*::after{ box-sizing:border-box; }
+
+    html{ -webkit-text-size-adjust:100%; scroll-behavior:smooth; }
+    @media (prefers-reduced-motion: reduce){ html{ scroll-behavior:auto; } }
+
+    body{
+      margin:0;
+      background:var(--paper);
+      color:var(--ink);
+      font-family:var(--display);
+      font-weight:400;
+      line-height:1.18;
+      text-rendering:optimizeLegibility;
+      -webkit-font-smoothing:antialiased;
+      -moz-osx-font-smoothing:grayscale;
+      overflow-x:hidden;
+      /* faint printed-paper grain via overlapping gradients */
+      background-image:
+        radial-gradient(rgba(28,24,20,.020) 1px, transparent 1px);
+      background-size: 4px 4px;
+    }
+
+    ::selection{ background:var(--amber); color:#1C1814; }
+
+    a{ color:inherit; text-decoration:none; }
+
+    /* ---- shared layout ---- */
+    .wrap{
+      width:100%;
+      max-width:var(--maxw);
+      margin-inline:auto;
+      padding-inline:var(--gutter);
+    }
+
+    .mono{
+      font-family:var(--mono);
+      font-weight:500;
+      letter-spacing:.02em;
+      text-transform:uppercase;
+      font-size:clamp(11px,1.05vw,13px);
+      color:var(--ink-faint);
+    }
+
+    .rule{ border:0; border-top:1.5px solid var(--rule); margin:0; }
+
+    /* keyboard focus — sharp, on-brand */
+    a:focus-visible, button:focus-visible{
+      outline:3px solid var(--amber);
+      outline-offset:3px;
+    }
+
+    /* ============================================================
+       MASTHEAD / NAV
+       ============================================================ */
+    header.masthead{
+      position:sticky; top:0; z-index:50;
+      background:color-mix(in srgb, var(--paper) 86%, transparent);
+      backdrop-filter:blur(8px) saturate(120%);
+      -webkit-backdrop-filter:blur(8px) saturate(120%);
+      border-bottom:1.5px solid var(--rule);
+    }
+    .masthead .wrap{
+      display:flex; align-items:center; justify-content:space-between;
+      height:64px; gap:24px;
+    }
+    .brand{
+      display:flex; align-items:baseline; gap:10px;
+      font-weight:700; font-size:19px; letter-spacing:-.02em;
+    }
+    .brand .glyph{ font-size:18px; transform:translateY(1px); }
+    .brand .tm{
+      font-family:var(--mono); font-size:10px; font-weight:500;
+      color:var(--ink-faint); letter-spacing:.08em; text-transform:uppercase;
+      border:1px solid var(--hair); padding:2px 6px; border-radius:2px;
+    }
+    nav.primary{ display:flex; align-items:center; gap:clamp(14px,2vw,28px); }
+    nav.primary a{
+      font-family:var(--mono); font-size:12px; font-weight:500;
+      text-transform:uppercase; letter-spacing:.04em; color:var(--ink-soft);
+      transition:color .15s ease;
+    }
+    nav.primary a:hover{ color:var(--ink); }
+    nav.primary a[aria-current="page"]{ color:var(--amber-ink); }
+    nav.primary a.cta{
+      color:var(--ink); border:1.5px solid var(--ink);
+      padding:7px 14px; border-radius:2px; background:var(--paper);
+    }
+    nav.primary a.cta:hover{ background:var(--ink); color:var(--paper); }
+    @media (max-width:780px){
+      nav.primary a.muted{ display:none; }
+    }
+
+    /* ============================================================
+       PAGE HEADER — type-driven
+       ============================================================ */
+    .phead{ padding:clamp(56px,12vh,140px) 0 clamp(36px,7vh,72px); }
+    .phead .kicker{
+      display:flex; align-items:center; gap:14px; margin-bottom:clamp(24px,5vh,48px);
+    }
+    .phead .kicker .tick{ width:42px; height:1.5px; background:var(--amber); display:inline-block; }
+    .phead h1{
+      font-weight:700;
+      font-size:clamp(40px, 8.4vw, 116px);
+      line-height:.95;
+      letter-spacing:-.04em;
+      margin:0;
+      max-width:14ch;
+      text-wrap:balance;
+    }
+    .phead h1 em{ font-style:normal; color:var(--amber-ink); }
+    .phead .lede{
+      margin-top:clamp(24px,5vh,44px);
+      display:grid; grid-template-columns:1fr; gap:clamp(18px,3vw,40px);
+      align-items:end;
+    }
+    @media (min-width:880px){
+      .phead .lede{ grid-template-columns:minmax(0,1.4fr) minmax(0,1fr); }
+    }
+    .phead .lede p{
+      font-size:clamp(17px,2vw,23px); line-height:1.4; font-weight:400;
+      color:var(--ink-soft); max-width:48ch; letter-spacing:-.01em; margin:0;
+    }
+    .phead .lede p strong{ color:var(--ink); font-weight:600; }
+    .phead .lede .meta{
+      font-family:var(--mono); font-size:12px; text-transform:uppercase;
+      letter-spacing:.04em; color:var(--ink-faint); line-height:1.9;
+    }
+    .phead .lede .meta b{ color:var(--amber-ink); font-weight:600; }
+
+    /* ============================================================
+       PRICE SHEET — editorial tiers, hairline-ruled
+       ============================================================ */
+    .sheet{ border-top:1.5px solid var(--rule); }
+
+    .tier{
+      border-bottom:1.5px solid var(--rule);
+      padding:clamp(34px,6vh,64px) 0;
+      position:relative;
+    }
+    .tier.is-rec{ background:var(--paper-2); }
+
+    .tier .grid{
+      display:grid; grid-template-columns:1fr; gap:clamp(24px,4vw,56px);
+    }
+    @media (min-width:980px){
+      .tier .grid{
+        grid-template-columns:minmax(0,4.5fr) minmax(0,5.5fr) minmax(0,3fr);
+        align-items:start;
+      }
+    }
+
+    /* left column — number + name */
+    .tier .id{ position:relative; }
+    .tier .t-num{
+      font-family:var(--mono); font-weight:500; font-size:13px;
+      letter-spacing:.12em; color:var(--ink-faint); display:block;
+      margin-bottom:clamp(10px,1.5vh,16px);
+    }
+    .tier .t-name{
+      font-weight:700; font-size:clamp(34px,5.4vw,64px);
+      line-height:.95; letter-spacing:-.035em; margin:0;
+    }
+    .tier.is-rec .t-name{ color:var(--amber-ink); }
+    .tier .t-tag{
+      display:inline-block; margin-top:14px;
+      font-family:var(--mono); font-size:11px; text-transform:uppercase;
+      letter-spacing:.08em; padding:4px 9px; border-radius:2px;
+    }
+    .tier .t-tag.rec{ background:var(--amber); color:#1C1814; }
+    .tier .t-tag.lic{ border:1px solid var(--hair); color:var(--ink-faint); }
+    .tier .t-desc{
+      margin-top:clamp(16px,2.5vh,24px);
+      font-size:clamp(15px,1.5vw,18px); line-height:1.5;
+      color:var(--ink-soft); max-width:34ch;
+    }
+
+    /* middle column — price + features */
+    .tier .price{
+      display:flex; align-items:baseline; gap:8px; flex-wrap:wrap;
+      margin-bottom:6px;
+    }
+    .tier .price .amt{
+      font-family:var(--mono); font-weight:600;
+      font-size:clamp(44px,7vw,76px); letter-spacing:-.03em; line-height:.9;
+    }
+    .tier.is-rec .price .amt{ color:var(--amber-ink); }
+    .tier .price .per{
+      font-family:var(--mono); font-size:clamp(14px,1.4vw,17px);
+      color:var(--ink-faint); letter-spacing:.02em;
+    }
+    .tier .price-note{
+      font-family:var(--mono); font-size:12px; color:var(--ink-faint);
+      letter-spacing:.02em; margin-bottom:clamp(22px,3.5vh,32px);
+    }
+    .tier .price-note b{ color:var(--amber-ink); font-weight:600; }
+
+    .feat{ list-style:none; margin:0; padding:0; }
+    .feat li{
+      display:grid; grid-template-columns:auto 1fr; gap:12px; align-items:baseline;
+      padding:11px 0; border-bottom:1px solid var(--hair);
+      font-size:clamp(14px,1.4vw,16px); color:var(--ink-soft); line-height:1.45;
+    }
+    .feat li:last-child{ border-bottom:0; }
+    .feat li .mk{
+      font-family:var(--mono); font-size:11px; font-weight:600;
+      letter-spacing:.04em; color:var(--ink-faint); text-transform:uppercase;
+      min-width:2.2em;
+    }
+    .tier.is-rec .feat li .mk{ color:var(--amber-ink); }
+    .feat li strong{ color:var(--ink); font-weight:600; }
+
+    /* right column — CTA */
+    .tier .act{ display:flex; flex-direction:column; gap:14px; }
+    .tier .btn{
+      display:inline-flex; align-items:center; justify-content:space-between; gap:12px;
+      font-family:var(--mono); font-weight:600; font-size:14px;
+      text-transform:uppercase; letter-spacing:.04em;
+      padding:14px 18px; border-radius:3px; transition:.16s ease;
+      border:1.5px solid var(--ink); color:var(--ink); background:var(--paper);
+    }
+    .tier .btn:hover{ background:var(--ink); color:var(--paper); }
+    .tier .btn.solid{ background:var(--ink); color:var(--paper); }
+    .tier .btn.solid:hover{ background:var(--amber); color:#1C1814; border-color:var(--amber); }
+    .tier.is-rec .btn{ border-color:var(--amber-ink); }
+    .tier .act .fine{
+      font-family:var(--mono); font-size:11px; color:var(--ink-faint);
+      letter-spacing:.02em; line-height:1.6;
+    }
+
+    /* ============================================================
+       LEDGER — feature comparison as a printed table
+       ============================================================ */
+    .ledger{ padding:clamp(64px,12vh,140px) 0; border-bottom:1.5px solid var(--rule); }
+    .ledger .lab{ margin-bottom:clamp(16px,2.5vh,24px); }
+    .ledger h2{
+      font-weight:700; font-size:clamp(30px,5vw,64px); letter-spacing:-.035em;
+      line-height:1; margin:0 0 clamp(14px,2.5vh,24px); max-width:16ch; text-wrap:balance;
+    }
+    .ledger .sub{
+      font-size:clamp(15px,1.5vw,18px); color:var(--ink-soft); max-width:52ch;
+      line-height:1.5; margin:0 0 clamp(32px,5vh,52px);
+    }
+    .ltable-scroll{ overflow-x:auto; }
+    table.ltable{
+      width:100%; border-collapse:collapse; min-width:640px;
+      font-family:var(--mono);
+    }
+    table.ltable th, table.ltable td{
+      text-align:left; padding:13px 16px; border-bottom:1px solid var(--hair);
+      font-size:13px; font-weight:400; letter-spacing:.01em;
+    }
+    table.ltable thead th{
+      border-bottom:1.5px solid var(--rule); text-transform:uppercase;
+      letter-spacing:.06em; font-weight:600; font-size:12px; color:var(--ink);
+      vertical-align:bottom;
+    }
+    table.ltable thead th:first-child{ color:var(--ink-faint); }
+    table.ltable thead th.hl{ color:var(--amber-ink); }
+    table.ltable thead th.col{ text-align:center; }
+    table.ltable td:first-child{
+      font-family:var(--display); font-weight:500; font-size:15px;
+      color:var(--ink); letter-spacing:-.01em;
+    }
+    table.ltable td.cell{ text-align:center; color:var(--ink-soft); }
+    table.ltable td.cell.yes{ color:var(--amber-ink); }
+    table.ltable td.cell.no{ color:var(--ink-faint); }
+    table.ltable tbody tr:hover td{ background:color-mix(in srgb, var(--paper-2) 60%, transparent); }
+    table.ltable .mark svg{ width:17px; height:17px; vertical-align:middle; }
+
+    /* ============================================================
+       FAQ — editorial Q&A with hairline dividers
+       ============================================================ */
+    .faq{ padding:clamp(64px,12vh,140px) 0; border-bottom:1.5px solid var(--rule); }
+    .faq .lab{ margin-bottom:clamp(16px,2.5vh,24px); }
+    .faq h2{
+      font-weight:700; font-size:clamp(30px,5vw,64px); letter-spacing:-.035em;
+      line-height:1; margin:0 0 clamp(36px,6vh,60px); max-width:14ch;
+    }
+    .qa{ border-top:1.5px solid var(--rule); }
+    .qa .row{
+      display:grid; grid-template-columns:1fr; gap:8px;
+      padding:clamp(22px,3.5vh,32px) 0; border-bottom:1px solid var(--hair);
+    }
+    @media (min-width:820px){
+      .qa .row{ grid-template-columns:minmax(0,5fr) minmax(0,7fr); gap:clamp(24px,4vw,56px); align-items:start; }
+    }
+    .qa .q{
+      font-weight:600; font-size:clamp(18px,2vw,24px); letter-spacing:-.02em;
+      line-height:1.2; margin:0;
+    }
+    .qa .q .qn{
+      font-family:var(--mono); font-size:12px; font-weight:500; color:var(--amber-ink);
+      letter-spacing:.06em; margin-right:10px; vertical-align:middle;
+    }
+    .qa .a{
+      font-size:clamp(15px,1.5vw,17px); line-height:1.6; color:var(--ink-soft); margin:0;
+    }
+    .qa .a code{
+      font-family:var(--mono); font-size:.86em; background:var(--paper-2);
+      padding:2px 6px; border-radius:2px; color:var(--amber-ink);
+      border:1px solid var(--hair);
+    }
+    .qa .a a{ color:var(--amber-ink); border-bottom:1px solid var(--hair); }
+    .qa .a a:hover{ border-color:var(--amber-ink); }
+
+    /* ============================================================
+       CLOSER — install as a statement
+       ============================================================ */
+    .closer{
+      padding:clamp(80px,16vh,180px) 0;
+      text-align:center;
+      background:var(--ink); color:var(--paper);
+      border-bottom:1.5px solid var(--rule);
+    }
+    .closer .pre{
+      font-family:var(--mono); text-transform:uppercase; letter-spacing:.16em;
+      font-size:13px; color:var(--amber); margin-bottom:clamp(20px,4vh,40px);
+    }
+    .closer h2{
+      font-weight:600; font-size:clamp(32px,6.4vw,92px); letter-spacing:-.035em;
+      line-height:1; margin:0 0 clamp(36px,6vh,56px); text-wrap:balance;
+      color:var(--paper);
+    }
+    .closer .big-install{
+      font-family:var(--mono); font-weight:600;
+      font-size:clamp(18px,3.6vw,40px);
+      display:inline-flex; align-items:center; gap:16px; flex-wrap:wrap;
+      justify-content:center;
+      border:1.5px solid rgba(247,243,236,.3); border-radius:4px;
+      padding:clamp(16px,2vw,24px) clamp(20px,3vw,34px);
+      letter-spacing:0; cursor:pointer; transition:.18s ease;
+    }
+    .closer .big-install:hover{ border-color:var(--amber); }
+    .closer .big-install .pmt{ color:var(--amber); }
+    .closer .big-install .ci{
+      font-size:.42em; text-transform:uppercase; letter-spacing:.08em;
+      border:1px solid rgba(247,243,236,.4); border-radius:3px; padding:5px 9px; color:var(--paper);
+    }
+    .closer .links{
+      margin-top:clamp(28px,5vh,44px); display:flex; gap:24px; justify-content:center; flex-wrap:wrap;
+      font-family:var(--mono); font-size:13px; text-transform:uppercase; letter-spacing:.04em;
+    }
+    .closer .links a{ color:rgba(247,243,236,.7); border-bottom:1px solid transparent; padding-bottom:2px; }
+    .closer .links a:hover{ color:var(--amber); border-color:var(--amber); }
+
+    /* ============================================================
+       FOOTER — editorial
+       ============================================================ */
+    footer.foot{ padding:clamp(56px,9vh,90px) 0 clamp(40px,6vh,64px); }
+    .foot-top{
+      display:grid; grid-template-columns:1fr; gap:clamp(36px,5vw,64px);
+      padding-bottom:clamp(40px,6vh,60px); border-bottom:1.5px solid var(--rule);
+    }
+    @media (min-width:820px){ .foot-top{ grid-template-columns: minmax(0,1.6fr) repeat(3, minmax(0,1fr)); } }
+    .foot-brand .b{
+      font-weight:700; font-size:clamp(28px,4vw,46px); letter-spacing:-.03em; line-height:1; margin-bottom:18px;
+    }
+    .foot-brand p{ color:var(--ink-soft); max-width:34ch; font-size:15px; line-height:1.55; }
+    .foot-col h4{
+      font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.1em;
+      color:var(--ink-faint); margin:0 0 16px; font-weight:600;
+    }
+    .foot-col a{
+      display:block; font-size:15px; color:var(--ink-soft); padding:6px 0; transition:color .15s ease;
+    }
+    .foot-col a:hover{ color:var(--ink); }
+    .foot-bottom{
+      display:flex; justify-content:space-between; align-items:center; gap:20px; flex-wrap:wrap;
+      padding-top:clamp(24px,4vh,36px);
+      font-family:var(--mono); font-size:12px; color:var(--ink-faint);
+      text-transform:uppercase; letter-spacing:.04em;
+    }
+    .foot-bottom a{ color:var(--ink-faint); }
+    .foot-bottom a:hover{ color:var(--amber-ink); }
+    .foot-bottom .made{ display:flex; align-items:center; gap:8px; }
+    .foot-bottom .eu{ color:var(--amber-ink); }
+  
+    /* ============================================================
+       COMPARE PAGE
+       ============================================================ */
+
+    .cats, .matrix, .elsewhere, .fits, .lic{
+      padding:clamp(56px,9vh,110px) 0; border-bottom:1.5px solid var(--rule);
+    }
+    .cats .lab, .matrix .lab, .elsewhere .lab, .fits .lab, .lic .lab{
+      display:block; margin-bottom:clamp(18px,3vh,30px);
+    }
+    .cats h2, .matrix h2, .elsewhere h2, .fits h2, .lic h2{
+      font-weight:700; font-size:clamp(28px,4.4vw,56px); letter-spacing:-.035em;
+      line-height:1.02; margin:0 0 clamp(28px,5vh,52px); max-width:20ch; text-wrap:balance;
+    }
+
+    /* ---- 01 categories ---- */
+    .cat-grid{
+      display:grid; gap:0; grid-template-columns:1fr;
+      border-top:1.5px solid var(--rule); border-left:1.5px solid var(--rule);
+    }
+    @media (min-width:860px){ .cat-grid{ grid-template-columns:repeat(3,1fr); } }
+    .cat{
+      border-right:1.5px solid var(--rule); border-bottom:1.5px solid var(--rule);
+      padding:clamp(20px,2.6vw,30px); min-width:0;
+    }
+    .cat h3{
+      font-size:clamp(19px,1.7vw,23px); font-weight:700; letter-spacing:-.02em;
+      margin:0 0 6px;
+    }
+    .cat .who{
+      font-family:var(--mono); font-size:11.5px; text-transform:uppercase;
+      letter-spacing:.08em; color:var(--amber-ink); margin:0 0 14px;
+    }
+    .cat p{ margin:0; font-size:15.5px; line-height:1.6; color:var(--ink-soft); }
+    .cat-note{
+      margin:clamp(26px,4vh,40px) 0 0; max-width:78ch;
+      font-size:clamp(15px,1.2vw,17px); line-height:1.62; color:var(--ink-soft);
+      padding-left:16px; border-left:2.5px solid var(--amber);
+    }
+
+    /* ---- 02 matrix ---- */
+    .matrix-intro{
+      margin:0 0 clamp(20px,3vh,28px); max-width:70ch;
+      font-size:15px; line-height:1.6; color:var(--ink-faint);
+    }
+    .table-scroll{
+      overflow-x:auto; -webkit-overflow-scrolling:touch;
+      border:1.5px solid var(--rule); border-radius:3px; background:var(--paper);
+      min-width:0;
+    }
+    .table-scroll:focus-visible{ outline:2px solid var(--amber); outline-offset:2px; }
+    table.cmp{
+      border-collapse:collapse; width:100%; min-width:760px;
+      font-size:14px; line-height:1.45;
+    }
+    table.cmp th, table.cmp td{
+      padding:12px 14px; text-align:left; vertical-align:top;
+      border-bottom:1px solid var(--hair); border-right:1px solid var(--hair);
+    }
+    table.cmp thead th{
+      font-family:var(--mono); font-size:11.5px; text-transform:uppercase;
+      letter-spacing:.07em; font-weight:600; color:var(--ink);
+      background:var(--paper-2); border-bottom:1.5px solid var(--rule);
+      position:sticky; top:0; z-index:2;
+    }
+    table.cmp thead th.self{ background:color-mix(in srgb, var(--amber) 16%, var(--paper-2)); }
+    table.cmp th.rowhead, table.cmp tbody th{
+      font-family:var(--display); font-weight:600; font-size:13.5px;
+      color:var(--ink); background:var(--paper-2); width:210px; min-width:180px;
+    }
+    table.cmp td.self{ background:color-mix(in srgb, var(--amber) 7%, var(--paper)); font-weight:600; }
+    table.cmp td .note{
+      display:block; font-family:var(--mono); font-size:10.5px; letter-spacing:.03em;
+      color:var(--ink-faint); font-weight:400; margin-top:3px;
+    }
+    table.cmp td.yes{ color:var(--ink); }
+    table.cmp td.yes::before{ content:"● "; color:var(--amber-ink); }
+    table.cmp td.no{ color:var(--ink-soft); }
+    table.cmp td.no::before{ content:"○ "; color:var(--ink-faint); }
+    table.cmp td.part::before{ content:"◐ "; color:var(--amber-ink); }
+    table.cmp td.na{ color:var(--ink-faint); }
+    table.cmp tbody tr:last-child th, table.cmp tbody tr:last-child td{ border-bottom:none; }
+    .matrix-foot{
+      margin:clamp(22px,3.4vh,34px) 0 0; max-width:76ch;
+      font-size:clamp(15px,1.2vw,17px); line-height:1.62; color:var(--ink-soft);
+      padding-left:16px; border-left:2.5px solid var(--amber);
+    }
+
+    /* ---- 03 pick something else ---- */
+    .elsewhere{ background:var(--paper-2); }
+    .else-list{
+      display:grid; gap:0; grid-template-columns:1fr;
+      border-top:1.5px solid var(--rule); border-left:1.5px solid var(--rule);
+    }
+    @media (min-width:820px){ .else-list{ grid-template-columns:repeat(2,1fr); } }
+    .else-item{
+      border-right:1.5px solid var(--rule); border-bottom:1.5px solid var(--rule);
+      padding:clamp(20px,2.6vw,30px); min-width:0;
+    }
+    .else-item h3{
+      font-size:clamp(18px,1.6vw,22px); font-weight:700; letter-spacing:-.02em;
+      margin:0 0 10px; max-width:26ch;
+    }
+    .else-item p{ margin:0; font-size:15px; line-height:1.62; color:var(--ink-soft); }
+    .else-item strong{ color:var(--ink); font-weight:600; }
+
+    /* ---- 04 where it fits ---- */
+    .fit-grid{
+      display:grid; gap:0; grid-template-columns:1fr;
+      border-top:1.5px solid var(--rule); border-left:1.5px solid var(--rule);
+    }
+    @media (min-width:820px){ .fit-grid{ grid-template-columns:repeat(2,1fr); } }
+    .fit{
+      border-right:1.5px solid var(--rule); border-bottom:1.5px solid var(--rule);
+      padding:clamp(20px,2.6vw,30px); min-width:0;
+    }
+    .fit h3{
+      font-size:clamp(18px,1.6vw,22px); font-weight:700; letter-spacing:-.02em;
+      margin:0 0 10px; max-width:26ch;
+    }
+    .fit p{ margin:0; font-size:15px; line-height:1.62; color:var(--ink-soft); }
+    .fit a{ color:var(--amber-ink); text-underline-offset:3px; }
+
+    /* ---- 05 licensing ---- */
+    .lic-lede{
+      margin:0 0 clamp(24px,4vh,38px); max-width:72ch;
+      font-size:clamp(16px,1.3vw,18px); line-height:1.6; color:var(--ink-soft);
+    }
+    .lic-grid{
+      display:grid; gap:0; grid-template-columns:1fr;
+      border-top:1.5px solid var(--rule); border-left:1.5px solid var(--rule);
+    }
+    @media (min-width:760px){ .lic-grid{ grid-template-columns:repeat(2,1fr); } }
+    @media (min-width:1080px){ .lic-grid{ grid-template-columns:repeat(3,1fr); } }
+    .lic-cell{
+      border-right:1.5px solid var(--rule); border-bottom:1.5px solid var(--rule);
+      padding:clamp(18px,2.2vw,26px); min-width:0;
+    }
+    .lic-cell h3{
+      font-family:var(--mono); font-size:12.5px; text-transform:uppercase;
+      letter-spacing:.06em; font-weight:600; margin:0 0 10px; color:var(--ink);
+    }
+    .lic-cell p{ margin:0; font-size:14.5px; line-height:1.6; color:var(--ink-soft); }
+    .lic-cell.own{
+      background:color-mix(in srgb, var(--amber) 8%, var(--paper));
+      grid-column:1 / -1;
+    }
+    .lic-cell.own h3{ color:var(--amber-ink); }
+    .lic-cell.own p{ max-width:88ch; }
+    .lic-cell strong{ color:var(--ink); font-weight:600; }
+
+    /* ---- closer note ---- */
+    .closer-note{
+      margin:clamp(22px,3vh,30px) auto 0; max-width:56ch;
+      font-size:15px; line-height:1.6; color:var(--ink-faint); text-align:center;
+    }
+    .closer-note a{ color:var(--amber); text-underline-offset:3px; }
+
+  </style>
+
+  <!-- =========================== MASTHEAD =========================== -->
+  <header class="masthead">
+    <div class="wrap">
+      <a class="brand" href="/" aria-label="Sandcastle home">
+        <span class="glyph" aria-hidden="true">🏰</span>
+        <span>Sandcastle</span>
+        <span class="tm">v0.43.0</span>
+      </a>
+      <nav class="primary" aria-label="Primary">
+        <a class="muted" href="/compare/" aria-current="page">Compare</a>
+        <a class="muted" href="/pricing/">Pricing</a>
+        <a class="muted" href="/security/">Security</a>
+        <a class="muted" href="/eu-ai-act/">EU&nbsp;AI&nbsp;Act</a>
+        <a class="muted" href="/hub/">Hub</a>
+          <a class="muted" href="/whatsnew/">What's&nbsp;New</a>
+        <a class="cta" href="https://github.com/gizmax/Sandcastle">GitHub&nbsp;↗</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <!-- =========================== PAGE HEADER =========================== -->
+    <section class="phead" aria-labelledby="ph-title">
+      <div class="wrap">
+        <div class="kicker">
+          <span class="tick" aria-hidden="true"></span>
+          <span class="mono">Compare / Where Sandcastle Fits</span>
+        </div>
+
+        <h1 id="ph-title">Nine tools.<br><em>Three different jobs.</em></h1>
+
+        <div class="lede">
+          <p>
+            &ldquo;AI orchestration&rdquo; covers three categories that solve different problems, and most
+            comparisons pretend otherwise. This page separates them, says plainly what
+            Sandcastle is good at, and names the cases where <strong>you should pick something
+            else</strong>. Every figure was verified from primary sources on 17&nbsp;August&nbsp;2026.
+          </p>
+          <div class="meta">
+            Verified&nbsp;··&nbsp;<b>2026-08-17</b><br>
+            Sources&nbsp;··&nbsp;<b>Official docs, GitHub, pricing pages</b><br>
+            Method&nbsp;··&nbsp;<b>No vendor claims taken on trust</b>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =========================== THE THREE CATEGORIES =========================== -->
+    <section class="cats" aria-labelledby="cats-h">
+      <div class="wrap">
+        <span class="mono lab">01 / The categories</span>
+        <h2 id="cats-h">These tools are not substitutes for each other.</h2>
+
+        <div class="cat-grid">
+          <article class="cat">
+            <h3>Durable execution engines</h3>
+            <p class="who">Temporal · Prefect · Airflow</p>
+            <p>
+              Built to make work survive failure. A process dies mid-run and the workflow
+              resumes where it stopped, sometimes mid-function. Decades of operational
+              thinking, and the strongest reliability guarantees of anything on this page.
+              AI features are recent additions on top.
+            </p>
+          </article>
+
+          <article class="cat">
+            <h3>Agent frameworks</h3>
+            <p class="who">LangGraph · LangChain · CrewAI</p>
+            <p>
+              Built so a model can decide what happens next. You describe tools, state and
+              control flow in code, and the model drives. Unmatched provider ecosystems and
+              the richest primitives for agent loops, memory and tool calling.
+            </p>
+          </article>
+
+          <article class="cat">
+            <h3>Workflow orchestrators</h3>
+            <p class="who">Sandcastle · n8n · Dify</p>
+            <p>
+              Built so a <em>person</em> decides what happens next, and the model does the
+              parts models are good at. The workflow is a declared artefact — a file or a
+              canvas — rather than a program. Sandcastle sits here.
+            </p>
+          </article>
+        </div>
+
+        <p class="cat-note">
+          The honest version: if a model needs to choose its own path through an open-ended
+          problem, an agent framework fits better. If a workflow absolutely cannot lose state
+          when a machine dies, a durable execution engine fits better. Sandcastle is for the
+          large middle ground where the steps are known, the sequence is fixed, and what you
+          want is for it to be readable, reviewable and cheap to run.
+        </p>
+      </div>
+    </section>
+
+    <!-- =========================== THE TABLE =========================== -->
+    <section class="matrix" aria-labelledby="matrix-h">
+      <div class="wrap">
+        <span class="mono lab">02 / The comparison</span>
+        <h2 id="matrix-h">What actually differs.</h2>
+        <p class="matrix-intro">
+          Figures verified 2026-08-17. Star counts and prices move — check the linked source
+          before you make a decision on them.
+        </p>
+
+        <div class="table-scroll" tabindex="0" role="region" aria-label="Feature comparison table, scrolls horizontally">
+          <table class="cmp">
+            <thead>
+              <tr>
+                <th scope="col" class="rowhead">&nbsp;</th>
+                <th scope="col" class="self">Sandcastle</th>
+                <th scope="col">LangGraph</th>
+                <th scope="col">n8n</th>
+                <th scope="col">Temporal</th>
+                <th scope="col">Dify</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">Workflow is defined as</th>
+                <td class="self">YAML file</td>
+                <td>Python / JS code</td>
+                <td>Visual canvas</td>
+                <td>Code, 7&nbsp;SDKs</td>
+                <td>Visual canvas <span class="note">(YAML DSL export)</span></td>
+              </tr>
+              <tr>
+                <th scope="row">License</th>
+                <td class="self">BSL&nbsp;1.1 <span class="note">source-available</span></td>
+                <td>MIT <span class="note">library</span> · Elastic&nbsp;2.0 <span class="note">server</span></td>
+                <td>Sustainable Use <span class="note">fair-code</span></td>
+                <td>MIT</td>
+                <td>Apache&nbsp;2.0 <span class="note">+ conditions</span></td>
+              </tr>
+              <tr>
+                <th scope="row">OSI-approved open source</th>
+                <td class="self no">No</td>
+                <td class="part">Library yes, server no</td>
+                <td class="no">No</td>
+                <td class="yes">Yes</td>
+                <td class="part">Yes, with two conditions</td>
+              </tr>
+              <tr>
+                <th scope="row">Free self-hosted production use</th>
+                <td class="self no">No <span class="note">until 2030</span></td>
+                <td class="part">License key required</td>
+                <td class="part">Internal business use</td>
+                <td class="yes">Yes</td>
+                <td class="yes">Yes <span class="note">single-tenant</span></td>
+              </tr>
+              <tr>
+                <th scope="row">Workflows reviewable in git</th>
+                <td class="self yes">Yes <span class="note">plain files</span></td>
+                <td class="yes">Yes <span class="note">it's code</span></td>
+                <td class="no">No PR review <span class="note">git on Business tier</span></td>
+                <td class="yes">Yes <span class="note">it's code</span></td>
+                <td class="no">No git integration</td>
+              </tr>
+              <tr>
+                <th scope="row">Token &amp; cost tracking built in</th>
+                <td class="self yes">Yes</td>
+                <td class="part">Via LangSmith <span class="note">paid</span></td>
+                <td class="part">Partial</td>
+                <td class="no">No</td>
+                <td class="yes">Yes</td>
+              </tr>
+              <tr>
+                <th scope="row">Survives a crashed worker</th>
+                <td class="self no">No <span class="note">run is marked failed</span></td>
+                <td class="yes">Yes <span class="note">checkpointed</span></td>
+                <td class="part">Partial</td>
+                <td class="yes">Yes <span class="note">resumes mid-function</span></td>
+                <td class="part">Partial</td>
+              </tr>
+              <tr>
+                <th scope="row">Human approval steps</th>
+                <td class="self yes">Yes <span class="note">gate / approval</span></td>
+                <td class="yes">Yes <span class="note">interrupt()</span></td>
+                <td class="yes">Yes</td>
+                <td class="yes">Yes <span class="note">signals</span></td>
+                <td class="yes">Yes</td>
+              </tr>
+              <tr>
+                <th scope="row">Local models first-class</th>
+                <td class="self yes">Yes <span class="note">ollama, vLLM, MLX</span></td>
+                <td class="yes">Yes <span class="note">Ollama featured</span></td>
+                <td class="yes">Yes</td>
+                <td class="na">n/a <span class="note">you write it</span></td>
+                <td class="yes">Yes</td>
+              </tr>
+              <tr>
+                <th scope="row">Data residency enforced in code</th>
+                <td class="self yes">Yes <span class="note">EU</span></td>
+                <td class="no">No</td>
+                <td class="no">No</td>
+                <td class="no">No</td>
+                <td class="no">No</td>
+              </tr>
+              <tr>
+                <th scope="row">GitHub stars</th>
+                <td class="self">~0.1k</td>
+                <td>39.9k</td>
+                <td>201.0k</td>
+                <td>22.4k</td>
+                <td>152.7k</td>
+              </tr>
+              <tr>
+                <th scope="row">Project age</th>
+                <td class="self">5 months</td>
+                <td>~3 years</td>
+                <td>~6 years</td>
+                <td>~7 years</td>
+                <td>~2 years</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p class="matrix-foot">
+          The bottom two rows are the ones to take seriously. Sandcastle is a five-month-old
+          project with one main author; every other tool here has years of production
+          scar tissue and a community to answer your questions at 2am. That is a real
+          difference and no feature column offsets it.
+        </p>
+      </div>
+    </section>
+
+    <!-- =========================== PICK SOMETHING ELSE =========================== -->
+    <section class="elsewhere" aria-labelledby="else-h">
+      <div class="wrap">
+        <span class="mono lab">03 / Pick something else when</span>
+        <h2 id="else-h">Cases where Sandcastle is the wrong answer.</h2>
+
+        <div class="else-list">
+          <article class="else-item">
+            <h3>The run must never lose state</h3>
+            <p>
+              <strong>Choose Temporal.</strong> Its event history replays a workflow back to the
+              exact line it was executing, across process and machine failures. Sandcastle
+              persists each step to the database and can replay a run from any step, but a
+              worker that dies mid-step marks the run failed and a human decides what happens
+              next. For payment flows or anything where a lost run means a lost customer,
+              that gap matters.
+            </p>
+          </article>
+
+          <article class="else-item">
+            <h3>The model should choose its own path</h3>
+            <p>
+              <strong>Choose LangGraph or CrewAI.</strong> Sandcastle has an agent step and a
+              delegate step, but the graph is something you wrote down in advance. If the
+              value of your system is that the model decides the sequence — branching into
+              research it wasn't told about, calling tools you didn't anticipate — a framework
+              built for that will fight you less.
+            </p>
+          </article>
+
+          <article class="else-item">
+            <h3>The AI part sits inside a bigger data pipeline</h3>
+            <p>
+              <strong>Choose Airflow.</strong> If the LLM call happens between a warehouse
+              extract and a load, splitting that across two orchestrators is a permanent tax
+              on your team. Airflow's official AI provider now offers
+              <span class="mono">@task.llm</span> and <span class="mono">@task.agent</span>
+              with step-level caching, plus human-in-the-loop operators. It's young — version
+              0.7.0, first released April 2026 — but it lives where your data already is.
+            </p>
+          </article>
+
+          <article class="else-item">
+            <h3>The people building workflows don't write code</h3>
+            <p>
+              <strong>Choose n8n or Dify.</strong> A YAML file is a developer artefact. If your
+              ops or marketing team needs to build and change automations themselves, a canvas
+              they can see is worth more than a file your engineers can review. n8n's
+              integration catalogue is also an order of magnitude larger than Sandcastle's 64
+              connectors.
+            </p>
+          </article>
+
+          <article class="else-item">
+            <h3>You need OSI-approved open source today</h3>
+            <p>
+              <strong>Choose Temporal, Airflow or Prefect.</strong> Sandcastle's source is
+              published and auditable, but BSL 1.1 permits non-production use only until it
+              converts to Apache 2.0 on 24 February 2030. If your policy requires a
+              genuinely open licence for production right now, that is a hard blocker and no
+              amount of goodwill changes it.
+            </p>
+          </article>
+
+          <article class="else-item">
+            <h3>You are a Go, Java or .NET shop</h3>
+            <p>
+              <strong>Choose Temporal.</strong> Sandcastle is Python. Temporal has seven
+              official SDKs, so your existing services keep their language.
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- =========================== WHERE IT FITS =========================== -->
+    <section class="fits" aria-labelledby="fits-h">
+      <div class="wrap">
+        <span class="mono lab">04 / Where it does fit</span>
+        <h2 id="fits-h">Four cases where Sandcastle is the better tool.</h2>
+
+        <div class="fit-grid">
+          <article class="fit">
+            <h3>The workflow belongs in code review</h3>
+            <p>
+              A Sandcastle workflow is a YAML file in your repository. It diffs, it branches,
+              it gets reviewed in a pull request, it rolls back. n8n's own documentation
+              states that its source control &ldquo;doesn't support a pull request-style review
+              and merge process&rdquo; and that pulling &ldquo;overwrites any changes you've made if
+              they aren't stored in Git&rdquo; — and git integration sits on a tier costing
+              €667 per month. Dify has no git integration at all.
+            </p>
+          </article>
+
+          <article class="fit">
+            <h3>You need to know what a run cost</h3>
+            <p>
+              Cost and token accounting is in the engine and recorded per step, and a budget
+              cap on the run warns at 80% and stops it at 100% — split evenly across parallel
+              branches so a fan-out can't blow through it. Neither Temporal nor Airflow nor Prefect
+              tracks LLM tokens or cost at all — that is code you write and maintain yourself.
+              LangGraph routes it through LangSmith, which is a paid product with per-trace
+              billing.
+            </p>
+          </article>
+
+          <article class="fit">
+            <h3>The data cannot leave the EU</h3>
+            <p>
+              Residency is enforced at the runtime layer, not promised in a subprocessor list,
+              and local models are a first-class path rather than a fallback — ollama, vLLM and
+              MLX endpoints run without any cloud key present. Combined with a tamper-evident
+              audit chain and the Article-by-Article mapping on our
+              <a href="/eu-ai-act/">EU AI Act page</a>, that is a different starting position
+              from a US SaaS with an EU region.
+            </p>
+          </article>
+
+          <article class="fit">
+            <h3>You want one file, not a framework</h3>
+            <p>
+              Twenty-five step types cover parallel fan-out, conditions, loops, gates,
+              approvals, sub-workflows and deterministic steps that cost nothing to run. The
+              deterministic ones matter more than they sound: most workflows are mostly
+              plumbing, and plumbing shouldn't be billed per token.
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- =========================== LICENSING =========================== -->
+    <section class="lic" aria-labelledby="lic-h">
+      <div class="wrap">
+        <span class="mono lab">05 / Licensing, without spin</span>
+        <h2 id="lic-h">Nobody in this category is simply &ldquo;open source&rdquo;.</h2>
+
+        <p class="lic-lede">
+          It is the most misrepresented axis in the market, so here is the whole picture,
+          including the part that is inconvenient for us.
+        </p>
+
+        <div class="lic-grid">
+          <div class="lic-cell own">
+            <h3>Sandcastle · BSL 1.1</h3>
+            <p>
+              Source is public and auditable. Free for development, testing and personal
+              projects; <strong>production use requires a commercial licence</strong> until the
+              change date of 24 February 2030, when the whole thing becomes Apache 2.0. On the
+              question &ldquo;can I run this in production for free today&rdquo;, this is the most
+              restrictive licence on this page. What it buys you is a dated, contractual exit:
+              one licence covering the entire repository, no separate enterprise directory, no
+              branding requirement, and a guarantee it gets more permissive, never less.
+            </p>
+          </div>
+
+          <div class="lic-cell">
+            <h3>LangGraph · MIT + Elastic 2.0</h3>
+            <p>
+              The library is MIT. The Agent Server you self-host is Elastic 2.0, needs a
+              licence key, and reports usage to the vendor. RBAC, SSO and audit logs are
+              enterprise features.
+            </p>
+          </div>
+
+          <div class="lic-cell">
+            <h3>n8n · Sustainable Use</h3>
+            <p>
+              Not open source, and n8n says so plainly — they call it fair-code. Internal
+              business use is permitted; offering it as a service is not. Enterprise-licensed
+              files live inside the same repository.
+            </p>
+          </div>
+
+          <div class="lic-cell">
+            <h3>Dify · Apache 2.0 + conditions</h3>
+            <p>
+              Genuinely permissive for single-tenant production. Two conditions: no
+              multi-tenant service without a commercial licence, and the frontend keeps its
+              branding. Contributors grant terms that permit relicensing.
+            </p>
+          </div>
+
+          <div class="lic-cell">
+            <h3>Temporal · MIT</h3>
+            <p>
+              Unambiguous, OSI-approved, no strings. If licence purity is your deciding
+              factor, this is the cleanest answer in the category.
+            </p>
+          </div>
+
+          <div class="lic-cell">
+            <h3>Airflow · Apache 2.0</h3>
+            <p>
+              Apache 2.0 under Apache Software Foundation governance — vendor-neutral, which
+              no commercially-backed project here can offer.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =========================== FAQ =========================== -->
+    <section class="faq" aria-labelledby="faq-h">
+      <div class="wrap">
+        <span class="mono lab">06 / Straight answers</span>
+        <h2 id="faq-h">Questions people actually ask.</h2>
+
+        <div class="qa">
+          <div class="row">
+            <h3>Is Sandcastle open source?</h3>
+            <p>
+              The source is public and you can read, fork and modify it, but BSL 1.1 is not an
+              OSI-approved open source licence — source-available is the accurate term. It
+              converts to Apache 2.0 on 24 February 2030.
+            </p>
+          </div>
+          <div class="row">
+            <h3>Can I replace LangGraph with Sandcastle?</h3>
+            <p>
+              Only if your graph is fixed. LangGraph exists so a model can pick its own route
+              through a problem; Sandcastle runs a route you defined. Workflows with known
+              steps port over well. Open-ended agent loops do not.
+            </p>
+          </div>
+          <div class="row">
+            <h3>What happens if the server dies mid-run?</h3>
+            <p>
+              The run is marked failed and you decide what to do — replay it from any completed
+              step, or fork it with different inputs. It is not resumed automatically. If you
+              need automatic resumption across failures, Temporal is built for exactly that.
+            </p>
+          </div>
+          <div class="row">
+            <h3>How does this compare to n8n on integrations?</h3>
+            <p>
+              It doesn't. Sandcastle ships 64 connectors covering 229 operations; n8n's
+              catalogue is far larger. Sandcastle's argument is the workflow format, cost
+              control and residency — not catalogue size.
+            </p>
+          </div>
+          <div class="row">
+            <h3>Who is behind it and how big is the project?</h3>
+            <p>
+              It is a young project — five months old at the time of writing, with one main
+              author and a small contributor base. If your procurement process weighs
+              bus factor and community size, weigh them honestly here.
+            </p>
+          </div>
+          <div class="row">
+            <h3>Do I have to use cloud models?</h3>
+            <p>
+              No. Local inference through ollama, vLLM and MLX is a first-class path in the
+              runtime, and workflows run with no cloud API key present at all.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =========================== CLOSER =========================== -->
+    <section class="closer" aria-labelledby="closer-h">
+      <div class="wrap">
+        <p class="pre">If the fit is right, it takes one command.</p>
+        <h2 id="closer-h">Try it against your own workflow.</h2>
+        <span class="big-install" id="bigInstall" role="button" tabindex="0" aria-label="Copy: pip install sandcastle-ai">
+          <span class="pmt">$</span><span>pip install sandcastle-ai</span>
+          <span class="ci" id="bigCopyLabel">Copy</span>
+        </span>
+        <p class="closer-note">
+          Still unsure? <a href="mailto:hello@sandcastle-ai.eu">Tell us what you're building</a>
+          and we'll say honestly whether this is the right tool — including when it isn't.
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <!-- =========================== FOOTER =========================== -->
+  <footer class="foot">
+    <div class="wrap">
+      <div class="foot-top">
+        <div class="foot-brand">
+          <div class="b">🏰 Sandcastle</div>
+          <p>A source-available workflow orchestrator for AI agents. Build anything, on any model, anywhere — your rules. European-built.</p>
+        </div>
+        <div class="foot-col">
+          <h4>Product</h4>
+          <a href="/pricing/">Pricing</a>
+          <a href="/hub/">Community Hub</a>
+          <a href="/whatsnew/">What's new</a>
+          <a href="https://pypi.org/project/sandcastle-ai/">PyPI ↗</a>
+        </div>
+        <div class="foot-col">
+          <h4>Trust</h4>
+          <a href="/security/">Security</a>
+          <a href="/eu-ai-act/">EU AI Act</a>
+          <a href="https://github.com/gizmax/Sandcastle">Source ↗</a>
+          <a href="mailto:hello@sandcastle-ai.eu">Contact</a>
+        </div>
+        <div class="foot-col">
+          <h4>Build</h4>
+          <a href="https://gizmax.github.io/Sandcastle/">Documentation ↗</a>
+          <a href="https://github.com/gizmax/Sandcastle">GitHub ↗</a>
+          <a href="https://buymeacoffee.com/gizmax">Buy me a coffee ↗</a>
+        </div>
+      </div>
+      <div class="foot-bottom">
+        <span class="made">Made in <span class="eu">Europe</span> · Source-available under BSL 1.1 → Apache 2.0 (2030)</span>
+        <span>© 2026 Sandcastle · <a href="https://sandcastle-ai.eu">sandcastle-ai.eu</a></span>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+  (function(){
+    "use strict";
+    /* ---------- copy-to-clipboard ---------- */
+    function flash(el){
+      var prev = el.textContent;
+      el.textContent = "Copied ✓";
+      setTimeout(function(){ el.textContent = prev; }, 1400);
+    }
+    function copyText(txt){
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        return navigator.clipboard.writeText(txt);
+      }
+      return new Promise(function(res){
+        var t=document.createElement("textarea"); t.value=txt; document.body.appendChild(t);
+        t.select(); try{ document.execCommand("copy"); }catch(e){} document.body.removeChild(t); res();
+      });
+    }
+    var big = document.getElementById("bigInstall");
+    var bigLabel = document.getElementById("bigCopyLabel");
+    function bigCopy(){ copyText("pip install sandcastle-ai").then(function(){ flash(bigLabel); }); }
+    if(big){
+      big.addEventListener("click", bigCopy);
+      big.addEventListener("keydown", function(e){
+        if(e.key==="Enter"||e.key===" "){ e.preventDefault(); bigCopy(); }
+      });
+    }
+  })();
+  </script>
+</body>
+</html>

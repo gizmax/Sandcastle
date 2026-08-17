@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>EU AI Act — Built for the Era · Sandcastle</title>
-  <meta name="description" content="Built for the EU AI Act era. Tamper-evident audit trail (Art. 12), Annex IV documentation, risk classification (Art. 9), human oversight (Art. 14), EU-only execution. Audit-ready, self-hosted, on infrastructure you control.">
+  <meta name="description" content="EU AI Act compliance, self-hosted: tamper-evident audit trail (Art. 12), Annex IV documentation, risk classification, human oversight, EU-only execution.">
   <meta name="keywords" content="EU AI Act compliance, Article 9, Article 11, Article 12, Article 14, Annex IV, AI audit trail, AI risk management, GDPR AI, EU data residency, AI transparency report, high-risk AI, AI governance, compliance pack">
   <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
   <meta name="author" content="Tomas Pflanzer">
@@ -52,6 +52,7 @@
   {
     "@context": "https://schema.org",
     "@type": "Organization",
+    "@id": "https://sandcastle-ai.eu/#organization",
     "name": "Sandcastle",
     "url": "https://sandcastle-ai.eu",
     "logo": "https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg",
@@ -76,6 +77,22 @@
       { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://sandcastle-ai.eu/" },
       { "@type": "ListItem", "position": 2, "name": "EU AI Act", "item": "https://sandcastle-ai.eu/eu-ai-act/" }
     ]
+  }
+  </script>
+
+  <!-- Structured Data: WebPage -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "@id": "https://sandcastle-ai.eu/eu-ai-act/",
+    "url": "https://sandcastle-ai.eu/eu-ai-act/",
+    "name": "EU AI Act — Built for the Era · Sandcastle",
+    "description": "EU AI Act compliance, self-hosted: tamper-evident audit trail (Art. 12), Annex IV documentation, risk classification, human oversight, EU-only execution.",
+    "inLanguage": "en",
+    "isPartOf": { "@id": "https://sandcastle-ai.eu/#website" },
+    "about": { "@id": "https://sandcastle-ai.eu/#organization" },
+    "publisher": { "@id": "https://sandcastle-ai.eu/#organization" }
   }
   </script>
 
@@ -517,6 +534,7 @@
         <span class="tm">v0.43.0</span>
       </a>
       <nav class="primary" aria-label="Primary">
+        <a class="muted" href="/compare/">Compare</a>
         <a class="muted" href="/pricing/">Pricing</a>
         <a class="muted" href="/security/">Security</a>
         <a class="muted" href="/eu-ai-act/" aria-current="page">EU&nbsp;AI&nbsp;Act</a>
@@ -757,10 +775,10 @@
               Under <strong>Article 25</strong>, the entity that puts an AI system on the market under its own name is the provider — even if it builds on a third-party model. The Act's provider duties cannot be outsourced to your SaaS vendor's privacy policy.
             </p>
             <p>
-              Sandcastle is open-source and runs entirely on your infrastructure. The audit trail lives in <strong>your database</strong>. The logs live on <strong>your disk</strong>. Model traffic can be pinned to EU regions or to on-premise inference — no data leaves your jurisdiction without your explicit configuration.
+              Sandcastle is source-available and runs entirely on your infrastructure. The audit trail lives in <strong>your database</strong>. The logs live on <strong>your disk</strong>. Model traffic can be pinned to EU regions or to on-premise inference — no data leaves your jurisdiction without your explicit configuration.
             </p>
             <p>
-              <strong>Self-hosted sandboxes for regulated workloads.</strong> Sandcastle wires Anthropic Managed Agents self-hosted sandboxes — tool calls run in your infrastructure (Cloudflare / Daytona / Modal / Vercel / Docker), orchestration brain at Anthropic. Combine with our Memory MCP server via tunnel to fill the memory_stores gap Anthropic disclaims. <a href="/docs/managed-agents-self-hosted" style="color:var(--amber);border-bottom:1px solid var(--amber);">Read the deployment guide →</a>
+              <strong>Self-hosted sandboxes for regulated workloads.</strong> Sandcastle wires Anthropic Managed Agents self-hosted sandboxes — tool calls run in your infrastructure (Cloudflare / Daytona / Modal / Vercel / Docker), orchestration brain at Anthropic. Combine with our Memory MCP server via tunnel to fill the memory_stores gap Anthropic disclaims. <a href="https://github.com/gizmax/Sandcastle/blob/main/docs/managed-agents-self-hosted.md" style="color:var(--amber);border-bottom:1px solid var(--amber);">Read the deployment guide →</a>
             </p>
           </div>
           <ul class="so-list" aria-label="Self-hosted controls">
@@ -826,11 +844,12 @@
       <div class="foot-top">
         <div class="foot-brand">
           <div class="b">🏰 Sandcastle</div>
-          <p>An open-source workflow orchestrator for AI agents. Build anything, on any model, anywhere — your rules. European-built.</p>
+          <p>A source-available workflow orchestrator for AI agents. Build anything, on any model, anywhere — your rules. European-built.</p>
         </div>
         <div class="foot-col">
           <h4>Product</h4>
           <a href="/pricing/">Pricing</a>
+          <a href="/compare/">Compare</a>
           <a href="/hub/">Community Hub</a>
           <a href="/whatsnew/">What's new</a>
           <a href="https://pypi.org/project/sandcastle-ai/">PyPI ↗</a>
@@ -850,7 +869,7 @@
         </div>
       </div>
       <div class="foot-bottom">
-        <span class="made">Made in <span class="eu">Europe</span> · Open source under BSL 1.1 → Apache 2.0 (2030)</span>
+        <span class="made">Made in <span class="eu">Europe</span> · Source-available under BSL 1.1 → Apache 2.0 (2030)</span>
         <span>© 2026 Sandcastle · <a href="https://sandcastle-ai.eu">sandcastle-ai.eu</a></span>
       </div>
     </div>
