@@ -117,3 +117,45 @@ class TestCSPReportOnly:
 
         assert "Content-Security-Policy" in result.headers
         assert "Content-Security-Policy-Report-Only" not in result.headers
+
+
+class TestCSPPolicyContents:
+    """Lock the directives that are easy to loosen by accident.
+
+    An earlier fix for these exact two issues was written, stashed and lost;
+    these assertions exist so the next one cannot disappear silently.
+    """
+
+    def _policy(self) -> str:
+        from sandcastle.api.security_headers import _CSP_POLICY
+
+        return _CSP_POLICY
+
+    def _directive(self, name: str) -> str:
+        for part in self._policy().split("; "):
+            if part.startswith(f"{name} "):
+                return part
+        raise AssertionError(f"{name} missing from CSP policy")
+
+    def test_script_src_has_no_unsafe_inline(self):
+        # The dashboard is a Vite bundle with no inline <script>; allowing
+        # 'unsafe-inline' here would negate XSS protection entirely.
+        assert "'unsafe-inline'" not in self._directive("script-src")
+
+    def test_script_src_is_self_only(self):
+        assert self._directive("script-src") == "script-src 'self'"
+
+    def test_google_fonts_origins_are_allowed(self):
+        # index.html loads font CSS from googleapis and the files from gstatic.
+        # Omitting either makes the browser block them and fall back silently.
+        assert "https://fonts.googleapis.com" in self._directive("style-src")
+        assert "https://fonts.gstatic.com" in self._directive("font-src")
+
+    def test_style_src_still_allows_inline(self):
+        # Tailwind and some UI components inject style attributes at runtime.
+        assert "'unsafe-inline'" in self._directive("style-src")
+
+    def test_dangerous_directives_stay_locked(self):
+        assert self._directive("object-src") == "object-src 'none'"
+        assert self._directive("frame-ancestors") == "frame-ancestors 'none'"
+        assert self._directive("base-uri") == "base-uri 'self'"

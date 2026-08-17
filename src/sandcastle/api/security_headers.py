@@ -11,13 +11,29 @@ from starlette.responses import Response
 
 from sandcastle.config import settings
 
-# CSP for the dashboard SPA
+# CSP for the dashboard SPA.
+#
+# script-src is 'self' only, deliberately:
+# - 'unsafe-inline' would negate XSS protection entirely, and the dashboard
+#   does not need it - the Vite build emits a single external module bundle
+#   and no inline <script> at all.
+# - googletagmanager was listed but never used: neither dashboard/src nor the
+#   built bundle references GTM, gtag or google-analytics.
+#
+# style-src keeps 'unsafe-inline' because Tailwind and some UI components
+# inject style attributes at runtime that cannot be nonce-gated without a
+# build-pipeline change. Removing it is a future hardening task.
+#
+# The Google Fonts origins are required: the built index.html loads its CSS
+# from fonts.googleapis.com and the font files from fonts.gstatic.com. Without
+# them the browser blocks both and silently falls back to the local .woff2
+# copies, which is how this went unnoticed.
 _CSP_POLICY = (
     "default-src 'self'; "
-    "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com; "
-    "style-src 'self' 'unsafe-inline'; "
+    "script-src 'self'; "
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
     "img-src 'self' data: blob:; "
-    "font-src 'self' data:; "
+    "font-src 'self' data: https://fonts.gstatic.com; "
     "connect-src 'self' https://www.google-analytics.com https://pypi.org https://raw.githubusercontent.com; "
     "object-src 'none'; "
     "base-uri 'self'; "
