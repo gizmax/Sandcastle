@@ -17183,7 +17183,7 @@
           },
           "expected_currency": {
             "type": "string",
-            "description": "Currency symbol / code the deterministic validator strips from each amount before parsing it as a number (defends against '$1,234.50', 'EUR 42'…).",
+            "description": "Currency symbol / code the deterministic validator strips from each amount before parsing it as a number (defends against '$1,234.50', 'EUR 42'\u2026).",
             "default": "$",
             "example": "$"
           },
