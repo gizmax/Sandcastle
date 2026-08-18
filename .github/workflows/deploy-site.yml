@@ -1,0 +1,68 @@
+name: Deploy Site
+
+# The marketing site at sandcastle-ai.eu is static and lives on Webglobe
+# shared hosting - it is not served from this repository. It used to be
+# published by hand, one curl per file, which is how llms.txt, llms-full.txt
+# and og-image.jpeg ended up 404ing on the live domain while sitting in the
+# repo. This publishes the whole site/ directory on every change.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "scripts/deploy-site.sh"
+      - ".github/workflows/deploy-site.yml"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "List what would be uploaded, upload nothing"
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-site
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show what will be uploaded
+        run: bash scripts/deploy-site.sh --dry-run
+
+      - name: Upload site over FTPS
+        if: github.event_name == 'push' || inputs.dry_run != true
+        env:
+          SANDCASTLE_FTP_USER: ${{ secrets.SANDCASTLE_FTP_USER }}
+          SANDCASTLE_FTP_PASS: ${{ secrets.SANDCASTLE_FTP_PASS }}
+        run: |
+          if [ -z "$SANDCASTLE_FTP_USER" ] || [ -z "$SANDCASTLE_FTP_PASS" ]; then
+            echo "::error::SANDCASTLE_FTP_USER / SANDCASTLE_FTP_PASS are not set."
+            echo "Add them under Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+          bash scripts/deploy-site.sh
+
+      - name: Verify the live site
+        if: github.event_name == 'push' || inputs.dry_run != true
+        run: |
+          fail=0
+          for u in / /compare/ /pricing/ /security/ /whatsnew/ /hub/ /eu-ai-act/ \
+                   /llms.txt /llms-full.txt /og-image.jpeg /sitemap.xml /robots.txt; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "https://sandcastle-ai.eu$u")
+            if [ "$code" = "200" ]; then
+              printf '  %-18s %s\n' "$u" "$code"
+            else
+              printf '  %-18s %s  <-- expected 200\n' "$u" "$code"
+              fail=1
+            fi
+          done
+          # /launch/ holds internal runbooks and must stay unpublished.
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "https://sandcastle-ai.eu/launch/product-hunt.md")
+          printf '  %-18s %s (expected 403/404)\n' "/launch/*" "$code"
+          case "$code" in 403|404) ;; *) echo "::error::internal runbooks are reachable"; fail=1 ;; esac
+          exit $fail
