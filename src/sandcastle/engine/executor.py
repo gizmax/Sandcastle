@@ -8372,6 +8372,11 @@ async def _execute_step_by_type(
     race execution so composite steps cannot accidentally send hybrid step
     definitions to the generic sandbox query path.
     """
+    # Every typed step lands here, so this is where the current step id belongs.
+    # Setting it only in _execute_step_once covered the generic sandbox path and
+    # missed http, code, transform and the rest - which is most of the steps that
+    # render large outputs into a template.
+    _CURRENT_STEP_ID.set(step.id)
     if step.type == "llm":
         return await _execute_llm_step(step, context, storage)
     if step.type == "http":
