@@ -402,7 +402,10 @@ class TestResolveContextQuery:
             result = await _resolve_context_query(step, ctx)
             # Should be truncated: 100 tokens * 4 chars = 400 chars + truncation marker
             assert len(result) < len(long_text)
-            assert result.endswith("...[truncated]")
+            # The two truncation markers the engine used to have ("...[truncated]"
+            # on this path, "[... truncated to fit context window ...]" on the
+            # output_max_tokens path) were unified when compaction landed.
+            assert result.endswith("[... truncated to fit context window ...]")
 
     @pytest.mark.asyncio
     async def test_template_variables_resolved_in_query(self):

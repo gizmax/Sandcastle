@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -592,8 +595,16 @@ class StepDefinition:
     context_query: str = ""  # Search query to fetch relevant context
     context_source: str = "memory"  # "memory" | "web" | "files" | "custom"
     context_max_tokens: int = 2000  # Max tokens of context to inject
-    # Token optimization: truncate step output before passing to dependents
-    output_max_tokens: int = 0  # 0 = no limit, >0 = truncate output before passing to dependents
+    # Token optimization: shrink step output before passing to dependents
+    output_max_tokens: int = 0  # 0 = no limit, >0 = compact output before passing to dependents
+    # How oversized text is shrunk once a token budget is exceeded:
+    #   truncate  - cut at the budget (default; keeps the historical behaviour)
+    #   head_tail - keep both ends, drop the middle (free, keeps conclusions)
+    #   prune     - shorten long arrays and repeated lines (free, keeps shape)
+    #   summarize - ask a model; costs a call, so point it at a local model
+    context_strategy: str = "truncate"
+    # Model used by the summarize strategy. Empty = the workflow default model.
+    context_model: str = ""
     # Sandcastle Mesh: capabilities this step requires (e.g. ["gpu", "browser"]).
     # Empty = run locally as always. Non-empty = the dispatcher picks a live mesh
     # node whose capability manifest satisfies ALL entries (local node preferred).
@@ -727,6 +738,26 @@ def _resolve_env_vars(value: str) -> str:
         return os.environ.get(var_name, "")
 
     return re.sub(r"\$\{(\w+)\}", _replace, value)
+
+
+def _normalize_compaction_strategy(value: object) -> str:
+    """Coerce a configured context_strategy onto a known compaction strategy.
+
+    Unknown values fall back to ``truncate`` rather than raising: a typo in a
+    workflow should not stop a run, and truncate is what the engine did before
+    the strategies existed.
+    """
+    from sandcastle.engine.compaction import STRATEGIES
+
+    v = str(value or "truncate").strip().lower().replace("-", "_")
+    if v not in STRATEGIES:
+        logger.warning(
+            "Unknown context_strategy %r; falling back to 'truncate'. Valid: %s",
+            value,
+            ", ".join(STRATEGIES),
+        )
+        return "truncate"
+    return v
 
 
 def _validate_context_source(source: str) -> str:
@@ -1412,6 +1443,8 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
         context_max_tokens=data.get("context_max_tokens", 2000),
         # Token optimization
         output_max_tokens=data.get("output_max_tokens", 0),
+        context_strategy=_normalize_compaction_strategy(data.get("context_strategy", "truncate")),
+        context_model=data.get("context_model", ""),
         # Sandcastle Mesh capability requirements (coerce to list[str])
         requires=_parse_requires(data.get("requires")),
         # Self-describing metadata
