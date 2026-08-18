@@ -926,6 +926,13 @@ class WorkflowEvolution(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
     )
+    # When the worker actually picked the job up, as opposed to when it was
+    # queued. The stuck-job reaper needs this: keyed on created_at it failed
+    # evolutions that were merely waiting in the queue, or running on another
+    # worker, on every startup.
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     tenant_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -338,6 +338,9 @@ async def run_evolution_job(
             )
             return {"evolution_id": evolution_id, "status": evolution.status}
         evolution.status = "running"
+        # Stamped when this worker picks the job up, so the reaper can tell a
+        # job that is actually running from one still sitting in the queue.
+        evolution.started_at = datetime.now(timezone.utc)
         await session.commit()
 
     try:
@@ -422,13 +425,28 @@ async def _recover_stuck_evolutions() -> None:
     cutoff = datetime.now(timezone.utc) - timedelta(
         seconds=2 * settings.evolution_job_timeout
     )
+    # A row can also be stranded before it ever runs: the API commits it as
+    # queued and only then enqueues, so a Redis failure between the two left it
+    # queued forever - blocking every later start for that workflow with a 409.
+    # The route compensates now, but a process killed between the two steps
+    # cannot, so sweep long-queued rows here as well. created_at is the right
+    # clock for this one: nothing has started, and queueing is what is stuck.
+    queued_cutoff = datetime.now(timezone.utc) - timedelta(
+        seconds=2 * settings.evolution_job_timeout
+    )
     try:
         async with async_session() as session:
             result = await session.execute(
                 update(WorkflowEvolution)
                 .where(
                     WorkflowEvolution.status == "running",
-                    WorkflowEvolution.created_at <= cutoff,
+                    # started_at, not created_at: created_at is when the job was
+                    # queued, so a queued or freshly-started evolution used to be
+                    # failed on every worker startup - including one running on
+                    # another worker. Rows with no start time are skipped rather
+                    # than reaped on a guess.
+                    WorkflowEvolution.started_at.isnot(None),
+                    WorkflowEvolution.started_at <= cutoff,
                 )
                 .values(
                     status="failed",
@@ -436,11 +454,26 @@ async def _recover_stuck_evolutions() -> None:
                     error="Worker crashed or evolution job timed out",
                 )
             )
-            if result.rowcount:
+            queued_result = await session.execute(
+                update(WorkflowEvolution)
+                .where(
+                    WorkflowEvolution.status == "queued",
+                    WorkflowEvolution.created_at <= queued_cutoff,
+                )
+                .values(
+                    status="failed",
+                    completed_at=datetime.now(timezone.utc),
+                    error="Never picked up by a worker after being queued",
+                )
+            )
+            total = (result.rowcount or 0) + (queued_result.rowcount or 0)
+            if total:
                 await session.commit()
                 logger.warning(
-                    "Recovered %d stuck evolution job(s)",
-                    result.rowcount,
+                    "Recovered %d stuck evolution job(s) (%d running, %d queued)",
+                    total,
+                    result.rowcount or 0,
+                    queued_result.rowcount or 0,
                 )
     except Exception as exc:
         logger.error("Failed to recover stuck evolutions on startup: %s", exc)
