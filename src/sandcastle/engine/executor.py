@@ -1819,6 +1819,8 @@ async def execute_step_with_retry(
                             cost_usd=total_attempt_cost_usd + fallback_result.cost_usd,
                             duration_seconds=result.duration_seconds + fallback_result.duration_seconds,
                             attempt=attempt,
+                            tokens_saved=context._compaction_saved.pop(step.id, 0),
+                            compaction_strategy=context._compaction_strategy_used.pop(step.id, None),
                         )
                         # Combine costs from all attempts + fallback
                         fallback_result.cost_usd += total_attempt_cost_usd
@@ -8533,6 +8535,8 @@ async def _prepare_and_run_step(
                 cost_usd=result.cost_usd,
                 duration_seconds=result.duration_seconds,
                 model=model,
+                tokens_saved=context._compaction_saved.pop(step.id, 0),
+                compaction_strategy=context._compaction_strategy_used.pop(step.id, None),
             )
         else:
             async with context._lock:
