@@ -6,8 +6,12 @@ the evolution engine does today. These columns let the engine record what the
 provider actually reported, and how many tokens context compaction removed
 before the step ran.
 
-Revision ID: 019
-Revises: 018
+Renumbered from 019 to 021 when it landed after two migrations of the same
+number: 019 (missing check constraints) and 020 (evolution started_at) reached
+main first. Nothing about the migration itself changed.
+
+Revision ID: 021
+Revises: 020
 Create Date: 2026-08-18
 """
 
@@ -19,8 +23,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "019"
-down_revision: str | None = "018"
+revision: str = "021"
+down_revision: str | None = "020"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
