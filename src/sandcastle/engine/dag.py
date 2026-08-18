@@ -1684,13 +1684,32 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
                     f"Loop step '{step.id}' max_iterations must be <= 10000, "
                     f"got {step.loop_config.max_iterations}"
                 )
+            # Unlike condition/classify/race, loop bodies were never checked.
+            # A loop listing itself recurses through the executor's dispatcher
+            # until the stack gives out, and the resulting RecursionError is
+            # swallowed by the retry wrapper, so the step reports success while
+            # the worker is gone. Same reasoning as the race check below.
+            if step.loop_config:
+                for sid in step.loop_config.step_ids:
+                    if sid == step.id:
+                        errors.append(
+                            f"Loop step '{step.id}' cannot include itself in step_ids"
+                        )
+                    elif sid not in step_ids:
+                        errors.append(
+                            f"Loop step '{step.id}' references unknown step '{sid}'"
+                        )
         elif step.type == "race":
             if not step.race_config or not step.race_config.branches:
                 errors.append(f"Race step '{step.id}' must have race_config with branches")
             if step.race_config:
                 for branch in step.race_config.branches:
                     for sid in branch:
-                        if sid not in step_ids:
+                        if sid == step.id:
+                            errors.append(
+                                f"Race step '{step.id}' cannot include itself in a branch"
+                            )
+                        elif sid not in step_ids:
                             errors.append(f"Race step '{step.id}' references unknown step '{sid}'")
         elif step.type == "sensor":
             if not step.sensor_config or not step.sensor_config.url:

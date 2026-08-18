@@ -21,9 +21,17 @@ logger = logging.getLogger(__name__)
 
 # Valid severity levels for policy definitions
 VALID_SEVERITIES = frozenset({"critical", "high", "medium", "low"})
+# "webhooks" is accepted alongside "webhook": the privacy router's own default
+# config uses the plural, so rejecting it turned a shipped default into a
+# configuration error - which, before this was made fail-closed, silently
+# disabled every policy on the step.
 VALID_REDACTION_TARGETS = frozenset(
-    {"output", "outputs", "storage", "webhook", "logs"}
+    {"output", "outputs", "storage", "webhook", "webhooks", "logs"}
 )
+
+
+class PolicyConfigError(ValueError):
+    """A policy definition is malformed and no engine can be built from it."""
 
 
 # --- Built-in regex patterns ---
@@ -121,7 +129,7 @@ class PolicyEngine:
         """Validate policy definitions for correctness."""
         for policy in self.policies:
             if policy.severity not in VALID_SEVERITIES:
-                raise ValueError(
+                raise PolicyConfigError(
                     f"Invalid severity '{policy.severity}' for policy '{policy.id}'. "
                     f"Must be one of: {', '.join(sorted(VALID_SEVERITIES))}"
                 )
@@ -130,7 +138,7 @@ class PolicyEngine:
                     set(policy.action.apply_to) - VALID_REDACTION_TARGETS
                 )
                 if invalid_targets:
-                    raise ValueError(
+                    raise PolicyConfigError(
                         f"Invalid redaction target(s) for policy '{policy.id}': "
                         f"{', '.join(sorted(invalid_targets))}"
                     )

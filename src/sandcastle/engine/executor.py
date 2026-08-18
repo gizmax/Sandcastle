@@ -111,6 +111,9 @@ class RunContext:
     _file_read_counts: dict[str, int] = field(default_factory=dict, repr=False)
     _seen_prompt_hashes: set[str] = field(default_factory=set, repr=False)
     _step_output_max_tokens: dict[str, int] = field(default_factory=dict, repr=False)
+    # Privacy router for this run, so the event-bus publish can scrub before
+    # emitting rather than relying on the later DB-write scrub.
+    _privacy_router: Any = field(default=None, repr=False)
     admin_trusted: bool = field(default=False)
     # Tenant ID is propagated into the run so sub-workflow + delegate steps
     # can inherit it (round 9 multi-tenant memory isolation).
@@ -152,6 +155,7 @@ class RunContext:
             _file_read_counts=dict(self._file_read_counts),
             _seen_prompt_hashes=set(self._seen_prompt_hashes),
             _step_output_max_tokens=dict(self._step_output_max_tokens),
+            _privacy_router=self._privacy_router,
             admin_trusted=self.admin_trusted,
             tenant_id=self.tenant_id,
             cassette=self.cassette,
@@ -1408,6 +1412,41 @@ _HYBRID_STEP_TYPES = {
 }
 
 
+# Distinguishes "no policy produced a value for this target" from a policy that
+# legitimately produced None.
+_MISSING_POLICY_OUTPUT = object()
+
+
+def _scrub_for_event_bus(output: Any, step_id: str, context: Any) -> Any:
+    """Redact PII before an output is published to the event bus.
+
+    Subscribers receive events as they happen and nothing rewrites them
+    afterwards, so anything published unscrubbed stays that way - unlike the DB
+    row, which _handle_step_result later overwrites with a scrubbed value. When
+    scrubbing fails the output is withheld rather than published raw: a missing
+    preview is recoverable, a leaked one is not.
+    """
+    router = getattr(context, "_privacy_router", None)
+    if router is None or "outputs" not in getattr(router.config, "apply_to", ()):
+        return output
+    try:
+        scrubbed, matches = router.scrub_dict(output)
+        if matches:
+            logger.info(
+                "PrivacyRouter: redacted %d PII match(es) from step '%s' event",
+                len(matches),
+                step_id,
+            )
+        return scrubbed
+    except Exception as exc:
+        logger.warning(
+            "PrivacyRouter scrub failed for step '%s' event, withholding output: %s",
+            step_id,
+            exc,
+        )
+        return "[output withheld: PII scrubbing failed]"
+
+
 async def execute_step_with_retry(
     step: StepDefinition,
     context: RunContext,
@@ -1652,10 +1691,19 @@ async def execute_step_with_retry(
                 )
 
                 # Broadcast step.completed event (truncate large outputs for event bus)
+                #
+                # The fallback used to be result.output, i.e. the raw value. PII
+                # scrubbing for the default apply_to target ("outputs") happens
+                # later, in _handle_step_result, so hybrid steps - which only
+                # started reaching this publish in this batch - leaked
+                # unscrubbed output onto the bus. The DB row self-corrects via
+                # upsert; a published event does not.
                 _evt_output = result.policy_outputs.get(
                     "logs",
-                    result.policy_outputs.get("webhook", result.output),
+                    result.policy_outputs.get("webhook", _MISSING_POLICY_OUTPUT),
                 )
+                if _evt_output is _MISSING_POLICY_OUTPUT:
+                    _evt_output = _scrub_for_event_bus(result.output, step.id, context)
                 if isinstance(_evt_output, str) and len(_evt_output) > 4096:
                     _evt_output = _evt_output[:4096] + "...[truncated]"
                 event_bus.publish(
@@ -2074,6 +2122,23 @@ async def _save_to_cache(
         logger.debug(f"Cache save failed: {e}")
 
 
+def _policy_config_failure(result: Any, step: Any, exc: Exception) -> Any:
+    """Fail a step whose policy configuration is invalid.
+
+    Guardrails that cannot be built are not guardrails. Returning the step's
+    output here would ship data that a `redact` or `block` policy was meant to
+    stop, so the step fails closed and names the policy that is wrong.
+    """
+    logger.error(
+        "Policy configuration invalid for step '%s': %s", step.id, exc
+    )
+    result.status = "failed"
+    result.error = f"Invalid policy configuration: {exc}"
+    result.retryable = False
+    result.policies_applied = False
+    return result
+
+
 async def _apply_step_policies(
     step: StepDefinition,
     context: RunContext,
@@ -2128,13 +2193,24 @@ async def _apply_step_policies(
     if step.policies:
         try:
             from sandcastle.engine.policy import (
+                PolicyConfigError,
                 PolicyEngine,
                 resolve_step_policies,
             )
 
             applicable = resolve_step_policies(step.policies, [])
             if applicable:
-                eval_result = await PolicyEngine(applicable).evaluate(
+                # Constructed outside the broad except below on purpose: a
+                # malformed policy must not be swallowed. One bad apply_to
+                # value used to disable every policy on the step - including
+                # block and inject_approval - because they share one engine.
+                # Misconfigured guardrails now fail the step instead of
+                # silently letting the output through.
+                try:
+                    _engine = PolicyEngine(applicable)
+                except PolicyConfigError as cfg_exc:
+                    return _policy_config_failure(result, step, cfg_exc)
+                eval_result = await _engine.evaluate(
                     step_id=step.id,
                     output=output,
                     context={
@@ -8305,13 +8381,31 @@ async def _execute_step_by_type(
             error=f"{step.type} step requires its parent workflow",
             retryable=False,
         )
-    if step.type == "loop":
-        return await _execute_loop_step(
-            step, context, sandbox, storage, workflow, depth
-        )
-    if step.type == "race":
+    if step.type in {"loop", "race"}:
+        # Composite steps recurse through this dispatcher, so depth has to grow
+        # with each level or a cycle runs until the stack gives out - and the
+        # RecursionError would be swallowed by the retry wrapper, leaving the
+        # step reported as completed. dag.validate() rejects a step that lists
+        # itself, but an indirect cycle (A -> B -> A) still reaches here.
+        from sandcastle.config import settings as _depth_settings
+
+        max_depth = _depth_settings.max_workflow_depth
+        if depth >= max_depth:
+            return StepResult(
+                step_id=step.id,
+                status="failed",
+                error=(
+                    f"Max workflow depth ({max_depth}) exceeded at {step.type} "
+                    f"step '{step.id}' - check for a cycle in its step_ids"
+                ),
+                retryable=False,
+            )
+        if step.type == "loop":
+            return await _execute_loop_step(
+                step, context, sandbox, storage, workflow, depth + 1
+            )
         return await _execute_race_step(
-            step, context, sandbox, storage, workflow, depth
+            step, context, sandbox, storage, workflow, depth + 1
         )
     if step.type == "sensor":
         return await _execute_sensor_step(step, context)
@@ -9154,6 +9248,11 @@ async def execute_workflow(
             )
     except Exception as e:
         logger.warning("Could not initialize PrivacyRouter: %s", e)
+
+    # The router is built after the context, so attach it here. The event-bus
+    # publish reads it from the context to scrub before emitting; without this
+    # it would fall back to publishing the raw output.
+    context._privacy_router = privacy_router
 
     logger.info(
         "Sandshore runtime: e2b_key=%s, backend=%s",
