@@ -125,6 +125,8 @@ interface StepCardProps {
   stepType?: string;
   artifactUrl?: string;
   model?: string | null;
+  tokensSaved?: number;
+  compactionStrategy?: string | null;
   runId?: string;
   onReplay?: (stepId: string) => void;
   onFork?: (stepId: string) => void;
@@ -146,6 +148,8 @@ export function StepCard({
   stepType,
   artifactUrl,
   model,
+  tokensSaved,
+  compactionStrategy,
   runId,
   onReplay,
   onFork,
@@ -204,6 +208,14 @@ export function StepCard({
             )}
             <span>{formatDuration(durationSeconds)}</span>
             <span>{formatCost(costUsd)}</span>
+            {!!tokensSaved && tokensSaved > 0 && (
+              <span
+                className="rounded-md bg-success/10 px-1.5 py-0.5 font-mono text-[11px] text-success"
+                title={`Context compaction removed ~${tokensSaved.toLocaleString()} tokens before this step ran${compactionStrategy ? ` (${compactionStrategy})` : ""}`}
+              >
+                −{tokensSaved.toLocaleString()} tok
+              </span>
+            )}
             {attempt > 1 && <span>attempt {attempt}</span>}
           </div>
         </div>

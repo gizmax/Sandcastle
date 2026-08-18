@@ -513,6 +513,12 @@ class StepStatusResponse(BaseModel):
     started_at: str | None = None
     pdf_artifact: bool = False
     model: str | None = Field(None, description="Provider/model that ran the step")
+    tokens_saved: int = Field(
+        0, ge=0, description="Tokens removed by context compaction before this step ran"
+    )
+    compaction_strategy: str | None = Field(
+        None, description="Compaction strategy applied, when one was"
+    )
 
 
 class HealthResponse(BaseModel):

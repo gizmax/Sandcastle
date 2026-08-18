@@ -6026,6 +6026,8 @@ async def get_run(run_id: str, req: Request) -> ApiResponse:
             duration_seconds=s.duration_seconds,
             attempt=s.attempt,
             error=s.error,
+            tokens_saved=s.tokens_saved or 0,
+            compaction_strategy=s.compaction_strategy,
             started_at=s.started_at.isoformat() if s.started_at else None,
             pdf_artifact=bool(
                 isinstance(s.output_data, dict) and s.output_data.get("_pdf_artifact")

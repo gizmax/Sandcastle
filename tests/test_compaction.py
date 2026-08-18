@@ -269,3 +269,32 @@ class TestResultDataclass:
     def test_saved_never_negative(self):
         r = CompactionResult("x", tokens_before=10, tokens_after=50, strategy="prune")
         assert r.tokens_saved == 0
+
+
+class TestApiSurface:
+    """The saving has to reach the dashboard, or it may as well not be measured."""
+
+    def test_step_response_defaults_to_zero(self):
+        from sandcastle.api.schemas import StepStatusResponse
+
+        r = StepStatusResponse(step_id="a", status="completed")
+        assert r.tokens_saved == 0
+        assert r.compaction_strategy is None
+
+    def test_step_response_carries_compaction_fields(self):
+        from sandcastle.api.schemas import StepStatusResponse
+
+        r = StepStatusResponse(
+            step_id="a", status="completed", tokens_saved=1234, compaction_strategy="head_tail"
+        )
+        assert r.tokens_saved == 1234
+        assert r.compaction_strategy == "head_tail"
+
+    def test_negative_savings_rejected(self):
+        import pytest as _pytest
+        from pydantic import ValidationError
+
+        from sandcastle.api.schemas import StepStatusResponse
+
+        with _pytest.raises(ValidationError):
+            StepStatusResponse(step_id="a", status="completed", tokens_saved=-1)
