@@ -259,9 +259,10 @@ def resolve_variable(var_path: str, context: RunContext) -> Any:
         if parts[2] == "output":
             if len(parts) == 3:
                 # Apply output_max_tokens truncation if configured
-                max_tok = context._step_output_max_tokens.get(step_id, 0)
-                if max_tok > 0 and isinstance(step_data, str):
-                    step_data = _compact_for_context(context, step_id, step_data, max_tok)
+                # Compaction deliberately does NOT happen here: this returns
+                # the raw value so `.field` traversal keeps working. Shrinking
+                # happens where the value is rendered into text, in
+                # resolve_templates._replace.
                 return step_data
             if step_data is None:
                 return None
@@ -350,6 +351,18 @@ def resolve_templates(
             raw = json.dumps(value)
         else:
             raw = str(value)
+        # Compaction runs here, not in resolve_variable, because that returns
+        # the value with its type intact so `{steps.x.output.field}` can still
+        # traverse it. Only once a value is rendered into a template is it
+        # unavoidably text - and only then does its token cost become real.
+        # Step outputs are dicts far more often than strings (code and http
+        # steps both return them), which an isinstance(str) check upstream
+        # would silently skip.
+        if var_path.startswith("steps."):
+            _sid = var_path.split(".")[1] if len(var_path.split(".")) > 1 else ""
+            _max_tok = context._step_output_max_tokens.get(_sid, 0)
+            if _max_tok > 0:
+                raw = _compact_for_context(context, _sid, raw, _max_tok)
         # Escape braces in user-provided input values, step outputs, and
         # memory values to prevent template injection. Only built-in
         # variables (run_id, date) and env vars are trusted sources.

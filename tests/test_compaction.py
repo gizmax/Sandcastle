@@ -221,48 +221,115 @@ steps:
 
 
 class TestEngineWiring:
-    """The resolve path must apply the step's strategy and record the saving."""
+    """Exercise the real path: resolve_templates, not resolve_variable.
 
-    def _ctx(self, strategy: str):
+    Compaction lives where a value is rendered into text. Testing the layer
+    underneath is how two bugs shipped - one booking savings against the wrong
+    step, one skipping every dict-valued output.
+    """
+
+    def _ctx(self, strategy: str, output=None):
         from sandcastle.engine.executor import RunContext
 
         ctx = RunContext(run_id="r1", input={})
-        ctx.step_outputs["research"] = "START-MARKER " + "x" * 20000 + " END-MARKER"
+        ctx.step_outputs["research"] = (
+            output if output is not None
+            else "START-MARKER " + "x" * 20000 + " END-MARKER"
+        )
         ctx._step_output_max_tokens = {"research": 200}
         ctx._step_context_strategy = {"research": strategy}
         return ctx
 
-    def test_truncate_still_default_behaviour(self):
-        from sandcastle.engine.executor import resolve_variable
+    def _render(self, ctx):
+        from sandcastle.engine.executor import resolve_templates
 
-        ctx = self._ctx("truncate")
-        out = resolve_variable("steps.research.output", ctx)
-        assert out.endswith("[... truncated to fit context window ...]")
+        return resolve_templates("data: {steps.research.output}", ctx, ["research"])
+
+    def test_truncate_still_default_behaviour(self):
+        out = self._render(self._ctx("truncate"))
+        assert "truncated to fit context window" in out
 
     def test_head_tail_preserves_the_ending(self):
-        from sandcastle.engine.executor import resolve_variable
+        assert "END-MARKER" in self._render(self._ctx("head_tail"))
 
+    def test_saving_is_recorded(self):
         ctx = self._ctx("head_tail")
-        out = resolve_variable("steps.research.output", ctx)
-        assert "END-MARKER" in out
+        self._render(ctx)
+        assert sum(ctx._compaction_saved.values()) > 0
 
-    def test_saving_is_recorded_for_the_step(self):
-        from sandcastle.engine.executor import resolve_variable
+    def test_dict_output_is_compacted_too(self):
+        """Code and http steps return dicts; an isinstance(str) gate skipped them."""
+        payload = {"rows": [{"i": i, "note": "filler"} for i in range(400)], "verdict": "KEEP"}
+        ctx = self._ctx("prune", output=payload)
+        out = self._render(ctx)
+        assert len(out) < 4000, "dict output must be compacted, not passed through"
+        assert sum(ctx._compaction_saved.values()) > 0
 
-        ctx = self._ctx("head_tail")
-        resolve_variable("steps.research.output", ctx)
-        assert ctx._compaction_saved.get("research", 0) > 0
-        assert ctx._compaction_strategy_used.get("research") == "head_tail"
+    def test_list_output_is_compacted_too(self):
+        ctx = self._ctx("prune", output=[{"i": i} for i in range(500)])
+        self._render(ctx)
+        assert sum(ctx._compaction_saved.values()) > 0
 
     def test_nothing_recorded_when_output_fits(self):
-        from sandcastle.engine.executor import RunContext, resolve_variable
+        from sandcastle.engine.executor import RunContext, resolve_templates
 
         ctx = RunContext(run_id="r1", input={})
         ctx.step_outputs["small"] = "tiny"
         ctx._step_output_max_tokens = {"small": 500}
         ctx._step_context_strategy = {"small": "head_tail"}
-        resolve_variable("steps.small.output", ctx)
-        assert ctx._compaction_saved.get("small", 0) == 0
+        resolve_templates("{steps.small.output}", ctx, ["small"])
+        assert not ctx._compaction_saved
+
+    def test_field_traversal_still_works(self):
+        """Compaction must not break `{steps.x.output.field}`."""
+        from sandcastle.engine.executor import resolve_templates
+
+        ctx = self._ctx("prune", output={"verdict": "KEEP", "big": "z" * 20000})
+        out = resolve_templates("v={steps.research.output.verdict}", ctx, ["research"])
+        assert out == "v=KEEP"
+
+
+class TestSavingsAttribution:
+    """The saving belongs to the step whose prompt shrank, not the one it read."""
+
+    def _ctx(self):
+        from sandcastle.engine.executor import RunContext
+
+        ctx = RunContext(run_id="r1", input={})
+        ctx.step_outputs["producer"] = "HEAD " + "x" * 20000 + " TAIL"
+        ctx._step_output_max_tokens = {"producer": 200}
+        ctx._step_context_strategy = {"producer": "head_tail"}
+        return ctx
+
+    def _render_as(self, ctx, reader):
+        from sandcastle.engine.executor import _CURRENT_STEP_ID, resolve_templates
+
+        token = _CURRENT_STEP_ID.set(reader)
+        try:
+            return resolve_templates("{steps.producer.output}", ctx, ["producer"])
+        finally:
+            _CURRENT_STEP_ID.reset(token)
+
+    def test_booked_against_the_reader(self):
+        ctx = self._ctx()
+        self._render_as(ctx, "consumer")
+        assert ctx._compaction_saved.get("consumer", 0) > 0
+        assert "producer" not in ctx._compaction_saved
+        assert ctx._compaction_strategy_used.get("consumer") == "head_tail"
+
+    def test_two_readers_each_get_their_own(self):
+        ctx = self._ctx()
+        self._render_as(ctx, "reader_a")
+        self._render_as(ctx, "reader_b")
+        assert ctx._compaction_saved["reader_a"] > 0
+        assert ctx._compaction_saved["reader_b"] > 0
+
+    def test_falls_back_to_producer_outside_a_step(self):
+        from sandcastle.engine.executor import resolve_templates
+
+        ctx = self._ctx()
+        resolve_templates("{steps.producer.output}", ctx, ["producer"])
+        assert ctx._compaction_saved.get("producer", 0) > 0
 
 
 class TestResultDataclass:
@@ -298,67 +365,3 @@ class TestApiSurface:
 
         with _pytest.raises(ValidationError):
             StepStatusResponse(step_id="a", status="completed", tokens_saved=-1)
-
-
-class TestSavingsAttribution:
-    """The saving must land on the step whose prompt shrank, not the one it read.
-
-    The first implementation booked it against the producer while the save path
-    read it back by the consumer's id, so tokens_saved was always 0 in a real
-    run. Unit tests missed it because they only checked the write half.
-    """
-
-    def test_saving_is_booked_against_the_reading_step(self):
-        from sandcastle.engine.executor import (
-            _CURRENT_STEP_ID,
-            RunContext,
-            resolve_variable,
-        )
-
-        ctx = RunContext(run_id="r1", input={})
-        ctx.step_outputs["producer"] = "HEAD " + "x" * 20000 + " TAIL"
-        ctx._step_output_max_tokens = {"producer": 200}
-        ctx._step_context_strategy = {"producer": "head_tail"}
-
-        token = _CURRENT_STEP_ID.set("consumer")
-        try:
-            resolve_variable("steps.producer.output", ctx)
-        finally:
-            _CURRENT_STEP_ID.reset(token)
-
-        assert ctx._compaction_saved.get("consumer", 0) > 0, "reader should carry it"
-        assert "producer" not in ctx._compaction_saved, "producer must not"
-        assert ctx._compaction_strategy_used.get("consumer") == "head_tail"
-
-    def test_two_readers_each_get_their_own_saving(self):
-        from sandcastle.engine.executor import (
-            _CURRENT_STEP_ID,
-            RunContext,
-            resolve_variable,
-        )
-
-        ctx = RunContext(run_id="r1", input={})
-        ctx.step_outputs["producer"] = "HEAD " + "y" * 20000 + " TAIL"
-        ctx._step_output_max_tokens = {"producer": 200}
-        ctx._step_context_strategy = {"producer": "head_tail"}
-
-        for reader in ("reader_a", "reader_b"):
-            token = _CURRENT_STEP_ID.set(reader)
-            try:
-                resolve_variable("steps.producer.output", ctx)
-            finally:
-                _CURRENT_STEP_ID.reset(token)
-
-        # One oversized output read twice costs twice, so it saves twice.
-        assert ctx._compaction_saved["reader_a"] > 0
-        assert ctx._compaction_saved["reader_b"] > 0
-
-    def test_falls_back_to_producer_id_outside_a_step(self):
-        from sandcastle.engine.executor import RunContext, resolve_variable
-
-        ctx = RunContext(run_id="r1", input={})
-        ctx.step_outputs["producer"] = "HEAD " + "z" * 20000 + " TAIL"
-        ctx._step_output_max_tokens = {"producer": 200}
-        ctx._step_context_strategy = {"producer": "head_tail"}
-        resolve_variable("steps.producer.output", ctx)
-        assert ctx._compaction_saved.get("producer", 0) > 0
