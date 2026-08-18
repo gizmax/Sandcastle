@@ -567,6 +567,10 @@ class TestNewConnectorRegistryEntries:
     def test_azure_blob_credentials(self):
         tool = TOOL_REGISTRY["azure-blob"]
         assert "TOOL_AZURE_STORAGE_CONNECTION_STRING" in tool.credential_env_vars
+        assert [
+            "TOOL_AZURE_STORAGE_ACCOUNT",
+            "TOOL_AZURE_STORAGE_KEY",
+        ] in tool.alternative_credential_env_vars
 
     def test_azure_blob_connector_file(self):
         assert TOOL_REGISTRY["azure-blob"].connector_file == "azure-blob.mjs"

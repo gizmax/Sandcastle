@@ -5420,6 +5420,29 @@ def _add_connection_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_json_flag_to_subcommands(parser: argparse.ArgumentParser) -> None:
+    """Allow the global ``--json`` flag at every subcommand level.
+
+    Subparser defaults use ``SUPPRESS`` so an omitted child flag does not
+    overwrite a value already parsed by its parent.
+    """
+    for action in parser._actions:
+        if not isinstance(action, argparse._SubParsersAction):
+            continue
+        for child in action.choices.values():
+            json_action = child._option_string_actions.get("--json")
+            if json_action is None:
+                child.add_argument(
+                    "--json",
+                    action="store_true",
+                    default=argparse.SUPPRESS,
+                    help="Output raw JSON instead of formatted tables",
+                )
+            else:
+                json_action.default = argparse.SUPPRESS
+            _add_json_flag_to_subcommands(child)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     """Build the full CLI argument parser."""
     from sandcastle import __version__
@@ -6126,6 +6149,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # --- help (explicit grouped help command) ---
     subparsers.add_parser("help", help="Show grouped help (Build / Run / Improve / Operate)")
 
+    _add_json_flag_to_subcommands(parser)
     return parser
 
 

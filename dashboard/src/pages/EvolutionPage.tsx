@@ -50,6 +50,7 @@ interface Evolution {
   budget_limit_usd: number | null;
   created_at: string | null;
   completed_at: string | null;
+  error: string | null;
 }
 
 interface Iteration {
@@ -128,92 +129,74 @@ const EXAMPLE_EVAL_SUITES: { label: string; description: string; yaml: string }[
   {
     label: "Quality check",
     description: "Basic pass/fail assertions",
-    yaml: `suite:
-  name: quality-check
-  description: Verify output correctness with pass/fail assertions
-  cases:
-    - name: basic-output-valid
-      input:
-        query: "Summarize the benefits of automation"
-      assertions:
-        - type: contains
-          value: "efficiency"
-        - type: min_length
-          value: 50
-    - name: no-hallucination
-      input:
-        query: "What is 2 + 2?"
-      assertions:
-        - type: equals
-          value: "4"
-        - type: max_length
-          value: 10`,
+    yaml: `description: Verify output correctness with pass/fail assertions
+cases:
+  - name: basic-output-valid
+    input:
+      query: "Summarize the benefits of automation"
+    assertions:
+      - type: not_empty
+      - type: contains
+        value: "efficiency"
+  - name: no-hallucination
+    input:
+      query: "What is 2 + 2?"
+    assertions:
+      - type: contains
+        value: "4"`,
   },
   {
     label: "Cost optimization",
     description: "Output quality while minimizing cost",
-    yaml: `suite:
-  name: cost-optimization
-  description: Maintain quality while reducing token usage and cost
-  cases:
-    - name: concise-response
-      input:
-        query: "Explain quantum computing in one paragraph"
-      assertions:
-        - type: max_tokens
-          value: 200
-        - type: contains
-          value: "qubit"
-        - type: min_quality
-          value: 0.7
-    - name: efficient-extraction
-      input:
-        query: "Extract the main topic from: AI is transforming healthcare"
-      assertions:
-        - type: max_tokens
-          value: 20
-        - type: contains
-          value: "healthcare"`,
+    yaml: `description: Maintain quality while reducing execution cost
+cases:
+  - name: concise-response
+    input:
+      query: "Explain quantum computing in one paragraph"
+    assertions:
+      - type: max_cost
+        value: 0.05
+      - type: contains
+        value: "qubit"
+  - name: efficient-extraction
+    input:
+      query: "Extract the main topic from: AI is transforming healthcare"
+    assertions:
+      - type: max_cost
+        value: 0.02
+      - type: contains
+        value: "healthcare"`,
   },
   {
     label: "Accuracy benchmark",
     description: "Detailed accuracy scoring with multiple test cases",
-    yaml: `suite:
-  name: accuracy-benchmark
-  description: Multi-case accuracy evaluation with weighted scoring
-  scoring:
-    method: weighted_average
-  cases:
-    - name: factual-recall
-      weight: 2.0
-      input:
-        query: "What is the capital of France?"
-      assertions:
-        - type: equals
-          value: "Paris"
-        - type: max_latency_ms
-          value: 3000
-    - name: reasoning-task
-      weight: 3.0
-      input:
-        query: "If a train travels 60 km/h for 2.5 hours, how far does it go?"
-      assertions:
-        - type: contains
-          value: "150"
-        - type: min_quality
-          value: 0.9
-    - name: edge-case-handling
-      weight: 1.0
-      input:
-        query: ""
-      assertions:
-        - type: not_empty
-        - type: contains
-          value: "provide"`,
+    yaml: `description: Multi-case accuracy evaluation
+cases:
+  - name: factual-recall
+    input:
+      query: "What is the capital of France?"
+    assertions:
+      - type: contains
+        value: "Paris"
+      - type: max_duration
+        value: 30
+  - name: reasoning-task
+    input:
+      query: "If a train travels 60 km/h for 2.5 hours, how far does it go?"
+    assertions:
+      - type: contains
+        value: "150"
+      - type: not_empty
+  - name: edge-case-handling
+    input:
+      query: ""
+    assertions:
+      - type: not_empty`,
   },
 ];
 
-const DEFAULT_EVAL_SUITE = "suite:\n  name: my-eval\n  cases:\n    - name: baseline\n      input: {}";
+const DEFAULT_EVAL_SUITE =
+  "description: Basic evolution check\ncases:\n  - name: baseline\n    input: {}\n    assertions:\n      - type: not_empty";
 
 // --- Start Evolution Modal ---
 
@@ -452,7 +435,7 @@ function StartEvolutionModal({ initialWorkflow, onClose, onStart, workflows }: S
               </label>
               <input
                 type="number"
-                min={0}
+                min={0.01}
                 step={0.01}
                 value={budgetLimit}
                 onChange={(e) => setBudgetLimit(e.target.value)}
@@ -795,6 +778,18 @@ export default function EvolutionPage() {
         api.get<{ name: string }[]>("/workflows"),
       ]);
       if (!mountedRef.current) return;
+
+      // The API client resolves with {data: null, error} instead of throwing,
+      // so the catch below only fires on a transport failure. Reading .error
+      // is the only way a 401, 403 or 500 becomes visible - without it the
+      // page rendered "No evolutions yet" to a user who simply lacked access,
+      // and the whole error UI, Retry button included, was unreachable code.
+      const failure = evoRes.error ?? statsRes.error ?? wfRes.error;
+      if (failure) {
+        setError(failure.message || "Could not load evolutions");
+        return;
+      }
+
       if (evoRes.data) setEvolutions(evoRes.data);
       if (statsRes.data) setStats(statsRes.data);
       if (wfRes.data) setWorkflows(wfRes.data.map((w) => w.name));
@@ -810,8 +805,8 @@ export default function EvolutionPage() {
     void fetchData();
   }, [fetchData]);
 
-  // Poll for progress when any evolution is running
-  const hasRunning = evolutions.some((e) => e.status === "running");
+  // Poll while work is waiting in the queue or actively executing.
+  const hasRunning = evolutions.some((e) => e.status === "queued" || e.status === "running");
   useEffect(() => {
     if (!hasRunning) return;
     const interval = setInterval(() => { void fetchData(); }, POLL_INTERVAL);
@@ -959,8 +954,9 @@ export default function EvolutionPage() {
     );
   }
 
-  const running = evolutions.filter((e) => e.status === "running");
+  const running = evolutions.filter((e) => e.status === "queued" || e.status === "running");
   const completed = evolutions.filter((e) => e.status === "completed" || e.status === "accepted");
+  const stopped = evolutions.filter((e) => e.status === "failed" || e.status === "cancelled");
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -989,7 +985,7 @@ export default function EvolutionPage() {
             <p className="mt-1 text-2xl font-semibold text-foreground">{stats.total_evolutions}</p>
           </div>
           <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
-            <p className="text-xs font-medium text-muted-foreground">Running</p>
+            <p className="text-xs font-medium text-muted-foreground">Active</p>
             <p className="mt-1 text-2xl font-semibold text-running">{stats.active_evolutions}</p>
           </div>
           <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
@@ -1067,7 +1063,7 @@ export default function EvolutionPage() {
                       <p className="text-sm font-medium text-foreground">{evo.workflow_name}</p>
                       <span className="inline-flex items-center gap-1 rounded-full bg-running/15 border border-running/30 px-2 py-0.5 text-[10px] font-semibold text-running">
                         <span className="h-1.5 w-1.5 rounded-full bg-running animate-pulse" />
-                        Running
+                        {evo.status === "queued" ? "Queued" : "Running"}
                       </span>
                       {isSuperseded && (
                         <span className="text-xs text-muted">Superseded</span>
@@ -1308,6 +1304,46 @@ export default function EvolutionPage() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Failed and cancelled experiments remain visible for diagnosis. */}
+      {stopped.length > 0 && (
+        <div className="space-y-3">
+          <h2 className="text-sm font-semibold text-foreground">
+            Stopped ({stopped.length})
+          </h2>
+          {stopped.map((evo) => (
+            <div
+              key={evo.id}
+              className="flex items-center gap-4 rounded-xl border border-border bg-surface px-5 py-4 shadow-sm"
+            >
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-error/30 bg-error/10">
+                {evo.status === "failed" ? (
+                  <XCircle className="h-5 w-5 text-error" />
+                ) : (
+                  <Ban className="h-5 w-5 text-muted" />
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <p className="truncate text-sm font-medium text-foreground">
+                    {evo.workflow_name}
+                  </p>
+                  <span className="rounded-full border border-border px-2 py-0.5 text-[10px] font-semibold capitalize text-muted">
+                    {evo.status}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-muted">
+                  {evo.current_iteration}/{evo.max_iterations} iterations
+                  {evo.completed_at ? ` · ${formatRelativeTime(evo.completed_at)}` : ""}
+                </p>
+                {evo.error && (
+                  <p className="mt-1 line-clamp-2 text-xs text-error">{evo.error}</p>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 

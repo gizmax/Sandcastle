@@ -1302,7 +1302,7 @@ class TestAgentCardBuilder:
         assert card["url"] == "https://example.com"
         assert "skills" in card
         assert len(card["skills"]) == 2
-        assert card["capabilities"]["streaming"] is True
+        assert card["capabilities"]["streaming"] is False
 
     def test_agent_card_auth_not_required(self):
         """A2A v1.0: auth-not-required -> empty `security` array."""

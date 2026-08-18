@@ -378,6 +378,23 @@ class TestRedaction:
         assert "***" in str(result.redacted_output)
 
     @pytest.mark.asyncio
+    async def test_storage_only_redaction_keeps_runtime_output(self):
+        policy = _make_policy(
+            patterns=[{"type": "email"}],
+            replacement="***",
+            apply_to=["storage"],
+        )
+        result = await PolicyEngine([policy]).evaluate(
+            step_id="test",
+            output={"email": "user@example.com"},
+            context={"step_id": "test", "run_id": "r1"},
+        )
+
+        assert result.modified_output == {"email": "user@example.com"}
+        assert result.target_outputs["storage"] == {"email": "***"}
+        assert "webhook" not in result.target_outputs
+
+    @pytest.mark.asyncio
     async def test_block_action_also_redacts(self):
         """Block action should redact the matching content from modified_output."""
         policy = _make_policy(

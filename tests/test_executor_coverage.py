@@ -933,6 +933,7 @@ class TestNotifyStep:
                 service="slack",
                 channel="#general",
                 message="Hello {input.name}!",
+                dry_run=True,
             ),
         )
         c = ctx(input={"name": "World"})
@@ -952,6 +953,7 @@ class TestNotifyStep:
             notify_config=NotifyConfig(
                 service="email",
                 message="Alert message",
+                dry_run=True,
             ),
         )
         c = ctx()
@@ -968,6 +970,7 @@ class TestNotifyStep:
             notify_config=NotifyConfig(
                 service="webhook",
                 message="Step {input.step_name} completed",
+                dry_run=True,
             ),
         )
         c = ctx(input={"step_name": "analysis"})

@@ -573,7 +573,7 @@ class TestA2AAgentCard:
         assert "capabilities" in card
         assert "streaming" in card["capabilities"]
         assert "pushNotifications" in card["capabilities"]
-        assert card["capabilities"]["streaming"] is True
+        assert card["capabilities"]["streaming"] is False
         assert card["capabilities"]["pushNotifications"] is False
 
     def test_agent_card_contains_skills(self):

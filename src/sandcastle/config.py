@@ -75,6 +75,7 @@ class Settings(BaseSettings):
     # default; the trainer is a deterministic mock unless trainer_backend="gpu" (real
     # SFT - needs the [training] extras + a CUDA GPU, e.g. a DGX Spark). See
     # engine/training/ and docs/overnight-self-tune-spark.md.
+    evolution_job_timeout: int = Field(default=3600, ge=60, le=86400)
     evolution_auto_finetune: bool = False
     evolution_finetune_min_samples: int = 10
     trainer_backend: str = "mock"  # "mock" | "gpu"
@@ -185,6 +186,11 @@ class Settings(BaseSettings):
 
     # Hierarchical workflows
     max_workflow_depth: int = 5
+    # Ceiling on what one evolution run may spend when the request does not set
+    # budget_limit_usd. Without it the loop ran to max_iterations - up to 100
+    # paid iterations, each executing the full eval suite - bounded only by the
+    # arq job timeout. A request may set a lower limit; it cannot exceed this.
+    evolution_default_budget_usd: float = 5.0
 
     # Scheduler (disable in multi-worker deployments; run a dedicated scheduler service)
     scheduler_enabled: bool = True

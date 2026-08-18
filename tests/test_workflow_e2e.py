@@ -876,6 +876,7 @@ steps:
       service: slack
       channel: "#alerts"
       message: "Alert: {steps.data.output}"
+      dry_run: true
 """
         result, _ = await _run_workflow(yaml)
         assert result.status == "completed"
@@ -900,6 +901,7 @@ steps:
       service: teams
       channel: "{input.channel}"
       message: "Build {input.build_id} completed"
+      dry_run: true
 """
         result, _ = await _run_workflow(
             yaml,
@@ -1315,6 +1317,7 @@ steps:
       service: slack
       channel: "#test"
       message: "test"
+      dry_run: true
 """
         result, _ = await _run_workflow(yaml)
         assert result.status == "completed"
@@ -1491,6 +1494,7 @@ steps:
       service: slack
       channel: "#results"
       message: "{steps.summarize.output}"
+      dry_run: true
 """
         result, sandbox = await _run_workflow(
             yaml,
@@ -1562,12 +1566,14 @@ steps:
       service: slack
       channel: "#urgent"
       message: "CRITICAL: {steps.analyze.output.message}"
+      dry_run: true
   - id: log_only
     type: notify
     notify_config:
       service: slack
       channel: "#logs"
       message: "Normal event"
+      dry_run: true
 """
         result, _ = await _run_workflow(yaml)
         assert result.status == "completed"

@@ -203,6 +203,28 @@ class TestValidateWorkflowInput:
         assert errors == []
         assert data["items"] == ["not-json"]
 
+    @pytest.mark.parametrize(
+        ("field_type", "value"),
+        [
+            ("integer", []),
+            ("number", True),
+            ("boolean", 1),
+            ("array", {"not": "a list"}),
+            ("object", []),
+            ("string", 42),
+        ],
+    )
+    def test_non_string_wrong_types_are_rejected(self, field_type, value):
+        schema = {"properties": {"value": {"type": field_type}}}
+        errors = _validate_workflow_input({"value": value}, schema)
+        assert len(errors) == 1
+        assert field_type in errors[0]
+
+    def test_number_rejects_non_finite_but_accepts_large_integer(self):
+        schema = {"properties": {"value": {"type": "number"}}}
+        assert _validate_workflow_input({"value": float("inf")}, schema)
+        assert _validate_workflow_input({"value": 10**1000}, schema) == []
+
     def test_missing_optional_field_no_error(self):
         schema = {"required": [], "properties": {"name": {"type": "string"}}}
         errors = _validate_workflow_input({}, schema)

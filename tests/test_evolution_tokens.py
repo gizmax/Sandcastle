@@ -97,6 +97,20 @@ async def test_cache_hit_on_second_call_within_ttl():
 
 @pytest.mark.asyncio
 @pytest.mark.timeout(10)
+async def test_history_query_and_cache_are_tenant_scoped():
+    """The same workflow name cannot reuse another tenant's history or cache."""
+    factory, session = _make_async_session(costs=[0.014])
+    with patch("sandcastle.models.db.async_session", factory):
+        await _estimate_tokens_per_run("shared-workflow", tenant_id="tenant-a")
+        first_stmt = session.execute.await_args.args[0]
+        await _estimate_tokens_per_run("shared-workflow", tenant_id="tenant-b")
+
+    assert session.execute.await_count == 2
+    assert "tenant-a" in first_stmt.compile().params.values()
+
+
+@pytest.mark.asyncio
+@pytest.mark.timeout(10)
 async def test_db_error_falls_back_to_default():
     """Any DB exception must yield the default, never propagate."""
     factory, _ = _make_async_session(raise_exc=RuntimeError("DB down"))

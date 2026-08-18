@@ -245,9 +245,6 @@ class TestEvolutionScore:
 
     def test_latency_mode_with_budget(self):
         """Latency mode with budget: higher cost should be penalized more."""
-        # In latency mode the formula is:
-        # (1 - duration/max(duration,1)) * 50 + quality * 50 * confidence - cost_penalty
-        # The duration term is always 0 for duration > 0, so we test via cost_penalty
         score_cheap = compute_evolution_score(
             quality=0.8, cost_usd=0.01, duration_seconds=30.0,
             eval_runs=5, optimize_for="latency", budget_limit=0.05,
@@ -257,6 +254,24 @@ class TestEvolutionScore:
             eval_runs=5, optimize_for="latency", budget_limit=0.05,
         )
         assert score_cheap > score_expensive
+
+    def test_latency_mode_directly_rewards_faster_runs(self):
+        """Equal-quality, equal-cost variants are ordered by latency."""
+        score_fast = compute_evolution_score(
+            quality=0.8,
+            cost_usd=0.01,
+            duration_seconds=10.0,
+            eval_runs=5,
+            optimize_for="latency",
+        )
+        score_slow = compute_evolution_score(
+            quality=0.8,
+            cost_usd=0.01,
+            duration_seconds=50.0,
+            eval_runs=5,
+            optimize_for="latency",
+        )
+        assert score_fast > score_slow
 
     def test_budget_limit_zero_no_penalty(self):
         """budget_limit=0 (falsy) should not trigger penalty."""

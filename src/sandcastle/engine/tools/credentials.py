@@ -12,6 +12,17 @@ import os
 logger = logging.getLogger(__name__)
 
 
+def _all_credential_env_vars(tool) -> list[str]:
+    """Return every primary, optional, and alternative env var without duplicates."""
+    alternatives = getattr(tool, "alternative_credential_env_vars", []) or []
+    names = [
+        *tool.credential_env_vars,
+        *(getattr(tool, "optional_credential_env_vars", []) or []),
+        *(name for group in alternatives for name in group),
+    ]
+    return list(dict.fromkeys(names))
+
+
 def get_tool_credentials(tool_names: list[str]) -> dict[str, str]:
     """Resolve credentials for the given tools from environment variables.
 
@@ -42,7 +53,7 @@ def get_tool_credentials(tool_names: list[str]) -> dict[str, str]:
         if conn_name:
             named_refs.append((base_name, conn_name))
         else:
-            for env_var in tool.credential_env_vars:
+            for env_var in _all_credential_env_vars(tool):
                 value = os.environ.get(env_var, "")
                 if value:
                     credentials[env_var] = value
@@ -117,7 +128,7 @@ async def _resolve_named_connections_async(
                     tool = get_tool(tool_name)
                 except KeyError:
                     continue
-                for env_var in tool.credential_env_vars:
+                for env_var in _all_credential_env_vars(tool):
                     value = os.environ.get(env_var, "")
                     if value:
                         credentials[env_var] = value
@@ -167,9 +178,30 @@ def validate_tool_credentials(tool_names: list[str]) -> dict[str, dict]:
 
         optional = list(getattr(tool, "optional_credential_env_vars", []) or [])
         optional_present = [v for v in optional if os.environ.get(v)]
+        alternatives = list(
+            getattr(tool, "alternative_credential_env_vars", []) or []
+        )
+        configured_alternative = next(
+            (
+                group
+                for group in alternatives
+                if group and all(os.environ.get(env_var) for env_var in group)
+            ),
+            None,
+        )
+        if configured_alternative:
+            present.extend(
+                env_var
+                for env_var in configured_alternative
+                if env_var not in present
+            )
+            missing = []
 
         result[name] = {
-            "configured": len(missing) == 0 and len(tool.credential_env_vars) > 0,
+            "configured": (
+                (len(missing) == 0 and len(tool.credential_env_vars) > 0)
+                or configured_alternative is not None
+            ),
             "missing": missing,
             "present": present,
             # Keyless tools (no required creds) report whether an optional upgrade
@@ -177,6 +209,7 @@ def validate_tool_credentials(tool_names: list[str]) -> dict[str, dict]:
             "keyless": len(tool.credential_env_vars) == 0,
             "optional": optional,
             "optional_present": optional_present,
+            "alternatives": alternatives,
         }
     return result
 

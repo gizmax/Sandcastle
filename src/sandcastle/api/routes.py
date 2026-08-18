@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 import sys
@@ -59,6 +60,7 @@ from sandcastle.api.schemas import (
     EvalRunResponse,
     EvalStatsResponse,
     EvalSuiteRunRequest,
+    EvolutionAcceptRequest,
     EvolutionIterationResponse,
     EvolutionListItemResponse,
     EvolutionStartRequest,
@@ -178,13 +180,9 @@ from sandcastle.models.db import (
     async_session,
 )
 from sandcastle.queue.scheduler import add_schedule, remove_schedule
-from sandcastle.queue.worker import enqueue_workflow
+from sandcastle.queue.worker import enqueue_evolution, enqueue_workflow
 
 logger = logging.getLogger(__name__)
-
-# Strong references to fire-and-forget tasks (evolution runs); asyncio only
-# keeps weak refs, an un-referenced task can be garbage-collected mid-flight.
-_BACKGROUND_TASKS: set = set()
 
 # Keep fire-and-forget API tasks alive until completion and surface failures.
 _background_tasks: set[asyncio.Task[Any]] = set()
@@ -323,8 +321,37 @@ def _validate_workflow_input(input_data: dict, schema: dict | None) -> list[str]
 
     # Type coercion based on properties
     properties = schema.get("properties", {})
+    if not isinstance(properties, dict):
+        return ["input_schema 'properties' must be a mapping"]
+
+    def matches_type(value: Any, expected: Any) -> bool:
+        if isinstance(expected, list):
+            return any(matches_type(value, item) for item in expected)
+        if expected == "integer":
+            return isinstance(value, int) and not isinstance(value, bool)
+        if expected == "number":
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return False
+            return not isinstance(value, float) or math.isfinite(value)
+        if expected == "boolean":
+            return isinstance(value, bool)
+        if expected == "array":
+            return isinstance(value, list)
+        if expected == "object":
+            return isinstance(value, dict)
+        if expected == "string":
+            return isinstance(value, str)
+        if expected == "null":
+            return value is None
+        if expected == "file":
+            return isinstance(value, (str, dict))
+        return True
+
     for field_name, prop in properties.items():
         if field_name not in input_data:
+            continue
+        if not isinstance(prop, dict):
+            errors.append(f"Input schema for '{field_name}' must be a mapping")
             continue
         value = input_data[field_name]
         field_type = prop.get("type")
@@ -336,27 +363,19 @@ def _validate_workflow_input(input_data: dict, schema: dict | None) -> list[str]
                 try:
                     input_data[field_name] = int(value)
                 except (ValueError, TypeError):
-                    errors.append(
-                        f"Input field '{field_name}' must be an integer, got '{value}'"
-                    )
+                    pass
         elif field_type == "number":
             if isinstance(value, str):
                 try:
                     input_data[field_name] = float(value)
                 except (ValueError, TypeError):
-                    errors.append(
-                        f"Input field '{field_name}' must be a number, got '{value}'"
-                    )
+                    pass
         elif field_type == "boolean":
             if isinstance(value, str):
                 if value.lower() == "true":
                     input_data[field_name] = True
                 elif value.lower() == "false":
                     input_data[field_name] = False
-                else:
-                    errors.append(
-                        f"Input field '{field_name}' must be a boolean, got '{value}'"
-                    )
         elif field_type == "array":
             if isinstance(value, str):
                 try:
@@ -373,11 +392,13 @@ def _validate_workflow_input(input_data: dict, schema: dict | None) -> list[str]
                     items = [part for part in items if part]
                     if items:
                         input_data[field_name] = items
-                    else:
-                        errors.append(
-                            f"Input field '{field_name}' must be a list "
-                            f"(comma-separated values or a JSON array), got '{value}'"
-                        )
+
+        coerced_value = input_data[field_name]
+        if not matches_type(coerced_value, field_type):
+            errors.append(
+                f"Input field '{field_name}' must be {field_type}, "
+                f"got {type(coerced_value).__name__}"
+            )
 
     return errors
 
@@ -5476,8 +5497,12 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
     # Update DB record with results. Retry transient failures so a finished run is
     # not silently reported as durable while its DB row stays RUNNING; if every
     # attempt fails we surface verification_pending below instead of lying about it.
-    output_with_report = dict(result.outputs) if result.outputs else {}
-    if result.token_report:
+    storage_outputs = getattr(result, "storage_outputs", None)
+    persisted_outputs = (
+        storage_outputs if isinstance(storage_outputs, dict) else result.outputs
+    )
+    output_with_report = dict(persisted_outputs) if persisted_outputs else {}
+    if getattr(result, "token_report", None):
         output_with_report["_token_report"] = result.token_report
     # Outputs may hold non-JSON-native objects; coerce once so persistence can
     # never fail on serialization (a finished run must stay durable).
@@ -5538,7 +5563,12 @@ async def run_workflow_sync(request: WorkflowRunRequest, req: Request) -> ApiRes
         event_type = _sync_event_map.get(result.status, "workflow.failed")
 
         # Apply PII redaction to webhook outputs if privacy router is active.
-        webhook_outputs = result.outputs
+        result_webhook_outputs = getattr(result, "webhook_outputs", None)
+        webhook_outputs = (
+            result_webhook_outputs
+            if isinstance(result_webhook_outputs, dict)
+            else result.outputs
+        )
         if webhook_urls:
             try:
                 from sandcastle.config import settings as _cfg
@@ -7448,6 +7478,48 @@ async def list_schedules(
         result = await session.execute(stmt)
         schedules = result.scalars().all()
 
+        last_run_ids = {s.last_run_id for s in schedules if s.last_run_id}
+        last_runs_by_id: dict[uuid.UUID, Run] = {}
+        if last_run_ids:
+            last_runs_stmt = select(Run).where(Run.id.in_(last_run_ids))
+            last_runs_stmt = _apply_tenant_filter(
+                last_runs_stmt, tenant_id, Run.tenant_id
+            )
+            last_runs_result = await session.execute(last_runs_stmt)
+            last_runs_by_id = {
+                run.id: run for run in last_runs_result.scalars().all()
+            }
+
+        success_rates: dict[str, float] = {}
+        workflow_names = {
+            s.workflow_name for s in schedules if s.last_run_id
+        }
+        if workflow_names:
+            recent_q = (
+                select(
+                    Run.workflow_name,
+                    func.count(Run.id).label("total"),
+                    func.count(
+                        case(
+                            (Run.status == RunStatus.COMPLETED, Run.id),
+                            else_=None,
+                        )
+                    ).label("passed"),
+                )
+                .where(
+                    Run.workflow_name.in_(workflow_names),
+                    Run.created_at >= datetime.now(timezone.utc) - timedelta(days=30),
+                )
+                .group_by(Run.workflow_name)
+            )
+            recent_q = _apply_tenant_filter(recent_q, tenant_id, Run.tenant_id)
+            recent_rows = (await session.execute(recent_q)).all()
+            success_rates = {
+                workflow_name: round(passed / run_count, 2)
+                for workflow_name, run_count, passed in recent_rows
+                if run_count > 0
+            }
+
     # Compute enriched schedule data (last run info, success rate, status)
     items: list[ScheduleResponse] = []
     for s in schedules:
@@ -7457,34 +7529,17 @@ async def list_schedules(
         sched_status = "paused" if not s.enabled else "active"
 
         if s.last_run_id:
-            async with async_session() as run_sess:
-                last_run = await run_sess.get(Run, s.last_run_id)
-                if last_run:
-                    last_run_at = last_run.started_at or last_run.created_at
-                    last_run_status = last_run.status.value if hasattr(last_run.status, "value") else str(last_run.status)
-                    if s.enabled and last_run_status == "failed":
-                        sched_status = "failing"
-
-                # Compute success rate from recent runs for this workflow
-                recent_q = (
-                    select(
-                        func.count(Run.id).label("total"),
-                        func.count(
-                            case(
-                                (Run.status == RunStatus.COMPLETED, Run.id),
-                                else_=None,
-                            )
-                        ).label("passed"),
-                    )
-                    .where(
-                        Run.workflow_name == s.workflow_name,
-                        Run.created_at >= datetime.now(timezone.utc) - timedelta(days=30),
-                    )
+            last_run = last_runs_by_id.get(s.last_run_id)
+            if last_run:
+                last_run_at = last_run.started_at or last_run.created_at
+                last_run_status = (
+                    last_run.status.value
+                    if hasattr(last_run.status, "value")
+                    else str(last_run.status)
                 )
-                recent_q = _apply_tenant_filter(recent_q, tenant_id, Run.tenant_id)
-                row = (await run_sess.execute(recent_q)).one_or_none()
-                if row and row.total > 0:
-                    success_rate = round(row.passed / row.total, 2)
+                if s.enabled and last_run_status == "failed":
+                    sched_status = "failing"
+            success_rate = success_rates.get(s.workflow_name, 0.0)
 
         # Compute next_run_at from cron
         next_run_at = None
@@ -11376,8 +11431,16 @@ async def run_workflow_api(workflow_name: str, req: Request) -> ApiResponse:
             db_run = await session.get(Run, uuid.UUID(run_id))
             if db_run:
                 db_run.status = status_map.get(result.status, RunStatus.FAILED)
-                output_with_report = dict(result.outputs) if result.outputs else {}
-                if result.token_report:
+                storage_outputs = getattr(result, "storage_outputs", None)
+                persisted_outputs = (
+                    storage_outputs
+                    if isinstance(storage_outputs, dict)
+                    else result.outputs
+                )
+                output_with_report = (
+                    dict(persisted_outputs) if persisted_outputs else {}
+                )
+                if getattr(result, "token_report", None):
                     output_with_report["_token_report"] = result.token_report
                 db_run.output_data = json_safe(output_with_report)
                 db_run.total_cost_usd = result.total_cost_usd
@@ -12049,7 +12112,11 @@ async def run_eval_suite_endpoint(req: Request, body: EvalSuiteRunRequest) -> Ap
 
     # Run the suite
     try:
-        result = await run_eval_suite(suite, concurrency=body.concurrency)
+        result = await run_eval_suite(
+            suite,
+            concurrency=body.concurrency,
+            tenant_id=tenant_id,
+        )
     except Exception as exc:
         # Mark as failed
         async with async_session() as session:
@@ -13181,6 +13248,7 @@ async def list_evolutions(req: Request) -> ApiResponse:
                 budget_limit_usd=evolution.budget_limit_usd,
                 created_at=evolution.created_at,
                 completed_at=evolution.completed_at,
+                error=evolution.error,
             )
             for evolution in evolutions
         ]
@@ -13196,7 +13264,10 @@ async def start_evolution(req: Request) -> ApiResponse:
     Admin-only when auth is enabled.
     """
     _require_admin(req)
-    body = await req.json()
+    try:
+        body = await req.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON body: {exc}")
     try:
         parsed = EvolutionStartRequest(**body)
     except Exception as exc:
@@ -13205,8 +13276,10 @@ async def start_evolution(req: Request) -> ApiResponse:
     # get_tenant_id is synchronous - do not await
     tenant_id = get_tenant_id(req)
 
-    from sandcastle.engine.eval import parse_eval_suite_string
-    from sandcastle.engine.evolution import _get_workflow_yaml, run_evolution
+    from sandcastle.engine.evolution import (
+        _get_workflow_yaml,
+        _prepare_eval_suite,
+    )
 
     # Quick validations synchronously so the UI gets immediate, specific
     # errors - then run the evolution loop in the background. With a real
@@ -13214,22 +13287,24 @@ async def start_evolution(req: Request) -> ApiResponse:
     # awaiting it here made the browser request time out ("Backend
     # unreachable") while the loop kept running server-side.
     try:
-        _get_workflow_yaml(parsed.workflow_name)
+        workflow_yaml = _get_workflow_yaml(parsed.workflow_name)
+        workflow = parse_yaml_string(workflow_yaml)
+        validation_errors = validate(workflow)
+        if validation_errors:
+            raise ValueError("; ".join(validation_errors))
     except Exception as exc:
         raise HTTPException(
             status_code=400,
             detail=f"Failed to load workflow '{parsed.workflow_name}': {exc}",
         )
     try:
-        import yaml as _yaml
-
-        _suite_data = _yaml.safe_load(parsed.eval_suite_yaml)
-        if isinstance(_suite_data, dict) and not _suite_data.get("workflow"):
-            _suite_data["workflow"] = parsed.workflow_name
-        _suite = parse_eval_suite_string(_yaml.safe_dump(_suite_data, sort_keys=False))
+        normalized_suite_yaml, suite = _prepare_eval_suite(
+            parsed.eval_suite_yaml,
+            parsed.workflow_name,
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Failed to parse eval suite: {exc}")
-    if not _suite.cases:
+    if not suite.cases:
         raise HTTPException(
             status_code=400,
             detail=(
@@ -13238,31 +13313,83 @@ async def start_evolution(req: Request) -> ApiResponse:
             ),
         )
 
-    async def _run_in_background() -> None:
-        try:
-            result = await run_evolution(
-                workflow_name=parsed.workflow_name,
-                eval_suite_yaml=parsed.eval_suite_yaml,
-                max_iterations=parsed.max_iterations,
-                optimize_for=parsed.optimize_for,
-                budget_limit=parsed.budget_limit_usd,
-                tenant_id=tenant_id,
+    # Persist the running record before returning. The dashboard immediately
+    # refreshes the list after this 202 response; creating the record inside
+    # the task raced that refresh and left the run invisible with no polling.
+    evolution_id = uuid.uuid4()
+    async with async_session() as session:
+        active_stmt = (
+            select(WorkflowEvolution.id)
+            .where(
+                WorkflowEvolution.workflow_name == parsed.workflow_name,
+                WorkflowEvolution.status.in_(("queued", "running")),
             )
-            if result.get("status") == "failed":
-                logger.error(
-                    "Evolution for '%s' failed: %s",
-                    parsed.workflow_name,
-                    result.get("error"),
-                )
-        except Exception:
-            logger.exception("Evolution for '%s' crashed", parsed.workflow_name)
+            .limit(1)
+        )
+        active_stmt = _apply_tenant_filter(
+            active_stmt,
+            tenant_id,
+            WorkflowEvolution.tenant_id,
+        )
+        if await session.scalar(active_stmt):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Evolution for '{parsed.workflow_name}' is already active"
+                ),
+            )
+        session.add(
+            WorkflowEvolution(
+                id=evolution_id,
+                workflow_name=parsed.workflow_name,
+                status="queued",
+                optimize_for=parsed.optimize_for,
+                max_iterations=parsed.max_iterations,
+                budget_limit_usd=parsed.budget_limit_usd,
+                eval_suite_yaml=normalized_suite_yaml,
+                tenant_id=tenant_id,
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+        await session.commit()
 
-    task = asyncio.create_task(_run_in_background())
-    _BACKGROUND_TASKS.add(task)
-    task.add_done_callback(_BACKGROUND_TASKS.discard)
+    try:
+        await enqueue_evolution(
+            str(evolution_id),
+            parsed.workflow_name,
+            normalized_suite_yaml,
+            parsed.max_iterations,
+            parsed.optimize_for,
+            budget_limit=parsed.budget_limit_usd,
+            tenant_id=tenant_id,
+        )
+    except Exception as exc:
+        # The queued row was committed before this point, and the reaper only
+        # sweeps "running". Without compensation the row stayed queued forever:
+        # the dashboard polled it every five seconds and every later start for
+        # this workflow returned 409 "already active", permanently. Mark it
+        # failed so the state matches what happened and the workflow is free.
+        try:
+            async with async_session() as cleanup_session:
+                stuck = await cleanup_session.get(WorkflowEvolution, evolution_id)
+                if stuck is not None and stuck.status == "queued":
+                    stuck.status = "failed"
+                    stuck.completed_at = datetime.now(timezone.utc)
+                    stuck.error = f"Failed to schedule evolution: {exc}"
+                    await cleanup_session.commit()
+        except Exception as cleanup_exc:  # noqa: BLE001 - report the original
+            logger.error(
+                "Could not clean up queued evolution %s after enqueue failure: %s",
+                evolution_id,
+                cleanup_exc,
+            )
+        raise HTTPException(
+            status_code=503,
+            detail=f"Failed to schedule evolution: {exc}",
+        )
 
     return ApiResponse(data=EvolutionStartResponse(
-        evolution_id="pending",
+        evolution_id=str(evolution_id),
         workflow_name=parsed.workflow_name,
         status="started",
     ))
@@ -13337,6 +13464,7 @@ async def get_evolution_status(workflow_name: str, req: Request = None) -> ApiRe
                 budget_limit_usd=ev.budget_limit_usd,
                 created_at=ev.created_at,
                 completed_at=ev.completed_at,
+                error=ev.error,
                 iterations=iter_responses,
             )
         )
@@ -13350,19 +13478,23 @@ async def accept_evolution(workflow_name: str, req: Request) -> ApiResponse:
     """
     _require_admin(req)
     tenant_id = get_tenant_id(req)
-    body = {}
     try:
         body = await req.json()
     except Exception:
-        pass
+        body = {}
+    try:
+        accept_request = EvolutionAcceptRequest(**body)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
-    notes = body.get("notes", "")
+    notes = accept_request.notes or ""
 
     async with async_session() as session:
         stmt = (
             select(WorkflowEvolution)
             .where(WorkflowEvolution.workflow_name == workflow_name)
             .order_by(WorkflowEvolution.created_at.desc())
+            .limit(1)
         )
         stmt = _apply_tenant_filter(stmt, tenant_id, WorkflowEvolution.tenant_id)
         result = await session.execute(stmt)
@@ -13380,7 +13512,13 @@ async def accept_evolution(workflow_name: str, req: Request) -> ApiResponse:
                 detail="No best variant available to accept",
             )
 
-        if ev.status not in ("completed", "running"):
+        if ev.best_score is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Evolution has no best score to accept",
+            )
+
+        if ev.status != "completed":
             raise HTTPException(
                 status_code=400,
                 detail=f"Evolution is in '{ev.status}' state - cannot accept",
@@ -13389,6 +13527,7 @@ async def accept_evolution(workflow_name: str, req: Request) -> ApiResponse:
         best_yaml = ev.best_variant_yaml
         best_score = ev.best_score
         best_quality = ev.best_quality
+        evolution_id = ev.id
 
     try:
         import hashlib
@@ -13396,6 +13535,13 @@ async def accept_evolution(workflow_name: str, req: Request) -> ApiResponse:
         from sandcastle.engine.dag import parse_yaml_string
 
         parsed_wf = parse_yaml_string(best_yaml)
+        if parsed_wf.name != workflow_name:
+            raise ValueError(
+                f"Evolved workflow name '{parsed_wf.name}' does not match '{workflow_name}'"
+            )
+        validation_errors = validate(parsed_wf)
+        if validation_errors:
+            raise ValueError("; ".join(validation_errors))
         checksum = hashlib.sha256(best_yaml.encode()).hexdigest()
 
         async with async_session() as session:
@@ -13406,6 +13552,15 @@ async def accept_evolution(workflow_name: str, req: Request) -> ApiResponse:
             )
             max_ver = await session.scalar(max_ver_stmt)
             next_version = (max_ver or 0) + 1
+
+            old_prod_result = await session.execute(
+                select(WorkflowVersion).where(
+                    WorkflowVersion.workflow_name == workflow_name,
+                    WorkflowVersion.status == WorkflowVersionStatus.PRODUCTION,
+                )
+            )
+            for old_prod in old_prod_result.scalars().all():
+                old_prod.status = WorkflowVersionStatus.ARCHIVED
 
             wv = WorkflowVersion(
                 workflow_name=workflow_name,
@@ -13420,6 +13575,11 @@ async def accept_evolution(workflow_name: str, req: Request) -> ApiResponse:
                 promoted_at=datetime.now(timezone.utc),
             )
             session.add(wv)
+
+            accepted_evolution = await session.get(WorkflowEvolution, evolution_id)
+            if accepted_evolution is None:
+                raise ValueError("Evolution disappeared before it could be accepted")
+            accepted_evolution.status = "accepted"
             await session.commit()
 
         return ApiResponse(
@@ -13447,9 +13607,10 @@ async def cancel_evolution(workflow_name: str, req: Request) -> ApiResponse:
             select(WorkflowEvolution)
             .where(
                 WorkflowEvolution.workflow_name == workflow_name,
-                WorkflowEvolution.status == "running",
+                WorkflowEvolution.status.in_(("queued", "running")),
             )
             .order_by(WorkflowEvolution.created_at.desc())
+            .limit(1)
         )
         stmt = _apply_tenant_filter(stmt, tenant_id, WorkflowEvolution.tenant_id)
         result = await session.execute(stmt)
@@ -13487,14 +13648,16 @@ async def get_evolution_stats(req: Request) -> ApiResponse:
         counts_by_status = {row.status: row.cnt for row in count_result.all()}
 
         total = sum(counts_by_status.values())
-        active = counts_by_status.get("running", 0)
-        completed = counts_by_status.get("completed", 0)
+        active = counts_by_status.get("queued", 0) + counts_by_status.get("running", 0)
+        completed = counts_by_status.get("completed", 0) + counts_by_status.get(
+            "accepted", 0
+        )
 
         improv_stmt = select(
             func.count(WorkflowEvolution.id)
         ).where(
             WorkflowEvolution.best_score > WorkflowEvolution.baseline_score,
-            WorkflowEvolution.status == "completed",
+            WorkflowEvolution.status.in_(("completed", "accepted")),
         )
         improv_stmt = _apply_tenant_filter(improv_stmt, tenant_id, WorkflowEvolution.tenant_id)
         improvements = (await session.scalar(improv_stmt)) or 0
@@ -13502,7 +13665,7 @@ async def get_evolution_stats(req: Request) -> ApiResponse:
         avg_stmt = select(
             func.avg(WorkflowEvolution.best_score - WorkflowEvolution.baseline_score)
         ).where(
-            WorkflowEvolution.status == "completed",
+            WorkflowEvolution.status.in_(("completed", "accepted")),
             WorkflowEvolution.baseline_score.is_not(None),
             WorkflowEvolution.best_score.is_not(None),
         )
@@ -13517,7 +13680,7 @@ async def get_evolution_stats(req: Request) -> ApiResponse:
                 ).label("max_improvement"),
                 func.count(WorkflowEvolution.id).label("runs"),
             )
-            .where(WorkflowEvolution.status == "completed")
+            .where(WorkflowEvolution.status.in_(("completed", "accepted")))
             .group_by(WorkflowEvolution.workflow_name)
             .order_by(
                 func.max(

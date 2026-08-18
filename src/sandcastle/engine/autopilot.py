@@ -32,8 +32,13 @@ async def get_or_create_experiment(
     step_id: str,
     config: AutoPilotConfig,
 ) -> Any:
-    """Find an active experiment for this workflow+step, or create a new one."""
-    from sqlalchemy import select
+    """Find the current experiment/deployment for this step, or create one.
+
+    Deploying and completed experiments remain authoritative until explicitly
+    reset. Otherwise a completed winner would be invisible to execution and a
+    fresh experiment would immediately replace it.
+    """
+    from sqlalchemy import case, select
 
     from sandcastle.models.db import (
         AutoPilotExperiment,
@@ -45,8 +50,21 @@ async def get_or_create_experiment(
         stmt = select(AutoPilotExperiment).where(
             AutoPilotExperiment.workflow_name == workflow_name,
             AutoPilotExperiment.step_id == step_id,
-            AutoPilotExperiment.status == ExperimentStatus.RUNNING,
-        )
+            AutoPilotExperiment.status.in_(
+                [
+                    ExperimentStatus.RUNNING,
+                    ExperimentStatus.DEPLOYING,
+                    ExperimentStatus.COMPLETED,
+                ]
+            ),
+        ).order_by(
+            case(
+                (AutoPilotExperiment.status == ExperimentStatus.DEPLOYING, 0),
+                (AutoPilotExperiment.status == ExperimentStatus.COMPLETED, 1),
+                else_=2,
+            ),
+            AutoPilotExperiment.created_at.desc(),
+        ).limit(1)
         result = await session.execute(stmt)
         experiment = result.scalar_one_or_none()
 

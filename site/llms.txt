@@ -1,8 +1,8 @@
 # Sandcastle
 
-> You write YAML. Sandcastle ships AI to production. Any model, any provider, zero lock-in. Sandcastle is an open-source, provider-neutral workflow orchestrator for AI agents: define a workflow once in YAML, and it runs on any of 7 model providers with automatic failover. The workflow is the asset; the model is swappable plumbing.
+> You write YAML. Sandcastle ships AI to production. Any model, any provider, zero lock-in. Sandcastle is a source-available, provider-neutral workflow orchestrator for AI agents: define a workflow once in YAML, and it runs on any of 7 model providers with automatic failover. The workflow is the asset; the model is swappable plumbing.
 
-Sandcastle turns a YAML file into a production AI pipeline. A workflow is a DAG of typed steps. The load-bearing decisions live in deterministic code or in cross-provider patterns (race failover, multi-provider consensus, two-judge gates), so swapping or losing a provider never changes the outcome. It ships with 165 built-in templates, 25 step types, 60+ system connectors, a vision-judge self-healing pattern for media, EU AI Act compliance mode, a SHA-256 audit chain, per-step data-residency enforcement, a React dashboard, and a CLI.
+Sandcastle turns a YAML file into a production AI pipeline. A workflow is a DAG of typed steps. The load-bearing decisions live in deterministic code or in cross-provider patterns (race failover, multi-provider consensus, two-judge gates), so swapping or losing a provider never changes the outcome. It ships with 248 built-in templates plus 283 community templates, 25 step types, 64 system connectors, a vision-judge self-healing pattern for media, EU AI Act compliance mode, a SHA-256 audit chain, per-step data-residency enforcement, a React dashboard, and a CLI.
 
 Install: `pip install sandcastle-ai`. CLI: `sandcastle serve` then `sandcastle run <workflow.yaml>`.
 
@@ -21,9 +21,9 @@ Install: `pip install sandcastle-ai`. CLI: `sandcastle serve` then `sandcastle r
 
 ## Built-in template categories
 
-- [Templates directory](https://github.com/gizmax/Sandcastle/tree/main/src/sandcastle/templates): 165 ready-to-run workflows across devops/SRE, data engineering, finance/ops, security/GRC, legal/docops, sales/RevOps, support/CX, marketing, and LLMOps. Examples: closed_loop_autoremediator (alert to verified fix), provider_consensus_decision_engine (3-provider vote), three_way_match_pay_run (deterministic AP match), quote_to_cash_orchestrator (closed-won to billed), ugc_studio (image-gen with a vision judge).
+- [Templates directory](https://github.com/gizmax/Sandcastle/tree/main/src/sandcastle/templates): 248 ready-to-run workflows across devops/SRE, data engineering, finance/ops, security/GRC, legal/docops, sales/RevOps, support/CX, marketing, and LLMOps. Examples: closed_loop_autoremediator (alert to verified fix), provider_consensus_decision_engine (3-provider vote), three_way_match_pay_run (deterministic AP match), quote_to_cash_orchestrator (closed-won to billed), ugc_studio (image-gen with a vision judge).
 
 ## Optional
 
-- [Connectors](https://github.com/gizmax/Sandcastle): 60+ integrations reachable from `http`/`tool`/`notify` steps, including slack, postgresql, snowflake, stripe, github, jira, salesforce, datadog, pagerduty, docusign, s3, qdrant, pinecone.
+- [Connectors](https://github.com/gizmax/Sandcastle): 64 integrations reachable from `http`/`tool`/`notify` steps, including slack, postgresql, snowflake, stripe, github, jira, salesforce, datadog, pagerduty, docusign, s3, qdrant, pinecone.
 - [Compliance](https://sandcastle-ai.eu/eu-ai-act/): EU AI Act mode, audit hash chain, PII redaction, data-residency routing.

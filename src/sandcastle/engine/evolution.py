@@ -33,6 +33,12 @@ _DEFAULT_TOKENS_PER_RUN = 1000
 # 2 * 3 + 15 = 21 / 3 = 7.0 USD per 1M blended tokens.
 _BASELINE_BLENDED_USD_PER_M = 7.0
 
+# Half-saturation points for the bounded efficiency terms used by evolution
+# scoring. At these values an otherwise perfect efficiency contribution is 25
+# points; lower cost/latency approaches 50 without ever becoming unbounded.
+_COST_EFFICIENCY_SCALE_USD = 0.05
+_LATENCY_EFFICIENCY_SCALE_SECONDS = 60.0
+
 # In-process cache: workflow_name -> (tokens, timestamp_monotonic).
 _TOKEN_CACHE: dict[str, tuple[int, float]] = {}
 _TOKEN_CACHE_TTL_SECONDS = 60.0
@@ -65,6 +71,7 @@ def _cache_clear() -> None:
 async def _estimate_tokens_per_run(
     workflow_name: str,
     default: int = _DEFAULT_TOKENS_PER_RUN,
+    tenant_id: str | None = None,
 ) -> int:
     """Estimate tokens per run for a workflow from recent run history.
 
@@ -77,7 +84,8 @@ async def _estimate_tokens_per_run(
     if not workflow_name:
         return default
 
-    cached = _cache_get(workflow_name)
+    cache_key = workflow_name if tenant_id is None else f"{tenant_id}\0{workflow_name}"
+    cached = _cache_get(cache_key)
     if cached is not None:
         return cached
 
@@ -94,6 +102,7 @@ async def _estimate_tokens_per_run(
             stmt = (
                 select(Run.total_cost_usd)
                 .where(Run.workflow_name == workflow_name)
+                .where(Run.tenant_id == tenant_id)
                 .where(Run.status == RunStatus.COMPLETED)
                 .order_by(Run.created_at.desc())
                 .limit(20)
@@ -115,7 +124,7 @@ async def _estimate_tokens_per_run(
     tokens = int(round(avg_cost * 1_000_000 / _BASELINE_BLENDED_USD_PER_M))
     if tokens <= 0:
         tokens = default
-    _cache_set(workflow_name, tokens)
+    _cache_set(cache_key, tokens)
     return tokens
 
 
@@ -173,12 +182,17 @@ def _build_cost_estimates(tokens_per_run: int = _DEFAULT_TOKENS_PER_RUN) -> dict
 async def estimate_model_costs(
     workflow_name: str,
     default: int = _DEFAULT_TOKENS_PER_RUN,
+    tenant_id: str | None = None,
 ) -> dict[str, float]:
     """Return per-model cost estimates calibrated to workflow_name's history.
 
     Falls back to the default tokens-per-run baseline when no history exists.
     """
-    tokens = await _estimate_tokens_per_run(workflow_name, default=default)
+    tokens = await _estimate_tokens_per_run(
+        workflow_name,
+        default=default,
+        tenant_id=tenant_id,
+    )
     return _build_cost_estimates(tokens)
 
 
@@ -189,6 +203,12 @@ MODEL_COST_ESTIMATES: dict[str, float] = _build_cost_estimates()
 # ---------------------------------------------------------------------------
 # Composite scoring
 # ---------------------------------------------------------------------------
+
+
+# Any variant that fails every case scores here: below anything a working
+# variant can reach, so it can never win a comparison, while still being an
+# ordinary float that the callers' `>` comparisons handle without special cases.
+_BROKEN_VARIANT_SCORE = -1000.0
 
 
 def compute_evolution_score(
@@ -210,36 +230,46 @@ def compute_evolution_score(
         duration_seconds: total duration of eval runs
         eval_runs: number of eval cases executed (for confidence)
         optimize_for: scoring objective (quality/cost/latency/balanced)
-        budget_limit: optional per-run budget cap
+        budget_limit: optional total evolution budget cap
 
     Returns:
         Composite score (higher is better).
     """
+    # A variant that passed nothing is not a cheap variant, it is a broken one.
+    # Crashed cases are recorded with cost_usd = 0.0 and duration 0.0, so in
+    # "cost" mode a variant where every case raised scored on pure efficiency
+    # and beat a working baseline - 50.00 against 36.67 in the case that found
+    # this - which promoted it to best_variant_yaml and, via the accept
+    # endpoint, into production. Zero quality is disqualifying regardless of
+    # what the other axes say.
+    if eval_runs > 0 and quality <= 0.0:
+        return _BROKEN_VARIANT_SCORE
+
     # Confidence factor: need enough runs for a reliable score
     confidence = min(eval_runs / 5, 1.0) ** 0.5
 
-    # Cost penalty: exponential penalty above budget
+    # Cost penalty: proportional penalty above budget
     cost_penalty = 0.0
     if budget_limit and cost_usd > budget_limit:
         cost_penalty = (cost_usd - budget_limit) / budget_limit * 20
 
     # Latency penalty: penalize > 60s
     latency_penalty = max(0, (duration_seconds - 60) / 60) * 2
+    cost_efficiency = 50 * confidence / (
+        1 + max(cost_usd, 0.0) / _COST_EFFICIENCY_SCALE_USD
+    )
+    latency_efficiency = (
+        50
+        * confidence
+        / (1 + max(duration_seconds, 0.0) / _LATENCY_EFFICIENCY_SCALE_SECONDS)
+    )
 
     if optimize_for == "quality":
         base = quality * 100 * confidence - cost_penalty - latency_penalty
     elif optimize_for == "cost":
-        base = (
-            (1 - cost_usd / max(cost_usd, 0.01)) * 50
-            + quality * 50 * confidence
-            - latency_penalty
-        )
+        base = cost_efficiency + quality * 50 * confidence - latency_penalty
     elif optimize_for == "latency":
-        base = (
-            (1 - duration_seconds / max(duration_seconds, 1)) * 50
-            + quality * 50 * confidence
-            - cost_penalty
-        )
+        base = latency_efficiency + quality * 50 * confidence - cost_penalty
     else:  # balanced
         base = quality * 60 * confidence - cost_usd * 10 - latency_penalty * 0.5
 
@@ -571,13 +601,21 @@ async def mutate_finetune(
     if min_samples is None:
         min_samples = settings.evolution_finetune_min_samples
 
-    pairs = [
-        {"input": inp, "output": out}
-        for r in (eval_results or [])
-        if isinstance(r, dict)
-        and (inp := r.get("input") or r.get("prompt"))
-        and (out := r.get("expected") or r.get("output"))
-    ]
+    pairs = []
+    for result in eval_results or []:
+        if not isinstance(result, dict):
+            continue
+        input_value = result.get("input")
+        if input_value is None:
+            input_value = result.get("prompt")
+        output_value = result.get("expected")
+        has_expected_output = output_value is not None
+        if output_value is None:
+            output_value = result.get("output")
+        if not has_expected_output and result.get("passed") is False:
+            continue
+        if input_value is not None and output_value is not None:
+            pairs.append({"input": input_value, "output": output_value})
     if len(pairs) < min_samples:
         return workflow_yaml, f"finetune skipped: {len(pairs)} usable samples < min {min_samples}"
 
@@ -651,9 +689,63 @@ def _pick_mutation_type(
     return cycle[iteration % len(cycle)]
 
 
+def _build_mutation_eval_results(
+    suite_cases: list[Any],
+    case_results: list[Any],
+) -> list[dict[str, Any]]:
+    """Combine eval outcomes with their original inputs for mutation operators."""
+    mutation_results: list[dict[str, Any]] = []
+    for index, result in enumerate(case_results):
+        case_input = suite_cases[index].input if index < len(suite_cases) else None
+        mutation_results.append(
+            {
+                "name": result.name,
+                "input": case_input,
+                "passed": result.passed,
+                "error": result.error,
+                "output": result.output,
+                "cost_usd": result.cost_usd,
+                "duration_seconds": result.duration_seconds,
+            }
+        )
+    return mutation_results
+
+
 # ---------------------------------------------------------------------------
 # Evolution orchestrator
 # ---------------------------------------------------------------------------
+
+
+def _prepare_eval_suite(
+    eval_suite_yaml: str,
+    workflow_name: str,
+) -> tuple[str, Any]:
+    """Normalize and parse an eval suite for a known workflow.
+
+    Evolution already knows the workflow name, so callers may omit it. Older
+    dashboard versions also wrapped the suite fields in a top-level ``suite``
+    mapping; accept that shape while storing the canonical flat format.
+    """
+    from sandcastle.engine.eval import parse_eval_suite_string
+
+    data = yaml.safe_load(eval_suite_yaml)
+    if not isinstance(data, dict):
+        raise ValueError("Eval suite must be a YAML mapping")
+
+    nested_suite = data.get("suite")
+    if isinstance(nested_suite, dict):
+        top_level = {key: value for key, value in data.items() if key != "suite"}
+        data = {**nested_suite, **top_level}
+
+    suite_workflow = data.get("workflow")
+    if suite_workflow and suite_workflow != workflow_name:
+        raise ValueError(
+            f"Eval suite targets workflow '{suite_workflow}', expected '{workflow_name}'"
+        )
+    data["workflow"] = workflow_name
+
+    normalized_yaml = yaml.safe_dump(data, sort_keys=False)
+    return normalized_yaml, parse_eval_suite_string(normalized_yaml)
 
 
 async def run_evolution(
@@ -663,6 +755,8 @@ async def run_evolution(
     optimize_for: str = "balanced",
     budget_limit: float | None = None,
     tenant_id: str | None = None,
+    evolution_id: uuid.UUID | None = None,
+    record_exists: bool = False,
 ) -> dict:
     """Run the evolution loop.
 
@@ -683,18 +777,20 @@ async def run_evolution(
         eval_suite_yaml: YAML string defining the eval suite
         max_iterations: maximum number of mutation iterations
         optimize_for: scoring objective (quality/cost/latency/balanced)
-        budget_limit: optional per-run cost cap (USD)
+        budget_limit: optional total experiment cost cap (USD)
         tenant_id: optional tenant for multi-tenant setups
+        evolution_id: optional preallocated ID for API background execution
+        record_exists: whether the API already persisted the running record
 
     Returns:
         Dict with evolution results including best_yaml and stats.
     """
-    from sandcastle.engine.dag import parse_yaml_string
-    from sandcastle.engine.eval import parse_eval_suite_string, run_eval_suite
+    from sandcastle.engine.dag import parse_yaml_string, validate
+    from sandcastle.engine.eval import run_eval_suite
     from sandcastle.engine.generator import _get_advisor_config
     from sandcastle.models.db import EvolutionIteration, WorkflowEvolution, async_session
 
-    evolution_id = uuid.uuid4()
+    evolution_id = evolution_id or uuid.uuid4()
     now = datetime.now(timezone.utc)
 
     # Snapshot advisor config at start of evolution for logging - the actual
@@ -715,7 +811,10 @@ async def run_evolution(
 
     # Calibrate per-model cost estimates against this workflow's run history.
     try:
-        estimated_tokens = await _estimate_tokens_per_run(workflow_name)
+        estimated_tokens = await _estimate_tokens_per_run(
+            workflow_name,
+            tenant_id=tenant_id,
+        )
         cost_estimates = _build_cost_estimates(estimated_tokens)
         logger.info(
             "Evolution %s: tokens_per_run=%d cost_estimates=%s",
@@ -727,7 +826,10 @@ async def run_evolution(
     # --- Load baseline workflow ---
     try:
         baseline_yaml = _get_workflow_yaml(workflow_name)
-        _baseline_workflow = parse_yaml_string(baseline_yaml)  # validate parseable
+        baseline_workflow = parse_yaml_string(baseline_yaml)
+        validation_errors = validate(baseline_workflow)
+        if validation_errors:
+            raise ValueError("; ".join(validation_errors))
     except Exception as exc:
         return {
             "error": f"Failed to load workflow '{workflow_name}': {exc}",
@@ -736,17 +838,7 @@ async def run_evolution(
 
     # --- Parse eval suite ---
     try:
-        # The suite's 'workflow' field is redundant here - evolution already
-        # knows which workflow it evolves. Inject it when missing so suites
-        # written (or generated by the dashboard) without it just work.
-        try:
-            _suite_data = yaml.safe_load(eval_suite_yaml)
-            if isinstance(_suite_data, dict) and not _suite_data.get("workflow"):
-                _suite_data["workflow"] = workflow_name
-                eval_suite_yaml = yaml.safe_dump(_suite_data, sort_keys=False)
-        except yaml.YAMLError:
-            pass  # let parse_eval_suite_string produce the real error
-        suite = parse_eval_suite_string(eval_suite_yaml)
+        eval_suite_yaml, suite = _prepare_eval_suite(eval_suite_yaml, workflow_name)
     except Exception as exc:
         return {
             "error": f"Failed to parse eval suite: {exc}",
@@ -764,31 +856,58 @@ async def run_evolution(
             "status": "failed",
         }
 
-    # --- Create DB record ---
-    evolution_record = WorkflowEvolution(
-        id=evolution_id,
-        workflow_name=workflow_name,
-        status="running",
-        optimize_for=optimize_for,
-        max_iterations=max_iterations,
-        budget_limit_usd=budget_limit,
-        eval_suite_yaml=eval_suite_yaml,
-        tenant_id=tenant_id,
-        created_at=now,
-    )
+    # An absent budget_limit made both stop checks dead code, so the loop ran
+    # max_iterations regardless - up to 100 paid iterations, bounded only by the
+    # arq job timeout. Resolve it here, before the record is written, so the
+    # stored budget_limit_usd is the one actually enforced rather than a NULL
+    # that the API would report as "no limit".
+    if not budget_limit or budget_limit <= 0:
+        from sandcastle.config import settings as _evo_settings
 
-    async with async_session() as session:
-        session.add(evolution_record)
-        await session.commit()
+        budget_limit = _evo_settings.evolution_default_budget_usd
+        logger.info(
+            "Evolution %s: no budget_limit given, applying default $%.2f",
+            evolution_id,
+            budget_limit,
+        )
+
+    # --- Create DB record ---
+    if not record_exists:
+        evolution_record = WorkflowEvolution(
+            id=evolution_id,
+            workflow_name=workflow_name,
+            status="running",
+            optimize_for=optimize_for,
+            max_iterations=max_iterations,
+            budget_limit_usd=budget_limit,
+            eval_suite_yaml=eval_suite_yaml,
+            tenant_id=tenant_id,
+            created_at=now,
+        )
+
+        async with async_session() as session:
+            session.add(evolution_record)
+            await session.commit()
 
     # --- Run baseline eval ---
     logger.info("Evolution %s: running baseline eval for '%s'", evolution_id, workflow_name)
     try:
-        baseline_result = await run_eval_suite(suite)
+        baseline_result = await run_eval_suite(suite, tenant_id=tenant_id)
     except Exception as exc:
         logger.error("Evolution %s: baseline eval failed: %s", evolution_id, exc)
-        await _update_evolution_status(evolution_id, "failed")
+        await _update_evolution_status(
+            evolution_id,
+            "failed",
+            error=f"Baseline eval failed: {exc}",
+        )
         return {"error": f"Baseline eval failed: {exc}", "status": "failed"}
+
+    if await _is_evolution_cancelled(evolution_id):
+        return {
+            "evolution_id": str(evolution_id),
+            "workflow_name": workflow_name,
+            "status": "cancelled",
+        }
 
     baseline_quality = baseline_result.pass_rate
     baseline_cost = baseline_result.total_cost_usd
@@ -833,21 +952,31 @@ async def run_evolution(
     total_spend = baseline_cost or 0.0
     total_keeps = 0
     total_discards = 0
+    iterations_run = 0
 
     # Extract eval results as dicts for mutation operators
-    eval_case_dicts = [
-        {
-            "name": cr.name,
-            "passed": cr.passed,
-            "error": cr.error,
-            "output": cr.output,
-            "cost_usd": cr.cost_usd,
-            "duration_seconds": cr.duration_seconds,
-        }
-        for cr in baseline_result.cases
-    ]
+    eval_case_dicts = _build_mutation_eval_results(
+        suite.cases,
+        baseline_result.cases,
+    )
 
     for iteration in range(max_iterations):
+        if budget_limit and total_spend >= budget_limit:
+            logger.warning(
+                "Evolution %s: budget already exhausted ($%.4f >= $%.4f limit)",
+                evolution_id,
+                total_spend,
+                budget_limit,
+            )
+            break
+
+        if await _is_evolution_cancelled(evolution_id):
+            return {
+                "evolution_id": str(evolution_id),
+                "workflow_name": workflow_name,
+                "status": "cancelled",
+            }
+
         logger.info("Evolution %s: iteration %d/%d", evolution_id, iteration + 1, max_iterations)
 
         # Pick mutation type
@@ -926,11 +1055,24 @@ async def run_evolution(
                     ev.total_discards = total_discards + 1
                 await session.commit()
             total_discards += 1
+            iterations_run = iteration + 1
             continue
 
         # Run eval suite on mutated workflow
         temp_workflow_name = f"__evolution_{evolution_id}_{iteration}"
-        eval_result = await _run_eval_on_yaml(new_yaml, suite, temp_workflow_name)
+        eval_result = await _run_eval_on_yaml(
+            new_yaml,
+            suite,
+            temp_workflow_name,
+            tenant_id=tenant_id,
+        )
+
+        if await _is_evolution_cancelled(evolution_id):
+            return {
+                "evolution_id": str(evolution_id),
+                "workflow_name": workflow_name,
+                "status": "cancelled",
+            }
 
         if eval_result is None:
             # Eval crashed
@@ -951,6 +1093,7 @@ async def run_evolution(
                     ev.total_discards = total_discards + 1
                 await session.commit()
             total_discards += 1
+            iterations_run = iteration + 1
             continue
 
         # Compute score
@@ -977,6 +1120,10 @@ async def run_evolution(
             best_quality = iter_quality
             best_cost = iter_cost
             total_keeps += 1
+            eval_case_dicts = _build_mutation_eval_results(
+                suite.cases,
+                eval_result.cases,
+            )
 
             # Update best in DB
             async with async_session() as session:
@@ -999,19 +1146,6 @@ async def run_evolution(
                 "Evolution %s iter %d: DISCARD score=%.2f<%.2f (%s)",
                 evolution_id, iteration + 1, iter_score, best_score, description,
             )
-
-        # Update eval case dicts with latest results
-        eval_case_dicts = [
-            {
-                "name": cr.name,
-                "passed": cr.passed,
-                "error": cr.error,
-                "output": cr.output,
-                "cost_usd": cr.cost_usd,
-                "duration_seconds": cr.duration_seconds,
-            }
-            for cr in eval_result.cases
-        ]
 
         # Log iteration to DB
         iter_record = EvolutionIteration(
@@ -1037,11 +1171,12 @@ async def run_evolution(
                 ev.total_keeps = total_keeps
                 ev.total_discards = total_discards
             await session.commit()
+        iterations_run = iteration + 1
 
         # Check budget stop condition against cumulative spend
-        if budget_limit and total_spend > budget_limit:
+        if budget_limit and total_spend >= budget_limit:
             logger.warning(
-                "Evolution %s: budget exhausted ($%.4f > $%.4f limit) after %d iterations",
+                "Evolution %s: budget exhausted ($%.4f >= $%.4f limit) after %d iterations",
                 evolution_id,
                 total_spend,
                 budget_limit,
@@ -1053,6 +1188,12 @@ async def run_evolution(
     completed_at = datetime.now(timezone.utc)
     async with async_session() as session:
         ev = await session.get(WorkflowEvolution, evolution_id)
+        if ev and ev.status == "cancelled":
+            return {
+                "evolution_id": str(evolution_id),
+                "workflow_name": workflow_name,
+                "status": "cancelled",
+            }
         if ev:
             ev.status = "completed"
             ev.completed_at = completed_at
@@ -1082,7 +1223,7 @@ async def run_evolution(
         "best_cost": best_cost,
         "best_variant_yaml": best_yaml,
         "improvement": improvement,
-        "iterations_run": max_iterations,
+        "iterations_run": iterations_run,
         "total_keeps": total_keeps,
         "total_discards": total_discards,
         "optimize_for": optimize_for,
@@ -1093,6 +1234,7 @@ async def _run_eval_on_yaml(
     workflow_yaml: str,
     suite: Any,
     temp_name: str,
+    tenant_id: str | None = None,
 ) -> Any | None:
     """Run eval suite against a mutated workflow YAML.
 
@@ -1103,6 +1245,7 @@ async def _run_eval_on_yaml(
         workflow_yaml: YAML string of the mutated workflow.
         suite: parsed eval suite definition.
         temp_name: temporary workflow name for logging.
+        tenant_id: tenant propagated into every workflow execution context.
     """
     from sandcastle.engine.eval import CaseResult, SuiteResult
 
@@ -1120,7 +1263,11 @@ async def _run_eval_on_yaml(
         case_results = []
         for case in suite.cases:
             try:
-                result = await _run_case_on_workflow(case, mutated_workflow)
+                result = await _run_case_on_workflow(
+                    case,
+                    mutated_workflow,
+                    tenant_id=tenant_id,
+                )
                 case_results.append(result)
             except Exception as exc:
                 case_results.append(
@@ -1154,7 +1301,11 @@ async def _run_eval_on_yaml(
         return None
 
 
-async def _run_case_on_workflow(case: Any, workflow: Any) -> Any:
+async def _run_case_on_workflow(
+    case: Any,
+    workflow: Any,
+    tenant_id: str | None = None,
+) -> Any:
     """Execute a single eval case against a specific workflow definition."""
     import uuid as _uuid
 
@@ -1176,6 +1327,7 @@ async def _run_case_on_workflow(case: Any, workflow: Any) -> Any:
             input_data=case.input,
             run_id=run_id,
             storage=storage,
+            tenant_id=tenant_id,
         )
 
         duration = time.monotonic() - start_time
@@ -1246,7 +1398,20 @@ def _get_workflow_yaml(workflow_name: str) -> str:
     raise FileNotFoundError(f"Workflow '{workflow_name}' not found in {workflows_dir}")
 
 
-async def _update_evolution_status(evolution_id: uuid.UUID, status: str) -> None:
+async def _is_evolution_cancelled(evolution_id: uuid.UUID) -> bool:
+    """Return whether cancellation was requested for a running evolution."""
+    from sandcastle.models.db import WorkflowEvolution, async_session
+
+    async with async_session() as session:
+        ev = await session.get(WorkflowEvolution, evolution_id)
+        return bool(ev and ev.status == "cancelled")
+
+
+async def _update_evolution_status(
+    evolution_id: uuid.UUID,
+    status: str,
+    error: str | None = None,
+) -> None:
     """Update evolution status in the database."""
     from sandcastle.models.db import WorkflowEvolution, async_session
 
@@ -1254,6 +1419,8 @@ async def _update_evolution_status(evolution_id: uuid.UUID, status: str) -> None
         ev = await session.get(WorkflowEvolution, evolution_id)
         if ev:
             ev.status = status
+            if error is not None:
+                ev.error = error
             if status in ("completed", "failed", "cancelled"):
                 ev.completed_at = datetime.now(timezone.utc)
             await session.commit()

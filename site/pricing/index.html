@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sandcastle — Pricing. Free to build. Licensed to ship.</title>
-  <meta name="description" content="Sandcastle pricing — free forever for development, testing, and personal projects under BSL 1.1. Commercial licenses for production: Pro from $49/mo, Enterprise custom. Converts to Apache 2.0 in 2030.">
+  <meta name="description" content="Sandcastle AI workflow orchestrator pricing: free forever for development under BSL 1.1. Production licenses from $49/mo. Converts to Apache 2.0 in 2030.">
   <meta name="keywords" content="Sandcastle pricing, AI orchestrator license, BSL 1.1, open source AI agents, production license, self-hosted AI">
   <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
   <meta name="author" content="Tomas Pflanzer">
@@ -29,6 +29,144 @@
   <meta name="twitter:creator" content="@iuditg">
 
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏰</text></svg>">
+
+  <!-- Structured data -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "BreadcrumbList",
+        "@id": "https://sandcastle-ai.eu/pricing/#breadcrumb",
+        "itemListElement": [
+          { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://sandcastle-ai.eu/" },
+          { "@type": "ListItem", "position": 2, "name": "Pricing", "item": "https://sandcastle-ai.eu/pricing/" }
+        ]
+      },
+      {
+        "@type": "SoftwareApplication",
+        "@id": "https://sandcastle-ai.eu/#software",
+        "name": "Sandcastle",
+        "url": "https://sandcastle-ai.eu/",
+        "applicationCategory": "DeveloperApplication",
+        "applicationSubCategory": "AI workflow orchestration",
+        "operatingSystem": "Linux, macOS, Windows",
+        "programmingLanguage": "Python",
+        "license": "https://github.com/gizmax/Sandcastle/blob/main/LICENSE",
+        "publisher": { "@id": "https://sandcastle-ai.eu/#organization" },
+        "offers": [
+          {
+            "@type": "Offer",
+            "name": "Community",
+            "category": "Free",
+            "price": "0",
+            "priceCurrency": "USD",
+            "availability": "https://schema.org/InStock",
+            "url": "https://sandcastle-ai.eu/pricing/#t1",
+            "description": "Free forever under BSL 1.1 for development, testing, prototyping and personal projects. Every feature included — no feature gates."
+          },
+          {
+            "@type": "Offer",
+            "name": "Pro",
+            "category": "Subscription",
+            "price": "49",
+            "priceCurrency": "USD",
+            "availability": "https://schema.org/InStock",
+            "url": "https://sandcastle-ai.eu/pricing/#t2",
+            "description": "Production use license for self-hosted deployments. Up to 10 team members, email support with 48h response, commercial invoice.",
+            "priceSpecification": {
+              "@type": "UnitPriceSpecification",
+              "price": "49",
+              "priceCurrency": "USD",
+              "unitCode": "MON",
+              "billingIncrement": 1,
+              "description": "Billed annually ($588 / year); $59 / month if billed monthly."
+            }
+          },
+          {
+            "@type": "Offer",
+            "name": "Enterprise",
+            "category": "Custom",
+            "priceCurrency": "USD",
+            "availability": "https://schema.org/InStock",
+            "url": "https://sandcastle-ai.eu/pricing/#t3",
+            "description": "Annual contract with volume pricing. Unlimited team members, 24h SLA, custom license terms, onboarding and architecture review."
+          }
+        ]
+      },
+      {
+        "@type": "FAQPage",
+        "@id": "https://sandcastle-ai.eu/pricing/#faq",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "What counts as \"production use\"?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Any deployment that serves real users, processes real data, or runs as part of a business operation. Internal tools your team uses for day-to-day work also count as production."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Can I use it for free during development?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. The Community plan covers local development, testing, CI/CD pipelines, demos, prototypes, personal projects, and open-source contributions. No restrictions."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What happens after the BSL Change Date (2030)?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "The license automatically converts to Apache 2.0. After that date, all versions released before it become fully open source with no production restrictions."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Is there a free tier for startups?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "If you're a bootstrapped startup with fewer than 5 people and under $100k ARR, reach out — we offer discounted or free production licenses on a case-by-case basis."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Do I need a license per server?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No. The Pro license covers your entire team (up to 10 members) regardless of how many servers or instances you run. Enterprise is unlimited."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Can I modify the source code?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. All plans allow you to modify, fork, and create derivative works. Your modifications remain under BSL 1.1 terms (or Apache 2.0 after 2030)."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How do I get an invoice for my company?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Pro and Enterprise plans include commercial invoices. Email tom@pflanzer.cz with your company details and we'll send a proper invoice."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What if I need custom terms?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "The Enterprise plan includes custom license agreements. If you need specific clauses — indemnification, data processing, SLA — we can work with your legal team."
+            }
+          }
+        ]
+      }
+    ]
+  }
+  </script>
 
   <!-- Google Analytics -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-ZN1K4G2TCZ"></script>
@@ -475,6 +613,7 @@
         <span class="tm">v0.43.0</span>
       </a>
       <nav class="primary" aria-label="Primary">
+        <a class="muted" href="/compare/">Compare</a>
         <a class="muted" href="/pricing/" aria-current="page">Pricing</a>
         <a class="muted" href="/security/">Security</a>
         <a class="muted" href="/eu-ai-act/">EU&nbsp;AI&nbsp;Act</a>
@@ -529,7 +668,7 @@
                 <li><span class="mk">All</span><span><strong>Every feature included</strong> — no feature gates, one version</span></li>
                 <li><span class="mk">Run</span><span>All sandbox backends — E2B, Docker, Cloudflare, Local</span></li>
                 <li><span class="mk">UI</span><span>Dashboard + REST API</span></li>
-                <li><span class="mk">Lib</span><span>118 community templates, one-click install</span></li>
+                <li><span class="mk">Lib</span><span>283 community templates, one-click install</span></li>
                 <li><span class="mk">Help</span><span>Community support via GitHub Issues</span></li>
               </ul>
             </div>
@@ -634,7 +773,7 @@
                 <td class="cell yes mark" aria-label="Enterprise: yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
               </tr>
               <tr>
-                <td>53 tool integrations</td>
+                <td>64 tool integrations</td>
                 <td class="cell yes mark" aria-label="Community: yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
                 <td class="cell yes mark" aria-label="Pro: yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
                 <td class="cell yes mark" aria-label="Enterprise: yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></td>
@@ -761,11 +900,12 @@
       <div class="foot-top">
         <div class="foot-brand">
           <div class="b">🏰 Sandcastle</div>
-          <p>An open-source workflow orchestrator for AI agents. Build anything, on any model, anywhere — your rules. European-built.</p>
+          <p>A source-available workflow orchestrator for AI agents. Build anything, on any model, anywhere — your rules. European-built.</p>
         </div>
         <div class="foot-col">
           <h4>Product</h4>
           <a href="/pricing/">Pricing</a>
+          <a href="/compare/">Compare</a>
           <a href="/hub/">Community Hub</a>
           <a href="/whatsnew/">What's new</a>
           <a href="https://pypi.org/project/sandcastle-ai/">PyPI ↗</a>
@@ -785,7 +925,7 @@
         </div>
       </div>
       <div class="foot-bottom">
-        <span class="made">Made in <span class="eu">Europe</span> · Open source under BSL 1.1 → Apache 2.0 (2030)</span>
+        <span class="made">Made in <span class="eu">Europe</span> · Source-available under BSL 1.1 → Apache 2.0 (2030)</span>
         <span>© 2026 Sandcastle · <a href="https://sandcastle-ai.eu">sandcastle-ai.eu</a></span>
       </div>
     </div>

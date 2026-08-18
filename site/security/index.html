@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sandcastle — Security. How we protect your runs.</title>
-  <meta name="description" content="Defense-in-depth for AI agent workflows: ephemeral sandboxes, HMAC-SHA256 auth, a policy engine with 30+ credential patterns, SSRF prevention, EU data residency enforcement, and a SHA-256 hash-chain audit trail. Built for the EU AI Act era.">
+  <meta name="description" content="Defense-in-depth for AI agent workflows: ephemeral sandboxes, 30+ credential-redaction patterns, EU data residency, and a SHA-256 hash-chain audit trail.">
   <meta name="keywords" content="AI workflow security, sandbox isolation, EU data residency, audit trail, SSRF prevention, credential redaction, EU AI Act, sandcastle, sandcastle-ai">
   <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
   <meta name="author" content="Tomas Pflanzer">
@@ -27,6 +27,34 @@
   <meta name="twitter:description" content="How we protect your runs. Defense in depth for AI agent workflows. EU data residency, tamper-evident audit trail, on by default.">
   <meta name="twitter:image" content="https://raw.githubusercontent.com/gizmax/Sandcastle/main/site/og-image.jpeg">
   <meta name="twitter:creator" content="@iuditg">
+
+  <!-- Structured Data: BreadcrumbList -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+      { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://sandcastle-ai.eu/" },
+      { "@type": "ListItem", "position": 2, "name": "Security", "item": "https://sandcastle-ai.eu/security/" }
+    ]
+  }
+  </script>
+
+  <!-- Structured Data: WebPage -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "@id": "https://sandcastle-ai.eu/security/",
+    "url": "https://sandcastle-ai.eu/security/",
+    "name": "Sandcastle — Security",
+    "description": "Defense-in-depth for AI agent workflows: ephemeral sandboxes, HMAC-SHA256 auth, a policy engine with 30+ credential patterns, SSRF prevention, EU data residency enforcement, and a SHA-256 hash-chain audit trail.",
+    "inLanguage": "en",
+    "isPartOf": { "@id": "https://sandcastle-ai.eu/#website" },
+    "about": { "@id": "https://sandcastle-ai.eu/#software" },
+    "publisher": { "@id": "https://sandcastle-ai.eu/#organization" }
+  }
+  </script>
 
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏰</text></svg>">
 
@@ -467,6 +495,7 @@
         <span class="tm">v0.43.0</span>
       </a>
       <nav class="primary" aria-label="Primary">
+        <a class="muted" href="/compare/">Compare</a>
         <a class="muted" href="/pricing/">Pricing</a>
         <a class="muted" href="/security/" aria-current="page">Security</a>
         <a class="muted" href="/eu-ai-act/">EU&nbsp;AI&nbsp;Act</a>
@@ -990,11 +1019,12 @@
       <div class="foot-top">
         <div class="foot-brand">
           <div class="b">🏰 Sandcastle</div>
-          <p>An open-source workflow orchestrator for AI agents. Build anything, on any model, anywhere — your rules. European-built.</p>
+          <p>A source-available workflow orchestrator for AI agents. Build anything, on any model, anywhere — your rules. European-built.</p>
         </div>
         <div class="foot-col">
           <h4>Product</h4>
           <a href="/pricing/">Pricing</a>
+          <a href="/compare/">Compare</a>
           <a href="/hub/">Community Hub</a>
           <a href="/whatsnew/">What's new</a>
           <a href="https://pypi.org/project/sandcastle-ai/">PyPI ↗</a>
@@ -1014,7 +1044,7 @@
         </div>
       </div>
       <div class="foot-bottom">
-        <span class="made">Made in <span class="eu">Europe</span> · Open source under BSL 1.1 → Apache 2.0 (2030)</span>
+        <span class="made">Made in <span class="eu">Europe</span> · Source-available under BSL 1.1 → Apache 2.0 (2030)</span>
         <span>© 2026 Sandcastle · <a href="https://sandcastle-ai.eu">sandcastle-ai.eu</a></span>
       </div>
     </div>

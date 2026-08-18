@@ -279,6 +279,63 @@ async def _cleanup_orphaned_runs() -> tuple[int, int]:
     return failed_count, reenqueued_count
 
 
+async def _cleanup_orphaned_evolutions() -> tuple[int, int]:
+    """Fail local evolution tasks or restore durable Redis evolution jobs."""
+    from datetime import datetime, timezone
+
+    from sqlalchemy import select as sa_select
+    from sqlalchemy import update as sa_update
+
+    from sandcastle.models.db import WorkflowEvolution, async_session
+    from sandcastle.queue.worker import enqueue_evolution, uses_redis_queue
+
+    redis_queue = uses_redis_queue()
+    active_statuses = ("queued", "running")
+    async with async_session() as session:
+        result = await session.execute(
+            sa_select(WorkflowEvolution).where(
+                WorkflowEvolution.status.in_(active_statuses)
+            )
+        )
+        active = result.scalars().all()
+
+        if not redis_queue and active:
+            await session.execute(
+                sa_update(WorkflowEvolution)
+                .where(WorkflowEvolution.status.in_(active_statuses))
+                .values(
+                    status="failed",
+                    completed_at=datetime.now(timezone.utc),
+                    error="Server restarted while evolution was running locally",
+                )
+            )
+            await session.commit()
+            return len(active), 0
+
+    reenqueued_count = 0
+    for evolution in active:
+        try:
+            await enqueue_evolution(
+                str(evolution.id),
+                evolution.workflow_name,
+                evolution.eval_suite_yaml or "",
+                evolution.max_iterations,
+                evolution.optimize_for,
+                budget_limit=evolution.budget_limit_usd,
+                tenant_id=evolution.tenant_id,
+                mark_failed_on_error=False,
+            )
+            reenqueued_count += 1
+        except Exception as exc:
+            logger.warning(
+                "Could not re-enqueue evolution %s: %s",
+                evolution.id,
+                exc,
+            )
+
+    return 0, reenqueued_count
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle - startup and shutdown hooks."""
@@ -337,6 +394,13 @@ async def lifespan(app: FastAPI):
             "Startup orphan cleanup failed %d run(s) and re-enqueued %d queued run(s)",
             failed_count,
             reenqueued_count,
+        )
+    failed_evolutions, reenqueued_evolutions = await _cleanup_orphaned_evolutions()
+    if failed_evolutions or reenqueued_evolutions:
+        logger.info(
+            "Startup evolution cleanup failed %d local job(s) and re-enqueued %d Redis job(s)",
+            failed_evolutions,
+            reenqueued_evolutions,
         )
 
     # Start the cron scheduler (skip in multi-worker deployments)

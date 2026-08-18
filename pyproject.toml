@@ -72,7 +72,9 @@ docker = [
     "aiodocker>=0.22",
 ]
 mcp = [
-    "mcp>=1.24",
+    # Capped below 2.0: mcp 2.x removed mcp.server.fastmcp (replaced by
+    # mcp.server.mcpserver), which src/sandcastle/mcp_server.py imports.
+    "mcp>=1.24,<2",
 ]
 security = [
     "cryptography>=43.0",
@@ -102,7 +104,7 @@ dev = [
     "hypothesis>=6.0",
     "ruff>=0.8",
     "aiodocker>=0.22",
-    "mcp>=1.24",
+    "mcp>=1.24,<2",  # cap: see the mcp extra above
     "sentry-sdk[fastapi]>=2.0",
     "cryptography>=43.0",
 ]

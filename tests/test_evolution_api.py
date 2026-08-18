@@ -14,6 +14,204 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 
 @pytest.mark.asyncio
+async def test_start_evolution_persists_visible_record_before_response(monkeypatch):
+    """The 202 response contains a real ID whose queued row is already committed."""
+    from sandcastle.api import routes
+    from sandcastle.engine import evolution
+
+    request = MagicMock()
+    request.json = AsyncMock(
+        return_value={
+            "workflow_name": "test-workflow",
+            "eval_suite_yaml": (
+                "suite:\n"
+                "  cases:\n"
+                "    - name: baseline\n"
+                "      input: {}\n"
+                "      assertions:\n"
+                "        - type: not_empty\n"
+            ),
+            "max_iterations": 2,
+        }
+    )
+    session = MagicMock()
+    session.__aenter__ = AsyncMock(return_value=session)
+    session.__aexit__ = AsyncMock(return_value=False)
+    session.add = MagicMock()
+    session.commit = AsyncMock()
+    session.scalar = AsyncMock(return_value=None)
+
+    monkeypatch.setattr(routes, "_require_admin", lambda _req: None)
+    monkeypatch.setattr(routes, "get_tenant_id", lambda _req: "tenant-a")
+    monkeypatch.setattr(routes, "parse_yaml_string", MagicMock())
+    monkeypatch.setattr(routes, "validate", MagicMock(return_value=[]))
+    monkeypatch.setattr(routes, "async_session", MagicMock(return_value=session))
+    enqueue = AsyncMock()
+    monkeypatch.setattr(routes, "enqueue_evolution", enqueue)
+    monkeypatch.setattr(evolution, "_get_workflow_yaml", lambda _name: "name: test-workflow")
+
+    response = await routes.start_evolution(request)
+
+    persisted = session.add.call_args.args[0]
+    assert session.commit.await_count == 1
+    assert response.data.evolution_id == str(persisted.id)
+    assert persisted.status == "queued"
+    assert persisted.tenant_id == "tenant-a"
+    assert "workflow: test-workflow" in persisted.eval_suite_yaml
+    assert "suite:" not in persisted.eval_suite_yaml
+    enqueue.assert_awaited_once_with(
+        str(persisted.id),
+        "test-workflow",
+        persisted.eval_suite_yaml,
+        2,
+        "balanced",
+        budget_limit=None,
+        tenant_id="tenant-a",
+    )
+
+
+@pytest.mark.asyncio
+async def test_start_evolution_reports_queue_failure(monkeypatch):
+    """A queue outage is reported immediately instead of returning a false start."""
+    from sandcastle.api import routes
+    from sandcastle.engine import evolution
+
+    request = MagicMock()
+    request.json = AsyncMock(
+        return_value={
+            "workflow_name": "test-workflow",
+            "eval_suite_yaml": (
+                "cases:\n"
+                "  - name: baseline\n"
+                "    input: {}\n"
+                "    assertions:\n"
+                "      - type: not_empty\n"
+            ),
+        }
+    )
+    session = MagicMock()
+    session.__aenter__ = AsyncMock(return_value=session)
+    session.__aexit__ = AsyncMock(return_value=False)
+    session.add = MagicMock()
+    session.commit = AsyncMock()
+    session.scalar = AsyncMock(return_value=None)
+
+    monkeypatch.setattr(routes, "_require_admin", lambda _req: None)
+    monkeypatch.setattr(routes, "get_tenant_id", lambda _req: None)
+    monkeypatch.setattr(routes, "parse_yaml_string", MagicMock())
+    monkeypatch.setattr(routes, "validate", MagicMock(return_value=[]))
+    monkeypatch.setattr(routes, "async_session", MagicMock(return_value=session))
+    monkeypatch.setattr(
+        routes,
+        "enqueue_evolution",
+        AsyncMock(side_effect=ConnectionError("queue offline")),
+    )
+    monkeypatch.setattr(evolution, "_get_workflow_yaml", lambda _name: "name: test-workflow")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await routes.start_evolution(request)
+
+    assert exc_info.value.status_code == 503
+    assert "queue offline" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_start_evolution_rejects_invalid_json(monkeypatch):
+    from sandcastle.api import routes
+
+    request = MagicMock()
+    request.json = AsyncMock(side_effect=ValueError("malformed"))
+    monkeypatch.setattr(routes, "_require_admin", lambda _req: None)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await routes.start_evolution(request)
+
+    assert exc_info.value.status_code == 400
+    assert "Invalid JSON body" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_start_evolution_rejects_duplicate_active_workflow(monkeypatch):
+    """A second active evolution cannot become an uncontrollable superseded job."""
+    from sandcastle.api import routes
+    from sandcastle.engine import evolution
+
+    request = MagicMock()
+    request.json = AsyncMock(
+        return_value={
+            "workflow_name": "test-workflow",
+            "eval_suite_yaml": (
+                "cases:\n"
+                "  - name: baseline\n"
+                "    input: {}\n"
+                "    assertions:\n"
+                "      - type: not_empty\n"
+            ),
+        }
+    )
+    session = MagicMock()
+    session.__aenter__ = AsyncMock(return_value=session)
+    session.__aexit__ = AsyncMock(return_value=False)
+    session.scalar = AsyncMock(return_value=uuid.uuid4())
+    session.add = MagicMock()
+
+    monkeypatch.setattr(routes, "_require_admin", lambda _req: None)
+    monkeypatch.setattr(routes, "get_tenant_id", lambda _req: "tenant-a")
+    monkeypatch.setattr(routes, "parse_yaml_string", MagicMock())
+    monkeypatch.setattr(routes, "validate", MagicMock(return_value=[]))
+    monkeypatch.setattr(routes, "async_session", MagicMock(return_value=session))
+    monkeypatch.setattr(routes, "enqueue_evolution", AsyncMock())
+    monkeypatch.setattr(evolution, "_get_workflow_yaml", lambda _name: "name: test-workflow")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await routes.start_evolution(request)
+
+    assert exc_info.value.status_code == 409
+    session.add.assert_not_called()
+    routes.enqueue_evolution.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_start_evolution_rejects_invalid_workflow_before_queueing(monkeypatch):
+    """Invalid dependencies are reported synchronously without creating a job."""
+    from sandcastle.api import routes
+    from sandcastle.engine import evolution
+
+    request = MagicMock()
+    request.json = AsyncMock(
+        return_value={
+            "workflow_name": "invalid-workflow",
+            "eval_suite_yaml": (
+                "cases:\n"
+                "  - name: baseline\n"
+                "    input: {}\n"
+                "    assertions:\n"
+                "      - type: not_empty\n"
+            ),
+        }
+    )
+    invalid_workflow = """
+name: invalid-workflow
+steps:
+  - id: answer
+    prompt: Answer
+    depends_on: [missing]
+"""
+    enqueue = AsyncMock()
+    monkeypatch.setattr(routes, "_require_admin", lambda _req: None)
+    monkeypatch.setattr(routes, "get_tenant_id", lambda _req: None)
+    monkeypatch.setattr(routes, "enqueue_evolution", enqueue)
+    monkeypatch.setattr(evolution, "_get_workflow_yaml", lambda _name: invalid_workflow)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await routes.start_evolution(request)
+
+    assert exc_info.value.status_code == 400
+    assert "missing" in exc_info.value.detail
+    enqueue.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_list_evolutions_is_empty_then_tenant_scoped(monkeypatch):
     """The evolution list is newest-first and never exposes another tenant's data."""
     from sandcastle.api import routes
@@ -172,6 +370,124 @@ async def test_evolution_status_returns_latest_run_for_workflow(monkeypatch):
     assert response.data.evolution_id == str(latest_id)
     assert response.data.status == "running"
     assert response.data.optimize_for == "cost"
+
+    with patch("sandcastle.api.routes.get_tenant_id", return_value=tenant_id):
+        cancelled = await routes.cancel_evolution(workflow_name, MagicMock())
+
+    assert cancelled.data["cancelled"] is True
+    async with async_session() as session:
+        older = await session.get(WorkflowEvolution, older_id)
+        latest = await session.get(WorkflowEvolution, latest_id)
+    assert older is not None and older.status == "completed"
+    assert latest is not None and latest.status == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_accept_evolution_archives_old_production_and_marks_latest_accepted(
+    monkeypatch,
+):
+    """Accept is an atomic promotion and leaves exactly one production version."""
+    from sqlalchemy import select
+
+    from sandcastle.api import routes
+    from sandcastle.models.db import (
+        WorkflowEvolution,
+        WorkflowVersion,
+        WorkflowVersionStatus,
+        async_session,
+    )
+
+    tenant_id = f"evolution-accept-{uuid.uuid4().hex}"
+    workflow_name = f"accepted-workflow-{uuid.uuid4().hex}"
+    now = datetime.now(timezone.utc)
+    best_yaml = (
+        f"name: {workflow_name}\n"
+        "steps:\n"
+        "  - id: answer\n"
+        "    prompt: Say hello\n"
+    )
+    older = WorkflowEvolution(
+        workflow_name=workflow_name,
+        tenant_id=tenant_id,
+        status="completed",
+        optimize_for="quality",
+        best_variant_yaml=best_yaml,
+        best_score=70.0,
+        best_quality=0.7,
+        max_iterations=1,
+        created_at=now - timedelta(minutes=1),
+    )
+    latest = WorkflowEvolution(
+        workflow_name=workflow_name,
+        tenant_id=tenant_id,
+        status="completed",
+        optimize_for="quality",
+        best_variant_yaml=best_yaml,
+        best_score=90.0,
+        best_quality=0.9,
+        max_iterations=2,
+        created_at=now,
+    )
+    production = WorkflowVersion(
+        workflow_name=workflow_name,
+        version=1,
+        status=WorkflowVersionStatus.PRODUCTION,
+        yaml_content=best_yaml,
+        steps_count=1,
+        checksum="0" * 64,
+    )
+
+    async with async_session() as session:
+        session.add_all([older, latest, production])
+        await session.commit()
+
+    request = MagicMock()
+    request.json = AsyncMock(return_value={})
+    monkeypatch.setattr(routes, "_require_admin", lambda _req: None)
+    monkeypatch.setattr(routes.settings, "auth_required", True)
+
+    with patch("sandcastle.api.routes.get_tenant_id", return_value=tenant_id):
+        response = await routes.accept_evolution(workflow_name, request)
+        stats = await routes.get_evolution_stats(MagicMock())
+
+    assert response.data["accepted"] is True
+    assert response.data["version"] == 2
+    assert stats.data.completed_evolutions == 2
+
+    async with async_session() as session:
+        refreshed_older = await session.get(WorkflowEvolution, older.id)
+        refreshed_latest = await session.get(WorkflowEvolution, latest.id)
+        versions = (
+            await session.execute(
+                select(WorkflowVersion)
+                .where(WorkflowVersion.workflow_name == workflow_name)
+                .order_by(WorkflowVersion.version)
+            )
+        ).scalars().all()
+
+    assert refreshed_older is not None and refreshed_older.status == "completed"
+    assert refreshed_latest is not None and refreshed_latest.status == "accepted"
+    assert [version.status for version in versions] == [
+        WorkflowVersionStatus.ARCHIVED,
+        WorkflowVersionStatus.PRODUCTION,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_accept_evolution_validates_notes_before_database_access(monkeypatch):
+    from sandcastle.api import routes
+
+    request = MagicMock()
+    request.json = AsyncMock(return_value={"notes": "x" * 501})
+    session_factory = MagicMock()
+    monkeypatch.setattr(routes, "_require_admin", lambda _req: None)
+    monkeypatch.setattr(routes, "async_session", session_factory)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await routes.accept_evolution("workflow", request)
+
+    assert exc_info.value.status_code == 422
+    session_factory.assert_not_called()
 
 
 def test_real_auth_middleware_protects_evolution_list(monkeypatch):

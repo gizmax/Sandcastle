@@ -90,6 +90,62 @@ steps:
 """
 
 
+def test_prepare_eval_suite_accepts_legacy_dashboard_shape():
+    """Evolution accepts the nested suite YAML emitted by pre-0.43 dashboards."""
+    from sandcastle.engine.evolution import _prepare_eval_suite
+
+    normalized, suite = _prepare_eval_suite(
+        """
+suite:
+  description: Legacy dashboard suite
+  cases:
+    - name: baseline
+      input: {}
+      assertions:
+        - type: not_empty
+""",
+        "test-workflow",
+    )
+
+    parsed = yaml.safe_load(normalized)
+    assert parsed["workflow"] == "test-workflow"
+    assert "suite" not in parsed
+    assert suite.workflow == "test-workflow"
+    assert len(suite.cases) == 1
+
+
+def test_prepare_eval_suite_rejects_different_workflow():
+    """Baseline evaluation cannot silently run against a different workflow."""
+    from sandcastle.engine.evolution import _prepare_eval_suite
+
+    with pytest.raises(ValueError, match="targets workflow 'other-workflow'"):
+        _prepare_eval_suite(
+            """
+workflow: other-workflow
+cases:
+  - name: baseline
+    input: {}
+    assertions:
+      - type: not_empty
+""",
+            "test-workflow",
+        )
+
+
+@pytest.mark.asyncio
+async def test_evolution_cancellation_check_reads_persisted_status():
+    """Background evolution observes cancellation requested through the API."""
+    from sandcastle.engine.evolution import _is_evolution_cancelled
+
+    session = MagicMock()
+    session.__aenter__ = AsyncMock(return_value=session)
+    session.__aexit__ = AsyncMock(return_value=False)
+    session.get = AsyncMock(return_value=MagicMock(status="cancelled"))
+
+    with patch("sandcastle.models.db.async_session", return_value=session):
+        assert await _is_evolution_cancelled(uuid.uuid4()) is True
+
+
 # ---------------------------------------------------------------------------
 # TestCompositeScoring
 # ---------------------------------------------------------------------------
@@ -129,27 +185,52 @@ class TestCompositeScoring:
         assert score_fast > score_slow
 
     def test_cost_mode_lower_cost_wins(self):
-        # In cost mode: (1 - cost_usd / max(cost_usd, 0.01)) * 50 + quality * 50 * conf
-        # With different quality to ensure differentiation
+        # Cost must influence the score even when both values exceed one cent.
         score_cheap = compute_evolution_score(
-            quality=0.9, cost_usd=0.01, duration_seconds=30.0, eval_runs=5, optimize_for="cost"
+            quality=0.8, cost_usd=0.05, duration_seconds=30.0, eval_runs=5, optimize_for="cost"
         )
         score_expensive = compute_evolution_score(
-            quality=0.4, cost_usd=1.0, duration_seconds=30.0, eval_runs=5, optimize_for="cost"
+            quality=0.8, cost_usd=1.0, duration_seconds=30.0, eval_runs=5, optimize_for="cost"
         )
         assert score_cheap > score_expensive
 
     def test_latency_mode_faster_wins(self):
-        # Latency mode: quality has significant weight + cost_penalty, so use same quality
-        # The key differentiation: latency_penalty = max(0, (dur-60)/60) * 2
-        # fast: 10s -> penalty=0, slow: 200s -> penalty=(140/60)*2 ~ 4.67
+        # Latency itself must influence latency mode below and above 60 seconds.
         score_fast = compute_evolution_score(
-            quality=0.8, cost_usd=0.01, duration_seconds=10.0, eval_runs=5, optimize_for="quality"
+            quality=0.8, cost_usd=0.01, duration_seconds=10.0, eval_runs=5, optimize_for="latency"
         )
         score_slow = compute_evolution_score(
-            quality=0.8, cost_usd=0.01, duration_seconds=200.0, eval_runs=5, optimize_for="quality"
+            quality=0.8, cost_usd=0.01, duration_seconds=200.0, eval_runs=5, optimize_for="latency"
         )
         assert score_fast > score_slow
+
+    def test_cost_mode_is_monotonic_across_realistic_costs(self):
+        scores = [
+            compute_evolution_score(
+                quality=0.8,
+                cost_usd=cost,
+                duration_seconds=30.0,
+                eval_runs=5,
+                optimize_for="cost",
+            )
+            for cost in (0.0, 0.01, 0.05, 0.1, 1.0)
+        ]
+        assert scores == sorted(scores, reverse=True)
+        assert len(set(scores)) == len(scores)
+
+    def test_latency_mode_is_monotonic_across_realistic_durations(self):
+        scores = [
+            compute_evolution_score(
+                quality=0.8,
+                cost_usd=0.01,
+                duration_seconds=duration,
+                eval_runs=5,
+                optimize_for="latency",
+            )
+            for duration in (0.0, 10.0, 30.0, 60.0, 180.0)
+        ]
+        assert scores == sorted(scores, reverse=True)
+        assert len(set(scores)) == len(scores)
 
     def test_balanced_mode(self):
         score = compute_evolution_score(
@@ -490,6 +571,35 @@ class TestEvolutionOrchestrator:
         assert "error" in result
 
     @pytest.mark.asyncio
+    async def test_invalid_workflow_dag_fails_before_baseline_eval(self):
+        from sandcastle.engine.evolution import run_evolution
+
+        invalid_workflow = """
+name: test-workflow
+steps:
+  - id: answer
+    prompt: Answer
+    depends_on: [missing]
+"""
+        run_suite = AsyncMock()
+        with (
+            patch(
+                "sandcastle.engine.evolution._get_workflow_yaml",
+                return_value=invalid_workflow,
+            ),
+            patch("sandcastle.engine.eval.run_eval_suite", run_suite),
+        ):
+            result = await run_evolution(
+                workflow_name="test-workflow",
+                eval_suite_yaml=EVAL_SUITE_YAML,
+                max_iterations=2,
+            )
+
+        assert result["status"] == "failed"
+        assert "missing" in result["error"]
+        run_suite.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_invalid_eval_suite_yaml(self):
         from sandcastle.engine.evolution import run_evolution
 
@@ -542,6 +652,9 @@ class TestEvolutionOrchestrator:
             ctx.__aenter__ = AsyncMock(return_value=ctx)
             ctx.__aexit__ = AsyncMock(return_value=False)
             ctx.get = AsyncMock(return_value=MagicMock())
+            ctx.execute = AsyncMock(
+                return_value=MagicMock(all=MagicMock(return_value=[]))
+            )
             ctx.add = MagicMock()
             ctx.commit = AsyncMock()
             mock_session.return_value = ctx
@@ -632,6 +745,9 @@ class TestAPIEndpointsUnit:
             ctx.__aenter__ = AsyncMock(return_value=ctx)
             ctx.__aexit__ = AsyncMock(return_value=False)
             ctx.get = AsyncMock(return_value=mock_ev)
+            ctx.execute = AsyncMock(
+                return_value=MagicMock(all=MagicMock(return_value=[]))
+            )
             ctx.add = MagicMock()
             ctx.commit = AsyncMock()
             mock_session.return_value = ctx
@@ -645,6 +761,111 @@ class TestAPIEndpointsUnit:
 
         assert isinstance(result, dict)
         assert "workflow_name" in result or "error" in result
+
+    @pytest.mark.asyncio
+    async def test_budget_exhausted_by_baseline_runs_zero_iterations(self):
+        """An exact budget boundary must not permit one extra paid iteration."""
+        from sandcastle.engine.evolution import run_evolution
+
+        suite_result = self._make_suite_result(cost=0.5)
+        mutate = AsyncMock()
+
+        with (
+            patch("sandcastle.engine.evolution._get_workflow_yaml", return_value=SIMPLE_WORKFLOW_YAML),
+            patch("sandcastle.engine.eval.run_eval_suite", return_value=suite_result),
+            patch("sandcastle.engine.evolution.mutate_prompt", mutate),
+            patch("sandcastle.models.db.async_session") as mock_session,
+        ):
+            mock_ev = MagicMock(status="running")
+            ctx = AsyncMock()
+            ctx.__aenter__ = AsyncMock(return_value=ctx)
+            ctx.__aexit__ = AsyncMock(return_value=False)
+            ctx.get = AsyncMock(return_value=mock_ev)
+            ctx.execute = AsyncMock(
+                return_value=MagicMock(all=MagicMock(return_value=[]))
+            )
+            ctx.add = MagicMock()
+            ctx.commit = AsyncMock()
+            mock_session.return_value = ctx
+
+            result = await run_evolution(
+                workflow_name="test-workflow",
+                eval_suite_yaml=EVAL_SUITE_YAML,
+                max_iterations=5,
+                optimize_for="quality",
+                budget_limit=0.5,
+            )
+
+        assert result["status"] == "completed"
+        assert result["iterations_run"] == 0
+        mutate.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_discarded_variant_failures_do_not_guide_next_mutation(self):
+        """Mutation context stays aligned with the best retained workflow."""
+        from sandcastle.engine.eval import CaseResult, SuiteResult
+        from sandcastle.engine.evolution import run_evolution
+
+        baseline = SuiteResult(
+            suite_name="test",
+            workflow="test-workflow",
+            total=1,
+            passed=1,
+            failed=0,
+            pass_rate=1.0,
+            total_cost_usd=0.01,
+            total_duration_seconds=1.0,
+            cases=[CaseResult(name="case", passed=True, output="best-output")],
+        )
+        rejected = SuiteResult(
+            suite_name="test",
+            workflow="test-workflow",
+            total=1,
+            passed=0,
+            failed=1,
+            pass_rate=0.0,
+            total_cost_usd=0.01,
+            total_duration_seconds=1.0,
+            cases=[CaseResult(name="case", passed=False, output="rejected-output")],
+        )
+        mutate = AsyncMock(
+            side_effect=[
+                (SIMPLE_WORKFLOW_YAML + "\n# variant one\n", "variant one"),
+                (SIMPLE_WORKFLOW_YAML + "\n# variant two\n", "variant two"),
+            ]
+        )
+
+        with (
+            patch("sandcastle.engine.evolution._get_workflow_yaml", return_value=SIMPLE_WORKFLOW_YAML),
+            patch("sandcastle.engine.eval.run_eval_suite", return_value=baseline),
+            patch("sandcastle.engine.evolution._pick_mutation_type", return_value="prompt"),
+            patch("sandcastle.engine.evolution.mutate_prompt", mutate),
+            patch("sandcastle.engine.evolution._run_eval_on_yaml", return_value=rejected),
+            patch("sandcastle.models.db.async_session") as mock_session,
+        ):
+            mock_ev = MagicMock(status="running")
+            ctx = AsyncMock()
+            ctx.__aenter__ = AsyncMock(return_value=ctx)
+            ctx.__aexit__ = AsyncMock(return_value=False)
+            ctx.get = AsyncMock(return_value=mock_ev)
+            ctx.execute = AsyncMock(
+                return_value=MagicMock(all=MagicMock(return_value=[]))
+            )
+            ctx.add = MagicMock()
+            ctx.commit = AsyncMock()
+            mock_session.return_value = ctx
+
+            result = await run_evolution(
+                workflow_name="test-workflow",
+                eval_suite_yaml=EVAL_SUITE_YAML,
+                max_iterations=2,
+                optimize_for="quality",
+            )
+
+        assert result["iterations_run"] == 2
+        assert result["total_discards"] == 2
+        second_context = mutate.await_args_list[1].kwargs["eval_results"]
+        assert second_context[0]["output"] == "best-output"
 
     def _make_suite_result(self, pass_rate=0.8, cost=0.05, duration=30.0, total=2):
         from sandcastle.engine.eval import CaseResult, SuiteResult
@@ -712,6 +933,16 @@ class TestAPIEndpointsUnit:
                 workflow_name="wf",
                 eval_suite_yaml="...",
                 max_iterations=0,
+            )
+
+    def test_evolution_start_request_rejects_non_positive_budget(self):
+        from sandcastle.api.schemas import EvolutionStartRequest
+
+        with pytest.raises(Exception):
+            EvolutionStartRequest(
+                workflow_name="wf",
+                eval_suite_yaml="...",
+                budget_limit_usd=0,
             )
 
     def test_evolution_status_response_defaults(self):

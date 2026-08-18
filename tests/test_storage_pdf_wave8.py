@@ -716,6 +716,12 @@ class TestGenerateBrandedPdf:
         result = generate_branded_pdf(md, str(out))
         assert result.exists()
 
+    def test_deeply_indented_bullet_is_clamped(self, tmp_path):
+        out = tmp_path / "deep-bullet.pdf"
+        md = "# List\n\n" + " " * 120 + "- Deeply nested item\n"
+        result = generate_branded_pdf(md, str(out))
+        assert result.exists()
+
     def test_numbered_list(self, tmp_path):
         out = tmp_path / "numbers.pdf"
         md = "# List\n\n1. First\n2. Second\n3. Third\n"
