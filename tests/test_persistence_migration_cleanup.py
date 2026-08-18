@@ -83,7 +83,10 @@ def test_persistence_drift_revision_upgrades_and_downgrades_sqlite(tmp_path):
             model_table = Base.metadata.tables[table_name]
             expected_columns = set(model_table.columns.keys())
             if table_name == "workflow_evolutions":
+                # Columns added by migrations later than the revision under
+                # test: "error" by 018, "started_at" by 020.
                 expected_columns.remove("error")
+                expected_columns.remove("started_at")
             assert {column["name"] for column in columns} == expected_columns
             assert {column["name"] for column in columns if not column["nullable"]} == {
                 column.name for column in model_table.columns if not column.nullable

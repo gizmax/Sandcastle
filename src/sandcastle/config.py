@@ -186,6 +186,11 @@ class Settings(BaseSettings):
 
     # Hierarchical workflows
     max_workflow_depth: int = 5
+    # Ceiling on what one evolution run may spend when the request does not set
+    # budget_limit_usd. Without it the loop ran to max_iterations - up to 100
+    # paid iterations, each executing the full eval suite - bounded only by the
+    # arq job timeout. A request may set a lower limit; it cannot exceed this.
+    evolution_default_budget_usd: float = 5.0
 
     # Scheduler (disable in multi-worker deployments; run a dedicated scheduler service)
     scheduler_enabled: bool = True

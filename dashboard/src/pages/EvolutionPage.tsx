@@ -778,6 +778,18 @@ export default function EvolutionPage() {
         api.get<{ name: string }[]>("/workflows"),
       ]);
       if (!mountedRef.current) return;
+
+      // The API client resolves with {data: null, error} instead of throwing,
+      // so the catch below only fires on a transport failure. Reading .error
+      // is the only way a 401, 403 or 500 becomes visible - without it the
+      // page rendered "No evolutions yet" to a user who simply lacked access,
+      // and the whole error UI, Retry button included, was unreachable code.
+      const failure = evoRes.error ?? statsRes.error ?? wfRes.error;
+      if (failure) {
+        setError(failure.message || "Could not load evolutions");
+        return;
+      }
+
       if (evoRes.data) setEvolutions(evoRes.data);
       if (statsRes.data) setStats(statsRes.data);
       if (wfRes.data) setWorkflows(wfRes.data.map((w) => w.name));

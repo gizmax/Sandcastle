@@ -273,6 +273,10 @@ async def test_worker_recovers_only_expired_running_evolutions():
                     status="running",
                     eval_suite_yaml="cases: []",
                     created_at=stale_time,
+                    # started_at is what the reaper keys on now. Keyed on
+                    # created_at it also failed jobs that were only queued, or
+                    # running on another worker, on every startup.
+                    started_at=stale_time,
                 ),
                 WorkflowEvolution(
                     id=fresh_id,
@@ -300,7 +304,11 @@ async def test_worker_recovers_only_expired_running_evolutions():
     assert stale is not None and stale.status == "failed"
     assert stale.completed_at is not None
     assert fresh is not None and fresh.status == "running"
-    assert queued is not None and queued.status == "queued"
+    # A row queued this long was never picked up by any worker: the API commits
+    # it before enqueuing, so a failure between the two used to strand it, and
+    # every later start for that workflow returned 409 "already active".
+    assert queued is not None and queued.status == "failed"
+    assert "queued" in (queued.error or "").lower()
 
 
 @pytest.mark.asyncio

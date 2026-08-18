@@ -13364,6 +13364,25 @@ async def start_evolution(req: Request) -> ApiResponse:
             tenant_id=tenant_id,
         )
     except Exception as exc:
+        # The queued row was committed before this point, and the reaper only
+        # sweeps "running". Without compensation the row stayed queued forever:
+        # the dashboard polled it every five seconds and every later start for
+        # this workflow returned 409 "already active", permanently. Mark it
+        # failed so the state matches what happened and the workflow is free.
+        try:
+            async with async_session() as cleanup_session:
+                stuck = await cleanup_session.get(WorkflowEvolution, evolution_id)
+                if stuck is not None and stuck.status == "queued":
+                    stuck.status = "failed"
+                    stuck.completed_at = datetime.now(timezone.utc)
+                    stuck.error = f"Failed to schedule evolution: {exc}"
+                    await cleanup_session.commit()
+        except Exception as cleanup_exc:  # noqa: BLE001 - report the original
+            logger.error(
+                "Could not clean up queued evolution %s after enqueue failure: %s",
+                evolution_id,
+                cleanup_exc,
+            )
         raise HTTPException(
             status_code=503,
             detail=f"Failed to schedule evolution: {exc}",

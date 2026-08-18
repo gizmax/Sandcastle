@@ -205,6 +205,12 @@ MODEL_COST_ESTIMATES: dict[str, float] = _build_cost_estimates()
 # ---------------------------------------------------------------------------
 
 
+# Any variant that fails every case scores here: below anything a working
+# variant can reach, so it can never win a comparison, while still being an
+# ordinary float that the callers' `>` comparisons handle without special cases.
+_BROKEN_VARIANT_SCORE = -1000.0
+
+
 def compute_evolution_score(
     quality: float,
     cost_usd: float,
@@ -229,6 +235,16 @@ def compute_evolution_score(
     Returns:
         Composite score (higher is better).
     """
+    # A variant that passed nothing is not a cheap variant, it is a broken one.
+    # Crashed cases are recorded with cost_usd = 0.0 and duration 0.0, so in
+    # "cost" mode a variant where every case raised scored on pure efficiency
+    # and beat a working baseline - 50.00 against 36.67 in the case that found
+    # this - which promoted it to best_variant_yaml and, via the accept
+    # endpoint, into production. Zero quality is disqualifying regardless of
+    # what the other axes say.
+    if eval_runs > 0 and quality <= 0.0:
+        return _BROKEN_VARIANT_SCORE
+
     # Confidence factor: need enough runs for a reliable score
     confidence = min(eval_runs / 5, 1.0) ** 0.5
 
@@ -839,6 +855,21 @@ async def run_evolution(
             ),
             "status": "failed",
         }
+
+    # An absent budget_limit made both stop checks dead code, so the loop ran
+    # max_iterations regardless - up to 100 paid iterations, bounded only by the
+    # arq job timeout. Resolve it here, before the record is written, so the
+    # stored budget_limit_usd is the one actually enforced rather than a NULL
+    # that the API would report as "no limit".
+    if not budget_limit or budget_limit <= 0:
+        from sandcastle.config import settings as _evo_settings
+
+        budget_limit = _evo_settings.evolution_default_budget_usd
+        logger.info(
+            "Evolution %s: no budget_limit given, applying default $%.2f",
+            evolution_id,
+            budget_limit,
+        )
 
     # --- Create DB record ---
     if not record_exists:
