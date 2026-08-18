@@ -44,6 +44,11 @@ steps:
   #    embed=* pulls related rows so every provider sees the same enriched evidence.
   - id: fetch
     type: http
+    # The record is fetched once and rendered into THREE provider prompts, so every
+    # token here is paid for three times. prune keeps the record's shape while
+    # shortening the evidence/history arrays that dominate its size.
+    output_max_tokens: 1500
+    context_strategy: prune
     http_config:
       url: "{input.record_endpoint}/cases?id=eq.{input.case_id}&select=*,evidence(*),history(*)"
       method: GET

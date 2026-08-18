@@ -165,6 +165,10 @@ steps:
   # 4a) HTTP: fetch the relevant payer medical / coverage policy bulletin for the denied codes.
   - id: fetch_payer_policy
     type: http
+    # Payer policy documents run long and the appeal only needs the criteria and
+    # the closing determination language - the two parts a head-only cut loses.
+    output_max_tokens: 2000
+    context_strategy: head_tail
     http_config:
       url: "{input.payer_policy_base_url}/policies?denial_track={steps.classify_denial.output}&dos={input.date_of_service}&claim_id={input.claim_id}"
       method: GET
