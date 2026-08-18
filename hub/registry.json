@@ -11588,7 +11588,7 @@
       "license": "BSL-1.1",
       "rating": 0.0,
       "review_count": 0,
-      "sha256": "6ad18792e39b1997ac7b2c3cc062df7a3fc4d1b237ec4a7e97b2e96e42fdb261",
+      "sha256": "53efa9f3e5c23c27e2235202cf230e5b2407cc82c9f73665f30ebe9169953b2a",
       "input_schema": {
         "required": [
           "claim_id",
@@ -17183,7 +17183,7 @@
           },
           "expected_currency": {
             "type": "string",
-            "description": "Currency symbol / code the deterministic validator strips from each amount before parsing it as a number (defends against '$1,234.50', 'EUR 42'\u2026).",
+            "description": "Currency symbol / code the deterministic validator strips from each amount before parsing it as a number (defends against '$1,234.50', 'EUR 42'…).",
             "default": "$",
             "example": "$"
           },
