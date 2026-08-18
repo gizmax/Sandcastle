@@ -298,3 +298,67 @@ class TestApiSurface:
 
         with _pytest.raises(ValidationError):
             StepStatusResponse(step_id="a", status="completed", tokens_saved=-1)
+
+
+class TestSavingsAttribution:
+    """The saving must land on the step whose prompt shrank, not the one it read.
+
+    The first implementation booked it against the producer while the save path
+    read it back by the consumer's id, so tokens_saved was always 0 in a real
+    run. Unit tests missed it because they only checked the write half.
+    """
+
+    def test_saving_is_booked_against_the_reading_step(self):
+        from sandcastle.engine.executor import (
+            _CURRENT_STEP_ID,
+            RunContext,
+            resolve_variable,
+        )
+
+        ctx = RunContext(run_id="r1", input={})
+        ctx.step_outputs["producer"] = "HEAD " + "x" * 20000 + " TAIL"
+        ctx._step_output_max_tokens = {"producer": 200}
+        ctx._step_context_strategy = {"producer": "head_tail"}
+
+        token = _CURRENT_STEP_ID.set("consumer")
+        try:
+            resolve_variable("steps.producer.output", ctx)
+        finally:
+            _CURRENT_STEP_ID.reset(token)
+
+        assert ctx._compaction_saved.get("consumer", 0) > 0, "reader should carry it"
+        assert "producer" not in ctx._compaction_saved, "producer must not"
+        assert ctx._compaction_strategy_used.get("consumer") == "head_tail"
+
+    def test_two_readers_each_get_their_own_saving(self):
+        from sandcastle.engine.executor import (
+            _CURRENT_STEP_ID,
+            RunContext,
+            resolve_variable,
+        )
+
+        ctx = RunContext(run_id="r1", input={})
+        ctx.step_outputs["producer"] = "HEAD " + "y" * 20000 + " TAIL"
+        ctx._step_output_max_tokens = {"producer": 200}
+        ctx._step_context_strategy = {"producer": "head_tail"}
+
+        for reader in ("reader_a", "reader_b"):
+            token = _CURRENT_STEP_ID.set(reader)
+            try:
+                resolve_variable("steps.producer.output", ctx)
+            finally:
+                _CURRENT_STEP_ID.reset(token)
+
+        # One oversized output read twice costs twice, so it saves twice.
+        assert ctx._compaction_saved["reader_a"] > 0
+        assert ctx._compaction_saved["reader_b"] > 0
+
+    def test_falls_back_to_producer_id_outside_a_step(self):
+        from sandcastle.engine.executor import RunContext, resolve_variable
+
+        ctx = RunContext(run_id="r1", input={})
+        ctx.step_outputs["producer"] = "HEAD " + "z" * 20000 + " TAIL"
+        ctx._step_output_max_tokens = {"producer": 200}
+        ctx._step_context_strategy = {"producer": "head_tail"}
+        resolve_variable("steps.producer.output", ctx)
+        assert ctx._compaction_saved.get("producer", 0) > 0

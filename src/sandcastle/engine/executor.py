@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import collections
+import contextvars
 import copy
 import csv
 import dataclasses
@@ -425,6 +426,16 @@ async def resolve_storage_refs(
     return "".join(parts)
 
 
+# The step currently being executed. Compaction happens while resolving that
+# step's templates, but the strategy belongs to the step being *read*, so the
+# saving has to be booked against the reader - it is the reader's prompt that
+# got smaller. A ContextVar rather than a field on RunContext because parallel
+# steps share one context but each runs in its own asyncio task.
+_CURRENT_STEP_ID: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "sandcastle_current_step_id", default=""
+)
+
+
 def _compact_for_context(context: Any, step_id: str, text: str, max_tokens: int) -> str:
     """Shrink ``text`` to ``max_tokens`` using the step's configured strategy.
 
@@ -439,10 +450,11 @@ def _compact_for_context(context: Any, step_id: str, text: str, max_tokens: int)
     strategy = context._step_context_strategy.get(step_id, "truncate")
     result = compact_sync(text, max_tokens, strategy)
     if result.applied:
-        context._compaction_saved[step_id] = (
-            context._compaction_saved.get(step_id, 0) + result.tokens_saved
+        reader = _CURRENT_STEP_ID.get() or step_id
+        context._compaction_saved[reader] = (
+            context._compaction_saved.get(reader, 0) + result.tokens_saved
         )
-        context._compaction_strategy_used[step_id] = result.strategy
+        context._compaction_strategy_used[reader] = result.strategy
     return result.text
 
 
@@ -2287,6 +2299,7 @@ async def _execute_step_once(
     attempt: int = 1,
 ) -> StepResult:
     """Execute a single attempt of a step."""
+    _CURRENT_STEP_ID.set(step.id)
     started_at = datetime.now(timezone.utc)
     resolved_input_prompt: str | None = None  # Populated after template resolution
     query_cost_usd = 0.0
