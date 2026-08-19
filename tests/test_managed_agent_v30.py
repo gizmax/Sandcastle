@@ -238,8 +238,8 @@ class TestTypeSetMembership:
         assert "managed-agent" in NON_LLM_TYPES
 
     def test_step_type_count(self):
-        """VALID_STEP_TYPES should have 25 entries (24 + tool)."""
-        assert len(VALID_STEP_TYPES) == 25
+        """VALID_STEP_TYPES should have 26 entries (25 + acp, added in 0.45)."""
+        assert len(VALID_STEP_TYPES) == 26
 
 
 # ===================================================================

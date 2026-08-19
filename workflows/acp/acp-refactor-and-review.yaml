@@ -1,0 +1,168 @@
+name: acp-refactor-and-review
+description: >
+  Drive an external ACP agent harness (Claude Code, Codex, Gemini CLI, goose) to
+  implement a change in a checked-out repository, then verify what it actually
+  did with deterministic code and review it with a second model.
+
+  The argument this workflow makes: the agent harness is ONE node. The brief,
+  the verification and the review are Sandcastle's. "The agent finished" is not
+  "the task was done", so the git diff step is not decoration - it is the point.
+
+  Prerequisites:
+    * SANDCASTLE_ACP_ALLOWED_ROOTS must include the parent of repo_path.
+    * The run must be admin-trusted (an acp step spawns a local executable).
+    * `npx` on PATH, and ANTHROPIC_API_KEY exported for the harness.
+version: "1.0"
+default_model: sonnet
+
+input_schema:
+  required: [repo_path, task]
+  properties:
+    repo_path:
+      type: string
+      description: Absolute path to a git worktree the agent may modify
+    task:
+      type: string
+      description: What the agent should implement
+
+steps:
+  # 1. Deterministic pre-flight. No LLM, no agent - just facts about the repo.
+  - id: preflight
+    type: code
+    responsibility: Record the starting commit and refuse to work on a dirty tree
+    code_config:
+      language: python
+      code: |
+        import subprocess
+        p = _input["repo_path"]
+        head = subprocess.run(
+            ["git", "-C", p, "rev-parse", "HEAD"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        dirty = subprocess.run(
+            ["git", "-C", p, "status", "--porcelain"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        result = {"head": head, "clean": dirty == ""}
+
+  - id: guard_clean
+    type: condition
+    depends_on: [preflight]
+    responsibility: Only let the agent loose on a clean working tree
+    condition_config:
+      expression: "{steps.preflight.output.clean} == True"
+      then_steps: [plan, implement, diffstat, review, notify]
+      else_steps: []
+
+  # 2. Plan with our own model. Cheap, and it gives the harness a tight brief
+  #    instead of a vague task string.
+  - id: plan
+    type: llm
+    depends_on: [guard_clean]
+    model: sonnet
+    responsibility: Turn the task into a five-bullet implementation brief
+    prompt: |
+      Write a 5-bullet implementation brief for this task. No code.
+      Task: {input.task}
+    llm_config:
+      max_tokens: 600
+
+  # 3. The headline: hand the brief to an external ACP harness.
+  - id: implement
+    type: acp
+    depends_on: [plan]
+    responsibility: Let an external agent harness make the change
+    retry:
+      max_attempts: 2
+      backoff: exponential
+    acp_config:
+      agent: claude                     # -> npx @agentclientprotocol/claude-agent-acp
+      cwd: "{input.repo_path}"
+      env_passthrough: ["ANTHROPIC_API_KEY"]
+      message: |
+        Implement the following in this repository.
+
+        Brief:
+        {steps.plan.output}
+
+        Task: {input.task}
+
+        When you are done, print a one-paragraph summary of what you changed.
+      filesystem: readwrite
+      permission: ask
+      permission_rules:
+        - kind: read
+          decision: allow_once
+        - kind: edit
+          decision: allow_once
+        - kind: execute
+          decision: reject_once         # no shell, even in ask mode
+      terminal: false
+      timeout: 1100
+      idle_timeout: 240
+      output_format: full
+      include_tool_calls: true
+      # ACP v1 reports no per-turn token counts, so max_cost_usd is ADVISORY
+      # for this step. If the harness volunteers a USD figure we use it; this
+      # is what gets billed when it does not.
+      cost_per_call: 0.0
+
+  # 4. Deterministic verification of what the agent ACTUALLY did. Never trust
+  #    the transcript: stop_reason "end_turn" says the turn ended, nothing more.
+  - id: diffstat
+    type: code
+    depends_on: [implement]
+    responsibility: Read the real diff rather than the agent's account of it
+    code_config:
+      language: python
+      code: |
+        import subprocess
+        p = _input["repo_path"]
+        d = subprocess.run(
+            ["git", "-C", p, "diff", "--stat"],
+            capture_output=True, text=True,
+        ).stdout
+        result = {"diffstat": d, "changed": bool(d.strip())}
+
+  # 5. Independent review by a different model: does the diff match the story?
+  - id: review
+    type: llm
+    depends_on: [implement, diffstat]
+    model: opus
+    responsibility: Compare the agent's report against the diff it actually produced
+    prompt: |
+      An external agent was asked to: {input.task}
+
+      It reported:
+      {steps.implement.output.text}
+
+      Tool calls it made:
+      {steps.implement.output.tool_calls}
+
+      Permission decisions Sandcastle made on its behalf:
+      {steps.implement.output.permissions}
+
+      Actual diff:
+      {steps.diffstat.output.diffstat}
+
+      Does the diff match the report? Answer JSON only.
+    output_schema:
+      type: object
+      properties:
+        matches: {type: boolean}
+        concerns: {type: array, items: {type: string}}
+        verdict: {type: string, enum: [accept, reject]}
+
+  - id: notify
+    type: notify
+    depends_on: [review]
+    responsibility: Tell a human what the agent did and whether it holds up
+    notify_config:
+      service: slack
+      channel: "#eng"
+      dry_run: true
+      message: |
+        ACP run on {input.repo_path}
+        stop_reason = {steps.implement.output.stop_reason}
+        verdict = {steps.review.output.verdict}
+        {steps.diffstat.output.diffstat}

@@ -192,6 +192,11 @@ _CONFIG_ATTRS = (
     "report_config",
     "managed_agent_config",
     "computer_use_config",
+    # Without this an acp step's fingerprint would be (type, model, placeholder
+    # prompt) - identical for two steps that spawn different harnesses in
+    # different repos with different messages. The ledger would then memoize one
+    # agent turn and hand its output to the other.
+    "acp_config",
 )
 
 

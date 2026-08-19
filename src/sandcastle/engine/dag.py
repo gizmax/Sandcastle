@@ -7,6 +7,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -316,6 +317,57 @@ class OpenClawConfig:
 
 
 @dataclass
+class AcpConfig:
+    """Configuration for a ``type: acp`` step - an external agent harness.
+
+    Sandcastle spawns the harness as a subprocess and talks Agent Client
+    Protocol (newline-delimited JSON-RPC over stdio) to it. Every default here
+    is the closed one: no filesystem, no terminal, permissions rejected, no
+    inherited environment. See ``engine/acp_client.py`` and ``docs/acp.md``.
+    """
+
+    # Which harness. Exactly one of command / agent.
+    command: str = ""                # argv[0]; resolved against PATH, never shell-interpreted
+    args: list[str] = field(default_factory=list)
+    agent: str = ""                  # shorthand: claude | codex | gemini | goose
+    env: dict = field(default_factory=dict)          # extra vars, template-resolved
+    env_passthrough: list[str] = field(default_factory=list)  # parent vars to forward, by name
+
+    # Session
+    cwd: str = ""                    # required; absolute, inside settings.acp_allowed_roots
+    additional_directories: list[str] = field(default_factory=list)
+    mcp_servers: list = field(default_factory=list)  # passed through as ACP McpServer[]
+    mode: str = ""                   # opaque agent-defined modeId; grants no safety
+    config_options: dict = field(default_factory=dict)
+
+    # The prompt
+    message: str = ""                # falls back to step.prompt
+
+    # What the agent is allowed to do to us
+    permission: str = "reject"       # reject | allow_once | allow_always | ask
+    permission_rules: list = field(default_factory=list)  # ordered, first match wins
+    filesystem: str = "none"         # none | read | readwrite
+    terminal: bool = False           # 0.45: must stay False
+    elicitation: str = "decline"     # 0.45: decline only
+
+    # Limits and accounting
+    timeout: int = 900               # seconds for the whole turn, spawn included
+    idle_timeout: int = 180          # seconds without a session/update before we abort
+    max_output_chars: int = 200000
+    # Flat declared cost, used when the harness reports none. ACP v1 has no
+    # per-turn token counts, so max_cost_usd is ADVISORY for acp steps: a
+    # harness that volunteers no cost is invisible to the budget guard.
+    cost_per_call: float = 0.0
+    protocol_version: int = 1        # the integer on the wire; 2 is an unstable draft
+    strict_version: bool = True
+
+    # Shaping the result
+    output_format: str = "text"      # text | json | full
+    include_thoughts: bool = False
+    include_tool_calls: bool = True
+
+
+@dataclass
 class ManagedAgentConfig:
     """Configuration for delegating to Anthropic Claude Managed Agents.
 
@@ -519,6 +571,7 @@ VALID_STEP_TYPES = frozenset(
         "trajectory-replay",
         "computer-use",
         "tool",
+        "acp",
     }
 )
 
@@ -528,6 +581,7 @@ NON_PROMPT_TYPES = frozenset(
         "http", "code", "condition", "loop", "race", "sensor", "gate",
         "transform", "notify", "composio", "openclaw", "parse",
         "managed-agent", "agent", "trajectory-replay", "computer-use", "tool",
+        "acp",
     }
 )
 
@@ -537,6 +591,10 @@ NON_LLM_TYPES = frozenset(
         "http", "code", "condition", "loop", "race", "sensor",
         "transform", "notify", "composio", "openclaw", "parse",
         "managed-agent", "agent", "trajectory-replay", "computer-use", "tool",
+        # The model an ACP harness picks is its own business, not ours - it runs
+        # against its own credentials. Without this, every acp step would fail
+        # parsing on a model name we never validated in the first place.
+        "acp",
     }
 )
 
@@ -589,6 +647,7 @@ class StepDefinition:
     parse_config: ParseConfig | None = None
     report_config: ReportConfig | None = None
     managed_agent_config: ManagedAgentConfig | None = None
+    acp_config: AcpConfig | None = None
     trajectory_replay_config: dict | None = None
     computer_use_config: dict | None = None
     # Dynamic context retrieval before execution
@@ -1311,6 +1370,63 @@ def _parse_openclaw_config(data: dict | None) -> OpenClawConfig | None:
     )
 
 
+def _str_list(value: Any) -> list[str]:
+    """Coerce a YAML scalar or sequence into a list of strings."""
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value]
+    return [str(value)]
+
+
+def _str_dict(value: Any) -> dict:
+    """Coerce a YAML mapping into ``dict[str, str]``; anything else is empty."""
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): str(item) for key, item in value.items()}
+
+
+def _parse_acp_config(data: dict | None) -> AcpConfig | None:
+    """Parse ``acp_config`` from YAML data.
+
+    Types are coerced explicitly rather than trusted, because these values reach
+    a subprocess spawn and a permission decision. A YAML author writing
+    ``args: "--acp"`` means one argument, not four characters.
+    """
+    if data is None:
+        return None
+    if not isinstance(data, dict):
+        return AcpConfig()
+    rules = data.get("permission_rules")
+    return AcpConfig(
+        command=str(data.get("command", "") or ""),
+        args=_str_list(data.get("args")),
+        agent=str(data.get("agent", "") or ""),
+        env=_str_dict(data.get("env")),
+        env_passthrough=_str_list(data.get("env_passthrough")),
+        cwd=str(data.get("cwd", "") or ""),
+        additional_directories=_str_list(data.get("additional_directories")),
+        mcp_servers=list(data.get("mcp_servers") or []),
+        mode=str(data.get("mode", "") or ""),
+        config_options=_str_dict(data.get("config_options")),
+        message=str(data.get("message", "") or ""),
+        permission=str(data.get("permission", "reject") or "reject"),
+        permission_rules=[r for r in rules if isinstance(r, dict)] if isinstance(rules, list) else [],
+        filesystem=str(data.get("filesystem", "none") or "none"),
+        terminal=bool(data.get("terminal", False)),
+        elicitation=str(data.get("elicitation", "decline") or "decline"),
+        timeout=int(data.get("timeout", 900) or 900),
+        idle_timeout=int(data.get("idle_timeout", 180) or 0),
+        max_output_chars=int(data.get("max_output_chars", 200000) or 0),
+        cost_per_call=float(data.get("cost_per_call", 0.0) or 0.0),
+        protocol_version=int(data.get("protocol_version", 1) or 1),
+        strict_version=bool(data.get("strict_version", True)),
+        output_format=str(data.get("output_format", "text") or "text"),
+        include_thoughts=bool(data.get("include_thoughts", False)),
+        include_tool_calls=bool(data.get("include_tool_calls", True)),
+    )
+
+
 def _parse_managed_agent_config(data: dict | None) -> ManagedAgentConfig | None:
     """Parse Managed Agent / universal agent configuration from YAML data.
 
@@ -1468,6 +1584,7 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
             data.get("managed_agent_config") if "managed_agent_config" in data
             else data.get("agent_config")
         ),
+        acp_config=_parse_acp_config(data.get("acp_config")),
         trajectory_replay_config=(
             dict(data["trajectory_replay_config"])
             if isinstance(data.get("trajectory_replay_config"), dict)
@@ -1893,6 +2010,8 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
                     f"Managed-agent step '{step.id}' timeout must be > 0, "
                     f"got {cfg.timeout}"
                 )
+        elif step.type == "acp":
+            errors.extend(_validate_acp_step(step))
         elif step.type == "parse":
             cfg = step.parse_config or ParseConfig()
             if cfg.output not in ("text", "markdown", "json"):
@@ -2119,6 +2238,118 @@ def _extract_step_refs(text: str) -> set[str]:
     return set(re.findall(r"\{steps\.([a-zA-Z0-9_\-]+)\.output", text))
 
 
+def _validate_acp_step(step: StepDefinition) -> list[str]:
+    """Validate one ``type: acp`` step. Everything unsupported is an error, not a warning.
+
+    An acp step spawns an arbitrary local executable with a working directory
+    and a network connection, so the rejections here are the cheapest place to
+    stop a workflow that would have asked for a shell or a draft protocol
+    version. ``terminal`` and ``elicitation: ask`` are refused rather than
+    silently downgraded: a workflow that asked for them and did not get them
+    should say so at parse time.
+    """
+    from sandcastle.engine.acp_client import (
+        _BUILTIN_ACP_AGENTS,
+        ACP_PROTOCOL_VERSION,
+        PERMISSION_KINDS,
+        VALID_ELICITATION_MODES,
+        VALID_FILESYSTEM_MODES,
+        VALID_OUTPUT_FORMATS,
+        VALID_PERMISSION_DEFAULTS,
+    )
+
+    errors: list[str] = []
+    cfg = step.acp_config
+    if not cfg:
+        return [f"ACP step '{step.id}' must have acp_config"]
+
+    if bool(cfg.command) == bool(cfg.agent):
+        errors.append(
+            f"ACP step '{step.id}' must set exactly one of acp_config.command "
+            "or acp_config.agent"
+        )
+    if cfg.agent and cfg.agent not in _BUILTIN_ACP_AGENTS:
+        errors.append(
+            f"ACP step '{step.id}' has unknown agent '{cfg.agent}'. "
+            f"Known: {', '.join(sorted(_BUILTIN_ACP_AGENTS))}"
+        )
+    if not cfg.cwd:
+        errors.append(f"ACP step '{step.id}' must set acp_config.cwd")
+    if cfg.timeout <= 0:
+        errors.append(f"ACP step '{step.id}' timeout must be > 0, got {cfg.timeout}")
+    if cfg.idle_timeout < 0:
+        errors.append(
+            f"ACP step '{step.id}' idle_timeout must be >= 0, got {cfg.idle_timeout}"
+        )
+    if cfg.max_output_chars <= 0:
+        errors.append(
+            f"ACP step '{step.id}' max_output_chars must be > 0, "
+            f"got {cfg.max_output_chars}"
+        )
+    if cfg.permission not in VALID_PERMISSION_DEFAULTS:
+        errors.append(
+            f"ACP step '{step.id}' has invalid permission '{cfg.permission}'. "
+            f"Must be one of {', '.join(sorted(VALID_PERMISSION_DEFAULTS))}"
+        )
+    for index, rule in enumerate(cfg.permission_rules):
+        decision = str(rule.get("decision", ""))
+        if decision not in PERMISSION_KINDS:
+            errors.append(
+                f"ACP step '{step.id}' permission_rules[{index}] has invalid "
+                f"decision '{decision}'. Must be one of "
+                f"{', '.join(sorted(PERMISSION_KINDS))}"
+            )
+    if cfg.filesystem not in VALID_FILESYSTEM_MODES:
+        errors.append(
+            f"ACP step '{step.id}' has invalid filesystem '{cfg.filesystem}'. "
+            f"Must be one of {', '.join(sorted(VALID_FILESYSTEM_MODES))}"
+        )
+    if cfg.terminal:
+        errors.append(
+            f"ACP step '{step.id}': acp_config.terminal is not supported in 0.45 - "
+            "granting an external agent a shell needs a sandbox story Sandcastle "
+            "does not have for local subprocesses"
+        )
+    if cfg.elicitation not in VALID_ELICITATION_MODES:
+        errors.append(
+            f"ACP step '{step.id}' has invalid elicitation '{cfg.elicitation}'. "
+            f"Must be one of {', '.join(sorted(VALID_ELICITATION_MODES))}"
+        )
+    elif cfg.elicitation == "ask":
+        errors.append(
+            f"ACP step '{step.id}': elicitation 'ask' is not supported in 0.45 - "
+            "there is no human-in-the-loop wiring for an agent's mid-turn question"
+        )
+    if cfg.output_format not in VALID_OUTPUT_FORMATS:
+        errors.append(
+            f"ACP step '{step.id}' has invalid output_format '{cfg.output_format}'. "
+            f"Must be one of {', '.join(sorted(VALID_OUTPUT_FORMATS))}"
+        )
+    if cfg.protocol_version != ACP_PROTOCOL_VERSION:
+        errors.append(
+            f"ACP step '{step.id}': protocol_version must be "
+            f"{ACP_PROTOCOL_VERSION}, got {cfg.protocol_version} "
+            "(version 2 is an unstable draft)"
+        )
+    for index, server in enumerate(cfg.mcp_servers):
+        if not isinstance(server, dict):
+            errors.append(
+                f"ACP step '{step.id}' mcp_servers[{index}] must be a mapping"
+            )
+            continue
+        if not server.get("name"):
+            errors.append(f"ACP step '{step.id}' mcp_servers[{index}] needs a name")
+        # An stdio MCP server is another arbitrary local exec, so it needs the
+        # same shape check the harness command gets. http/sse entries carry a
+        # url instead and are capability-gated by the agent at runtime.
+        if not server.get("url") and not server.get("command"):
+            errors.append(
+                f"ACP step '{step.id}' mcp_servers[{index}] needs either "
+                "'command' (stdio) or 'url' (http/sse)"
+            )
+    return errors
+
+
 def _collect_step_template_fields(step: StepDefinition) -> list[str]:
     """Collect all text fields from a step that may contain template variables."""
     fields: list[str] = [step.prompt]
@@ -2163,6 +2394,15 @@ def _collect_step_template_fields(step: StepDefinition) -> list[str]:
         fields.append(step.managed_agent_config.agent_id)
         if step.managed_agent_config.message:
             fields.append(step.managed_agent_config.message)
+    if step.acp_config:
+        # message/cwd/env are the three template-resolved fields; command and
+        # args deliberately are NOT, so an upstream step's output can never
+        # become the executable we spawn.
+        if step.acp_config.message:
+            fields.append(step.acp_config.message)
+        if step.acp_config.cwd:
+            fields.append(step.acp_config.cwd)
+        fields.extend(str(v) for v in step.acp_config.env.values())
     if step.tool_config:
         # Tool arguments carry {steps.X.output} / {input.X} refs that drive
         # both implicit dependency ordering and unknown-ref validation. dict/

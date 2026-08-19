@@ -88,6 +88,16 @@ Every step has `id`, `type`, optional `depends_on: [...]`, optional `model:`, op
   template name. Composes/fan-outs another workflow.
 - tool: `tool_config: { tool: <connector>, function: "...", arguments: [...] }`. Calls a
   built-in connector (e.g. nano-banana, openai, gemini for image-gen/vision).
+- acp: `acp_config: { agent: claude|codex|gemini|goose (or command + args), cwd: <abs path>,
+  message: "...", env_passthrough: [ANTHROPIC_API_KEY], permission: reject|ask|allow_once,
+  permission_rules: [{ kind: edit, decision: allow_once }], filesystem: none|read|readwrite,
+  timeout: 900, idle_timeout: 180, output_format: text|json|full, cost_per_call: 0.0 }`.
+  Drives an external agent harness over the Agent Client Protocol (stdio JSON-RPC,
+  protocol version 1). Requires an admin-trusted run and `cwd` inside
+  SANDCASTLE_ACP_ALLOWED_ROOTS. The harness bills its own credentials, so `max_cost_usd`
+  is ADVISORY here - use `timeout`/`idle_timeout` as the real limit. ALWAYS pair an acp
+  step with deterministic verification (a `code` step running `git diff`) plus a review:
+  `stopReason: end_turn` means the turn ended, not that the task was done.
 
 ## Model-independence patterns
 

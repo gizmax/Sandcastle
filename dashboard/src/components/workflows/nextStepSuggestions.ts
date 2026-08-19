@@ -17,6 +17,9 @@ export const NEXT_STEP_SUGGESTIONS: Record<string, StepType[]> = {
   http: ["parse", "transform", "code"],
   browser: ["parse", "transform"],
   openclaw: ["parse", "transform"],
+  // "The agent finished" is not "the task was done" - code first, then a
+  // review. See docs/acp.md.
+  acp: ["code", "llm", "notify"],
   parse: ["llm", "transform"],
   code: ["transform", "condition"],
   transform: ["notify", "report"],

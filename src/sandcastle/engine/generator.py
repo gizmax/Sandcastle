@@ -319,6 +319,27 @@ task: description of what the agent should do.
 gateway_url: optional, defaults to env OPENCLAW_GATEWAY_URL.
 No prompt required.
 
+### acp
+Drive an external agent harness (Claude Code, Codex, Gemini CLI, goose) over
+the Agent Client Protocol. Sandcastle spawns it locally and streams its work.
+Fields: acp_config: {agent | command+args, cwd, message, env_passthrough,
+permission, permission_rules, filesystem, timeout, idle_timeout,
+output_format, include_tool_calls, cost_per_call}
+agent: shorthand "claude" | "codex" | "gemini" | "goose" (or set command+args).
+cwd: REQUIRED absolute path to the workspace the harness may work in.
+message: the brief for the harness; falls back to prompt.
+env_passthrough: names of parent env vars to forward, e.g. ["ANTHROPIC_API_KEY"].
+permission: "reject" (default) | "allow_once" | "allow_always" | "ask".
+permission_rules: ordered [{kind, decision}], first match wins.
+filesystem: "none" (default) | "read" | "readwrite".
+output_format: "text" (default) | "json" | "full".
+The external harness bills its own credentials, so max_cost_usd is advisory
+for acp steps - use timeout and idle_timeout as the real limits.
+ALWAYS follow an acp step with a deterministic verification step (type: code
+running git diff, or an llm review): "the agent finished" is not "the task
+was done".
+No prompt required.
+
 ### managed-agent
 Delegate to Anthropic Claude Managed Agents. The agent runs in a cloud
 container with bash, file operations, and web access.
@@ -400,7 +421,7 @@ parallel_over, max_concurrent, timeout}
 
 IMPORTANT: Types that do NOT need a prompt: http, code, condition,
 loop, race, sensor, gate, transform, notify, composio, openclaw, parse,
-tool, managed-agent, trajectory-replay, computer-use.
+tool, managed-agent, acp, trajectory-replay, computer-use.
 All other types require a prompt field.
 
 ## Dynamic Context Retrieval (optional)

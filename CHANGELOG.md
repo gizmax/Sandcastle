@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`type: acp` - drive an external agent harness over the Agent Client
+  Protocol.** Sandcastle spawns a harness (Claude Code, Codex, Gemini CLI,
+  goose - ~38 speak the protocol) as a local subprocess and talks
+  newline-delimited JSON-RPC 2.0 on its stdio: `initialize` -> `session/new` ->
+  `session/prompt`, with the answer reassembled from the streamed
+  `agent_message_chunk` updates, because ACP's `PromptResponse` carries only a
+  `stopReason` and nothing else. Sandcastle is a **client only**; ACP server
+  mode is not implemented and is not planned. Protocol version is pinned to the
+  integer `1`; `protocol_version: 2` is a validation error while v2 is a draft.
+  New module `engine/acp_client.py`, new `acp_config` block, new setting
+  `ACP_ALLOWED_ROOTS`, worked example in
+  `workflows/acp/acp-refactor-and-review.yaml`, full documentation in
+  `docs/acp.md`. There is no new runtime dependency: the client is
+  hand-rolled against the v1 schema rather than taking the optional
+  `agent-client-protocol` SDK.
+
+  What it buys that the four existing agent integrations do not: **graceful
+  cancellation of a running turn** (`session/cancel`, with every pending
+  permission request answered `{"outcome": "cancelled"}` as the spec requires)
+  and **visibility of the agent's tool calls** as they happen, streamed on the
+  `step.progress` event channel.
+
+  Deny-by-default throughout: permissions reject unless a rule allows,
+  `filesystem: none`, `terminal: true` is a validation error, the environment
+  is built from `build_minimal_subprocess_env()` rather than inherited, and
+  `cwd` must resolve inside `ACP_ALLOWED_ROOTS` - which is **empty by default,
+  so the step type is off until an operator opts in**. An `acp` step also
+  requires an admin-trusted run, the same gate `code` steps use, because it
+  spawns an arbitrary local executable. Every permission decision lands in the
+  SHA-256 audit chain along with the harness's reported `agentInfo` and the
+  *names* (never values) of any forwarded credentials.
+
+  **`max_cost_usd` is advisory for `acp` steps.** ACP v1 reports
+  `usage_update{used, size, cost?}` and nothing else; `used` is context
+  occupancy, not consumption, so summing it is meaningless, and there are no
+  per-turn token counts anywhere in v1. Sandcastle bills the harness's own
+  reported USD figure when it volunteers one, falls back to
+  `cost_per_call` otherwise, never converts a foreign currency and never
+  estimates. A harness that reports nothing is invisible to the budget guard -
+  `timeout` and `idle_timeout` are the real limits.
+
+  **`data_residency` fails closed for `acp`**: Sandcastle cannot know which
+  model an external harness calls, so the step refuses to run rather than
+  silently exempting itself from a compliance mode.
+
+  Not mesh-routable, deliberately: `cwd` is a local path, the wire payload
+  would carry credential names, and cancellation and streaming are both bound
+  to a live stdio pipe on the executing node. There is a test asserting that
+  decision stays one.
+
 ### Security
 
 - **Memory scope ids can no longer carry a path traversal.** `workflow:..`,

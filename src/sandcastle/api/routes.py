@@ -3863,6 +3863,9 @@ async def estimate_run_cost(request: RunEstimateRequest) -> ApiResponse:
         "http", "code", "condition", "loop", "race", "sensor",
         "transform", "notify", "composio", "sub_workflow",
         "openclaw", "parse",
+        # The harness bills its own credentials and ACP v1 reports no token
+        # counts, so any number we produced here would be invented.
+        "acp",
     }
     # classify and gate issue a single LLM call, not max_turns
     SINGLE_CALL_TYPES = {"classify", "gate"}

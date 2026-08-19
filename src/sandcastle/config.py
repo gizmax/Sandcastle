@@ -140,6 +140,13 @@ class Settings(BaseSettings):
     # single-tenant environment.
     code_steps_allow_inprocess_fallback: bool = False
 
+    # Directories a `type: acp` step may point an external agent harness at.
+    # Empty = the step type is disabled, which is the default: an acp step
+    # spawns somebody else's agent with read/write access to a working
+    # directory, and "any directory on this box" is not a defensible default.
+    # Set e.g. SANDCASTLE_ACP_ALLOWED_ROOTS='["/srv/checkouts"]'.
+    acp_allowed_roots: list[str] = Field(default_factory=list)
+
     # Database (empty = local SQLite mode)
     database_url: str = ""
 
