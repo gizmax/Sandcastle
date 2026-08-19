@@ -309,6 +309,7 @@ steps:
     type: notify
     depends_on: ["write_back"]
     notify_config:
+      dry_run: true
       service: slack
       channel: "#llmops-cost"
       message: |

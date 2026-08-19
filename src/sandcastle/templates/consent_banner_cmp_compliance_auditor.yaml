@@ -600,6 +600,7 @@ steps:
     type: notify
     depends_on: [replay_vs_golden, compute_verdict]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.counsel_channel}"
       message: "Consent banner / CMP audit complete. Domains: {steps.compute_verdict.output.total_domains} | Noncompliant: {steps.compute_verdict.output.noncompliant_count} | Total violations: {steps.compute_verdict.output.total_violations} | Worst domain: {steps.compute_verdict.output.max_domain_violations} | Invalid reads: {steps.compute_verdict.output.invalid_read_count} | Evidence sealed to object-lock WORM bucket for run {run_id} | Per-domain PDF dossier generated. High-severity findings (if any) were routed to privacy counsel approval before any complaint/disclosure."

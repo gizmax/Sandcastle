@@ -567,6 +567,7 @@ steps:
     type: notify
     depends_on: [route_outcome]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: ":rotating_light: Filing watch: action required. Escalation cases (action_required / denied): {steps.detect_changes.output.escalation}. Status changes: {steps.detect_changes.output.changed}. New documents: {steps.detect_changes.output.new_docs}. Approaching deadlines: {steps.detect_changes.output.approaching}. Quarantined (bad/drifted reads): {steps.validate_extractions.output.quarantined_count}. Missing reads (possible portal redesign / login wall): {steps.validate_extractions.output.missing_reads}. This run was READ-ONLY on all external portals - no submit/file/pay/withdraw actions were taken."

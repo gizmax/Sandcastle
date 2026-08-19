@@ -565,6 +565,7 @@ steps:
     type: notify
     depends_on: [drift_gate]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: ":receipt: Supplier portal reconciliation complete. Exceptions: {steps.reconcile.output.summary}. Stuck/short-paid/mismatched detail: {steps.reconcile.output}. Suspicious (possible portal redesign / auth wall) portals: {steps.reconcile.output.suspicious_portals}. Rejected malformed rows: {steps.reconcile.output.rejected_count}. This run was READ-ONLY on all external portals - no submit/edit/pay actions were taken."

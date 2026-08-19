@@ -397,6 +397,7 @@ steps:
   - id: notify_no_writes
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: >-
@@ -536,6 +537,7 @@ steps:
     type: notify
     depends_on: [confirm_writes_gate]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: >-

@@ -338,6 +338,7 @@ steps:
   - id: notify_rep_rejected
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_rep_channel}"
       message: >
@@ -376,6 +377,7 @@ steps:
     type: notify
     depends_on: [crm_writeback_approved]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_rep_channel}"
       message: >
@@ -390,6 +392,7 @@ steps:
     type: notify
     depends_on: [crm_writeback_approved]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_finance_channel}"
       message: >

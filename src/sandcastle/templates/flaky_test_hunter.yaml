@@ -611,6 +611,7 @@ steps:
     type: notify
     depends_on: [render_scorecard, open_quarantine_pr]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: |

@@ -612,6 +612,7 @@ steps:
     type: notify
     depends_on: [upsert_zendesk_macro]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: ":mega: Proactive comms sent for incident {input.incident_id} on {input.affected_component} ({input.affected_region}). Impacted accounts: {steps.build_impacted_accounts.output.total_impacted}; by entitlement: {steps.build_impacted_accounts.output.counts_by_entitlement}. Email: {steps.send_email_sendgrid.output}; SMS: {steps.send_sms_twilio.output}; status page: {steps.post_status_page.output}; Zendesk macro armed: {steps.upsert_zendesk_macro.output}."

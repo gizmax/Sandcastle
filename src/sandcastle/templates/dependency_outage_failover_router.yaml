@@ -302,6 +302,7 @@ steps:
   - id: notify_no_failover
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: ":mag: No vendor failover for {input.dependency_name}. Classified as {steps.failure_decision.output.failure_mode} - {steps.failure_decision.output.rationale}"
@@ -467,6 +468,7 @@ steps:
     type: notify
     depends_on: [reroute_edge_config]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: ":rotating_light: FAILOVER ENGAGED for {input.dependency_name} -> routed live traffic to {steps.score_recommendation.output.backup_vendor}. Confidence {steps.score_recommendation.output.confidence}; risk: {steps.score_recommendation.output.risk}. Edge config: {steps.reroute_edge_config.output}"
@@ -550,6 +552,7 @@ steps:
     type: notify
     depends_on: [restore_edge_config]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: ":white_check_mark: FAIL-BACK COMPLETE for {input.dependency_name}. Primary recovered and live traffic restored to the primary vendor. Edge config: {steps.restore_edge_config.output}"

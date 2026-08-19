@@ -555,6 +555,7 @@ steps:
   - id: notify_hold
     type: notify
     notify_config:
+      dry_run: true
       service: "{input.notify_service}"
       channel: "{input.notify_channel}"
       message: >-
@@ -696,6 +697,7 @@ steps:
     type: notify
     depends_on: [approve_handoff]
     notify_config:
+      dry_run: true
       service: "{input.notify_service}"
       channel: "{input.notify_channel}"
       message: >-

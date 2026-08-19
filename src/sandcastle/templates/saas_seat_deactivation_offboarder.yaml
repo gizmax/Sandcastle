@@ -537,6 +537,7 @@ steps:
     type: notify
     depends_on: [audit_record]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: "Offboarding batch complete. Targeted: {steps.final_reconcile.output.targeted_count} | Confirmed inactive: {steps.final_reconcile.output.confirmed_count} | Drift (failed): {steps.final_reconcile.output.drift_count} | Collateral (untouched changed): {steps.final_reconcile.output.collateral_count} | All clean: {steps.final_reconcile.output.all_clean} | Approver: {steps.audit_record.output.audit_record.approver} | Audit sha256 {steps.audit_record.output.sha256}."

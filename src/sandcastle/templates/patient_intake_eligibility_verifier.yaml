@@ -480,6 +480,7 @@ steps:
     type: notify
     depends_on: [route_gaps]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: ":warning: Pre-visit coverage gap for patient {steps.minimize_and_normalize.output.inquiry.patient_ref} (DOB {steps.minimize_and_normalize.output.inquiry.dob}), payer {steps.minimize_and_normalize.output.payer_id}, DOS {steps.reconcile_coverage.output.summary.date_of_service}. Gaps: {steps.reconcile_coverage.output.coverage_gaps}. Coverage active: {steps.reconcile_coverage.output.summary.coverage_active}. Prior auth required: {steps.reconcile_coverage.output.summary.prior_auth_required}. Estimated patient due: {steps.reconcile_coverage.output.summary.estimated_patient_due}. Resolve before the visit. This check was READ-ONLY against the payer - no claim or auth was submitted."
@@ -525,6 +526,7 @@ steps:
     type: notify
     depends_on: [render_summary]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: ":white_check_mark: Eligibility verified for {steps.minimize_and_normalize.output.inquiry.patient_ref} (DOB {steps.minimize_and_normalize.output.inquiry.dob}) - DOS {steps.reconcile_coverage.output.summary.date_of_service}. Coverage active: {steps.reconcile_coverage.output.summary.coverage_active}. Plan: {steps.reconcile_coverage.output.summary.plan_name}. Copay: {steps.reconcile_coverage.output.summary.copay}. Deductible remaining: {steps.reconcile_coverage.output.summary.deductible_remaining}. Prior auth required: {steps.reconcile_coverage.output.summary.prior_auth_required}. Estimated patient due: {steps.reconcile_coverage.output.summary.estimated_patient_due}. Gaps: {steps.reconcile_coverage.output.coverage_gaps}. Summary PDF attached. READ-ONLY eligibility check - no claim submitted."

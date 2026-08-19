@@ -457,6 +457,7 @@ steps:
     type: notify
     depends_on: [build_audit]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: "NDA countersigned for {input.counterparty_name} via {input.intake_source}. Path: {steps.prepare_envelope.output.audit_path}. {steps.playbook_diff.output.summary}. DocuSign envelope {steps.create_envelope.output.envelope_id}. Filed to Drive + Notion CLM. Audit: {steps.build_audit.output}"

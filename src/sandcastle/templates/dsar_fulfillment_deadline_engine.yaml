@@ -239,6 +239,7 @@ steps:
   - id: notify_unverified
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: >-
@@ -573,6 +574,7 @@ steps:
   - id: notify_delivery_slack
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: >-
@@ -587,6 +589,7 @@ steps:
   - id: notify_audit_email
     type: notify
     notify_config:
+      dry_run: true
       service: gmail
       channel: "{input.dpo_email}"
       message: >-

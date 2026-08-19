@@ -301,6 +301,7 @@ steps:
     type: notify
     depends_on: [route-on-verdict]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.oncall_channel}"
       message: >-

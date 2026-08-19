@@ -594,6 +594,7 @@ steps:
   - id: open_triage_ticket
     type: notify
     notify_config:
+      dry_run: true
       service: jira
       project: "{input.ap_triage_project}"
       title: "AP spend anomalies on {input.batch_id} - {steps.aggregate_anomalies.output.flagged_vendor_count} vendor(s), score {steps.aggregate_anomalies.output.anomaly_score}/100"
@@ -610,6 +611,7 @@ steps:
   - id: notify_controller
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.controller_channel}"
       message: |
@@ -626,6 +628,7 @@ steps:
   - id: notify_clean
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.controller_channel}"
       message: |

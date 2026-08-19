@@ -525,6 +525,7 @@ steps:
     type: notify
     depends_on: [promotion_gate]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.ci_slack_channel}"
       message: >-

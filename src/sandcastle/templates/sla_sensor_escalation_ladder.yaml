@@ -265,6 +265,7 @@ steps:
   - id: notify_tier
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: ":rotating_light: SLA breach on {input.service} - escalating to a new tier. Triage: {steps.triage_race.output}. Watching {input.watch_url}."
@@ -333,6 +334,7 @@ steps:
   - id: notify_outcome
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: "SLA watcher for {input.service}: ladder result {steps.evaluate_ladder.output}. Triage was {steps.triage_race.output}. (If still breached, on-call has been handed the manual-action gate.)"

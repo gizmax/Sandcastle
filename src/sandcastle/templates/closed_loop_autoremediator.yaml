@@ -522,6 +522,7 @@ steps:
   - id: notify_failure
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: ":rotating_light: AUTO-REMEDIATION FAILED for {input.service} (incident {input.incident_id}). Applied {steps.apply_result.output} but SLO did not recover - auto-rollback triggered. Human takeover required."
@@ -530,6 +531,7 @@ steps:
   - id: notify_success
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: ":white_check_mark: AUTO-REMEDIATION VERIFIED for {input.service} (incident {input.incident_id}). Applied {steps.apply_result.output}; Datadog SLO recovered: {steps.evaluate_recovery.output}."

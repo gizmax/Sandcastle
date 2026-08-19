@@ -581,6 +581,7 @@ steps:
     type: notify
     depends_on: [render_certificate_pdf]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: "Records disposition {input.disposition_run_id} complete. Destroyed: {steps.build_deletion_ledger.output.destroyed_count} | Retained on hold: {steps.consolidate_dispositions.output.retain_hold_count} | Queued for review: {steps.consolidate_dispositions.output.review_count}. Certificate of destruction issued; batch integrity sha256 {steps.build_deletion_ledger.output.batch_sha256}."
@@ -590,6 +591,7 @@ steps:
     type: notify
     depends_on: [render_certificate_pdf]
     notify_config:
+      dry_run: true
       service: gmail
       channel: "{input.records_manager_email}"
       message: "Certificate of Destruction for disposition run {input.disposition_run_id} (schedule: {input.retention_schedule_name}). Records destroyed: {steps.build_deletion_ledger.output.destroyed_count}. Batch integrity SHA-256: {steps.build_deletion_ledger.output.batch_sha256}. The branded certificate PDF and full destroyed-records ledger are attached for the audit file. Retained on hold: {steps.consolidate_dispositions.output.retain_hold_count}; queued for review: {steps.consolidate_dispositions.output.review_count}."

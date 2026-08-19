@@ -479,6 +479,7 @@ steps:
     type: notify
     depends_on: [route_verdict]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.ok_slack_channel}"
       message: ":white_check_mark: Checkout revenue canary GREEN. Money path proven: order {steps.canary_verdict.output.order_id} written, charged {steps.canary_verdict.output.total_charged} {steps.canary_verdict.output.currency}, arithmetic delta {steps.canary_verdict.output.amount_discrepancy}, golden replay {steps.canary_verdict.output.replay_score}. (product {input.product_url})"
@@ -518,6 +519,7 @@ steps:
     type: notify
     depends_on: [cleanup_approval]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.revops_slack_channel}"
       message: ":rotating_light: CHECKOUT BROKEN - revenue canary RED (PagerDuty: {input.pagerduty_service}). Broken stage: {steps.canary_verdict.output.broken_stage}. Cause: {steps.canary_verdict.output.reason}. Failing assertion: {steps.canary_verdict.output.failing_assertion}. Amount discrepancy: {steps.canary_verdict.output.amount_discrepancy} {steps.canary_verdict.output.currency} (charged {steps.canary_verdict.output.total_charged}). Stages reached: {steps.canary_verdict.output.stages_reached}. Golden replay score {steps.canary_verdict.output.replay_score} (drift floor 0.9). Failure screenshot: {steps.canary_verdict.output.screenshot_url}. Product {input.product_url}. Paging payments on-call - every minute is lost GMV."

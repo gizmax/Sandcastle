@@ -753,6 +753,7 @@ steps:
     type: notify
     depends_on: [finalize_outreach, log_crm_task]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_csm_channel}"
       message: >

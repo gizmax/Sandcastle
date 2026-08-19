@@ -766,6 +766,7 @@ steps:
     type: notify
     depends_on: [share_with_audit_firm]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: "PBC fulfilment {input.engagement_id} done. Coverage: {steps.aggregate_coverage.output.coverage_pct}% ({steps.aggregate_coverage.output.satisfied_count}/{steps.aggregate_coverage.output.total_requests} satisfied, {steps.aggregate_coverage.output.partial_count} partial, {steps.aggregate_coverage.output.missing_count} missing). Open requests + owners: {steps.aggregate_coverage.output.open_requests}. Sealed manifest {steps.assemble_packs_manifest.output.manifest_root_sha256} shared read-only at {steps.assemble_packs_manifest.output.manifest_object_key}."

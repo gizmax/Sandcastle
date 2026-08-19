@@ -281,6 +281,7 @@ steps:
   - id: notify_no_auth_required
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.clinic_queue_channel}"
       message: >-
@@ -490,6 +491,7 @@ steps:
     type: notify
     depends_on: [build_packet, validate_completeness]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.clinic_queue_channel}"
       message: >-

@@ -409,6 +409,7 @@ steps:
     source_hint: "Refunds need a visible trail in the team channel for awareness."
     owner: "support-ops"
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: "Refund settled for ticket {input.ticket_id} (customer {input.customer_id}). Decision: {steps.policy_engine.output}. Stripe refund: {steps.execute_stripe_refund.output}."

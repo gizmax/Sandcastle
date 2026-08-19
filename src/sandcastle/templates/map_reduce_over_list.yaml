@@ -235,6 +235,7 @@ steps:
     type: notify
     depends_on: [writeback]
     notify_config:
+      dry_run: true
       service: slack
       channel: "#data-pipelines"
       message: >-
@@ -262,6 +263,7 @@ steps:
     type: notify
     depends_on: [review-failed]
     notify_config:
+      dry_run: true
       service: slack
       channel: "#data-pipelines"
       message: >-

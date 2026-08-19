@@ -426,6 +426,7 @@ steps:
   - id: notify_decision
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: "Vuln triage for {input.github_repo}: {steps.build_judge_brief.output.summary}. Two-judge gate passed={steps.exploitability_gate.output.passed}. Deduped findings: {steps.score_and_rank.output.deduped_count} (KEV hits: {steps.score_and_rank.output.kev_hits})."

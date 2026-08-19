@@ -267,6 +267,7 @@ steps:
   - id: notify_blocked
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: >-
@@ -427,6 +428,7 @@ steps:
   - id: notify_drift
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: >-
@@ -605,6 +607,7 @@ steps:
   - id: notify_needs_attention
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: >-
@@ -633,6 +636,7 @@ steps:
     type: notify
     depends_on: [archive_receipt]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: >-

@@ -564,6 +564,7 @@ steps:
     type: notify
     depends_on: [apply_result]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: ":ship: Canary sentinel for deployment {input.deployment_id} ({input.provider}) decided *{steps.apply_result.output.action_taken}*. Verdict {steps.decide_action.output.verdict}; error delta {steps.compute_deltas.output.error_delta_pp}pp (budget {input.error_rate_budget_pct}pp), p95 regress {steps.compute_deltas.output.latency_regress_pct}% (budget {input.latency_budget_pct}%). Commit {input.commit_sha}."

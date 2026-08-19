@@ -596,6 +596,7 @@ steps:
     type: notify
     depends_on: [servicenow_checkpoint]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: "SOC2 evidence sweep {input.program_id} done. Control coverage: {steps.aggregate_results.output.coverage_pct}% ({steps.aggregate_results.output.satisfied_count}/{steps.aggregate_results.output.total_controls} satisfied, {steps.aggregate_results.output.gap_count} gaps). Gaps + owners: {steps.aggregate_results.output.gaps}. Signed manifest {steps.sign_evidence_manifest.output.manifest_root_sha256} sealed (object-lock) at {steps.sign_evidence_manifest.output.object_key}."

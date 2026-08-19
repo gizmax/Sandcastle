@@ -7,6 +7,162 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### ⚠️ Breaking
+
+- **`notify` steps now deliver.** Until 0.43.1 a `notify` step only wrote a log
+  line - literally *"Notification logged only - no delivery connector
+  configured"* - and always succeeded. It now sends through the configured
+  connector or webhook unless `dry_run: true` is set.
+
+  Two things follow, and both bite on upgrade:
+
+  - A workflow with a configured Slack, SMTP or webhook target **starts sending
+    messages that were previously only logged.**
+  - A workflow *without* a configured target now **fails the step**
+    (`retryable=False`) where it used to pass silently.
+
+  All 202 `notify` steps across the 113 bundled templates now set
+  `dry_run: true`, so shipped templates keep the old log-only behaviour and you
+  opt into delivery deliberately. **Your own workflows are not touched** - if
+  they contain a `notify` step and you want the previous behaviour, add
+  `dry_run: true` to its `notify_config`.
+
+- **Policies with an invalid `apply_to` now fail the step.** A malformed policy
+  used to be swallowed, which silently disabled *every* policy on that step,
+  `block` and `inject_approval` included. Guardrails that cannot be built are
+  not guardrails, so the step now fails closed and names the policy. A workflow
+  that appeared to work may start failing - it was running without its
+  guardrails. `webhooks` is now accepted alongside `webhook`, which is what the
+  privacy router's own default config uses.
+
+- **`loop` and `race` steps that reference themselves are rejected at
+  validation.** They previously validated clean and then recursed until the
+  worker's stack gave out, reporting the step as completed. Such a workflow
+  never worked; it now says so before it runs.
+
+- **Evolution applies a default budget.** When `budget_limit_usd` is omitted,
+  runs are capped by `evolution_default_budget_usd` (5 USD). Previously an
+  absent limit made both stop checks dead code and the loop ran to
+  `max_iterations` - up to 100 paid iterations - bounded only by the job
+  timeout. Set the limit explicitly, or raise the setting.
+
+- **One truncation marker instead of two.** Context trimmed on the
+  context-query path used to end with `...[truncated]`; it now matches the
+  other path, `[... truncated to fit context window ...]`. Only matters if you
+  parse step output for that string.
+
+### Added
+
+- **Context compaction.** When a step's output or its retrieved context exceeds
+  its token budget, the engine no longer only cuts at the budget and discards
+  whatever followed - which, for an LLM step, is usually the conclusion.
+  `context_strategy` picks how text is shrunk:
+
+  | strategy | behaviour | cost |
+  |---|---|---|
+  | `truncate` | cut at the budget — **unchanged default** | free |
+  | `head_tail` | keep both ends, drop the middle | free |
+  | `prune` | shorten long JSON arrays, collapse repeated lines | free |
+  | `summarize` | ask a model, budgeted in words | one call |
+
+  ```yaml
+  - id: analyse
+    type: llm
+    context_strategy: prune
+    context_model: ollama    # summarize only; local model = $0
+    output_max_tokens: 2000
+  ```
+
+  Measured on a live engine with the same payload and budget: `prune` took
+  10,732 characters to 1,264 and saved 2,378 tokens with the closing verdict
+  intact, where `truncate` saved less (2,273) and lost it.
+
+  `summarize` never fails a step - a provider error, an empty response or an
+  over-budget summary all fall back to `head_tail`. On the synchronous resolve
+  path only the model-free strategies run, so a step configured for `summarize`
+  degrades there by design; otherwise one template would trigger dozens of
+  model calls. Compaction applies to template-resolved text (prompts, http
+  bodies, headers, context queries) - `code` steps receive raw step outputs via
+  `_steps` and are unaffected.
+
+- **Token accounting on steps.** `run_steps` gains `input_tokens`,
+  `output_tokens`, `tokens_saved` and `compaction_strategy`. A step recorded
+  only `cost_usd` before, which is why the evolution engine derives token counts
+  backwards through a blended price. Savings are shown per step in the dashboard
+  and summed in the run header.
+
+- **`/compare/` page on the site**, an honest comparison against LangGraph, n8n,
+  Temporal, Airflow and Dify, including the cases where Sandcastle is the wrong
+  choice.
+
+- **Automated site deployment** (`.github/workflows/deploy-site.yml`) over FTPS
+  with a verified certificate. Needs `SANDCASTLE_FTP_USER` and
+  `SANDCASTLE_FTP_PASS` as repository secrets.
+
+### Fixed
+
+- **SMTP injection in the Gmail connector.** A CR or LF in a recipient ended the
+  SMTP line and let a second `RCPT TO` through, so template-resolved step output
+  could add recipients and BCC every notification, DKIM-signed from your own
+  mailbox. Recipients and subjects are now rejected if they contain CR, LF or
+  NUL, and addresses must match a strict pattern. The SMTP password also left
+  `argv`, where `ps` exposed it, and moved to a curl config on stdin.
+
+  Note that the connector was unimportable in 0.43.0 and 0.43.1 - it imported a
+  non-existent export and threw at load - so this hardening lands on a connector
+  that is only now usable.
+
+- **PII could be published unscrubbed.** Hybrid steps reached the
+  `step.completed` event before redaction ran. The database row self-corrected
+  on write; a published event does not. Events are scrubbed before emission, and
+  the output is withheld if scrubbing fails.
+
+- **A broken variant could win evolution and reach production.** Crashed cases
+  record `cost_usd = 0.0`, so in `cost` mode a variant where every case raised
+  scored on pure efficiency - 50.00 against 36.67 for a working baseline - and
+  became `best_variant_yaml`. Zero quality with a non-zero run count is now
+  disqualifying.
+
+- **The stuck-job reaper failed other workers' evolutions.** It keyed on
+  `created_at` (when queued) rather than when a worker picked the job up, and
+  ran on every startup, so a rolling restart marked in-flight work as failed
+  while it carried on running. `workflow_evolutions` gains `started_at`.
+
+- **A queued evolution could block its workflow forever.** The row was committed
+  before enqueueing, so a failure between the two left it queued: the dashboard
+  polled it indefinitely and every later start returned 409. The route now
+  compensates and the reaper sweeps long-queued rows.
+
+- **The evolution page never showed errors.** It did not read `error` from the
+  response, and the API client resolves rather than throws, so the entire error
+  UI including Retry was unreachable - a user without access saw "No evolutions
+  yet".
+
+- **Dashboard CSP**: `script-src` no longer carries `'unsafe-inline'` or
+  googletagmanager (neither was used); `style-src` and `font-src` gained the
+  Google Fonts origins the built page actually loads, which the policy had been
+  blocking.
+
+- **Nine check constraints** existed in the model but in no migration, so a
+  database built by migrations drifted from one built by `create_all`. Added as
+  `NOT VALID` on PostgreSQL: new rows are checked, existing rows are not
+  scanned, and no table lock is taken.
+
+- `mcp` is capped below 2.0. mcp 2.x removed `mcp.server.fastmcp`, which the MCP
+  server imports, so a clean install resolved to a version the code cannot run
+  against.
+
+### Upgrading
+
+Migrations `018` through `021` run in order from 0.43.1. Verified on PostgreSQL
+16 against a populated database: rows survive, `alembic check` reports no drift,
+and `alembic downgrade 017` reverses cleanly.
+
+**Run migrations before starting the application.** `_cleanup_orphaned_evolutions`
+runs unguarded in the app lifespan and selects the new `error` column, so an app
+that starts first will not boot. Docker Compose users get this for free from the
+`migrate` service.
+
 ### Added
 - **Context compaction.** When a step's output or its retrieved context exceeds
   its token budget, the engine no longer only cuts at the budget and throws away

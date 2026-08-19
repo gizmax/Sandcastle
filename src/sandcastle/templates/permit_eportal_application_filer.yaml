@@ -212,6 +212,7 @@ steps:
   - id: notify_blocked
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: >-
@@ -268,6 +269,7 @@ steps:
   - id: notify_no_route
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: >-
@@ -708,6 +710,7 @@ steps:
   - id: notify_fill_failed
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: >-
@@ -890,6 +893,7 @@ steps:
   - id: notify_submit_unconfirmed
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: >-
@@ -930,6 +934,7 @@ steps:
     type: notify
     depends_on: [writeback_tracker]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: >-

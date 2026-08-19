@@ -634,6 +634,7 @@ steps:
     type: notify
     depends_on: [file_to_vault]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: >-

@@ -521,6 +521,7 @@ steps:
   - id: notify_slack_followup
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: >
@@ -533,6 +534,7 @@ steps:
   - id: email_counterparties
     type: notify
     notify_config:
+      dry_run: true
       service: gmail
       channel: "{input.counterparty_from}"
       message: >

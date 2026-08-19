@@ -306,6 +306,7 @@ steps:
   - id: notify_marketing
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.marketing_channel}"
       message: ":no_entry_sign: Lead {input.lead_id} ({input.email}) auto-disqualified - {steps.routing_decision.output.reason} Auto-reply queued; no SLA clock started."
@@ -396,6 +397,7 @@ steps:
   - id: notify_owner
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: ":fire: New {steps.capture_record_id.output.route} lead for round-robin: {input.first_name} {input.last_name} ({input.email}) - score {steps.capture_record_id.output.lead_score}, queue {steps.capture_record_id.output.queue}. Contact within {input.sla_seconds}s. Record: {steps.capture_record_id.output.record_link}"
@@ -454,6 +456,7 @@ steps:
   - id: notify_manager
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.manager_channel}"
       message: ":rotating_light: SLA BREACH - lead {input.lead_id} ({input.email}) not contacted within {input.sla_seconds}s. Owner {steps.evaluate_sla.output.owner_email} missed first touch. Auto-flagging SLA_breached and reassigning. Record: {steps.evaluate_sla.output.record_link}"

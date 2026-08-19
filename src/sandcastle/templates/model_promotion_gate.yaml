@@ -466,6 +466,7 @@ steps:
   - id: notify_promoted
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: |
@@ -481,6 +482,7 @@ steps:
   - id: notify_rejected
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: |

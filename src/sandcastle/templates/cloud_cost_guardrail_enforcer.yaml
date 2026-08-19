@@ -668,6 +668,7 @@ steps:
     type: notify
     depends_on: [evaluate_drop]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: ":money_with_wings: Cost guardrail run complete. Top offender: {steps.compute_burn.output.top_offender}. Action: {steps.enforcement_result.output}. Before/after: {steps.evaluate_drop.output}."

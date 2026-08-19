@@ -445,6 +445,7 @@ steps:
     type: notify
     depends_on: ["decide_action"]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: |

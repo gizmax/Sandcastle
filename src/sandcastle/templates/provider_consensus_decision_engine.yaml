@@ -313,6 +313,7 @@ steps:
   - id: notify_decision
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: |
@@ -354,6 +355,7 @@ steps:
   - id: notify_split
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: |

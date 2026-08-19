@@ -565,6 +565,7 @@ steps:
     type: notify
     depends_on: [log_to_compliance, aggregate_findings]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.privacy_officer_channel}"
       message: "HIPAA PHI leak audit complete for run {run_id}. Documents: {steps.aggregate_findings.output.total_documents} | High-severity (release blocked): {steps.aggregate_findings.output.high_severity_count} | Worst PHI risk score: {steps.aggregate_findings.output.max_phi_risk_score} | Parse failures: {steps.aggregate_findings.output.parse_failure_count} | Contextual label: {steps.aggregate_findings.output.contextual_label} | The 18-identifier hard catches are deterministic (model-independent); high-severity releases required an explicit privacy-officer approval. Per-document PHI risk register PDF generated and logged to the compliance system of record."

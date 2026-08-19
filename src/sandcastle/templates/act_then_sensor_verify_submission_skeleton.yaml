@@ -262,6 +262,7 @@ steps:
   - id: notify_bad_preview
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.oncall_channel}"
       message: >-
@@ -413,6 +414,7 @@ steps:
   - id: notify_needs_attention
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.oncall_channel}"
       message: >-

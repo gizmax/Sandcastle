@@ -664,6 +664,7 @@ steps:
   - id: notify_drift
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: |
@@ -701,6 +702,7 @@ steps:
   - id: notify_clean
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: |

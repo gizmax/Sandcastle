@@ -574,6 +574,7 @@ steps:
     type: notify
     depends_on: [file_recovery_ticket]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: ":money_with_wings: Revenue leakage detected. Total recoverable: ${steps.build_leakage_ledger.output.total_recoverable} across {steps.build_leakage_ledger.output.accounts_with_leak} account(s). Hard leak: ${steps.build_leakage_ledger.output.hard_leak_total}, soft: ${steps.build_leakage_ledger.output.soft_leak_total}, tax exposure: ${steps.build_leakage_ledger.output.tax_risk_total}. Recovery ticket filed: {steps.file_recovery_ticket.output}. Summary: {steps.classify_leakage.output}. Ledger: {steps.build_leakage_ledger.output.ledger}."
@@ -583,6 +584,7 @@ steps:
   - id: notify_clean
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: ":white_check_mark: Revenue leakage sweep clean: ${steps.build_leakage_ledger.output.total_recoverable} recoverable is below the ${input.recoverable_threshold} threshold across {steps.build_leakage_ledger.output.accounts_swept} account(s). {steps.classify_leakage.output}"

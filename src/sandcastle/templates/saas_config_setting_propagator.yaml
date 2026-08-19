@@ -730,6 +730,7 @@ steps:
     type: notify
     depends_on: [route_outcome]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: >-
@@ -749,6 +750,7 @@ steps:
     type: notify
     depends_on: [route_outcome]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: >-
