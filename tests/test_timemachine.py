@@ -81,7 +81,7 @@ class TestEstimateMath:
 
     def test_projected_cost_hand_computed(self):
         # 4000 chars prompt -> 1000 input tokens; 8000 chars output -> 2000 output
-        # tokens. haiku pricing: $0.80/M input, $4.00/M output.
+        # tokens. haiku pricing: $1.00/M input, $5.00/M output (Haiku 4.5).
         cas = [
             tm.RunCassette(
                 run_id="r1",
@@ -93,7 +93,7 @@ class TestEstimateMath:
         est = tm.estimate_replay_cost(cas, "haiku")
         assert est["input_tokens"] == 1000
         assert est["output_tokens"] == 2000
-        expected = (1000 * 0.80 + 2000 * 4.0) / 1_000_000
+        expected = (1000 * 1.0 + 2000 * 5.0) / 1_000_000
         assert est["projected_cost_usd"] == pytest.approx(expected)
         assert est["original_cost_usd"] == pytest.approx(0.05)
         # No judge model -> no judge cost, total == target cost
@@ -205,7 +205,7 @@ class TestDryRun:
         assert report["selection"]["runs"] == 1
         # Output JSON-serialized adds {"text": ...} wrapper: 8000 + 12 chars -> 2003 tokens
         out_tokens = (8000 + len('{"text": ""}')) // 4
-        expected = (1000 * 0.80 + out_tokens * 4.0) / 1_000_000
+        expected = (1000 * 1.0 + out_tokens * 5.0) / 1_000_000
         assert report["cost"]["new_usd"] == pytest.approx(expected, rel=1e-6)
         assert report["cost"]["original_usd"] == pytest.approx(0.10)
         assert report["cost"]["delta_usd"] < 0

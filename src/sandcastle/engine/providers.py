@@ -41,11 +41,26 @@ PROVIDER_REGISTRY: dict[str, ModelInfo] = {
     ),
     "opus": ModelInfo(
         "claude", "opus", "runner.mjs",
-        "ANTHROPIC_API_KEY", None, 15.0, 75.0, region="us",
+        "ANTHROPIC_API_KEY", None, 5.0, 25.0, region="us",
     ),
     "haiku": ModelInfo(
         "claude", "haiku", "runner.mjs",
-        "ANTHROPIC_API_KEY", None, 0.80, 4.0, region="us",
+        "ANTHROPIC_API_KEY", None, 1.0, 5.0, region="us",
+    ),
+    # Claude 5 family, addressable by exact ID. The bare aliases above resolve
+    # to the current model of each tier (see _CLAUDE_MODEL_ALIASES); pin one of
+    # these when a workflow must not move when the alias does.
+    "claude/opus-5": ModelInfo(
+        "claude", "claude-opus-5", "runner.mjs",
+        "ANTHROPIC_API_KEY", None, 5.0, 25.0, region="us",
+    ),
+    "claude/sonnet-5": ModelInfo(
+        "claude", "claude-sonnet-5", "runner.mjs",
+        "ANTHROPIC_API_KEY", None, 3.0, 15.0, region="us",
+    ),
+    "claude/haiku-4.5": ModelInfo(
+        "claude", "claude-haiku-4-5", "runner.mjs",
+        "ANTHROPIC_API_KEY", None, 1.0, 5.0, region="us",
     ),
     # MiniMax
     "minimax/m2.5": ModelInfo(
@@ -409,6 +424,19 @@ def is_claude_model(model_str: str) -> bool:
 # Ordered fallback list for each model: same-provider cheaper first,
 # then same-provider pricier, then cross-provider equivalents.
 FAILOVER_CHAINS: dict[str, list[str]] = {
+    # Claude 5, addressable by exact id. Same tiering as the bare aliases.
+    "claude/opus-5": [
+        "claude/sonnet-5", "claude/haiku-4.5",
+        "google/gemini-2.5-pro", "mistral/large",
+    ],
+    "claude/sonnet-5": [
+        "claude/haiku-4.5", "claude/opus-5",
+        "google/gemini-2.5-pro", "mistral/large",
+    ],
+    "claude/haiku-4.5": [
+        "claude/sonnet-5", "claude/opus-5",
+        "minimax/m2.5", "mistral/small",
+    ],
     "sonnet": [
         "haiku", "opus",
         "openai/codex-mini", "openai/codex", "minimax/m2.5", "google/gemini-2.5-pro",
@@ -426,6 +454,7 @@ FAILOVER_CHAINS: dict[str, list[str]] = {
     ],
     "minimax/m2.5": [
         "openai/codex-mini", "haiku", "sonnet", "google/gemini-2.5-pro",
+        "claude/haiku-4.5",
     ],
     "openai/codex-mini": [
         "openai/codex",
@@ -440,15 +469,18 @@ FAILOVER_CHAINS: dict[str, list[str]] = {
     "google/gemini-2.5-pro": [
         "sonnet", "opus",
         "openai/codex", "minimax/m2.5",
+        "claude/opus-5", "claude/sonnet-5",
     ],
     # Mistral EU models - prefer same-provider, then cross-provider
     "mistral/large": [
         "mistral/small", "mistral/codestral",
         "sonnet", "opus", "openai/codex",
+        "claude/opus-5", "claude/sonnet-5",
     ],
     "mistral/small": [
         "mistral/large", "mistral/codestral",
         "haiku", "openai/codex-mini",
+        "claude/haiku-4.5",
     ],
     "mistral/codestral": [
         "mistral/small", "mistral/large",

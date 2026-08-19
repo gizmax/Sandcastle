@@ -1,6 +1,6 @@
 pages:
   stage: deploy
-  image: node:20-alpine
+  image: node:22-alpine
   script:
     - cd dashboard
     - npm ci

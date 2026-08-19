@@ -1,4 +1,4 @@
-FROM node:20-slim
+FROM node:22-slim
 
 ARG CLAUDE_AGENT_SDK_VERSION=0.3.207
 

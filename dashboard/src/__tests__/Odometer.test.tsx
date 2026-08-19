@@ -78,7 +78,7 @@ describe("Odometer", () => {
     // First aria-hidden span is the invisible width reserver with the final value.
     const reserver = container.querySelector("span.invisible");
     expect(reserver).not.toBeNull();
-    expect(reserver!.textContent).toBe("1,234");
+    expect(reserver!.textContent).toBe((1234).toLocaleString());
   });
 
   it("starts at 0 on first mount and eases up to the target", () => {
@@ -122,7 +122,7 @@ describe("Odometer", () => {
   it("jumps instantly when prefers-reduced-motion is set", () => {
     setReducedMotion(true);
     const { container } = render(<Odometer value={4321} duration={400} />);
-    expect(visibleText(container)).toBe("4,321");
+    expect(visibleText(container)).toBe((4321).toLocaleString());
     expect(raf.pending).toBe(0); // no animation scheduled
   });
 

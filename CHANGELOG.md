@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-08-19 - "Keep the Ending"
+
 ### ⚠️ Breaking
 
 - **`notify` steps now deliver.** Until 0.43.1 a `notify` step only wrote a log
@@ -100,6 +102,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SANDCASTLE_FTP_PASS` as repository secrets.
 
 ### Fixed
+
+- **Opus cost figures were 3x too high.** The registry priced the `opus` alias
+  at $15/$75 while the model it resolves to costs $5/$25, and `haiku` at
+  $0.80/$4.00 against an actual $1/$5. Cost is not cosmetic here - it drives
+  budget caps, the evolution scorer's cost mode, and the router's
+  cheapest-first choice, so every one of those was working from wrong numbers.
+  `sonnet` was already correct and is unchanged.
+
+  Two catalogues disagreed, which is how it stayed invisible: the executor's
+  `_AGENT_MODEL_PRICING` already had Opus at $5/$25 while the registry did not.
+
+- **The Claude 5 family was in no file at all.** Added as pinnable registry
+  entries (`claude/opus-5`, `claude/sonnet-5`, `claude/haiku-4.5`), and the
+  bare `opus`/`sonnet`/`haiku` aliases now resolve to Claude 5 - which is what
+  a bare alias means. Pricing is unchanged by the move.
+
+- **Base images were four months unpatched.** `node:20-slim` went end-of-life
+  2026-04-30 and was last rebuilt 2026-04-22. Two of the three images are the
+  runner and e2b sandboxes, which execute agent-authored code. Now
+  `node:22-slim`, verified by building the runner and launching Chromium in it.
+
+- **Three dependency floors could not be installed** on any Python the project
+  claims: `pyyaml>=6.0` (no cp312+ wheel, sdist fails to build), `torch>=2.4`
+  (no cp313 wheel, no sdist, plus CVE-2025-32434), `matplotlib>=3.8` (no
+  cp313/cp314 wheels). `apscheduler` gains a `<4` cap - 4.x is an API rewrite,
+  the same shape as the `mcp>=1.24` incident.
+
+- **The committed `uv.lock` pinned a vulnerable set**, including simpleeval
+  1.0.3 (CVE-2026-32640, sandbox escape - and simpleeval is the workflow
+  expression evaluator) and mcp 1.26.0 (auth bypass on HTTP transports).
+  Nothing consumes the lock - Docker and CI install fresh - so it was a trap
+  for anyone running `uv sync`, not a live breach. Refreshed and verified by
+  running the suite against the upgraded set.
+
+- **15 dashboard advisories, 11 high, now zero.** All fixes were inside the
+  declared semver ranges, so `package.json` is untouched and only the lockfile
+  moved.
 
 - **SMTP injection in the Gmail connector.** A CR or LF in a recipient ended the
   SMTP line and let a second `RCPT TO` through, so template-resolved step output
