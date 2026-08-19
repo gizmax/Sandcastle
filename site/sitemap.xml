@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   lastmod reflects the last significant content change per page.
-  All six pages were revised on 2026-08-17 (structured data, meta descriptions,
+  Pages were last revised on 2026-08-19 (structured data, meta descriptions,
   factual corrections). Update this file whenever page content changes -
   ideally generated at deploy time from file mtimes rather than by hand.
   priority/changefreq are intentionally omitted: Google ignores both.
@@ -33,6 +33,10 @@
   </url>
   <url>
     <loc>https://sandcastle-ai.eu/security/</loc>
+    <lastmod>2026-08-19</lastmod>
+  </url>
+  <url>
+    <loc>https://sandcastle-ai.eu/langgraph-alternative/</loc>
     <lastmod>2026-08-19</lastmod>
   </url>
 </urlset>

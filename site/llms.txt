@@ -27,3 +27,4 @@ Install: `pip install sandcastle-ai`. CLI: `sandcastle serve` then `sandcastle r
 
 - [Connectors](https://github.com/gizmax/Sandcastle): 64 integrations reachable from `http`/`tool`/`notify` steps, including slack, postgresql, snowflake, stripe, github, jira, salesforce, datadog, pagerduty, docusign, s3, qdrant, pinecone.
 - [Compliance](https://sandcastle-ai.eu/eu-ai-act/): EU AI Act mode, audit hash chain, PII redaction, data-residency routing.
+- [LangGraph alternative](https://sandcastle-ai.eu/langgraph-alternative/): For teams already running LangGraph - what the framework does not cover (schedules, budget ceilings, cost per step, audit trail), and four cases where staying on LangGraph is the right call.
