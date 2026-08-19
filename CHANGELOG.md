@@ -5,7 +5,77 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [Unreleased] - "Nothing Was Broken"
+
+### ⚠️ Breaking
+
+- **A rejected `gate` now stops the run.** A gate whose `llm_eval` or `timeout`
+  strategy rejected returned `status="completed"`, and nothing in the engine
+  ever read `output.decision` - zero of the 83 bundled templates containing a
+  gate read it. So every gate was advisory: it judged, wrote down "rejected",
+  and the workflow walked past its own guard rail. Among them a sanctions
+  screener, a three-way-match payment run and a discount approval.
+
+  `gate_config` gains `fail_on_reject` (default `true`), following the
+  `fail_on_error` precedent on `http` steps. Rejection now fails the step, and
+  the result is not retryable - re-running a judge until it says yes turns a
+  guard rail into a dice roll.
+
+  Two consequences on upgrade:
+
+  1. **A gate used as a filter now fails the run.** Rejection is the normal
+     outcome for some gates - "no material deals today", "this email is not
+     actionable". 32 of the 88 bundled gates are filters and now carry
+     `fail_on_reject: false` with a stated reason. Third-party workflows using
+     a gate this way must do the same.
+  2. **A failed step publishes no output onto the run**, so the verdict is read
+     from `.error`, not from `{steps.gate.decision}`. Workflows that branch on
+     a verdict should set `fail_on_reject: false` and read the output as before.
+
+  Also fixed: two bundled templates had been rejecting 100% of the time and it
+  was invisible precisely because rejection did nothing. Their prompts ask the
+  judge to answer `PASS`/`FAIL` while the executor decides on `"approved"`. All
+  116 `llm_eval` prompts were scanned; these were the only two.
+
+- **`MEMORY_BACKEND=cloud` now errors instead of silently giving you `local`.**
+  See *Changed* below. `local` is the default, so a default-configured
+  deployment is unaffected.
+
+### Added
+
+- **A durable step effect ledger, so replay stops re-sending.**
+  `sandcastle run --replay` re-spent tokens and re-sent HTTP requests. Cassette
+  record/replay was real but lived inside `_execute_step_once`, and all 24 step
+  types in `_HYBRID_STEP_TYPES` - `llm` and `http` among them - dispatch through
+  `_execute_step_by_type` and never reached it. `bundle.py` conceded it in one
+  line: `REPLAY_SAFE_STEP_TYPES = frozenset({"standard"})`.
+
+  New `run_step_effects` table (migration `022`) holds a write-ahead claim keyed
+  on effect scope + tenant + step + `parallel_index` + `iteration_index` + a
+  per-type fingerprint of the **resolved** effect. Auth material is collapsed to
+  digests, so no secret reaches the table. Memoized steps return
+  `cost_usd=0.0`, so budget accounting is right without special-casing, and
+  `original_cost_usd` carries what the first execution paid.
+
+  The guarantee, tested without `skip_steps` so it cannot pass by accident: two
+  full runs in one effect scope fire the POST once and charge $0 the second
+  time. A separate test asserts a *different* scope fires again, so a ledger
+  that failed closed on everything could not pass the first one.
+
+  Steps opt out with `replay: live`; `GET` requests are live by default.
+  `condition`, `classify`, `gate`, `approval`, `loop`, `race`, `delegate` and
+  `sub_workflow` are never intercepted - `condition` and `classify` write
+  `branch_skip_steps`, so a memoized return would silently un-skip the other
+  branch.
+
+  When the ledger itself is unreachable, the behaviour follows the deployment
+  rather than a flag: local mode has no database and runs live with a warning,
+  a server deployment fails the step. `EFFECT_LEDGER_REQUIRED` overrides either
+  way.
+
+  **Deploy order:** migration `022` must land before workers read
+  `run.effect_scope_id`. The job signature is unchanged, so in-flight jobs still
+  deserialize.
 
 ### Security
 
