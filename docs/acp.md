@@ -151,12 +151,14 @@ There is no `inputTokens` and no `outputTokens` anywhere in ACP v1.
 - The pre-run cost estimator lists `acp` under its non-LLM set and returns `$0` rather
   than inventing a token estimate.
 
-**UNVERIFIED:** whether `@agentclientprotocol/claude-agent-acp` actually emits
-`usage_update` with a `cost` field has not been confirmed against a running adapter.
-The schema makes it optional. If it does not, an `acp` step driving Claude Code reports
-`cost_per_call` (default `$0`) and the "agent-reported cost" path never fires. Both
-branches are implemented and tested against the fake agent; only the real adapter's
-behaviour is unconfirmed.
+**CONFIRMED 2026-08-20** against `@agentclientprotocol/claude-agent-acp` 0.70.0:
+it *does* emit `usage_update` with a USD `cost`, so the agent-reported path fires for
+Claude Code. See the recorded smoke run below.
+
+That confirms one harness, not the field's presence in general - the schema still makes
+`cost` optional, so a harness that omits it falls back to `cost_per_call` and
+`max_cost_usd` remains advisory for `acp` steps as a class. Both branches stay
+implemented and tested.
 
 ---
 
@@ -286,17 +288,67 @@ SANDCASTLE_ACP_ALLOWED_ROOTS='["/path/to/parent"]' \
 
 ### Manual smoke run
 
-> **Not yet recorded.** This section is where the output of a real
-> `claude-agent-acp` / `codex-acp` / `goose` run is pasted, and it is a definition-of-done
-> item for the 0.45 release. The 0.45 branch has no recorded run against a real harness
-> yet — nothing in this document should be read as claiming one was performed.
+**Recorded 2026-08-20**, `@agentclientprotocol/claude-agent-acp` 0.70.0 on macOS,
+node 22.23.2. Workspace was a throwaway directory; `--permission reject
+--filesystem none`, so the harness got no filesystem capability and any permission
+request would have been refused.
 
-Two things to check when you do it, both flagged as unverified above:
+```console
+$ SANDCASTLE_ACP_ALLOWED_ROOTS='["/tmp/acp-smoke"]' python scripts/acp_smoke.py \
+    --agent claude --cwd /tmp/acp-smoke \
+    --message "Reply with the single word ACP-OK and nothing else, then stop." \
+    --permission reject --filesystem none --verbose
+ACP-OK
+=== result ===
+{
+  "stop_reason": "end_turn",
+  "session_id": "4b6c2b6d-21d6-4435-b3c0-cd379913ad19",
+  "agent": {
+    "name": "@agentclientprotocol/claude-agent-acp",
+    "title": "Claude Agent",
+    "version": "0.70.0"
+  },
+  "protocol_version": 1,
+  "modes": {
+    "current": "default",
+    "available": ["auto", "default", "acceptEdits", "plan", "dontAsk", "bypassPermissions"]
+  },
+  "usage": {
+    "used": 28585,
+    "size": 1000000,
+    "cost": { "amount": 0.268085, "currency": "USD" }
+  },
+  "permissions": [],
+  "tool_calls": [],
+  "truncated": false,
+  "text": "ACP-OK"
+}
+```
 
-1. Does the harness emit `usage_update` with a `cost` field? (The release's cost story
-   depends on it.)
-2. Does it print a non-ACP banner to stdout before the handshake? Sandcastle tolerates
-   up to 64 such lines and then fails with a protocol error, but the count is a guess.
+What it settles:
+
+1. **`cost` is emitted, in USD.** The agent-reported path fires for this harness;
+   `cost_source` is `agent_reported`.
+2. **No banner.** stdout carried ACP messages only - the 64-line junk tolerance was
+   never exercised, so that number remains a guess rather than a measurement.
+3. **`used` really is occupancy.** 28,585 of a 1,000,000 window for a one-word answer,
+   which is the system prompt sitting in context - not tokens consumed. It is the
+   clearest possible argument for never turning `used` into money.
+4. **Adapter version and protocol version are different numbers**, visible together in
+   one payload: `version: "0.70.0"` is the adapter, `protocol_version: 1` is ACP.
+
+Note the cost: **$0.27 for a one-word reply.** An `acp` turn carries the harness's
+whole system prompt, so treat these steps as expensive by default.
+
+Failure mode worth recording too - with an API key that has no credit, the run reaches
+`session/new` and fails at the prompt with a clear error rather than hanging:
+
+```
+ACP failed (protocol): ACP agent returned error -32603: Internal error: Credit balance is too low
+```
+
+Still unrecorded: `codex-acp`, `gemini`, `goose`. Each needs its own credentials, and
+whether *they* report `cost` is unknown.
 
 ---
 

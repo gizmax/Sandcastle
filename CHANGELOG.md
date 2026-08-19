@@ -77,8 +77,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `run.effect_scope_id`. The job signature is unchanged, so in-flight jobs still
   deserialize.
 
-### Added
-
 - **`type: acp` - drive an external agent harness over the Agent Client
   Protocol.** Sandcastle spawns a harness (Claude Code, Codex, Gemini CLI,
   goose - ~38 speak the protocol) as a local subprocess and talks
