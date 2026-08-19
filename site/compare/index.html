@@ -160,6 +160,61 @@
       "isPartOf": {
         "@id": "https://sandcastle-ai.eu/#website"
       }
+    },
+    {
+      "@type": "ItemList",
+      "@id": "https://sandcastle-ai.eu/compare/#wrong-answer",
+      "name": "Cases where Sandcastle is the wrong answer",
+      "description": "Situations in which a competing tool is the better choice, stated by Sandcastle's own maintainers, each anchored to its own URL fragment.",
+      "itemListOrder": "https://schema.org/ItemListUnordered",
+      "numberOfItems": 6,
+      "isPartOf": {
+        "@id": "https://sandcastle-ai.eu/compare/#webpage"
+      },
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "The run must never lose state",
+          "url": "https://sandcastle-ai.eu/compare/#when-the-run-must-never-lose-state",
+          "description": "Choose Temporal. Its event history replays a workflow back to the exact line it was executing, across process and machine failures. Sandcastle persists each step to the database and can replay a run from any step, but a worker that dies mid-step marks the run failed and a human decides what happens next. For payment flows or anything where a lost run means a lost customer, that gap matters."
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "The model should choose its own path",
+          "url": "https://sandcastle-ai.eu/compare/#when-the-model-should-choose-its-own-path",
+          "description": "Choose LangGraph or CrewAI. Sandcastle has an agent step and a delegate step, but the graph is something you wrote down in advance. If the value of your system is that the model decides the sequence — branching into research it wasn't told about, calling tools you didn't anticipate — a framework built for that will fight you less."
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "The AI part sits inside a bigger data pipeline",
+          "url": "https://sandcastle-ai.eu/compare/#when-the-ai-part-sits-inside-a-bigger-data-pipeline",
+          "description": "Choose Airflow. If the LLM call happens between a warehouse extract and a load, splitting that across two orchestrators is a permanent tax on your team. Airflow's official AI provider now offers @task.llm and @task.agent with step-level caching, plus human-in-the-loop operators. It's young — version 0.7.0, first released April 2026 — but it lives where your data already is."
+        },
+        {
+          "@type": "ListItem",
+          "position": 4,
+          "name": "The people building workflows don't write code",
+          "url": "https://sandcastle-ai.eu/compare/#when-the-people-building-workflows-don-t-write-code",
+          "description": "Choose n8n or Dify. A YAML file is a developer artefact. If your ops or marketing team needs to build and change automations themselves, a canvas they can see is worth more than a file your engineers can review. n8n's integration catalogue is also an order of magnitude larger than Sandcastle's 64 connectors."
+        },
+        {
+          "@type": "ListItem",
+          "position": 5,
+          "name": "You need OSI-approved open source today",
+          "url": "https://sandcastle-ai.eu/compare/#when-you-need-osi-approved-open-source-today",
+          "description": "Choose Temporal, Airflow or Prefect. Sandcastle's source is published and auditable, but BSL 1.1 permits non-production use only until it converts to Apache 2.0 on 24 February 2030. If your policy requires a genuinely open licence for production right now, that is a hard blocker and no amount of goodwill changes it."
+        },
+        {
+          "@type": "ListItem",
+          "position": 6,
+          "name": "You are a Go, Java or .NET shop",
+          "url": "https://sandcastle-ai.eu/compare/#when-you-are-a-go-java-or-net-shop",
+          "description": "Choose Temporal. Sandcastle is Python. Temporal has seven official SDKs, so your existing services keep their language."
+        }
+      ]
     }
   ]
 }

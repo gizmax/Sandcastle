@@ -97,6 +97,88 @@
       "isPartOf": {
         "@id": "https://sandcastle-ai.eu/#website"
       }
+    },
+    {
+      "@type": "ItemList",
+      "@id": "https://sandcastle-ai.eu/langgraph-alternative/#gaps",
+      "name": "What LangGraph leaves to you",
+      "description": "Concerns that sit outside an agent framework and become the caller's problem.",
+      "itemListOrder": "https://schema.org/ItemListUnordered",
+      "numberOfItems": 4,
+      "isPartOf": {
+        "@id": "https://sandcastle-ai.eu/langgraph-alternative/#webpage"
+      },
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "You cannot answer what a run cost",
+          "url": "https://sandcastle-ai.eu/langgraph-alternative/#bite-cost",
+          "description": "Token accounting is not in the framework. Teams reach for LangSmith, which bills per trace &mdash; so observability becomes a line item that scales with usage, and the numbers live in someone else's system. Sandcastle records tokens and cost per step in your own database, because it is the same system that ran the step."
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Nothing stops a loop that is spending",
+          "url": "https://sandcastle-ai.eu/langgraph-alternative/#bite-budget",
+          "description": "An agent that retries its way through a bad tool response can burn real money before anyone notices. There is no built-in ceiling; you write the guard. Sandcastle takes budget_limit_usd on the workflow and stops at it."
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "The data leaves, and you have to prove it did not",
+          "url": "https://sandcastle-ai.eu/langgraph-alternative/#bite-residency",
+          "description": "Hosted tracing means prompts and outputs go somewhere else. For an EU team answering to the AI Act, &ldquo;we self-host the agent but ship the traces to a US SaaS&rdquo; is the awkward half of the sentence. Sandcastle runs on your hardware end to end, and the audit trail stays there with it."
+        },
+        {
+          "@type": "ListItem",
+          "position": 4,
+          "name": "The workflow is not reviewable",
+          "url": "https://sandcastle-ai.eu/langgraph-alternative/#bite-review",
+          "description": "A graph assembled in Python is code, and code review shows you a diff of the assembly, not of the behaviour. A YAML workflow diffs as what changed: this step, this model, this budget. That matters more the more people touch it."
+        }
+      ]
+    },
+    {
+      "@type": "ItemList",
+      "@id": "https://sandcastle-ai.eu/langgraph-alternative/#stay",
+      "name": "Cases where staying on LangGraph is the right call",
+      "description": "Situations in which Sandcastle is the wrong choice, stated by its own maintainers, each anchored to its own URL fragment.",
+      "itemListOrder": "https://schema.org/ItemListUnordered",
+      "numberOfItems": 4,
+      "isPartOf": {
+        "@id": "https://sandcastle-ai.eu/langgraph-alternative/#webpage"
+      },
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "The model must choose its own path",
+          "url": "https://sandcastle-ai.eu/langgraph-alternative/#stay-dynamic",
+          "description": "If the sequence genuinely cannot be written down &mdash; the agent decides at runtime what to do next, and that is the point &mdash; a declarative workflow is the wrong shape. Keep LangGraph. Sandcastle's agent step delegates to a model, but the workflow around it is still a graph you wrote."
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Losing a run is unacceptable",
+          "url": "https://sandcastle-ai.eu/langgraph-alternative/#stay-state",
+          "description": "Sandcastle is not a durable execution engine. If the process dies mid-run, the run dies with it. When a workflow moves money or provisions infrastructure and must survive a crash exactly once, that is Temporal's job, not this one &mdash; and not LangGraph's either."
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "Your team wants to stay in Python",
+          "url": "https://sandcastle-ai.eu/langgraph-alternative/#stay-python",
+          "description": "Some teams simply prefer their orchestration in the same language and repository as everything else, with the full expressive power that gives them. That is a legitimate preference and no comparison table overturns it."
+        },
+        {
+          "@type": "ListItem",
+          "position": 4,
+          "name": "You need OSI-approved open source",
+          "url": "https://sandcastle-ai.eu/langgraph-alternative/#stay-osi",
+          "description": "LangGraph is MIT. Sandcastle is BSL 1.1 &mdash; source-available, free to read, modify and self-host, but production use needs a licence. If your policy requires an OSI licence today, that is a hard stop and no feature closes it."
+        }
+      ]
     }
   ]
 }
