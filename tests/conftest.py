@@ -205,6 +205,7 @@ def _reset_module_globals():
 
         with _mem._clients_lock:
             _mem._clients.clear()
+            _mem._backends.clear()
         _mem._graph_client = None
         _mem._graph_client_initialized = False
     except Exception:

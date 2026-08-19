@@ -20,7 +20,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import Any, Protocol
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +123,10 @@ class _SandcastleAnthropicLLM:
 
 _clients: dict[str, Any] = {}
 _clients_lock = threading.Lock()
+# Backend adapters (MemoryBackend implementations), keyed by backend name.
+# Shares _clients_lock: both caches are cheap, and one lock keeps the
+# double-checked-locking discipline in one place.
+_backends: dict[str, Any] = {}
 _graph_client: Any | None = None
 _graph_client_lock = threading.Lock()
 _graph_client_initialized = False  # True once we have attempted initialization
@@ -144,12 +148,28 @@ _STOPWORDS: set[str] = {
 # Scope ID format: must be "workflow:<name>", "agent:<name>", or "global",
 # optionally prefixed with "tenant:<id>/" for multi-tenant isolation.
 # Also accept the internal "__health_check__" scope for health probes.
+#
+# Path safety: scope ids are inert strings for the Mem0/Qdrant backend (they
+# are just a user_id), but any backend that maps a scope onto a directory
+# turns them into path components. The name patterns below therefore reject
+# every dot-run (".." anywhere) and every name made up only of dots and
+# spaces, so "workflow:..", "agent:." and "tenant:../workflow:x" are refused
+# here rather than at each consumer. Ordinary dotted names ("v1.2.3",
+# "acme.com") still pass.
+_NO_DOTDOT_NAME = (
+    r"(?=[a-zA-Z0-9_. -]*[a-zA-Z0-9_-])"     # at least one non-dot/space char
+    r"(?:(?!\.\.)[a-zA-Z0-9_. -]){1,200}"    # charset, minus any ".." run
+)
+_TENANT_NAME = (
+    r"(?=[a-zA-Z0-9_.-]*[a-zA-Z0-9_-])"      # at least one non-dot char
+    r"(?:(?!\.\.)[a-zA-Z0-9_.-]){1,64}"      # charset, minus any ".." run
+)
 _VALID_SCOPE_RE = re.compile(
-    r"^(tenant:[a-zA-Z0-9_.-]{1,64}/)?"
-    r"(workflow:[a-zA-Z0-9_. -]{1,200}"
-    r"|agent:[a-zA-Z0-9_. -]{1,200}"
+    r"^(tenant:" + _TENANT_NAME + r"/)?"
+    r"(workflow:" + _NO_DOTDOT_NAME +
+    r"|agent:" + _NO_DOTDOT_NAME +
     r"|global"
-    r"|__health_check__)$"
+    r"|__health_check__)\Z"   # \Z not $: $ would allow a trailing newline
 )
 
 
@@ -312,6 +332,21 @@ def _get_graph_client() -> Any | None:
 # ---------------------------------------------------------------------------
 
 
+def _sanitize_tenant_dots(safe: str) -> str:
+    """Neutralize dot-only / traversal tenant ids after charset sanitizing.
+
+    The charset substitution in resolve_scope_id leaves "." untouched, so a
+    tenant id of ".." survives it verbatim and would produce the scope
+    "tenant:../workflow:x". That is inert for Mem0 but is a directory
+    traversal primitive for any path-backed backend, so dots are downgraded
+    to underscores whenever the result would contain a ".." run or carry no
+    other character. Ordinary ids like "acme.com" are left alone.
+    """
+    if ".." in safe or not re.search(r"[a-zA-Z0-9_-]", safe):
+        safe = safe.replace(".", "_")
+    return safe or "_"
+
+
 def resolve_scope_id(
     memory_config: Any,
     workflow_name: str,
@@ -334,6 +369,7 @@ def resolve_scope_id(
     if tenant_id:
         # Sanitize tenant id to allowed characters - same rules as scope ids.
         safe = re.sub(r"[^a-zA-Z0-9_.-]", "_", tenant_id)[:64]
+        safe = _sanitize_tenant_dots(safe)
         return f"tenant:{safe}/{base}"
     return base
 
@@ -607,29 +643,61 @@ def enrich_memory(
 
 
 # ---------------------------------------------------------------------------
-# Core CRUD operations (backward-compatible public API)
+# Backend interface
 # ---------------------------------------------------------------------------
 
 
-async def load_memories(
-    scope_id: str,
-    query: str = "",
-    limit: int = 10,
-    max_age_days: int | None = None,
-    backend: str = "local",
-) -> list[dict]:
-    """Load relevant memories with optional decay filtering.
+class MemoryBackend(Protocol):
+    """Protocol for memory backend implementations.
 
-    If query is provided, performs semantic search; otherwise get_all.
-    When max_age_days is set, expired memories are filtered out and
-    remaining ones receive a relevance_score.
+    The public module functions below own everything that is backend
+    agnostic - scope validation, size clamping, admission control,
+    enrichment and decay - and delegate only the storage operations here.
+    A backend therefore implements five methods and nothing else.
     """
-    import asyncio
 
-    _validate_scope(scope_id)
+    async def load(
+        self, scope_id: str, query: str, limit: int,
+    ) -> list[dict]: ...
 
-    try:
-        client = _get_client(backend)
+    async def save(
+        self,
+        scope_id: str,
+        content: str,
+        metadata: dict[str, Any],
+        run_id: str,
+    ) -> list[dict]: ...
+
+    async def delete(
+        self, memory_id: str, scope_id: str | None = None,
+    ) -> bool: ...
+
+    async def delete_all(self, scope_id: str) -> bool: ...
+
+    async def health(self) -> None: ...
+
+
+class _Mem0Backend:
+    """Mem0 + Qdrant backend - the historical default.
+
+    A thin adapter over the client returned by _get_client(). It resolves
+    the client on every call rather than holding a reference, so the
+    lazy-singleton and error semantics of _get_client stay authoritative:
+    an unknown backend name still raises MemoryBackendError and "cloud"
+    still raises NotImplementedError, at the same point in the call as
+    before this adapter existed.
+    """
+
+    def __init__(self, name: str = "local") -> None:
+        self.name = name
+
+    async def load(
+        self, scope_id: str, query: str, limit: int,
+    ) -> list[dict]:
+        """Search (with query) or list (without) memories for a scope."""
+        import asyncio
+
+        client = _get_client(self.name)
         if query:
             results = await asyncio.to_thread(
                 client.search, query,
@@ -655,8 +723,128 @@ async def load_memories(
                 "created_at": item.get("created_at", ""),
                 "updated_at": item.get("updated_at", ""),
             })
+        return memories
 
-        # Apply decay if requested
+    async def save(
+        self,
+        scope_id: str,
+        content: str,
+        metadata: dict[str, Any],
+        run_id: str,
+    ) -> list[dict]:
+        """Store content. Mem0 auto-extracts facts and deduplicates."""
+        import asyncio
+
+        client = _get_client(self.name)
+        result = await asyncio.to_thread(
+            client.add, content,
+            user_id=scope_id, metadata=metadata,
+        )
+        return result if isinstance(result, list) else [result]
+
+    async def delete(
+        self, memory_id: str, scope_id: str | None = None,
+    ) -> bool:
+        """Delete one memory by id.
+
+        scope_id is accepted for interface parity and ignored here: Mem0
+        deletes by id alone and offers no scoped delete, which is the gap
+        already documented in memory_mcp_server._tool_forget.
+        """
+        import asyncio
+
+        client = _get_client(self.name)
+        await asyncio.to_thread(client.delete, memory_id)
+        return True
+
+    async def delete_all(self, scope_id: str) -> bool:
+        """Delete every memory in a scope."""
+        import asyncio
+
+        client = _get_client(self.name)
+        await asyncio.to_thread(client.delete_all, user_id=scope_id)
+        return True
+
+    async def health(self) -> None:
+        """Probe the backend; raise if it is not usable."""
+        import asyncio
+
+        client = _get_client(self.name)
+        # Probe with a harmless get_all on a non-existent scope
+        await asyncio.to_thread(
+            client.get_all, user_id="__health_check__",
+        )
+
+
+def _resolve_backend_name(backend: str = "") -> str:
+    """Resolve a backend name, falling back to the configured default.
+
+    An empty name means "whatever MEMORY_BACKEND says". This is how
+    settings.memory_backend reaches callers that do not pass backend=
+    explicitly; the setting's own default is "local", so this is a no-op
+    for existing deployments. The config import is deferred to keep this
+    module importable without the settings stack.
+    """
+    if backend:
+        return backend
+    try:
+        from sandcastle.config import settings
+
+        return settings.memory_backend or "local"
+    except Exception:  # pragma: no cover - settings should always import
+        return "local"
+
+
+def _get_backend(backend: str = "") -> Any:
+    """Get or create the MemoryBackend adapter for the given name.
+
+    Name validation deliberately stays inside _get_client, so unknown and
+    not-yet-implemented backends fail exactly where and how they always
+    have. Thread-safe with the same double-checked locking as _get_client.
+    """
+    name = _resolve_backend_name(backend)
+
+    # Fast path (no lock needed once initialized)
+    if name in _backends:
+        return _backends[name]
+
+    with _clients_lock:
+        # Re-check inside the lock (double-checked locking pattern)
+        if name in _backends:
+            return _backends[name]
+        adapter = _Mem0Backend(name)
+        _backends[name] = adapter
+        return adapter
+
+
+# ---------------------------------------------------------------------------
+# Core CRUD operations (backward-compatible public API)
+# ---------------------------------------------------------------------------
+
+
+async def load_memories(
+    scope_id: str,
+    query: str = "",
+    limit: int = 10,
+    max_age_days: int | None = None,
+    backend: str = "",
+) -> list[dict]:
+    """Load relevant memories with optional decay filtering.
+
+    If query is provided, performs semantic search; otherwise get_all.
+    When max_age_days is set, expired memories are filtered out and
+    remaining ones receive a relevance_score.
+
+    An empty backend means settings.memory_backend.
+    """
+    _validate_scope(scope_id)
+
+    try:
+        memories = await _get_backend(backend).load(
+            scope_id, query, limit,
+        )
+
+        # Apply decay if requested - shared, so backends age identically
         if max_age_days is not None:
             memories = apply_decay(memories, max_age_days=max_age_days)
 
@@ -676,7 +864,7 @@ async def save_memory(
     run_id: str = "",
     admit_threshold: float = 0.3,
     skip_admission: bool = False,
-    backend: str = "local",
+    backend: str = "",
 ) -> list[dict]:
     """Add memory content with admission control.
 
@@ -691,7 +879,7 @@ async def save_memory(
         run_id: Associated workflow run ID.
         admit_threshold: Minimum importance score (0.0-1.0).
         skip_admission: Bypass admission control if True.
-        backend: Memory backend to use.
+        backend: Memory backend to use ("" = settings.memory_backend).
 
     Returns:
         List of created/updated memory records.
@@ -700,8 +888,6 @@ async def save_memory(
         MemoryAdmissionError: If content is rejected by admission.
         MemoryBackendError: If the backend is unreachable.
     """
-    import asyncio
-
     _validate_scope(scope_id)
 
     # Reject oversized content to prevent storage abuse.
@@ -746,12 +932,9 @@ async def save_memory(
         meta["keywords"] = ",".join(enriched["keywords"])
 
     try:
-        client = _get_client(backend)
-        result = await asyncio.to_thread(
-            client.add, content,
-            user_id=scope_id, metadata=meta,
+        records = await _get_backend(backend).save(
+            scope_id, content, meta, run_id,
         )
-        records = result if isinstance(result, list) else [result]
 
         # Validate and log what the backend actually confirmed
         confirmed = len(records)
@@ -780,14 +963,19 @@ async def save_memory(
 
 async def delete_memory(
     memory_id: str,
-    backend: str = "local",
+    backend: str = "",
+    *,
+    scope_id: str | None = None,
 ) -> bool:
-    """Delete a specific memory by ID."""
-    import asyncio
+    """Delete a specific memory by ID.
+
+    scope_id is optional and only used by backends that can scope a
+    delete; Mem0 deletes by id alone and ignores it.
+    """
     try:
-        client = _get_client(backend)
-        await asyncio.to_thread(client.delete, memory_id)
-        return True
+        return await _get_backend(backend).delete(
+            memory_id, scope_id=scope_id,
+        )
     except MemoryBackendError:
         raise
     except Exception as exc:
@@ -797,15 +985,12 @@ async def delete_memory(
 
 async def delete_all_memories(
     scope_id: str,
-    backend: str = "local",
+    backend: str = "",
 ) -> bool:
     """Delete all memories for a scope."""
-    import asyncio
     _validate_scope(scope_id)
     try:
-        client = _get_client(backend)
-        await asyncio.to_thread(client.delete_all, user_id=scope_id)
-        return True
+        return await _get_backend(backend).delete_all(scope_id)
     except MemoryBackendError:
         raise
     except Exception as exc:
@@ -877,32 +1062,30 @@ def format_memories_for_prompt(
 
 
 async def memory_health_check(
-    backend: str = "local",
+    backend: str = "",
 ) -> dict[str, Any]:
     """Check if the memory backend is reachable and operational.
 
-    Returns a dict with status, backend, latency_ms, and details.
+    Returns a dict with status, backend, latency_ms, and details. The
+    reported backend is the resolved name, so an empty argument shows
+    what settings.memory_backend actually selected.
     """
-    import asyncio
+    name = _resolve_backend_name(backend)
 
     start = time.monotonic()
     try:
-        client = _get_client(backend)
-        # Probe with a harmless get_all on a non-existent scope
-        await asyncio.to_thread(
-            client.get_all, user_id="__health_check__",
-        )
+        await _get_backend(name).health()
         latency = (time.monotonic() - start) * 1000
         return {
             "status": "ok",
-            "backend": backend,
+            "backend": name,
             "latency_ms": round(latency, 1),
             "graph_available": _get_graph_client() is not None,
         }
     except NotImplementedError as exc:
         return {
             "status": "error",
-            "backend": backend,
+            "backend": name,
             "error": str(exc),
             "graph_available": False,
         }
@@ -910,7 +1093,7 @@ async def memory_health_check(
         latency = (time.monotonic() - start) * 1000
         return {
             "status": "error",
-            "backend": backend,
+            "backend": name,
             "latency_ms": round(latency, 1),
             "error": str(exc),
             "graph_available": False,
@@ -924,7 +1107,8 @@ async def memory_health_check(
 
 def _reset_client() -> None:
     """Reset all client singletons (for testing)."""
-    global _clients, _graph_client, _graph_client_initialized
+    global _clients, _backends, _graph_client, _graph_client_initialized
     _clients = {}
+    _backends = {}
     _graph_client = None
     _graph_client_initialized = False

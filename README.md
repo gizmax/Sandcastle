@@ -1564,7 +1564,7 @@ Sandcastle includes a built-in memory system that gives agents persistent contex
 
 ```python
 # Configured via environment variables
-MEMORY_BACKEND=local        # "local" (SQLite + embeddings) or "cloud" (Mem0)
+MEMORY_BACKEND=local        # "local" (Qdrant + fastembed) or "cloud" (Mem0)
 MEMORY_GRAPH_ENABLED=false  # Enable Neo4j graph backend
 MEMORY_MAX_AGE_DAYS=90      # TTL for memory decay (0 = keep forever)
 MEMORY_ADMIT_THRESHOLD=0.3  # Minimum quality score for admission
@@ -2521,7 +2521,7 @@ DEFAULT_MAX_COST_USD=0    # 0 = no global budget limit
 MAX_WORKFLOW_DEPTH=5      # max recursion depth for hierarchical workflows
 
 # Agent Memory
-MEMORY_BACKEND=local           # "local" (SQLite + embeddings) or "cloud"
+MEMORY_BACKEND=local           # "local" (Qdrant + fastembed) or "cloud"
 MEMORY_MAX_AGE_DAYS=90         # TTL for memory decay (0 = keep forever)
 MEMORY_ADMIT_THRESHOLD=0.3     # Minimum quality score for admission
 MEMORY_GRAPH_ENABLED=false     # Enable Neo4j graph backend
