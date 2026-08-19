@@ -467,6 +467,8 @@ steps:
   - id: materiality_gate
     type: gate
     gate_config:
+      # Advisory: per-rival. Rejection means 'this diff is noise, not a real pricing move' - the normal case; the sweep must continue to notify_clean.
+      fail_on_reject: false
       strategies:
         - type: llm_eval
           config:

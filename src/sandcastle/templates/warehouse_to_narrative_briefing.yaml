@@ -312,6 +312,8 @@ steps:
     type: gate
     depends_on: [narrative_race]
     gate_config:
+      # Advisory: score_disagreement reads the judge verdicts and route_review sends a disagreement to analyst_approval. Failing here would kill that review path.
+      fail_on_reject: false
       strategies:
         - type: llm_eval
           config:

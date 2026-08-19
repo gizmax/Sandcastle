@@ -293,6 +293,8 @@ steps:
   - id: judge_gate
     type: gate
     gate_config:
+      # Advisory: per-question. Rejection means 'this answer is not fully evidence-backed' - routed to analyst_review; the questionnaire loop must continue.
+      fail_on_reject: false
       strategies:
         - type: llm_eval
           config:

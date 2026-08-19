@@ -1007,7 +1007,10 @@ class TestGateStep:
 
                 result = await _execute_gate_step(step, ctx, storage)
 
-        assert result.status == "completed"
+        # A rejected gate fails the step so the run stops; the verdict stays
+        # in the output so templates reading it keep working.
+        assert result.status == "failed"
+        assert result.retryable is False
         assert result.output["decision"] == "rejected"
 
     @pytest.mark.asyncio
@@ -1055,7 +1058,8 @@ class TestGateStep:
         with patch("asyncio.sleep", new_callable=AsyncMock):
             result = await _execute_gate_step(step, ctx, storage)
 
-        assert result.status == "completed"
+        assert result.status == "failed"
+        assert result.retryable is False
         assert result.output["decision"] == "rejected"
 
     @pytest.mark.asyncio

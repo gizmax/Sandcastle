@@ -365,6 +365,8 @@ steps:
     type: gate
     depends_on: [execute_sample_race]
     gate_config:
+      # Advisory: aggregate_projection reads this verdict as EVIDENCE (sample_quality_ok) for rollout_eligible. rollout_gate below is the blocking gate.
+      fail_on_reject: false
       strategies:
         - type: llm_eval
           config:

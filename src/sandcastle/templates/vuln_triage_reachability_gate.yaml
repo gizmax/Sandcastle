@@ -336,6 +336,8 @@ steps:
     type: gate
     depends_on: [build_judge_brief]
     gate_config:
+      # Advisory: rejection means 'unreachable / not exploitable' - the normal verdict for most CVEs, and decision_branch reads output.passed to route it.
+      fail_on_reject: false
       strategies:
         - type: llm_eval
           config:

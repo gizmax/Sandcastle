@@ -409,6 +409,8 @@ steps:
     type: gate
     depends_on: [build_gate_brief]
     gate_config:
+      # Advisory: record_gate_decision reads this verdict and route_decision routes a rejection to confirm_held_batch. The quarantine audit + summary must still be written.
+      fail_on_reject: false
       strategies:
         - type: llm_eval
           config:

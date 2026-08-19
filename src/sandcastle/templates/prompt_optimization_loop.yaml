@@ -365,6 +365,8 @@ steps:
     type: gate
     depends_on: [score_variant]
     gate_config:
+      # Advisory: per-round. Rejection means 'the lift is within noise' - the normal outcome of most rounds; plateau_check routes it to hold_incumbent.
+      fail_on_reject: false
       strategies:
         - type: llm_eval
           config:

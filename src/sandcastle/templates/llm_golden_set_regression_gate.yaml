@@ -410,6 +410,8 @@ steps:
     type: gate
     depends_on: [score_cases]
     gate_config:
+      # Advisory: this is a SCORING step - merge_rubric parses the judges' per-case scores and aggregate turns them into the PASS/BLOCK verdict. regression_gate below is the blocking gate.
+      fail_on_reject: false
       strategies:
         - type: llm_eval
           config:

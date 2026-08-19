@@ -371,6 +371,8 @@ steps:
     type: gate
     depends_on: [dedup_and_score, classify_topicality]
     gate_config:
+      # Advisory: rejection means 'nothing on this sweep is worth embedding' - handled by the notify_empty branch, not a failure.
+      fail_on_reject: false
       strategies:
         - type: llm_eval
           config:

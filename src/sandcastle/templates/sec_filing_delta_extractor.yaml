@@ -444,6 +444,8 @@ steps:
   - id: materiality_gate
     type: gate
     gate_config:
+      # Advisory: rejection means 'the delta is immaterial boilerplate' - the normal case, handled by the notify_no_change branch.
+      fail_on_reject: false
       strategies:
         - type: llm_eval
           config:

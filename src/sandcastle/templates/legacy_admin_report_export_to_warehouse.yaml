@@ -533,8 +533,8 @@ steps:
               affected/count value greater than zero) for table {input.target_table} on
               {steps.validate_export.output.report_date}, and the affected row count should be
               consistent with the {steps.validate_export.output.row_count} validated rows. Answer
-              PASS only if the warehouse confirms the rows landed; FAIL on any error, empty
-              response, or zero rows affected.
+              'approved' only if the warehouse confirms the rows landed; answer 'rejected' on any
+              error, empty response, or zero rows affected.
             input: "{steps.upsert_clean.output}{steps.upsert_approved.output}"
             model: sonnet
         - type: human

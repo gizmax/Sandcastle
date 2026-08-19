@@ -488,6 +488,8 @@ steps:
     type: gate
     depends_on: [check_feasibility]
     gate_config:
+      # Advisory: rejection means 'the plan is not feasible / not good enough to send' - handled by the route_plan else-branch (bounce_back).
+      fail_on_reject: false
       strategies:
         - type: llm_eval
           config:
