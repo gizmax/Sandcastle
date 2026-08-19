@@ -609,6 +609,16 @@ class StepDefinition:
     # Empty = run locally as always. Non-empty = the dispatcher picks a live mesh
     # node whose capability manifest satisfies ALL entries (local node preferred).
     requires: list[str] = field(default_factory=list)
+    # Step effect ledger (engine/effects.py). "" = the per-type default:
+    # anything that spends money or changes the world memoizes, pure and
+    # composite types stay live, and http splits on method (GET is live).
+    #   memoize - claim the effect once per replay lineage, then reuse it
+    #   live    - always re-execute; never consult or write the ledger
+    replay: str = ""
+    # What to do when a previous attempt claimed this effect and never reported
+    # an outcome: "fail" (default - we do not know whether the POST landed, so
+    # refuse to guess) or "retry" (the endpoint is genuinely idempotent).
+    on_uncertain: str = "fail"
     # Self-describing metadata
     responsibility: str = ""  # WHAT this step does in one sentence
     source_hint: str = ""  # WHY this step exists (business reason, ticket, who requested)
@@ -768,6 +778,37 @@ def _validate_context_source(source: str) -> str:
             f"Valid sources: {', '.join(sorted(VALID_CONTEXT_SOURCES))}"
         )
     return source
+
+
+def _validate_replay_mode(value: object) -> str:
+    """Validate the step-level ``replay:`` mode.
+
+    Unknown values raise rather than falling back: a typo'd ``replay: memoise``
+    silently meaning "live" would re-fire the very side effect the author was
+    trying to guard.
+    """
+    from sandcastle.engine.effects import VALID_REPLAY_MODES
+
+    v = str(value or "").strip().lower()
+    if v not in VALID_REPLAY_MODES:
+        raise ValueError(
+            f"Invalid replay mode '{value}'. Valid modes: "
+            f"{', '.join(sorted(m for m in VALID_REPLAY_MODES if m))}"
+        )
+    return v
+
+
+def _validate_on_uncertain(value: object) -> str:
+    """Validate the step-level ``on_uncertain:`` policy."""
+    from sandcastle.engine.effects import VALID_ON_UNCERTAIN
+
+    v = str(value or "fail").strip().lower()
+    if v not in VALID_ON_UNCERTAIN:
+        raise ValueError(
+            f"Invalid on_uncertain '{value}'. Valid values: "
+            f"{', '.join(sorted(VALID_ON_UNCERTAIN))}"
+        )
+    return v
 
 
 def _parse_retry(data: dict | None) -> RetryConfig | None:
@@ -1447,6 +1488,9 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
         context_model=data.get("context_model", ""),
         # Sandcastle Mesh capability requirements (coerce to list[str])
         requires=_parse_requires(data.get("requires")),
+        # Step effect ledger
+        replay=_validate_replay_mode(data.get("replay", "")),
+        on_uncertain=_validate_on_uncertain(data.get("on_uncertain", "fail")),
         # Self-describing metadata
         responsibility=data.get("responsibility", ""),
         source_hint=data.get("source_hint", ""),

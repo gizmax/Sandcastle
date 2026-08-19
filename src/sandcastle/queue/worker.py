@@ -160,6 +160,10 @@ async def run_workflow_job(
             step_overrides=step_overrides,
             admin_trusted=admin_trusted,
             tenant_id=run.tenant_id,
+            # Replay/fork lineage for the step effect ledger. Read off the run
+            # row rather than added to the job signature, so jobs enqueued by
+            # an older API version keep deserializing.
+            effect_scope_id=str(run.effect_scope_id) if run.effect_scope_id else None,
         )
 
         # Map result status to RunStatus
@@ -493,6 +497,14 @@ async def startup(ctx: dict) -> None:
         logger.warning("Could not restore DB settings on worker startup: %s", e)
     await _recover_stuck_runs()
     await _recover_stuck_evolutions()
+    # The step effect ledger only grows otherwise: nothing sweeps settled rows
+    # once they are past their TTL.
+    try:
+        from sandcastle.engine.effects import prune_expired_effects
+
+        await prune_expired_effects()
+    except Exception as e:  # noqa: BLE001 - startup must not die on a prune
+        logger.warning("Could not prune the step effect ledger: %s", e)
 
 
 async def shutdown(ctx: dict) -> None:

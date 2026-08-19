@@ -78,6 +78,12 @@ class StepResult:
     retryable: bool = True
     policy_outputs: dict[str, Any] = field(default_factory=dict)
     policies_applied: bool = False
+    # True when the output came from a memoized effect (effect ledger or
+    # cassette) instead of a live execution. cost_usd stays 0.0 on that path so
+    # budget accounting is automatically right; original_cost_usd carries what
+    # the first execution paid, purely for display.
+    replayed: bool = False
+    original_cost_usd: float = 0.0
 
 
 @dataclass
@@ -128,6 +134,11 @@ class RunContext:
     # recorded outputs offline at zero cost. See engine/cassette.py.
     cassette: Any = field(default=None, repr=False)
     cassette_mode: str | None = field(default=None, repr=False)  # "record" | "replay" | None
+    # Head of the replay/fork lineage this run belongs to. A side effect is
+    # claimed once per scope, so a replay inherits its parent's scope and sees
+    # the effects the parent already committed. Empty = the run is its own
+    # scope. See engine/effects.py.
+    effect_scope_id: str = field(default="", repr=False)
     policy_target_outputs: dict[str, dict[str, Any]] = field(
         default_factory=dict,
         repr=False,
@@ -167,6 +178,7 @@ class RunContext:
             tenant_id=self.tenant_id,
             cassette=self.cassette,
             cassette_mode=self.cassette_mode,
+            effect_scope_id=self.effect_scope_id,
             policy_target_outputs=copy.deepcopy(self.policy_target_outputs),
         )
 
@@ -183,6 +195,8 @@ class RunContext:
             "costs": self.costs,
             "total_cost": self.total_cost,
         }
+        if self.effect_scope_id:
+            snapshot["effect_scope_id"] = self.effect_scope_id
         if self.policy_target_outputs:
             snapshot["policy_target_outputs"] = self.policy_target_outputs
         return snapshot
@@ -758,6 +772,8 @@ async def _save_run_step(
     input_prompt: str | None = None,
     tokens_saved: int = 0,
     compaction_strategy: str | None = None,
+    replayed: bool = False,
+    original_cost_usd: float | None = None,
 ) -> None:
     """Create or update a RunStep record in the database.
 
@@ -814,6 +830,9 @@ async def _save_run_step(
                     existing.tokens_saved = (existing.tokens_saved or 0) + tokens_saved
                 if compaction_strategy:
                     existing.compaction_strategy = compaction_strategy
+                if replayed:
+                    existing.replayed = True
+                    existing.original_cost_usd = original_cost_usd
                 if status in ("completed", "failed", "skipped"):
                     existing.completed_at = now
             else:
@@ -832,6 +851,8 @@ async def _save_run_step(
                     input_prompt=input_prompt,
                     tokens_saved=tokens_saved,
                     compaction_strategy=compaction_strategy,
+                    replayed=replayed,
+                    original_cost_usd=original_cost_usd,
                     started_at=now if status == "running" else None,
                     completed_at=(now if status in ("completed", "failed", "skipped") else None),
                 )
@@ -1525,6 +1546,245 @@ def _scrub_for_event_bus(output: Any, step_id: str, context: Any) -> Any:
         return "[output withheld: PII scrubbing failed]"
 
 
+def _apply_step_overrides(
+    step: StepDefinition, step_overrides: dict | None
+) -> StepDefinition:
+    """Apply fork overrides to a step (dataclasses.replace preserves all fields).
+
+    The effect guard fingerprints the *overridden* step, so a fork that changes
+    a prompt produces a different effect key and correctly re-executes.
+    """
+    if not step_overrides:
+        return step
+    override_fields = {}
+    for key in ("prompt", "model", "max_turns", "timeout"):
+        if key in step_overrides:
+            override_fields[key] = step_overrides[key]
+    if not override_fields:
+        return step
+    return dataclasses.replace(step, **override_fields)
+
+
+@dataclass
+class _EffectGuard:
+    """Carries the claim between the pre-execution check and the outcome report."""
+
+    ledger: Any = None
+    effect_key: str = ""
+    cassette_key: str = ""
+
+
+async def _begin_effect_guard(
+    step: StepDefinition,
+    context: RunContext,
+    parallel_index: int | None,
+) -> tuple[_EffectGuard | None, StepResult | None]:
+    """Consult the cassette and the effect ledger before a step executes.
+
+    Returns ``(guard, memoized_result)``. A non-None result means the step must
+    not run: its output is already known (cassette hit or committed effect) or
+    its effect is uncertain (an abandoned claim, which fails rather than
+    re-firing). A non-None guard means we own the effect and must report its
+    outcome afterwards.
+
+    This is the site the pre-0.45 code was missing. The cassette lookup lived
+    inside ``_execute_step_once``, which only ``standard`` steps reach - every
+    one of the 24 hybrid types, ``llm`` and ``http`` included, dispatched down
+    ``_execute_step_by_type`` and never saw it.
+    """
+    from sandcastle.config import settings
+    from sandcastle.engine.effects import (
+        GUARD_EXEMPT_STEP_TYPES,
+        EffectLedger,
+        EffectUncertain,
+        compute_effect_key,
+        effect_mode_for,
+        on_uncertain_for,
+        step_effect_fingerprint,
+    )
+
+    # Control flow that writes branch_skip_steps (condition/classify), the
+    # approval gate, and composites whose children carry their own guards must
+    # always execute - a memoized return would silently un-skip a branch or
+    # swallow a whole sub-tree.
+    if step.type in GUARD_EXEMPT_STEP_TYPES:
+        return None, None
+
+    # ``standard`` steps are guarded where they already were, inside
+    # _execute_step_once. That hook keys off the *fully* resolved prompt -
+    # storage refs expanded, memories injected - which this one cannot see
+    # without doing I/O on a hot path. Memoizing on a coarser key than the one
+    # that determines the output would suppress steps whose real prompts
+    # differ, so the standard path is left exactly as it was and only the
+    # hybrid types are guarded here. That is precisely the gap: all 24 of them,
+    # ``llm`` and ``http`` included, dispatch through _execute_step_by_type and
+    # never reached a memoization check at all.
+    if step.type not in _HYBRID_STEP_TYPES:
+        return None, None
+
+    wants_cassette = context.cassette is not None
+    wants_ledger = settings.effect_ledger_enabled and effect_mode_for(step) == "memoize"
+    if not wants_cassette and not wants_ledger:
+        return None, None
+
+    try:
+        fingerprint = step_effect_fingerprint(step, context)
+    except Exception as exc:  # pragma: no cover - fingerprinting is pure
+        logger.warning("Effect fingerprint failed for step '%s': %s", step.id, exc)
+        return None, None
+
+    guard = _EffectGuard()
+
+    if wants_cassette:
+        guard.cassette_key = _compute_cache_key(
+            context.workflow_name,
+            step.id,
+            fingerprint,
+            step.model,
+            tenant_id=context.tenant_id,
+        )
+        if context.cassette_mode == "replay":
+            # A strict replay store raises CassetteMissError here rather than
+            # falling through, which is what keeps bundle verification offline.
+            recorded = context.cassette.get(guard.cassette_key)
+            if recorded is not None:
+                logger.info(
+                    "Step '%s' cassette REPLAY (key=%s...)",
+                    step.id,
+                    guard.cassette_key[:12],
+                )
+                return None, StepResult(
+                    step_id=step.id,
+                    parallel_index=parallel_index,
+                    output=recorded["output"],
+                    cost_usd=0.0,
+                    status="completed",
+                    replayed=True,
+                    original_cost_usd=float(recorded.get("cost_usd", 0.0) or 0.0),
+                    policies_applied=True,
+                )
+
+    if not wants_ledger:
+        return guard, None
+
+    scope_id = context.effect_scope_id or context.run_id
+    # Loop iterations share a step id and often a URL, so the iteration index is
+    # what keeps them separate effects. RunContext.with_item writes it as an int
+    # (executor: _execute_loop_step / _execute_fanout_step); anything else in
+    # input["_index"] is workflow data, not an iteration, and is ignored.
+    raw_index = context.input.get("_index")
+    iteration_index = raw_index if isinstance(raw_index, int) else None
+    guard.effect_key = compute_effect_key(
+        scope_id,
+        context.tenant_id,
+        step.id,
+        fingerprint,
+        parallel_index=parallel_index,
+        iteration_index=iteration_index,
+    )
+    ledger = EffectLedger()
+    try:
+        claim = await ledger.claim(
+            effect_key=guard.effect_key,
+            scope_id=scope_id,
+            run_id=context.run_id,
+            tenant_id=context.tenant_id,
+            step_id=step.id,
+            step_type=step.type,
+            parallel_index=parallel_index,
+            iteration_index=iteration_index,
+        )
+    except EffectUncertain as exc:
+        return None, StepResult(
+            step_id=step.id,
+            parallel_index=parallel_index,
+            status="failed",
+            error=str(exc),
+            retryable=False,
+        )
+
+    if claim.outcome == "memoized":
+        logger.info(
+            "Step '%s' effect MEMOIZED from run %s (key=%s...)",
+            step.id,
+            claim.owner_run_id,
+            guard.effect_key[:12],
+        )
+        return None, StepResult(
+            step_id=step.id,
+            parallel_index=parallel_index,
+            output=claim.output,
+            cost_usd=0.0,
+            status="completed",
+            replayed=True,
+            original_cost_usd=float(claim.cost_usd or 0.0),
+            policies_applied=True,
+        )
+
+    if claim.outcome == "uncertain":
+        if on_uncertain_for(step) == "retry":
+            logger.warning(
+                "Step '%s': %s - on_uncertain=retry, taking the claim over",
+                step.id,
+                claim.detail,
+            )
+            await ledger.take_over(guard.effect_key, context.run_id)
+            guard.ledger = ledger
+            return guard, None
+        # We do not know whether the side effect landed, and guessing is how a
+        # card gets charged twice. Fail loudly and let on_failure / the dead
+        # letter queue decide.
+        return None, StepResult(
+            step_id=step.id,
+            parallel_index=parallel_index,
+            status="failed",
+            error=f"EffectUncertain: {claim.detail}",
+            retryable=False,
+        )
+
+    if claim.outcome == "owned":
+        guard.ledger = ledger
+    # "unavailable" leaves guard.ledger None: the step runs live, having already
+    # warned. See settings.effect_ledger_required to make that a failure.
+    return guard, None
+
+
+async def _finish_effect_guard(
+    guard: _EffectGuard | None,
+    step: StepDefinition,
+    context: RunContext,
+    result: StepResult,
+) -> None:
+    """Report a step's outcome to the ledger and record it into the cassette."""
+    if guard is None:
+        return
+    if guard.ledger is not None and guard.effect_key:
+        if result.status == "completed":
+            await guard.ledger.commit(
+                guard.effect_key,
+                result.output,
+                result.cost_usd,
+                run_id=context.run_id,
+            )
+        else:
+            # A failed effect did not change the world (a half-completed one
+            # leaves the claim in_flight instead, which is the uncertain case).
+            await guard.ledger.mark_failed(guard.effect_key, result.error)
+    if (
+        guard.cassette_key
+        and result.status == "completed"
+        and context.cassette is not None
+        and context.cassette_mode == "record"
+    ):
+        context.cassette.put(
+            cache_key=guard.cassette_key,
+            output=result.output,
+            cost_usd=result.cost_usd,
+            model=result.model or step.model,
+            step_id=step.id,
+        )
+
+
 async def execute_step_with_retry(
     step: StepDefinition,
     context: RunContext,
@@ -1535,16 +1795,52 @@ async def execute_step_with_retry(
     workflow: WorkflowDefinition | None = None,
     depth: int = 0,
 ) -> StepResult:
-    """Execute a step with retry logic and exponential backoff."""
-    # Apply step overrides for fork (use dataclasses.replace to preserve all fields)
-    if step_overrides:
-        override_fields = {}
-        for key in ("prompt", "model", "max_turns", "timeout"):
-            if key in step_overrides:
-                override_fields[key] = step_overrides[key]
-        if override_fields:
-            step = dataclasses.replace(step, **override_fields)
+    """Execute a step, guarded by the cassette and the durable effect ledger.
 
+    The guard sits here because this is the one site every hybrid step type
+    passes through - top level, fan-out item and loop iteration alike, on every
+    retry attempt. A memoized effect returns before the retry loop, so it costs
+    $0 and fires no request. (``standard`` steps keep their existing hook inside
+    ``_execute_step_once``; see _begin_effect_guard for why.)
+    """
+    step = _apply_step_overrides(step, step_overrides)
+    guard, memoized = await _begin_effect_guard(step, context, parallel_index)
+    if memoized is not None:
+        return memoized
+    # Note what is deliberately NOT handled below: a CancelledError (an approval
+    # pause cancels its in-flight siblings) or a dead process leaves the claim
+    # in_flight, so the next run reports "we do not know whether this landed"
+    # instead of silently re-POSTing.
+    try:
+        result = await _execute_step_with_retry_inner(
+            step,
+            context,
+            sandbox,
+            storage,
+            parallel_index=parallel_index,
+            workflow=workflow,
+            depth=depth,
+        )
+    except (WorkflowPaused, StepBlocked) as exc:
+        # The step was gated before it did anything, so release the claim -
+        # a resume must run it, not report it as uncertain.
+        if guard is not None and guard.ledger is not None and guard.effect_key:
+            await guard.ledger.mark_failed(guard.effect_key, type(exc).__name__)
+        raise
+    await _finish_effect_guard(guard, step, context, result)
+    return result
+
+
+async def _execute_step_with_retry_inner(
+    step: StepDefinition,
+    context: RunContext,
+    sandbox: SandshoreRuntime,
+    storage: StorageBackend,
+    parallel_index: int | None = None,
+    workflow: WorkflowDefinition | None = None,
+    depth: int = 0,
+) -> StepResult:
+    """Execute a step with retry logic and exponential backoff."""
     # AutoPilot: pick variant if configured
     autopilot_experiment = None
     autopilot_variant = None
@@ -6196,6 +6492,7 @@ async def _execute_race_step(
                 tenant_id=context.tenant_id,
                 cassette=context.cassette,
                 cassette_mode=context.cassette_mode,
+                effect_scope_id=context.effect_scope_id,
                 policy_target_outputs=copy.deepcopy(
                     context.policy_target_outputs
                 ),
@@ -8639,6 +8936,8 @@ async def _prepare_and_run_step(
                 model=model,
                 tokens_saved=context._compaction_saved.pop(step.id, 0),
                 compaction_strategy=context._compaction_strategy_used.pop(step.id, None),
+                replayed=result.replayed,
+                original_cost_usd=result.original_cost_usd if result.replayed else None,
             )
         else:
             async with context._lock:
@@ -9056,6 +9355,7 @@ async def execute_workflow(
     tenant_id: str | None = None,
     cassette: Any = None,
     cassette_mode: str | None = None,
+    effect_scope_id: str | None = None,
 ) -> WorkflowResult:
     """Execute a full workflow with parallel stages and retry logic.
 
@@ -9070,6 +9370,10 @@ async def execute_workflow(
         skip_steps: Set of step IDs to skip (already completed in replay).
         step_overrides: Per-step overrides for fork (e.g. {"score": {"model": "opus"}}).
         depth: Current nesting depth for hierarchical workflows.
+        effect_scope_id: Head of the replay/fork lineage. A side effect is
+            claimed once per scope, so a replay passes its parent's scope to
+            memoize effects the parent already committed. Defaults to run_id,
+            i.e. a fresh run is its own scope.
     """
     from sandcastle.config import settings
     from sandcastle.engine.storage import create_storage
@@ -9213,6 +9517,7 @@ async def execute_workflow(
         tenant_id=tenant_id,
         cassette=cassette,
         cassette_mode=cassette_mode,
+        effect_scope_id=effect_scope_id or run_id,
     )
 
     # Set telemetry context for this workflow run
@@ -9276,6 +9581,10 @@ async def execute_workflow(
             "policy_target_outputs", {}
         )
         context.costs = initial_context.get("costs", [])
+        # An explicit argument (the replay/fork route) wins over the snapshot;
+        # the snapshot is the fallback for a resume that predates the argument.
+        if not effect_scope_id and initial_context.get("effect_scope_id"):
+            context.effect_scope_id = initial_context["effect_scope_id"]
 
     # Resolve global policies from workflow definition
     global_policies = []

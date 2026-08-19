@@ -7136,6 +7136,10 @@ async def replay_run(run_id: str, request: ReplayRequest, req: Request) -> ApiRe
             tenant_id=tenant_id,
             parent_run_id=run_uuid,
             replay_from_step=request.from_step,
+            # Inherit the lineage so the effect ledger recognises effects this
+            # run's ancestors already committed (engine/effects.py). A run that
+            # predates the column is its own scope.
+            effect_scope_id=original_run.effect_scope_id or original_run.id,
             max_cost_usd=original_run.max_cost_usd,
             workflow_version=original_run.workflow_version,
         )
@@ -7279,6 +7283,9 @@ async def fork_run(run_id: str, request: ForkRequest, req: Request) -> ApiRespon
             parent_run_id=run_uuid,
             replay_from_step=request.from_step,
             fork_changes=request.changes,
+            # Same lineage as the parent: a fork re-fires only the steps whose
+            # effect fingerprint the override actually changed.
+            effect_scope_id=original_run.effect_scope_id or original_run.id,
             max_cost_usd=original_run.max_cost_usd,
             workflow_version=original_run.workflow_version,
         )

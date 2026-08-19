@@ -184,6 +184,26 @@ class Settings(BaseSettings):
     # Workflows directory (default: ~/.sandcastle/workflows)
     workflows_dir: str = _DEFAULT_WORKFLOWS_DIR
 
+    # Step effect ledger (engine/effects.py): claim a side effect before it
+    # fires so a replay, fork or approval resume memoizes it instead of
+    # re-POSTing / re-spending. EFFECT_LEDGER_ENABLED=0 is the kill switch.
+    effect_ledger_enabled: bool = True
+    # How long a claim stays valid before an unfinished effect counts as
+    # abandoned (and therefore uncertain). Longer than the longest step.
+    effect_lease_seconds: int = 900
+    # Ledger rows are deleted this many days after they settle.
+    effect_ledger_ttl_days: int = 30
+    # How long to wait for another worker's in-flight claim to settle before
+    # declaring the effect uncertain.
+    effect_claim_wait_seconds: float = 5.0
+    # What to do when the ledger itself is unreachable (no DB, missing table).
+    # None means "decide from the deployment": local mode executes live with a
+    # warning so `sandcastle run --local` keeps working without a database,
+    # while a server deployment fails the step - there, an unreachable ledger
+    # means something is wrong, and re-sending a POST is the exact bug the
+    # ledger exists to prevent. Set True/False to override either way.
+    effect_ledger_required: bool | None = None
+
     # Hierarchical workflows
     max_workflow_depth: int = 5
     # Ceiling on what one evolution run may spend when the request does not set
