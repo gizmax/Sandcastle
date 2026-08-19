@@ -236,6 +236,72 @@ jobs:
         working-directory: dashboard
         run: npm run build
 
+  connector-syntax:
+    name: Connector syntax
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The engine ships 67 .mjs files that nothing imported in CI. gmail.mjs
+      # shipped in 0.43.0 and 0.43.1 importing a non-existent export from
+      # node:net, so it threw SyntaxError at load and the connector was dead in
+      # both releases without anything noticing. Parsing every file is cheap
+      # and would have caught it twice.
+      - name: Parse every engine .mjs file
+        run: |
+          set -uo pipefail
+          failed=0
+          count=0
+          while IFS= read -r f; do
+            count=$((count + 1))
+            if ! node --check "$f" 2>/tmp/err; then
+              echo "::error file=$f::$(head -1 /tmp/err)"
+              failed=1
+            fi
+          done < <(find src/sandcastle -name '*.mjs' -type f | sort)
+          echo "Checked $count files"
+          exit $failed
+
+      # --check parses but does not resolve imports, which is exactly what
+      # gmail.mjs got wrong. Importing each module catches a bad specifier.
+      #
+      # Two things must NOT fail the build, because both are the normal state of
+      # a connector in CI: a missing credential, and a missing npm package
+      # (browser.mjs imports playwright, which is not installed here). Node
+      # distinguishes the latter from a genuinely broken relative import by
+      # wording - "Cannot find package 'x'" versus "Cannot find module
+      # '/path/x.mjs'" - so the package form is ignored and the module form is
+      # not.
+      - name: Import every connector
+        run: |
+          set -uo pipefail
+          failed=0
+          count=0
+          while IFS= read -r f; do
+            count=$((count + 1))
+            if ! err=$(node --input-type=module -e "await import('file://$PWD/$f')" 2>&1); then
+              case "$err" in
+                *"Cannot find package"*)
+                  echo "  $f: optional npm dependency not installed, ignoring"
+                  ;;
+                *SyntaxError*|*"Cannot find module"*|*ERR_UNSUPPORTED*|*"is not exported"*)
+                  echo "::error file=$f::${err%%$'\n'*}"
+                  failed=1
+                  ;;
+                *)
+                  echo "  $f: import failed for a non-structural reason, ignoring"
+                  ;;
+              esac
+            fi
+          done < <(find src/sandcastle/engine/tools/connectors -name '*.mjs' -type f | sort)
+          echo "Imported $count connectors"
+          exit $failed
+
   cf-sandbox-worker:
     name: Cloudflare Sandbox worker
     runs-on: ubuntu-latest
