@@ -268,9 +268,15 @@ jobs:
           exit $failed
 
       # --check parses but does not resolve imports, which is exactly what
-      # gmail.mjs got wrong. Importing each module catches a bad specifier,
-      # while a missing credential must not count as a failure - connectors are
-      # expected to be unconfigured here.
+      # gmail.mjs got wrong. Importing each module catches a bad specifier.
+      #
+      # Two things must NOT fail the build, because both are the normal state of
+      # a connector in CI: a missing credential, and a missing npm package
+      # (browser.mjs imports playwright, which is not installed here). Node
+      # distinguishes the latter from a genuinely broken relative import by
+      # wording - "Cannot find package 'x'" versus "Cannot find module
+      # '/path/x.mjs'" - so the package form is ignored and the module form is
+      # not.
       - name: Import every connector
         run: |
           set -uo pipefail
@@ -280,7 +286,10 @@ jobs:
             count=$((count + 1))
             if ! err=$(node --input-type=module -e "await import('file://$PWD/$f')" 2>&1); then
               case "$err" in
-                *ERR_MODULE_NOT_FOUND*|*SyntaxError*|*ERR_UNSUPPORTED*|*"is not exported"*)
+                *"Cannot find package"*)
+                  echo "  $f: optional npm dependency not installed, ignoring"
+                  ;;
+                *SyntaxError*|*"Cannot find module"*|*ERR_UNSUPPORTED*|*"is not exported"*)
                   echo "::error file=$f::${err%%$'\n'*}"
                   failed=1
                   ;;
