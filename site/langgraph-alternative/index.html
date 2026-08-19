@@ -783,6 +783,28 @@
       }
       .foot-maker a{ color:inherit; text-decoration:underline; text-underline-offset:2px; }
       .foot-maker a:hover{ color:var(--amber-ink, #8a5a1a); }
+
+      /* Code sample. The block scrolls inside its own container rather than
+         widening the page - a 285px horizontal overflow on a 390px phone was
+         exactly this element before it had any styles at all. min-width:0 is
+         the load-bearing part: without it the grid item refuses to shrink and
+         the overflow escapes the container. */
+      .code-block{
+        overflow-x:auto; -webkit-overflow-scrolling:touch;
+        border:1.5px solid var(--rule); border-radius:3px;
+        background:var(--paper-2); min-width:0; max-width:100%;
+        margin:0 0 clamp(20px,3vh,28px);
+      }
+      .code-block:focus-visible{ outline:2px solid var(--amber); outline-offset:2px; }
+      .code-block pre{
+        margin:0; padding:clamp(14px,2vw,20px);
+        font-family:var(--mono); font-size:13.5px; line-height:1.6;
+        color:var(--ink); white-space:pre;
+      }
+      .code-block code{ font:inherit; color:inherit; background:none; padding:0; }
+      @media (max-width:640px){
+        .code-block pre{ font-size:12.5px; }
+      }
 </style>
 
   <!-- =========================== MASTHEAD =========================== -->
@@ -978,7 +1000,7 @@
           that works, and put the schedule, the budget, the record and the retries outside it.
         </p>
 
-        <div class="code-block">
+        <div class="code-block" tabindex="0" role="region" aria-label="Example workflow calling a LangGraph service">
           <pre><code>steps:
   - id: fetch_tickets
     type: http                      # deterministic, $0
