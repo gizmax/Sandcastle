@@ -1509,6 +1509,11 @@ _HYBRID_STEP_TYPES = {
     "trajectory-replay",
     "computer-use",
     "tool",
+    # An acp step MUST be here. A type absent from this set does not fail
+    # loudly - it silently falls through to _execute_step_once and runs its
+    # placeholder prompt as a plain LLM call, which for `type: acp` would mean
+    # quietly answering with a model instead of driving the external harness.
+    "acp",
 }
 
 
@@ -4254,6 +4259,296 @@ async def _execute_composio_step(
             error=f"Composio step failed: {e}",
             duration_seconds=time.monotonic() - started_at,
         )
+
+
+# stopReason -> (status, retryable). The agent finishing is not the agent
+# succeeding, which is why the worked example pairs every acp step with a
+# deterministic verification step. A refusal is deterministic: retrying it burns
+# the retry budget to be told no a second time.
+_ACP_STOP_REASONS: dict[str, tuple[str, bool]] = {
+    "end_turn": ("completed", True),
+    "max_tokens": ("completed", True),
+    "max_turn_requests": ("completed", True),
+    "refusal": ("failed", False),
+    "cancelled": ("failed", False),
+}
+
+# Failure classes from acp_client.AcpError that no amount of retrying fixes.
+_ACP_FATAL_KINDS = frozenset({"config", "version", "capability", "spawn"})
+
+
+def _acp_cost(cfg: Any, usage: dict | None, step_id: str) -> tuple[float, str]:
+    """Decide what an acp step cost. Returns ``(cost_usd, source)``.
+
+    ACP v1 reports ``usage_update{used, size, cost?}`` and nothing else. ``used``
+    is *context occupancy* - tokens currently in the window - not tokens
+    consumed; it goes down after a compaction, so summing it across updates
+    produces a number that means nothing. There is no inputTokens/outputTokens
+    anywhere in v1.
+
+    So: use the harness's own reported USD figure when it volunteers one (last
+    update wins, because ``cost`` is cumulative), fall back to the declared
+    ``cost_per_call`` otherwise, and never estimate. Estimating from ``used``
+    would be fabricating a bill, and a fabricated bill feeding ``max_cost_usd``
+    is worse than an honest zero.
+    """
+    declared = float(getattr(cfg, "cost_per_call", 0.0) or 0.0)
+    cost = usage.get("cost") if isinstance(usage, dict) else None
+    if not isinstance(cost, dict):
+        return declared, "declared"
+    currency = str(cost.get("currency") or "").upper()
+    try:
+        amount = float(cost.get("amount"))
+    except (TypeError, ValueError):
+        return declared, "declared"
+    if currency == "USD":
+        return amount, "agent_reported"
+    # Sandcastle has no FX layer, and inventing one silently corrupts every
+    # budget check downstream. Report the foreign amount, bill the declared one.
+    logger.warning(
+        "ACP step '%s' reported cost %.4f %s; Sandcastle does not convert "
+        "currencies, so cost_per_call (%.4f USD) is used for accounting",
+        step_id,
+        amount,
+        currency or "?",
+        declared,
+    )
+    return declared, "declared_foreign_currency"
+
+
+async def _execute_acp_step(
+    step: StepDefinition,
+    context: RunContext,
+    storage: StorageBackend,
+) -> StepResult:
+    """Drive an external agent harness over the Agent Client Protocol.
+
+    Sandcastle is the client: it spawns the harness, streams its message chunks
+    back as ``step.progress`` events, answers its permission requests from the
+    step's own rules, and can cancel a running turn gracefully - which none of
+    the four older agent integrations can do.
+
+    What it deliberately does not do is trust the harness. The command comes
+    from the step definition and never from an upstream step's output, the
+    environment is built rather than inherited, the working directory has to sit
+    inside a configured root, and every permission decision is recorded.
+    """
+    import time
+
+    from sandcastle.config import settings
+    from sandcastle.engine.acp_client import (
+        AcpError,
+        build_acp_env,
+        resolve_agent_shorthand,
+        resolve_workspace_path,
+        run_acp_turn,
+    )
+
+    started_at = time.monotonic()
+    cfg = step.acp_config
+    if not cfg:
+        return StepResult(
+            step_id=step.id, status="failed", error="Missing acp_config", retryable=False
+        )
+
+    # An acp step spawns an arbitrary local executable. That is the same blast
+    # radius as a code step, so it gets the same gate.
+    if not context.admin_trusted:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=(
+                "ACP steps spawn a local agent harness and require an "
+                "admin-trusted workflow"
+            ),
+            retryable=False,
+            duration_seconds=time.monotonic() - started_at,
+        )
+
+    # Data residency is enforced from a model-registry entry, and we do not know
+    # which model an external harness calls. A compliance mode that silently
+    # fails to apply to the newest step type is worse than no compliance mode,
+    # so this fails closed.
+    if getattr(settings, "data_residency", ""):
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=(
+                f"ACP steps cannot run under data_residency='{settings.data_residency}': "
+                "Sandcastle does not know which model an external agent harness calls, "
+                "so the residency guarantee cannot be enforced"
+            ),
+            retryable=False,
+            duration_seconds=time.monotonic() - started_at,
+        )
+
+    message = resolve_templates(
+        cfg.message or step.prompt or f"acp step {step.id}",
+        context,
+        step.depends_on,
+    )
+    message = await resolve_storage_refs(message, storage, context)
+
+    try:
+        command, args = resolve_agent_shorthand(cfg)
+        workspace = resolve_workspace_path(
+            resolve_templates(cfg.cwd, context, step.depends_on),
+            list(getattr(settings, "acp_allowed_roots", None) or []),
+        )
+        extra_dirs = [
+            str(
+                resolve_workspace_path(
+                    resolve_templates(raw, context, step.depends_on),
+                    list(getattr(settings, "acp_allowed_roots", None) or []),
+                    label="additional_directories",
+                )
+            )
+            for raw in cfg.additional_directories
+        ]
+        resolved_cfg = dataclasses.replace(
+            cfg,
+            env={
+                key: resolve_templates(str(value), context, step.depends_on)
+                for key, value in (cfg.env or {}).items()
+            },
+        )
+        env = build_acp_env(resolved_cfg)
+    except AcpError as exc:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=f"ACP step '{step.id}': {exc}",
+            retryable=exc.kind not in _ACP_FATAL_KINDS,
+            duration_seconds=time.monotonic() - started_at,
+        )
+
+    def _on_event(kind: str, payload: dict) -> None:
+        # Same channel delegate already streams on, so the dashboard's existing
+        # progress plumbing shows an ACP turn as it happens instead of after it.
+        event_bus.publish(
+            "step.progress",
+            {
+                "run_id": context.run_id,
+                "step_id": step.id,
+                "step_name": step.id,
+                "acp_event": kind,
+                **payload,
+            },
+        )
+
+    async def _cancel_check() -> bool:
+        return await _check_cancel(context.run_id)
+
+    try:
+        turn = await run_acp_turn(
+            resolved_cfg,
+            message,
+            workspace=workspace,
+            env=env,
+            additional_directories=extra_dirs,
+            cancel_check=_cancel_check,
+            on_event=_on_event,
+        )
+    except AcpError as exc:
+        error = f"ACP step '{step.id}' failed ({exc.kind}): {exc}"
+        if exc.stderr_tail:
+            error = f"{error}; agent stderr tail: {exc.stderr_tail[-500:]}"
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=error,
+            retryable=exc.kind not in _ACP_FATAL_KINDS,
+            duration_seconds=time.monotonic() - started_at,
+            input_prompt=message,
+        )
+    except Exception as exc:  # noqa: BLE001 - errors are values on this path
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=f"ACP step '{step.id}' failed: {exc}",
+            duration_seconds=time.monotonic() - started_at,
+            input_prompt=message,
+        )
+
+    status, retryable = _ACP_STOP_REASONS.get(turn.stop_reason, ("failed", True))
+    cost_usd, cost_source = _acp_cost(cfg, turn.usage, step.id)
+    truncated = turn.truncated or turn.stop_reason in ("max_tokens", "max_turn_requests")
+
+    usage_out: dict | None = None
+    if turn.usage is not None:
+        usage_out = {**turn.usage, "cost_source": cost_source}
+    elif cost_usd:
+        usage_out = {"cost_source": cost_source}
+
+    if cfg.output_format == "full":
+        output: Any = {
+            "text": turn.text,
+            "stop_reason": turn.stop_reason,
+            "session_id": turn.session_id,
+            "agent": turn.agent_info,
+            "protocol_version": turn.protocol_version,
+            "modes": turn.modes,
+            "permissions": turn.permissions,
+            "usage": usage_out,
+            "plan": turn.plan,
+            "truncated": truncated,
+        }
+        if cfg.include_thoughts:
+            output["thoughts"] = turn.thoughts
+        if cfg.include_tool_calls:
+            output["tool_calls"] = turn.tool_calls
+    elif cfg.output_format == "json":
+        try:
+            output = json.loads(turn.text)
+        except (json.JSONDecodeError, ValueError):
+            output = {"raw_text": turn.text, "_parse_error": True}
+    else:
+        output = turn.text
+
+    # "this step was handed ANTHROPIC_API_KEY, ran claude-agent-acp 0.70.0, and
+    # said no to one execute request" belongs in the SHA-256 chain. Names only -
+    # never the values.
+    await _emit_audit_event(
+        "step.acp",
+        context.run_id,
+        "system",
+        {
+            "step_id": step.id,
+            "command": command,
+            "args": args,
+            "cwd": str(workspace),
+            "env_passthrough": list(cfg.env_passthrough),
+            "env_names": sorted(resolved_cfg.env.keys()),
+            "agent_info": turn.agent_info,
+            "protocol_version": turn.protocol_version,
+            "session_id": turn.session_id,
+            "stop_reason": turn.stop_reason,
+            "permissions": turn.permissions,
+            "filesystem": cfg.filesystem,
+            "cost_usd": cost_usd,
+            "cost_source": cost_source,
+        },
+    )
+
+    error: str | None = None
+    if status == "failed":
+        error = (
+            f"ACP turn ended with stopReason '{turn.stop_reason}'"
+            if turn.stop_reason
+            else "ACP turn produced no stopReason"
+        )
+
+    return StepResult(
+        step_id=step.id,
+        status=status,
+        output=output,
+        error=error,
+        cost_usd=cost_usd,
+        retryable=retryable,
+        duration_seconds=time.monotonic() - started_at,
+        input_prompt=message,
+        model=(turn.agent_info or {}).get("name") or command,
+    )
 
 
 async def _execute_openclaw_step(
@@ -8870,6 +9165,8 @@ async def _execute_step_by_type(
         return await _execute_composio_step(step, context)
     if step.type == "openclaw":
         return await _execute_openclaw_step(step, context)
+    if step.type == "acp":
+        return await _execute_acp_step(step, context, storage)
     if step.type == "parse":
         return await _execute_parse_step(step, context)
     if step.type == "report":

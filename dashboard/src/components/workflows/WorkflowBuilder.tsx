@@ -722,7 +722,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
       transform: "transform", notify: "notify", delegate: "delegate",
       browser: "browser", parse: "parse", approval: "approval",
       sub_workflow: "sub", openclaw: "claw", composio: "composio",
-      agent: "agent", "managed-agent": "magent",
+      agent: "agent", "managed-agent": "magent", acp: "acp",
     };
     const prefix = agentTemplate || prefixes[stepType] || "step";
     const id = `${prefix}_${counter}`;
@@ -1018,6 +1018,7 @@ export function WorkflowBuilder({ onSave, onRun, initialWorkflow }: WorkflowBuil
       icon: Bot,
       items: [
         { type: "agent" as const, icon: Bot, label: "Agent (Auto)", color: "text-accent" },
+        { type: "acp" as const, icon: Code, label: "ACP Agent", color: "text-lime-400" },
         { type: "agent" as const, icon: Search, label: "Researcher", color: "text-blue-400", template: "researcher" },
         { type: "agent" as const, icon: Code, label: "Coder", color: "text-emerald-400", template: "coder" },
         { type: "agent" as const, icon: TrendingUp, label: "Analyst", color: "text-orange-400", template: "analyst" },

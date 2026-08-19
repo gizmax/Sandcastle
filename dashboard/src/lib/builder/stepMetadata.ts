@@ -211,6 +211,20 @@ export const STEP_TYPE_METADATA: Record<StepType, StepMeta> = {
     costNote: "cost depends on the OpenClaw action",
     iconKey: "openclaw",
   },
+  acp: {
+    type: "acp",
+    label: "ACP Agent",
+    category: "Agents",
+    summary:
+      "Drives an external agent harness (Claude Code, Codex, Gemini CLI, goose) over the Agent Client Protocol.",
+    whenToUse:
+      "Use when the work needs a real coding agent with filesystem access on a checked-out repo.",
+    example: "Implement a brief in a git worktree, then verify the diff.",
+    costNote:
+      "billed by the external harness \u2014 max_cost_usd is advisory, set cost_per_call to make it count",
+    iconKey: "agent",
+    docHref: "https://github.com/gizmax/Sandcastle/blob/main/docs/acp.md",
+  },
   composio: {
     type: "composio",
     label: "Composio",
