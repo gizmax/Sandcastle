@@ -26,6 +26,7 @@ concurrency:
 
 jobs:
   deploy:
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     environment: production
     steps:

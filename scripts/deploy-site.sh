@@ -78,8 +78,20 @@ for rel in "${FILES[@]}"; do
   fi
   # --ftp-create-dirs makes nested paths (compare/, hub/, eu-ai-act/) work.
   # --ssl-reqd refuses to fall back to plaintext if STARTTLS is unavailable.
-  if curl -sS --fail --ssl-reqd --ftp-create-dirs -T "$src" \
-       --user "$SANDCASTLE_FTP_USER:$SANDCASTLE_FTP_PASS" \
+  #
+  # The timeouts are load-bearing: without --max-time a stalled FTPS control
+  # connection hangs the upload until the job's own limit, which on GitHub is
+  # six hours by default - one deploy sat on a single file for 24 minutes
+  # before it was killed by hand. Retries cover the transient case that causes
+  # it, so a blip costs seconds instead of a failed deploy.
+  #
+  # Credentials go in on stdin rather than --user, which would put the password
+  # in argv where `ps` can read it.
+  if printf 'user = "%s:%s"\n' "$SANDCASTLE_FTP_USER" "$SANDCASTLE_FTP_PASS" \
+     | curl -sS --fail --ssl-reqd --ftp-create-dirs -T "$src" \
+       --config - \
+       --connect-timeout 20 --max-time 180 \
+       --retry 3 --retry-delay 5 --retry-all-errors \
        "ftp://$FTP_HOST$FTP_ROOT/$rel" >/dev/null; then
     echo "  uploaded $rel"; uploaded=$((uploaded+1))
   else
@@ -95,6 +107,6 @@ if [[ $DRY_RUN -eq 0 ]]; then
   echo
   echo "Verify a few of the files that were missing before:"
   for u in / /compare/ /llms.txt /og-image.jpeg /sitemap.xml; do
-    printf "  %-18s %s\n" "$u" "$(curl -s -o /dev/null -w '%{http_code}' "https://sandcastle-ai.eu$u")"
+    printf "  %-18s %s\n" "$u" "$(curl -s -o /dev/null --connect-timeout 15 --max-time 45 -w '%{http_code}' "https://sandcastle-ai.eu$u")"
   done
 fi
