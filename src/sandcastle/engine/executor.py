@@ -2817,6 +2817,7 @@ async def _execute_step_once(
                     context._memory_scope_id,
                     query=prompt[:500],
                     limit=context._memory_config.max_inject,
+                    backend=_mem_read_settings.memory_backend,
                 )
                 # Apply decay
                 max_age = (
@@ -3086,6 +3087,7 @@ async def _execute_step_once(
                         metadata=meta,
                         run_id=context.run_id,
                         skip_admission=True,  # already checked above
+                        backend=_mem_write_settings.memory_backend,
                     )
                     logger.info(
                         "Saved memory from step '%s' "
@@ -9556,6 +9558,7 @@ async def execute_workflow(
                 context.memories = await load_memories(
                     context._memory_scope_id,
                     limit=workflow.memory.max_inject,
+                    backend=_mem_settings.memory_backend,
                 )
                 # Apply memory decay (TTL filtering)
                 max_age = (

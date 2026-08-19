@@ -12638,10 +12638,17 @@ async def run_workflow_eval_gate(
 
 import re as _re  # noqa: E402
 
+# Mirrors _VALID_SCOPE_RE in engine/memory.py: the name charset excludes any
+# ".." run and any name made only of dots and spaces, so a scope id can never
+# become a path traversal for a path-backed memory backend.
+_SCOPE_NAME_RE = (
+    r"(?=[a-zA-Z0-9_. -]*[a-zA-Z0-9_-])"
+    r"(?:(?!\.\.)[a-zA-Z0-9_. -]){1,200}"
+)
 _SCOPE_ID_RE = _re.compile(
-    r"^(workflow:[a-zA-Z0-9_. -]{1,200}"
-    r"|agent:[a-zA-Z0-9_. -]{1,200}"
-    r"|global)$"
+    r"^(workflow:" + _SCOPE_NAME_RE +
+    r"|agent:" + _SCOPE_NAME_RE +
+    r"|global)\Z"
 )
 _MEMORY_ID_RE = _re.compile(r"^[a-zA-Z0-9_-]{1,200}$")
 
@@ -12709,6 +12716,7 @@ async def list_memories(
 async def add_memory(req: Request, body: MemoryAddRequest):
     """Add a new memory. Mem0 auto-extracts facts and deduplicates."""
     _require_admin(req)
+    _validate_scope_id(body.scope_id)
     from sandcastle.engine.memory import save_memory
 
     result = await save_memory(

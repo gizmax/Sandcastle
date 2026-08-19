@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Memory scope ids can no longer carry a path traversal.** `workflow:..`,
+  `agent:..`, `workflow:.` and `tenant:../workflow:x` all passed scope
+  validation, and the tenant sanitiser left `..` untouched, so
+  `resolve_scope_id(cfg, "x", tenant_id="..")` produced
+  `tenant:../workflow:x`. That is inert against Qdrant, where a scope is only
+  a `user_id`, but it is a live directory-traversal primitive for any backend
+  that maps a scope onto a path. Scope names now reject every `..` run and
+  every name made only of dots and spaces, in `engine/memory.py` and in the
+  API-layer regex in `api/routes.py`; `POST /memories` validates its
+  `scope_id` explicitly instead of relying on the write path. Ordinary dotted
+  names (`workflow:my.wf.v2`, `tenant:acme.com`) are unaffected.
+
+### Changed
+
+- **`MEMORY_BACKEND` is now read.** The setting existed and was validated but
+  had no readers - every call took the literal default. Memory operations now
+  resolve the backend from `settings.memory_backend` when no `backend=` is
+  passed, and the three executor call sites pass it explicitly. The setting's
+  default is `local`, so nothing changes unless you had already set it.
+- **Memory backends are behind a `MemoryBackend` Protocol.** The Mem0 + Qdrant
+  implementation moved verbatim into a `_Mem0Backend` adapter and is the first
+  conformer. No behaviour change; this is the seam a filesystem backend hangs
+  off.
+
 ## [0.44.0] - 2026-08-19 - "Keep the Ending"
 
 ### ⚠️ Breaking
