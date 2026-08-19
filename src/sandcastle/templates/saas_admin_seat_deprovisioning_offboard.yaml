@@ -579,6 +579,7 @@ steps:
     type: notify
     depends_on: [evidence_report]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: "SaaS offboarding complete for {steps.reconcile_offboard.output.target_email}. Apps targeted: {steps.reconcile_offboard.output.targeted_count} | Confirmed deactivated: {steps.reconcile_offboard.output.confirmed_count} | Drift (needs manual follow-up): {steps.reconcile_offboard.output.drift_count} | All clean: {steps.reconcile_offboard.output.all_clean}. Evidence pack attached. Post this summary as a comment on the offboarding ticket."

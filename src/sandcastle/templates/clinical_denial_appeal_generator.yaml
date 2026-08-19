@@ -410,6 +410,7 @@ steps:
     type: notify
     depends_on: [poll_deadline]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.escalation_channel}"
       message: >

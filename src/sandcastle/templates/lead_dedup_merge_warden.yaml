@@ -421,6 +421,7 @@ steps:
     type: notify
     depends_on: [apply_auto_merge]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.revops_channel}"
       message: ":twisted_rightwards_arrows: Auto-merged duplicate lead. Survivor {steps.build_survivor_map.output.master_crm}/{steps.build_survivor_map.output.master_id} absorbed {input.lead_id}. {steps.build_survivor_map.output.audit_note}. CRM write: {steps.apply_auto_merge.output}"
@@ -582,6 +583,7 @@ steps:
     type: notify
     depends_on: [compile_stats]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.revops_channel}"
       message: ":bar_chart: Lead Dedup Warden run complete. {steps.compile_stats.output.summary}"

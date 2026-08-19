@@ -429,6 +429,7 @@ steps:
     type: notify
     depends_on: [sign_and_persist]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: ":ledger: Bank reconciliation closed for account {input.plaid_account_id} ({input.period_start} -> {input.period_end}). Bridge: {steps.match_and_bridge.output}. Signed record persisted: {steps.sign_and_persist.output}."

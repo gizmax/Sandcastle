@@ -661,6 +661,7 @@ steps:
     type: notify
     depends_on: [filter_material]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: |
@@ -676,6 +677,7 @@ steps:
   - id: notify_clean
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: |

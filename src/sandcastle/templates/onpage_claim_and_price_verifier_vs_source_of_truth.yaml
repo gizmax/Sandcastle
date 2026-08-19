@@ -788,6 +788,7 @@ steps:
     type: notify
     depends_on: [replay_vs_golden, compute_diff]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.compliance_channel}"
       message: "On-site price/claim vs source-of-truth audit complete. Items: {steps.compute_diff.output.total_items} | Mismatched: {steps.compute_diff.output.mismatched_count} | Total discrepancies: {steps.compute_diff.output.total_discrepancies} | High-severity: {steps.compute_diff.output.high_severity_count} | Worst item high-severity: {steps.compute_diff.output.max_item_high_severity} | Evidence sealed + sensor-confirmed in object-lock WORM bucket for run {run_id} | Per-run PDF dossier generated. High-severity findings (if any) were routed to the legal/pricing owner approval before any correction/takedown ticket was filed."

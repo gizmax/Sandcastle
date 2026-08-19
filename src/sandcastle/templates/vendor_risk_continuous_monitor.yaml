@@ -546,6 +546,7 @@ steps:
     type: notify
     depends_on: [put_object_lock_register]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: "Vendor risk re-assessment {input.assessment_cycle_id} complete. Vendors assessed: {steps.collect_material_changes.output.vendors_assessed}. Material tier downgrades: {steps.collect_material_changes.output.material_count} (cleared by cross-provider consensus + TPRM-owner sign-off). Remediation tickets opened in {input.ticketing_project_key}. Sealed record sha256 {steps.seal_vendor_record.output.sha256} written to object-lock register at {steps.seal_vendor_record.output.object_key}."

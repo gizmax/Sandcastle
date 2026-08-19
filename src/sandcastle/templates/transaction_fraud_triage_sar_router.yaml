@@ -634,6 +634,7 @@ steps:
     type: notify
     depends_on: [build_case_file]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.fraud_ops_channel}"
       message: ":rotating_light: SAR-pending case routed to FIU for {input.institution_id}. Events triaged: {steps.build_case_ledger.output.events_triaged}, SAR-eligible: {steps.build_case_ledger.output.sar_eligible_count}, total exposure: ${steps.build_case_ledger.output.total_exposure}, max risk score: {steps.build_case_ledger.output.max_risk_score}. Case ref: {steps.file_sar_case.output}. Narrative: {steps.sar_narrative.output}"
@@ -643,6 +644,7 @@ steps:
   - id: notify_close_or_monitor
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.fraud_ops_channel}"
       message: ":white_check_mark: Fraud triage complete for {input.institution_id} - disposition {steps.build_case_ledger.output.disposition} (no SAR-eligible events). Events triaged: {steps.build_case_ledger.output.events_triaged}, max risk score: {steps.build_case_ledger.output.max_risk_score}, total exposure: ${steps.build_case_ledger.output.total_exposure}. {steps.sar_narrative.output}"

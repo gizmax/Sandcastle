@@ -594,6 +594,7 @@ steps:
     type: notify
     depends_on: [put_to_intake, build_audit_log]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: "Security questionnaire {input.questionnaire_id} for {input.customer_name} is COMPLETE. Auto-answered: {steps.aggregate_answers.output.auto_answered} / {steps.aggregate_answers.output.total_questions} | Human-reviewed: {steps.aggregate_answers.output.human_reviewed} | No-evidence gaps: {steps.aggregate_answers.output.unanswered_no_evidence} | Integrity sha256 {steps.build_audit_log.output.sha256} sealed at {steps.build_audit_log.output.object_key}."

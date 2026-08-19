@@ -421,6 +421,7 @@ steps:
     type: notify
     depends_on: [route_verdict]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.ok_channel}"
       message: ":white_check_mark: Partner portal journey UNCHANGED. Reached {steps.journey_verdict.output.screens_reached}, golden replay score {steps.journey_verdict.output.replay_score}. Submit affordance present, not clicked (read-only). Portal {input.portal_login_url}."
@@ -432,6 +433,7 @@ steps:
     type: notify
     depends_on: [route_verdict]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.ops_channel}"
       message: ":rotating_light: PARTNER PORTAL CHANGED - operational journey at risk before today's batch. Cause: {steps.journey_verdict.output.reason}. Failing assertion: {steps.journey_verdict.output.failing_assertion}. New/unexpected fields: {steps.journey_verdict.output.new_unexpected_fields}. Missing screens: {steps.journey_verdict.output.missing_screens}. Missing required fields: {steps.journey_verdict.output.missing_required_fields}. Golden replay score {steps.journey_verdict.output.replay_score} (drift floor 0.8). Screenshot: {steps.journey_verdict.output.screenshot_url}. Portal {input.portal_login_url}. Adapt the manual flow before the batch fires."

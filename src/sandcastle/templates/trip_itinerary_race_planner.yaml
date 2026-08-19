@@ -573,6 +573,7 @@ steps:
   - id: ping_slack
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: |
@@ -583,6 +584,7 @@ steps:
   - id: bounce_back
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: |

@@ -457,6 +457,7 @@ steps:
     type: notify
     depends_on: [route-outcome]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.oncall_channel}"
       message: >-

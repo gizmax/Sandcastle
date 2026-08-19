@@ -482,6 +482,7 @@ steps:
   - id: notify_ci_failed
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: ":rotating_light: Incident {input.incident_id} ({input.service}): the automated {steps.blast_radius_check.output.patch_kind} PR FAILED CI ({steps.evaluate_ci.output.failed_conclusions}). Suspect SHA {steps.blast_radius_check.output.suspect_sha}. Human takeover required - PR left open for inspection."
@@ -539,6 +540,7 @@ steps:
   - id: notify_resolved
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: ":white_check_mark: Incident {input.incident_id} ({input.service}) RESOLVED. Suspect SHA {steps.blast_radius_check.output.suspect_sha} -> {steps.blast_radius_check.output.patch_kind} PR merged after CI green ({steps.evaluate_ci.output.total_runs} checks). PagerDuty resolved, Linear closed. Error jump {steps.correlate_suspect.output.error_jump} at inflection {steps.correlate_suspect.output.inflection_ts}."

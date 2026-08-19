@@ -384,6 +384,7 @@ steps:
     source_hint: "AP needs a visible audit trail of every posted bill in the team channel."
     owner: "ap-ops"
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.ap_channel}"
       message: "Pay-run posted: invoice {steps.reconcile.output.invoice_number} (PO {input.po_number}) status {steps.reconcile.output.match_status}, amount {steps.reconcile.output.invoice_total} {steps.reconcile.output.currency}. ERP bill: {steps.post_bill.output}."

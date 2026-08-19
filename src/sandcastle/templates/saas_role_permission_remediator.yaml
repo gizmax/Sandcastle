@@ -674,6 +674,7 @@ steps:
     type: notify
     depends_on: [audit_chain]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: "Role remediation batch complete. Planned: {steps.safety_diff.output.plan_count} | Confirmed at target: {steps.final_reconcile.output.confirmed_count} | Drift (failed): {steps.final_reconcile.output.drift_count} | Collateral (untouched changed): {steps.final_reconcile.output.collateral_count} | Admin still exists: {steps.final_reconcile.output.admin_still_exists} | Lockout guard OK: {steps.safety_diff.output.lockout_guard_ok} | Replay passed: {steps.audit_chain.output.audit_record.replay_passed} | All clean: {steps.final_reconcile.output.all_clean} | Approver: {steps.audit_chain.output.audit_record.approver} | Audit sha256 {steps.audit_chain.output.sha256}."

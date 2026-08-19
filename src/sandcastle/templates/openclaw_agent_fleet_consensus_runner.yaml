@@ -551,6 +551,7 @@ steps:
     type: notify
     depends_on: [route_on_quorum]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: >-
@@ -631,6 +632,7 @@ steps:
     type: notify
     depends_on: [audit_chain]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: >-

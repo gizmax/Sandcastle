@@ -720,6 +720,7 @@ steps:
     type: notify
     depends_on: [render_ropa_pdf]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: >-

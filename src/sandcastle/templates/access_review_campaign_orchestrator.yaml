@@ -538,6 +538,7 @@ steps:
     type: notify
     depends_on: [certification_narrative, servicenow_attestation]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: "Access review {input.campaign_id} certified. {steps.certification_narrative.output} | Revoked: {steps.consolidate_decisions.output.revoke_count} | Kept: {steps.consolidate_decisions.output.keep_count} | Evidence sha256 {steps.assemble_evidence.output.sha256} sealed (object-lock) at {steps.assemble_evidence.output.object_key}."

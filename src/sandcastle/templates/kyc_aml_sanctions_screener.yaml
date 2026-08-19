@@ -583,6 +583,7 @@ steps:
     type: notify
     depends_on: [route_outcome]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: "KYC/AML screening {input.applicant_id} ({input.full_name}) -> {steps.score_aml_risk.output.disposition} | risk score {steps.score_aml_risk.output.risk_score}/100 | resolver: {steps.score_aml_risk.output.resolver_verdict} | sanctioned={steps.score_aml_risk.output.is_sanctioned} pep={steps.score_aml_risk.output.is_pep} media={steps.score_aml_risk.output.is_adverse_media} | case file archived at cases/{input.applicant_id}/cdd-edd-case-file.pdf."

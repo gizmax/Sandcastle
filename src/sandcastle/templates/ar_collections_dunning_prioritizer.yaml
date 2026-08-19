@@ -569,6 +569,7 @@ steps:
     type: notify
     depends_on: [build_digest]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: |

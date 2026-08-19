@@ -248,6 +248,7 @@ steps:
   - id: notify_blocked
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: >-
@@ -438,6 +439,7 @@ steps:
   - id: notify_review_failed
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: >-
@@ -578,6 +580,7 @@ steps:
   - id: notify_submit_unconfirmed
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: >-
@@ -652,6 +655,7 @@ steps:
   - id: notify_receipt_unconfirmed
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: >-
@@ -697,6 +701,7 @@ steps:
     type: notify
     depends_on: [archive_receipt]
     notify_config:
+      dry_run: true
       service: gmail
       channel: "{input.hr_case_file_email}"
       message: >-

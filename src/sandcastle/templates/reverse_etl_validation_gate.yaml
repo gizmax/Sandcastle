@@ -540,6 +540,7 @@ steps:
     type: notify
     depends_on: [write_quarantine_audit, record_gate_decision]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: >-

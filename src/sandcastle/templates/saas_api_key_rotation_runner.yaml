@@ -303,6 +303,7 @@ steps:
   - id: notify_plan_blocked
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: >-
@@ -593,6 +594,7 @@ steps:
   - id: notify_drift
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: >-
@@ -631,6 +633,7 @@ steps:
     type: notify
     depends_on: [audit_record]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: >-

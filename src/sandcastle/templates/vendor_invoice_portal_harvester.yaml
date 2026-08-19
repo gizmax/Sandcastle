@@ -535,6 +535,7 @@ steps:
   - id: notify_needs_review
     type: notify
     notify_config:
+      dry_run: true
       service: "{input.notify_service}"
       channel: "{input.notify_channel}"
       message: >-
@@ -670,6 +671,7 @@ steps:
   - id: notify_action_unconfirmed
     type: notify
     notify_config:
+      dry_run: true
       service: "{input.notify_service}"
       channel: "{input.notify_channel}"
       message: >-

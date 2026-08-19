@@ -467,6 +467,7 @@ steps:
   - id: notify_failover
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: ":rotating_light: SLA failover event on {input.breaker_key}. Served by: {steps.update_breaker.output.winner} | valid: {steps.update_breaker.output.valid} | degraded: {steps.update_breaker.output.degraded} | failed_over: {steps.update_breaker.output.failed_over}. Provider health: {steps.update_breaker.output.health}"

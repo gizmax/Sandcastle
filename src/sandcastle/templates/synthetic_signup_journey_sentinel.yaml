@@ -380,6 +380,7 @@ steps:
   - id: notify_ok
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.ok_slack_channel}"
       message: ":white_check_mark: Synthetic signup journey GREEN. Reached {steps.synth_verdict.output.steps_reached}, landed {steps.synth_verdict.output.final_url}, golden replay score {steps.synth_verdict.output.replay_score}. (signup {input.signup_url})"
@@ -390,6 +391,7 @@ steps:
   - id: notify_oncall
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.oncall_slack_channel}"
       message: ":rotating_light: SIGNUP BROKEN - synthetic journey RED. Cause: {steps.synth_verdict.output.reason}. Failing assertion: {steps.synth_verdict.output.failing_assertion}. Reached {steps.synth_verdict.output.steps_reached}. Golden replay score {steps.synth_verdict.output.replay_score} (drift threshold 0.85). Failure screenshot: {steps.synth_verdict.output.screenshot_url}. Signup URL {input.signup_url}. Paging on-call."

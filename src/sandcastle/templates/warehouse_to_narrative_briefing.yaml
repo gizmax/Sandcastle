@@ -445,6 +445,7 @@ steps:
     type: notify
     depends_on: [build_pdf]
     notify_config:
+      dry_run: true
       service: slack
       channel: "#revops-briefings"
       message: |

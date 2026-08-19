@@ -281,6 +281,7 @@ steps:
     type: notify
     depends_on: [crm_writeback_lost]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: "Signature lost on '{steps.normalize_terms.output.opportunity_name}' ({steps.normalize_terms.output.account_name}). DocuSign envelope ended as {steps.classify_signature.output.status}. CRM marked signature_lost - no billing created."
@@ -383,6 +384,7 @@ steps:
     type: notify
     depends_on: [billing_summary_race, crm_writeback_won]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: "Closed-won converted to cash: {steps.billing_summary_race.output} | Deal: {steps.normalize_terms.output.opportunity_name} | TCV {steps.normalize_terms.output.total_amount} {steps.normalize_terms.output.currency} | Stripe sub {steps.create_subscription.output.subscription_id} | CRM updated."

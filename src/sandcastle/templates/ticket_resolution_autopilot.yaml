@@ -409,6 +409,7 @@ steps:
     type: notify
     depends_on: [post_reply]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: |

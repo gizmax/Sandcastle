@@ -705,6 +705,7 @@ steps:
     type: notify
     depends_on: [regression_gate]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: >-

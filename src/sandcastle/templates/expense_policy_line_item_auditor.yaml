@@ -617,6 +617,7 @@ steps:
     type: notify
     depends_on: [archive_summary]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: |

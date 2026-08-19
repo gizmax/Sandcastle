@@ -557,6 +557,7 @@ steps:
     type: notify
     depends_on: [seal_attestation_pack]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: "Policy attestation {input.campaign_id} ({input.policy_id} {input.policy_version}) certified. Coverage {steps.build_ledger.output.coverage_pct}% of {steps.build_ledger.output.population_count} (required {steps.build_ledger.output.required_coverage_pct}%). Attested {steps.build_ledger.output.attested_count}, exceptions {steps.build_ledger.output.exception_count}. Ledger sha256 {steps.build_ledger.output.ledger_sha256} sealed (object-lock) at {steps.build_ledger.output.object_key}."

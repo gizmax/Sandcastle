@@ -583,6 +583,7 @@ steps:
     type: notify
     depends_on: [persist_result]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: ":chart_with_upwards_trend: Prompt optimization finished for '{input.task_description}'. Winning score {steps.finalize_result.output.winning_score} (lift {steps.finalize_result.output.absolute_lift}) over {steps.finalize_result.output.rounds_run} rounds, {steps.finalize_result.output.accepted_variants} variants accepted. Winning prompt persisted."

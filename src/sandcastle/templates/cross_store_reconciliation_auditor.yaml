@@ -344,6 +344,7 @@ steps:
   - id: notify_reconciled
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: ":white_check_mark: Cross-store reconciliation PASSED for {input.metric} / {input.entity} / {input.period}. All stores agree within tolerance. Matrix: {steps.build_variance_matrix.output}."
@@ -559,6 +560,7 @@ steps:
     type: notify
     depends_on: [write_audit_record]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: ":rotating_light: Cross-store reconciliation BREAK for {input.metric} / {input.entity} / {input.period}. Source-of-truth verdict: {steps.tally_verdict.output}. Audit record: {steps.write_audit_record.output}."

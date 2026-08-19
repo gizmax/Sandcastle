@@ -427,6 +427,7 @@ steps:
     type: notify
     depends_on: [route_cancel]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: |

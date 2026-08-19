@@ -252,6 +252,7 @@ steps:
   - id: notify_blocked
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: >-
@@ -478,6 +479,7 @@ steps:
   - id: notify_plan_failed
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: >-
@@ -665,6 +667,7 @@ steps:
   - id: notify_attestation_failed
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: >-
@@ -796,6 +799,7 @@ steps:
   - id: notify_submit_unconfirmed
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.notify_channel}"
       message: >-

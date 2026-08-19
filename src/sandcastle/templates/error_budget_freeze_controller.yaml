@@ -273,6 +273,7 @@ steps:
   - id: notify_all_clear
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: ":white_check_mark: Error budget for {input.service} is healthy. Burn assessment: {steps.compute_burn.output}. No deploy freeze required."
@@ -422,6 +423,7 @@ steps:
     type: notify
     depends_on: [lock_github_branch, set_cloudflare_maintenance, enable_vercel_protection]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: ":no_entry: DEPLOY FREEZE ACTIVE for {input.service}. Scope/justification: {steps.recommend_race.output}. Burn: {steps.compute_burn.output}. Freeze auto-lifts when remaining budget recovers above {input.unfreeze_pct}%."
@@ -479,6 +481,7 @@ steps:
     type: notify
     depends_on: [unlock_github_branch, restore_cloudflare_route]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: ":unlock: DEPLOY FREEZE LIFTED for {input.service}. Error budget recovered above {input.unfreeze_pct}%. Recovery observation: {steps.wait_for_recovery.output}."

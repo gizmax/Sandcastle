@@ -520,6 +520,7 @@ steps:
     type: notify
     depends_on: [build_digest]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.manager_slack_channel}"
       message: ":bar_chart: Weekly CSAT coaching digest is ready. Per-agent and per-theme trends: {steps.build_digest.output}"
@@ -530,6 +531,7 @@ steps:
     type: notify
     depends_on: [build_digest]
     notify_config:
+      dry_run: true
       service: gmail
       channel: "{input.agent_email}"
       message: "Your weekly CSAT coaching recap: {steps.build_digest.output}. Reply to your team lead with any questions."

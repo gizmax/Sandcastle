@@ -561,6 +561,7 @@ steps:
   - id: notify_page
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: |
@@ -576,6 +577,7 @@ steps:
   - id: notify_log
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: |

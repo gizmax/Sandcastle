@@ -548,6 +548,7 @@ steps:
     type: notify
     depends_on: [merge_pr]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: ":package: Upgrade pilot: {input.package_name} {input.from_version} -> {input.to_version} on {input.github_repo} MERGED (PR #{steps.pr_context.output.pr_number}). Fix applied: {steps.fix_decision.output.summary} (root cause: {steps.fix_decision.output.root_cause}; risk: {steps.fix_decision.output.risk})."

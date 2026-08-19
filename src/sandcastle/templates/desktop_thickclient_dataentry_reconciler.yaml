@@ -683,6 +683,7 @@ steps:
     type: notify
     depends_on: [audit_chain]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: "Thick-client data-entry batch complete. Keyed: {steps.idempotency_plan.output.plan_count} | Confirmed at source: {steps.reconcile.output.confirmed_count} | Drift (mismatch): {steps.reconcile.output.drift_count} | Collateral (untouched changed): {steps.reconcile.output.collateral_count} | Idempotent skips: {steps.idempotency_plan.output.skipped_count} | Allowlist OK: {steps.idempotency_plan.output.allowlist_ok} | All clean: {steps.reconcile.output.all_clean} | Approver: {steps.audit_chain.output.audit_record.approver} | Audit sha256 {steps.audit_chain.output.sha256}."

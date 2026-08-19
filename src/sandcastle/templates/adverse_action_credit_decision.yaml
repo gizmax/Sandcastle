@@ -497,6 +497,7 @@ steps:
     source_hint: "Adverse-action notices must be delivered to the applicant and logged on the file."
     owner: "compliance-ops"
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.applicant_channel}"
       message: >
@@ -558,6 +559,7 @@ steps:
     source_hint: "Approved bookings need a visible trail in the team channel for awareness."
     owner: "credit-risk-eng"
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.applicant_channel}"
       message: >

@@ -560,6 +560,7 @@ steps:
     type: notify
     depends_on: [render_register_pdf, write_notion_governance]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: "EU AI Act risk register {input.register_cycle_id} sealed. New high-risk systems this cycle: {steps.assemble_register.output.new_high_risk_count}. Systems classified: {steps.select_high_risk_candidates.output.candidate_count} prohibited/high-risk candidates gated (dual-provider consensus + legal/DPO sign-off). Conformity tasks opened in Jira project {input.jira_project_key}. Register sha256 {steps.assemble_register.output.register_sha256} sealed at {steps.assemble_register.output.object_key}."

@@ -338,6 +338,7 @@ steps:
   - id: notify_bad_extraction
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: >-
@@ -836,6 +837,7 @@ steps:
     type: notify
     depends_on: [audit_record, reconcile_revocations]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: "SaaS seat audit complete. Seats: {steps.compute_revocation_sets.output.total_seats} | Dormant: {steps.compute_revocation_sets.output.dormant_count} | Over-privileged: {steps.compute_revocation_sets.output.over_privileged_count} | Revoked (confirmed): {steps.reconcile_revocations.output.confirmed_count} | Drift: {steps.reconcile_revocations.output.drift_count} | Collateral: {steps.reconcile_revocations.output.collateral_count} | All clean: {steps.reconcile_revocations.output.all_clean} | Est. monthly savings: {steps.compute_revocation_sets.output.est_monthly_savings} | Approver: {steps.audit_record.output.audit_record.approver} | Audit sha256 {steps.audit_record.output.sha256}."

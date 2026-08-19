@@ -683,6 +683,7 @@ steps:
     type: notify
     depends_on: [route_writeoff, reconcile_payment, assess_writeoff]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_ar_channel}"
       message: >

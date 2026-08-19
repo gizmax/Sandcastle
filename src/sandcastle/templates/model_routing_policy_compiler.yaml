@@ -583,6 +583,7 @@ steps:
   - id: notify_projection
     type: notify
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: |

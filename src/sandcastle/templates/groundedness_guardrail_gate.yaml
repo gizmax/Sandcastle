@@ -500,6 +500,7 @@ steps:
     type: notify
     depends_on: [final_decision, repair_loop]
     notify_config:
+      dry_run: true
       service: slack
       channel: "{input.slack_channel}"
       message: ":no_entry: Guardrail decision {steps.final_decision.output.decision} (groundedness {steps.final_decision.output.groundedness_score}). Reasons: {steps.final_decision.output.reasons}. Repair attempted: {steps.recheck_repair.output.repaired_pass}."
