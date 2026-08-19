@@ -64,6 +64,9 @@ else
 fi
 
 uploaded=0; skipped=0; failed=0
+BATCH=()          # curl args: one -T/URL pair per file
+PENDING=()        # the paths they correspond to, for reporting
+
 for rel in "${FILES[@]}"; do
   src="$SITE_DIR/$rel"
   if [[ ! -f "$src" ]]; then
@@ -76,28 +79,53 @@ for rel in "${FILES[@]}"; do
     printf "  would upload  %-46s %s\n" "$rel" "$(wc -c <"$src" | tr -d ' ') B"
     uploaded=$((uploaded+1)); continue
   fi
-  # --ftp-create-dirs makes nested paths (compare/, hub/, eu-ai-act/) work.
-  # --ssl-reqd refuses to fall back to plaintext if STARTTLS is unavailable.
-  #
-  # The timeouts are load-bearing: without --max-time a stalled FTPS control
-  # connection hangs the upload until the job's own limit, which on GitHub is
-  # six hours by default - one deploy sat on a single file for 24 minutes
-  # before it was killed by hand. Retries cover the transient case that causes
-  # it, so a blip costs seconds instead of a failed deploy.
-  #
-  # Credentials go in on stdin rather than --user, which would put the password
-  # in argv where `ps` can read it.
-  if printf 'user = "%s:%s"\n' "$SANDCASTLE_FTP_USER" "$SANDCASTLE_FTP_PASS" \
-     | curl -sS --fail --ssl-reqd --ftp-create-dirs -T "$src" \
-       --config - \
-       --connect-timeout 20 --max-time 180 \
-       --retry 3 --retry-delay 5 --retry-all-errors \
-       "ftp://$FTP_HOST$FTP_ROOT/$rel" >/dev/null; then
-    echo "  uploaded $rel"; uploaded=$((uploaded+1))
-  else
-    echo "  FAILED   $rel" >&2; failed=$((failed+1))
-  fi
+  BATCH+=(-T "$src" "ftp://$FTP_HOST$FTP_ROOT/$rel")
+  PENDING+=("$rel")
 done
+
+# One connection for the whole site, not one per file.
+#
+# The per-file loop opened a separate FTPS session for every upload: 17 TLS
+# handshakes and 17 logins in a burst, each handshake costing up to 1.2s. Shared
+# hosts commonly throttle repeated logins as a brute-force signature, and a CI
+# runner arrives on an address shared with everyone else on that range - which
+# is the best explanation for why the same script takes 10 seconds from a laptop
+# and twice stalled past 15 minutes from GitHub. curl reuses one connection
+# across multiple -T/URL pairs, so this is 1 login instead of 17.
+#
+# --ftp-create-dirs makes nested paths (compare/, hub/, eu-ai-act/) work, and
+# --ssl-reqd refuses to fall back to plaintext. Credentials arrive on stdin
+# rather than --user, which would put the password in argv where `ps` reads it.
+#
+# On failure we fall back to the per-file path, which is slower but reports
+# exactly which file failed - worth having, since a batch reports only that
+# something did.
+if [[ $DRY_RUN -eq 0 && ${#PENDING[@]} -gt 0 ]]; then
+  if printf 'user = "%s:%s"\n' "$SANDCASTLE_FTP_USER" "$SANDCASTLE_FTP_PASS" \
+     | curl -sS --fail --ssl-reqd --ftp-create-dirs \
+       --config - \
+       --connect-timeout 20 --max-time 240 \
+       --retry 3 --retry-delay 5 --retry-all-errors \
+       "${BATCH[@]}" >/dev/null; then
+    for rel in "${PENDING[@]}"; do
+      echo "  uploaded $rel"; uploaded=$((uploaded+1))
+    done
+  else
+    echo "  batch upload failed - retrying file by file to find the culprit" >&2
+    for rel in "${PENDING[@]}"; do
+      if printf 'user = "%s:%s"\n' "$SANDCASTLE_FTP_USER" "$SANDCASTLE_FTP_PASS" \
+         | curl -sS --fail --ssl-reqd --ftp-create-dirs -T "$SITE_DIR/$rel" \
+           --config - \
+           --connect-timeout 20 --max-time 120 \
+           --retry 2 --retry-delay 3 --retry-all-errors \
+           "ftp://$FTP_HOST$FTP_ROOT/$rel" >/dev/null; then
+        echo "  uploaded $rel"; uploaded=$((uploaded+1))
+      else
+        echo "  FAILED   $rel" >&2; failed=$((failed+1))
+      fi
+    done
+  fi
+fi
 
 echo
 echo "uploaded: $uploaded  skipped: $skipped  failed: $failed"
