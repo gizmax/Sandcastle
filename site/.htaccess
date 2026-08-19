@@ -1,0 +1,82 @@
+# sandcastle-ai.eu - Apache config for the Webglobe shared host.
+#
+# The host answers `Server: nginx`, which is why this file was assumed useless
+# for months: nginx is a reverse proxy in front of Apache, and .htaccess IS
+# honoured. Verified by setting a probe header and reading it back.
+#
+# Everything is wrapped in <IfModule> so a host that lacks a module degrades to
+# doing nothing instead of returning 500 on every request.
+
+# --- Canonical host: www -> apex, one 301 hop --------------------------------
+# www.sandcastle-ai.eu answered 200, so both hostnames served the same pages and
+# split their signals. HTTPS is already forced by the host.
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteCond %{HTTP_HOST} ^www\.sandcastle-ai\.eu$ [NC]
+  RewriteRule ^(.*)$ https://sandcastle-ai.eu/$1 [R=301,L]
+</IfModule>
+
+# --- Character encoding ------------------------------------------------------
+# Content-Type arrived without a charset, so browsers had to sniff it from the
+# meta tag. Declaring it in the header is the authoritative form.
+AddDefaultCharset UTF-8
+
+<IfModule mod_headers.c>
+  # --- Security headers ------------------------------------------------------
+  # The site is static HTML with no forms, no cookies and no login, so these are
+  # cheap: they cost nothing to serve and remove whole classes of attack.
+
+  # Never let a browser second-guess a declared type.
+  Header always set X-Content-Type-Options "nosniff"
+
+  # Send the origin on cross-site navigation, full URL same-origin.
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+
+  # This site needs none of these capabilities.
+  Header always set Permissions-Policy "camera=(), microphone=(), geolocation=(), interest-cohort=()"
+
+  # Static pages are never framed by design.
+  Header always set X-Frame-Options "SAMEORIGIN"
+
+  # HSTS: the host already 301s http -> https, so this only hardens what is
+  # already true. One year, subdomains included. Deliberately no `preload` -
+  # that is a one-way door requiring every current and future subdomain to be
+  # HTTPS, and it is not ours to commit to.
+  Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+  # --- Caching ---------------------------------------------------------------
+  # Nothing was cacheable before, so every visit re-downloaded 232 KB of image
+  # and ~1 MB of registry JSON.
+
+  # HTML must revalidate: a release announcement that sticks for a week is worse
+  # than a slightly slower page.
+  <FilesMatch "\.html$">
+    Header set Cache-Control "public, max-age=0, must-revalidate"
+  </FilesMatch>
+
+  # Images and fonts are content-addressed by name here and change rarely.
+  <FilesMatch "\.(jpe?g|png|gif|webp|avif|svg|ico|woff2?)$">
+    Header set Cache-Control "public, max-age=2592000"
+  </FilesMatch>
+
+  # The registry changes with each template release; a day is a fair trade
+  # against its size.
+  <FilesMatch "\.json$">
+    Header set Cache-Control "public, max-age=86400"
+  </FilesMatch>
+
+  # llms.txt and robots.txt are small and read by crawlers; an hour is plenty.
+  <FilesMatch "\.txt$">
+    Header set Cache-Control "public, max-age=3600"
+  </FilesMatch>
+</IfModule>
+
+# --- Compression -------------------------------------------------------------
+# HTML was served gzip-only. Brotli is materially better on markup; where
+# mod_brotli is missing this block simply does nothing and gzip continues.
+<IfModule mod_brotli.c>
+  AddOutputFilterByType BROTLI_COMPRESS text/html text/css text/plain text/xml application/javascript application/json
+</IfModule>
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/html text/css text/plain text/xml application/javascript application/json
+</IfModule>
