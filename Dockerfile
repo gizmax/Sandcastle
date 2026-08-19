@@ -1,5 +1,5 @@
 # -- Dashboard builder stage --
-FROM node:20-slim AS dashboard-builder
+FROM node:22-slim AS dashboard-builder
 
 WORKDIR /dashboard
 
