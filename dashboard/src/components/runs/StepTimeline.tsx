@@ -19,6 +19,8 @@ interface Step {
   type?: string;
   artifact_url?: string;
   model?: string | null;
+  tokens_saved?: number;
+  compaction_strategy?: string | null;
 }
 
 interface StepTimelineProps {
@@ -69,6 +71,8 @@ export function StepTimeline({ steps, runId, onReplay, onFork }: StepTimelinePro
               stepType={step.type}
               artifactUrl={step.artifact_url}
               model={step.model}
+              tokensSaved={step.tokens_saved}
+              compactionStrategy={step.compaction_strategy}
               runId={runId}
               onReplay={onReplay}
               onFork={onFork}

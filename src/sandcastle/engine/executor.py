@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import collections
+import contextvars
 import copy
 import csv
 import dataclasses
@@ -111,6 +112,11 @@ class RunContext:
     _file_read_counts: dict[str, int] = field(default_factory=dict, repr=False)
     _seen_prompt_hashes: set[str] = field(default_factory=set, repr=False)
     _step_output_max_tokens: dict[str, int] = field(default_factory=dict, repr=False)
+    # Compaction strategy per step id, mirroring _step_output_max_tokens.
+    _step_context_strategy: dict[str, str] = field(default_factory=dict, repr=False)
+    # Tokens removed by compaction, per step id, so the saving can be recorded.
+    _compaction_saved: dict[str, int] = field(default_factory=dict, repr=False)
+    _compaction_strategy_used: dict[str, str] = field(default_factory=dict, repr=False)
     # Privacy router for this run, so the event-bus publish can scrub before
     # emitting rather than relying on the later DB-write scrub.
     _privacy_router: Any = field(default=None, repr=False)
@@ -155,6 +161,7 @@ class RunContext:
             _file_read_counts=dict(self._file_read_counts),
             _seen_prompt_hashes=set(self._seen_prompt_hashes),
             _step_output_max_tokens=dict(self._step_output_max_tokens),
+            _step_context_strategy=dict(self._step_context_strategy),
             _privacy_router=self._privacy_router,
             admin_trusted=self.admin_trusted,
             tenant_id=self.tenant_id,
@@ -256,11 +263,10 @@ def resolve_variable(var_path: str, context: RunContext) -> Any:
         if parts[2] == "output":
             if len(parts) == 3:
                 # Apply output_max_tokens truncation if configured
-                max_tok = context._step_output_max_tokens.get(step_id, 0)
-                if max_tok > 0 and isinstance(step_data, str):
-                    max_chars = max_tok * 4
-                    if len(step_data) > max_chars:
-                        step_data = step_data[:max_chars] + "\n\n[... truncated to fit context window ...]"
+                # Compaction deliberately does NOT happen here: this returns
+                # the raw value so `.field` traversal keeps working. Shrinking
+                # happens where the value is rendered into text, in
+                # resolve_templates._replace.
                 return step_data
             if step_data is None:
                 return None
@@ -349,6 +355,18 @@ def resolve_templates(
             raw = json.dumps(value)
         else:
             raw = str(value)
+        # Compaction runs here, not in resolve_variable, because that returns
+        # the value with its type intact so `{steps.x.output.field}` can still
+        # traverse it. Only once a value is rendered into a template is it
+        # unavoidably text - and only then does its token cost become real.
+        # Step outputs are dicts far more often than strings (code and http
+        # steps both return them), which an isinstance(str) check upstream
+        # would silently skip.
+        if var_path.startswith("steps."):
+            _sid = var_path.split(".")[1] if len(var_path.split(".")) > 1 else ""
+            _max_tok = context._step_output_max_tokens.get(_sid, 0)
+            if _max_tok > 0:
+                raw = _compact_for_context(context, _sid, raw, _max_tok)
         # Escape braces in user-provided input values, step outputs, and
         # memory values to prevent template injection. Only built-in
         # variables (run_id, date) and env vars are trusted sources.
@@ -374,9 +392,7 @@ def resolve_templates(
                 # Apply output_max_tokens truncation for auto-injected outputs
                 max_tok = context._step_output_max_tokens.get(dep, 0)
                 if max_tok > 0:
-                    max_chars = max_tok * 4
-                    if len(formatted) > max_chars:
-                        formatted = formatted[:max_chars] + "\n[... truncated to fit context window ...]"
+                    formatted = _compact_for_context(context, dep, formatted, max_tok)
                 parts.append(f"[{dep}]: {_escape_braces(formatted)}")
             context_block = "\n".join(parts)
             resolved = f"{resolved}\n\nContext from previous steps:\n{context_block}"
@@ -425,6 +441,38 @@ async def resolve_storage_refs(
         last_end = match.end()
     parts.append(prompt[last_end:])
     return "".join(parts)
+
+
+# The step currently being executed. Compaction happens while resolving that
+# step's templates, but the strategy belongs to the step being *read*, so the
+# saving has to be booked against the reader - it is the reader's prompt that
+# got smaller. A ContextVar rather than a field on RunContext because parallel
+# steps share one context but each runs in its own asyncio task.
+_CURRENT_STEP_ID: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "sandcastle_current_step_id", default=""
+)
+
+
+def _compact_for_context(context: Any, step_id: str, text: str, max_tokens: int) -> str:
+    """Shrink ``text`` to ``max_tokens`` using the step's configured strategy.
+
+    Runs on the synchronous resolve path, which is walked for every reference in
+    every template, so only the model-free strategies are available here; a step
+    configured for ``summarize`` degrades to ``head_tail`` (compact_sync reports
+    that through ``fallback_from``). Model-backed compaction happens on the async
+    context-query path instead.
+    """
+    from sandcastle.engine.compaction import compact_sync
+
+    strategy = context._step_context_strategy.get(step_id, "truncate")
+    result = compact_sync(text, max_tokens, strategy)
+    if result.applied:
+        reader = _CURRENT_STEP_ID.get() or step_id
+        context._compaction_saved[reader] = (
+            context._compaction_saved.get(reader, 0) + result.tokens_saved
+        )
+        context._compaction_strategy_used[reader] = result.strategy
+    return result.text
 
 
 def _truncate_to_tokens(text: str, max_tokens: int) -> str:
@@ -590,7 +638,29 @@ async def _resolve_context_query(
     if not result:
         return ""
 
-    return _truncate_to_tokens(result, step.context_max_tokens)
+    # Async path: the full strategy set is available here, including summarize.
+    from sandcastle.config import settings
+    from sandcastle.engine.compaction import compact
+
+    compacted = await compact(
+        result,
+        step.context_max_tokens,
+        step.context_strategy,
+        step.context_model or getattr(settings, "workflow_default_model", "") or "",
+    )
+    if compacted.applied:
+        context._compaction_saved[step.id] = (
+            context._compaction_saved.get(step.id, 0) + compacted.tokens_saved
+        )
+        context._compaction_strategy_used[step.id] = compacted.strategy
+        if compacted.fallback_from:
+            logger.info(
+                "Compaction for step '%s': %s unavailable, used %s instead",
+                step.id,
+                compacted.fallback_from,
+                compacted.strategy,
+            )
+    return compacted.text
 
 
 def _enforce_data_residency(model_info: Any) -> None:
@@ -686,6 +756,8 @@ async def _save_run_step(
     error: str | None = None,
     model: str | None = None,
     input_prompt: str | None = None,
+    tokens_saved: int = 0,
+    compaction_strategy: str | None = None,
 ) -> None:
     """Create or update a RunStep record in the database.
 
@@ -738,6 +810,10 @@ async def _save_run_step(
                     existing.model = model
                 if input_prompt is not None:
                     existing.input_prompt = input_prompt
+                if tokens_saved:
+                    existing.tokens_saved = (existing.tokens_saved or 0) + tokens_saved
+                if compaction_strategy:
+                    existing.compaction_strategy = compaction_strategy
                 if status in ("completed", "failed", "skipped"):
                     existing.completed_at = now
             else:
@@ -754,6 +830,8 @@ async def _save_run_step(
                     error=error,
                     model=model,
                     input_prompt=input_prompt,
+                    tokens_saved=tokens_saved,
+                    compaction_strategy=compaction_strategy,
                     started_at=now if status == "running" else None,
                     completed_at=(now if status in ("completed", "failed", "skipped") else None),
                 )
@@ -1688,6 +1766,8 @@ async def execute_step_with_retry(
                     attempt=attempt,
                     model=result.model or step.model,
                     input_prompt=result.input_prompt,
+                    tokens_saved=context._compaction_saved.pop(step.id, 0),
+                    compaction_strategy=context._compaction_strategy_used.pop(step.id, None),
                 )
 
                 # Broadcast step.completed event (truncate large outputs for event bus)
@@ -1787,6 +1867,8 @@ async def execute_step_with_retry(
                             cost_usd=total_attempt_cost_usd + fallback_result.cost_usd,
                             duration_seconds=result.duration_seconds + fallback_result.duration_seconds,
                             attempt=attempt,
+                            tokens_saved=context._compaction_saved.pop(step.id, 0),
+                            compaction_strategy=context._compaction_strategy_used.pop(step.id, None),
                         )
                         # Combine costs from all attempts + fallback
                         fallback_result.cost_usd += total_attempt_cost_usd
@@ -2308,6 +2390,7 @@ async def _execute_step_once(
     attempt: int = 1,
 ) -> StepResult:
     """Execute a single attempt of a step."""
+    _CURRENT_STEP_ID.set(step.id)
     started_at = datetime.now(timezone.utc)
     resolved_input_prompt: str | None = None  # Populated after template resolution
     query_cost_usd = 0.0
@@ -6105,6 +6188,7 @@ async def _execute_race_step(
                 _file_read_counts=dict(context._file_read_counts),
                 _seen_prompt_hashes=set(context._seen_prompt_hashes),
                 _step_output_max_tokens=dict(context._step_output_max_tokens),
+                _step_context_strategy=dict(context._step_context_strategy),
                 admin_trusted=context.admin_trusted,
                 tenant_id=context.tenant_id,
                 cassette=context.cassette,
@@ -8364,6 +8448,11 @@ async def _execute_step_by_type(
     race execution so composite steps cannot accidentally send hybrid step
     definitions to the generic sandbox query path.
     """
+    # Every typed step lands here, so this is where the current step id belongs.
+    # Setting it only in _execute_step_once covered the generic sandbox path and
+    # missed http, code, transform and the rest - which is most of the steps that
+    # render large outputs into a template.
+    _CURRENT_STEP_ID.set(step.id)
     if step.type == "llm":
         return await _execute_llm_step(step, context, storage)
     if step.type == "http":
@@ -8545,6 +8634,8 @@ async def _prepare_and_run_step(
                 cost_usd=result.cost_usd,
                 duration_seconds=result.duration_seconds,
                 model=model,
+                tokens_saved=context._compaction_saved.pop(step.id, 0),
+                compaction_strategy=context._compaction_strategy_used.pop(step.id, None),
             )
         else:
             async with context._lock:
@@ -9099,6 +9190,13 @@ async def execute_workflow(
         for s in workflow.steps
         if s.output_max_tokens > 0
     }
+    # Compaction strategy per step; only non-default entries are carried so the
+    # map stays empty for workflows that never configured one.
+    step_context_strategy = {
+        s.id: s.context_strategy
+        for s in workflow.steps
+        if getattr(s, "context_strategy", "truncate") != "truncate"
+    }
 
     context = RunContext(
         run_id=run_id,
@@ -9107,6 +9205,7 @@ async def execute_workflow(
         workflow_name=workflow.name,
         default_tools=getattr(workflow, "default_tools", []),
         _step_output_max_tokens=step_output_max_tokens,
+        _step_context_strategy=step_context_strategy,
         admin_trusted=admin_trusted,
         tenant_id=tenant_id,
         cassette=cassette,

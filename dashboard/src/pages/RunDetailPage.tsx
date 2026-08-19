@@ -46,6 +46,8 @@ interface Step {
   type?: string;
   artifact_url?: string;
   model?: string | null;
+  tokens_saved?: number;
+  compaction_strategy?: string | null;
 }
 
 interface RunDetail {
@@ -442,6 +444,24 @@ export default function RunDetailPage() {
     () => run?.steps?.find((s) => s.status === "failed")?.step_id ?? null,
     [run]
   );
+  // Context compaction: how much this run avoided sending to the model, and
+  // which strategies produced it. Steps that compacted nothing report 0.
+  const tokensSavedTotal = useMemo(
+    () => (run?.steps ?? []).reduce((sum, s) => sum + (s.tokens_saved ?? 0), 0),
+    [run],
+  );
+  const compactionStrategiesUsed = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          (run?.steps ?? [])
+            .filter((s) => (s.tokens_saved ?? 0) > 0 && s.compaction_strategy)
+            .map((s) => s.compaction_strategy as string),
+        ),
+      ),
+    [run],
+  );
+
   // Earliest step id, used as the "from" for a full re-run via replay.
   const firstStepId = useMemo(() => run?.steps?.[0]?.step_id ?? null, [run]);
 
@@ -764,6 +784,21 @@ export default function RunDetailPage() {
             <span className="text-xs font-medium text-muted-foreground">Cost</span>
             <p><Odometer value={run.total_cost_usd} format={formatCost} /></p>
           </div>
+          {tokensSavedTotal > 0 && (
+            <div>
+              <span className="text-xs font-medium text-muted-foreground">Context saved</span>
+              <p
+                className="text-success"
+                title={
+                  compactionStrategiesUsed.length > 0
+                    ? `Compaction removed ~${tokensSavedTotal.toLocaleString()} tokens before these steps ran (${compactionStrategiesUsed.join(", ")})`
+                    : `Compaction removed ~${tokensSavedTotal.toLocaleString()} tokens`
+                }
+              >
+                −{tokensSavedTotal.toLocaleString()} tok
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Budget bar */}

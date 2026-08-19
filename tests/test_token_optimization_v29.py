@@ -65,13 +65,23 @@ class TestOutputMaxTokensDefault:
 
 class TestOutputMaxTokensTruncation:
     def test_truncate_long_string_output(self):
-        """When output_max_tokens is set, long string outputs are truncated."""
+        """When output_max_tokens is set, long string outputs are truncated.
+
+        Shrinking moved from resolve_variable to resolve_templates when
+        compaction landed: resolve_variable must return the value with its type
+        intact so `{steps.x.output.field}` can still traverse it, and a value
+        only costs tokens once it is rendered into text. The user-visible effect
+        is unchanged - and dict/list outputs are now covered too, which the old
+        isinstance(str) gate skipped.
+        """
+        from sandcastle.engine.executor import resolve_templates
+
         ctx = _make_context()
         ctx.step_outputs["research"] = "A" * 10000
         ctx._step_output_max_tokens = {"research": 500}
 
         # 500 tokens * 4 chars = 2000 chars max
-        result = resolve_variable("steps.research.output", ctx)
+        result = resolve_templates("{steps.research.output}", ctx, ["research"])
         assert len(result) < 10000
         assert result.endswith("[... truncated to fit context window ...]")
         # First 2000 chars should be preserved
@@ -518,12 +528,18 @@ class TestEdgeCases:
         assert "[... truncated" not in result
 
     def test_truncation_one_char_over(self):
-        """Output one char over the limit is truncated."""
+        """Output one char over the limit is truncated.
+
+        Rendered through resolve_templates: see the note on
+        test_truncate_long_string_output for why shrinking lives there now.
+        """
+        from sandcastle.engine.executor import resolve_templates
+
         ctx = _make_context()
         ctx.step_outputs["step1"] = "A" * 401
         ctx._step_output_max_tokens = {"step1": 100}
 
-        result = resolve_variable("steps.step1.output", ctx)
+        result = resolve_templates("{steps.step1.output}", ctx, ["step1"])
         assert "[... truncated to fit context window ...]" in result
         assert result.startswith("A" * 400)
 

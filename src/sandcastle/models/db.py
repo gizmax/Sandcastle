@@ -172,6 +172,7 @@ class RunStep(Base):
         CheckConstraint("cost_usd >= 0", name="ck_run_steps_cost_non_negative"),
         CheckConstraint("duration_seconds >= 0", name="ck_run_steps_duration_non_negative"),
         CheckConstraint("attempt >= 1", name="ck_run_steps_attempt_positive"),
+        CheckConstraint("tokens_saved >= 0", name="ck_run_steps_tokens_saved_non_negative"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -191,6 +192,14 @@ class RunStep(Base):
     input_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     output_data: Mapped[dict | None] = mapped_column(JSONB_PG, nullable=True)
     cost_usd: Mapped[float] = mapped_column(Float, default=0.0, server_default="0.0")
+    # Token accounting. Recorded when the provider reports usage; NULL means the
+    # provider did not report it, which is why cost stays the load-bearing metric.
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Tokens removed by context compaction before the step ran (0 = nothing to do).
+    tokens_saved: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # Which compaction strategy ran, when one did.
+    compaction_strategy: Mapped[str | None] = mapped_column(String(32), nullable=True)
     duration_seconds: Mapped[float] = mapped_column(Float, default=0.0, server_default="0.0")
     attempt: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     error: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -169,6 +169,11 @@ steps:
   #     Connectors: pinecone, qdrant. This is the RAG grounding - facts come from here, not the model.
   - id: retrieve_evidence
     type: http
+    # Evidence documents are long and the answering steps need their substance,
+    # not their bulk. head_tail keeps the opening and the conclusion of each
+    # document rather than whatever happened to come first.
+    output_max_tokens: 2000
+    context_strategy: head_tail
     http_config:
       url: "{input.vector_store_url}"
       method: POST

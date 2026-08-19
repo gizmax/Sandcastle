@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Context compaction.** When a step's output or its retrieved context exceeds
+  its token budget, the engine no longer only cuts at the budget and throws away
+  whatever followed. `context_strategy` on a step picks how the text is shrunk:
+  - `truncate` - cut at the budget. Unchanged, and still the default.
+  - `head_tail` - keep the opening and the ending, drop the middle. Free, and it
+    stops conclusions from being the first thing discarded.
+  - `prune` - shorten long JSON arrays and collapse repeated lines while keeping
+    the structure. Free.
+  - `summarize` - ask a model. Costs a call, so point `context_model` at a local
+    model (`ollama`, `omlx`) and it costs nothing per run.
+
+  `summarize` never fails a step: if the model errors or returns nothing usable,
+  the text is compacted with `head_tail` instead and the fallback is logged. On
+  the synchronous resolve path - walked for every reference in every template -
+  only the model-free strategies run, so a step configured for `summarize` there
+  degrades to `head_tail` by design.
+
+- **Token accounting on steps.** `run_steps` gains `input_tokens`,
+  `output_tokens`, `tokens_saved` and `compaction_strategy` (migration `019`).
+  Until now a step recorded only `cost_usd`, so anything needing token counts had
+  to derive them backwards through a blended price - which is what the evolution
+  engine does. Savings from compaction are recorded per step, so the trade is
+  visible rather than silent.
+
+### Changed
+- The two truncation markers the engine used - `...[truncated]` on the context
+  query path and `[... truncated to fit context window ...]` on the
+  `output_max_tokens` path - are now one. Text cut on either path ends with
+  `[... truncated to fit context window ...]`.
+
+### Fixed
+- Dashboard CSP: `script-src` no longer carries `'unsafe-inline'` or
+  googletagmanager - the built bundle has no inline `<script>` and never
+  referenced GTM, so both were weakening the policy for nothing. `style-src` and
+  `font-src` gained the Google Fonts origins the built `index.html` actually
+  loads from; the policy had been blocking them, and the browser fell back to the
+  bundled `.woff2` copies quietly enough that nobody noticed.
+- `mcp` is capped below 2.0. mcp 2.x removed `mcp.server.fastmcp`, which
+  `mcp_server.py` imports, so a clean install resolved to a version the code
+  cannot run against.
+
 ## [0.43.1] - 2026-07-22 - "First Impressions"
 
 ### Changed
