@@ -482,7 +482,14 @@
     @media (prefers-reduced-motion: reduce){
       .reveal{ opacity:1 !important; transform:none !important; transition:none !important; }
     }
-  </style>
+  
+      .foot-maker{
+        margin-top:12px; font-size:13px; line-height:1.55;
+        color:var(--muted, #6b6b6b); max-width:52ch;
+      }
+      .foot-maker a{ color:inherit; text-decoration:underline; text-underline-offset:2px; }
+      .foot-maker a:hover{ color:var(--amber-ink, #8a5a1a); }
+</style>
 </head>
 <body>
 
@@ -1020,6 +1027,7 @@
         <div class="foot-brand">
           <div class="b">🏰 Sandcastle</div>
           <p>A source-available workflow orchestrator for AI agents. Build anything, on any model, anywhere — your rules. European-built.</p>
+          <p class="foot-maker">Built and maintained by <a href="https://github.com/gizmax" rel="author noopener">Tomas Pflanzer</a>, solo, in Europe — <a href="mailto:hello@sandcastle-ai.eu">hello@sandcastle-ai.eu</a>. Five months old and shipping weekly; the <a href="/whatsnew/">release log</a> is the whole record.</p>
         </div>
         <div class="foot-col">
           <h4>Product</h4>

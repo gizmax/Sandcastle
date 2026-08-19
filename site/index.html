@@ -32,68 +32,74 @@
 
   <!-- Structured data -->
   <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@graph": [
-      {
-        "@type": "Organization",
-        "@id": "https://sandcastle-ai.eu/#organization",
-        "name": "Sandcastle",
-        "url": "https://sandcastle-ai.eu/",
-        "logo": "https://sandcastle-ai.eu/og-image.jpeg",
-        "email": "hello@sandcastle-ai.eu",
-        "founder": {
-          "@type": "Person",
-          "name": "Tomas Pflanzer"
-        },
-        "sameAs": [
-          "https://github.com/gizmax/Sandcastle",
-          "https://pypi.org/project/sandcastle-ai/"
-        ]
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://sandcastle-ai.eu/#organization",
+      "name": "Sandcastle",
+      "url": "https://sandcastle-ai.eu/",
+      "logo": "https://sandcastle-ai.eu/og-image.jpeg",
+      "email": "hello@sandcastle-ai.eu",
+      "founder": {
+        "@type": "Person",
+        "name": "Tomas Pflanzer",
+        "url": "https://github.com/gizmax"
       },
-      {
-        "@type": "WebSite",
-        "@id": "https://sandcastle-ai.eu/#website",
-        "url": "https://sandcastle-ai.eu/",
-        "name": "Sandcastle",
-        "description": "Source-available AI workflow orchestrator: define agent workflows in one YAML file, run them on any model, self-host anywhere.",
-        "publisher": { "@id": "https://sandcastle-ai.eu/#organization" },
-        "inLanguage": "en"
+      "sameAs": [
+        "https://github.com/gizmax/Sandcastle",
+        "https://pypi.org/project/sandcastle-ai/"
+      ],
+      "description": "European-built, source-available workflow orchestrator for AI agents, designed for self-hosting and EU data residency."
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://sandcastle-ai.eu/#website",
+      "url": "https://sandcastle-ai.eu/",
+      "name": "Sandcastle",
+      "description": "Source-available AI workflow orchestrator: define agent workflows in one YAML file, run them on any model, self-host anywhere.",
+      "publisher": {
+        "@id": "https://sandcastle-ai.eu/#organization"
       },
-      {
-        "@type": "SoftwareApplication",
-        "@id": "https://sandcastle-ai.eu/#software",
-        "name": "Sandcastle",
-        "url": "https://sandcastle-ai.eu/",
-        "applicationCategory": "DeveloperApplication",
-        "applicationSubCategory": "AI workflow orchestration",
-        "operatingSystem": "Linux, macOS, Windows",
-        "softwareVersion": "0.44.0",
-        "downloadUrl": "https://pypi.org/project/sandcastle-ai/",
-        "installUrl": "https://pypi.org/project/sandcastle-ai/",
-        "codeRepository": "https://github.com/gizmax/Sandcastle",
-        "programmingLanguage": "Python",
-        "license": "https://github.com/gizmax/Sandcastle/blob/main/LICENSE",
-        "description": "Sandcastle is a source-available orchestrator for AI agent workflows. A workflow is defined in a single YAML file, runs on any model provider (cloud or local), and can be self-hosted on your own infrastructure with EU data residency.",
-        "featureList": [
-          "25 step types including parallel fan-out, conditions, loops, gates and deterministic zero-cost steps",
-          "64 tool integrations",
-          "Runs on any model provider, cloud or local",
-          "Self-hostable with EU data residency",
-          "Tamper-evident audit trail for EU AI Act documentation"
-        ],
-        "publisher": { "@id": "https://sandcastle-ai.eu/#organization" },
-        "offers": {
-          "@type": "Offer",
-          "price": "0",
-          "priceCurrency": "EUR",
-          "description": "Free for development, testing and personal projects under BSL 1.1",
-          "url": "https://sandcastle-ai.eu/pricing/"
-        }
+      "inLanguage": "en"
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://sandcastle-ai.eu/#software",
+      "name": "Sandcastle",
+      "url": "https://sandcastle-ai.eu/",
+      "applicationCategory": "DeveloperApplication",
+      "applicationSubCategory": "AI workflow orchestration",
+      "operatingSystem": "Linux, macOS, Windows",
+      "softwareVersion": "0.44.0",
+      "downloadUrl": "https://pypi.org/project/sandcastle-ai/",
+      "installUrl": "https://pypi.org/project/sandcastle-ai/",
+      "codeRepository": "https://github.com/gizmax/Sandcastle",
+      "programmingLanguage": "Python",
+      "license": "https://github.com/gizmax/Sandcastle/blob/main/LICENSE",
+      "description": "Sandcastle is a source-available orchestrator for AI agent workflows. A workflow is defined in a single YAML file, runs on any model provider (cloud or local), and can be self-hosted on your own infrastructure with EU data residency.",
+      "featureList": [
+        "25 step types including parallel fan-out, conditions, loops, gates and deterministic zero-cost steps",
+        "64 tool integrations",
+        "Runs on any model provider, cloud or local",
+        "Self-hostable with EU data residency",
+        "Tamper-evident audit trail for EU AI Act documentation"
+      ],
+      "publisher": {
+        "@id": "https://sandcastle-ai.eu/#organization"
+      },
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "EUR",
+        "description": "Free for development, testing and personal projects under BSL 1.1",
+        "url": "https://sandcastle-ai.eu/pricing/"
       }
-    ]
-  }
-  </script>
+    }
+  ]
+}
+</script>
 
   <!-- Google Analytics -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-ZN1K4G2TCZ"></script>
@@ -680,7 +686,14 @@
     @media (max-width:520px){
       .install-line{ white-space:normal; }
     }
-  </style>
+  
+      .foot-maker{
+        margin-top:12px; font-size:13px; line-height:1.55;
+        color:var(--muted, #6b6b6b); max-width:52ch;
+      }
+      .foot-maker a{ color:inherit; text-decoration:underline; text-underline-offset:2px; }
+      .foot-maker a:hover{ color:var(--amber-ink, #8a5a1a); }
+</style>
 </head>
 <body>
 
@@ -902,12 +915,12 @@
     <section class="colophon" aria-labelledby="specs">
       <div class="wrap">
         <span class="mono lab">The specifics — for the record</span>
-        <h2 id="specs">No feature gates. One version. Every line above ships free.</h2>
+        <h2 id="specs">No feature gates. One version. Every line above ships in Community — <a href="/pricing/">production use needs a licence</a>.</h2>
         <div class="spec-grid">
           <div class="spec-cell"><div class="s-num">7</div><div class="s-lab">Model providers — Claude, GPT, Gemini, Mistral, MiniMax, OpenRouter, local</div></div>
-          <div class="spec-cell"><div class="s-num">531</div><div class="s-lab">Workflow templates — 248 built-in + 283 community, one-click install</div></div>
+          <div class="spec-cell"><div class="s-num">531</div><div class="s-lab">Workflow templates — 248 built into the core plus <a href="/hub/">283 in the community Hub</a>, one-click install</div></div>
           <div class="spec-cell"><div class="s-num">25</div><div class="s-lab">Step types — mix AI with deterministic $0 steps</div></div>
-          <div class="spec-cell"><div class="s-num">$<span class="unit">0</span></div><div class="s-lab">Local steps cost nothing — http, code, condition, transform, notify</div></div>
+          <div class="spec-cell"><div class="s-num">$<span class="unit">0</span></div><div class="s-lab">Local steps cost nothing to run — http, code, condition, transform, notify. The licence is separate.</div></div>
           <div class="spec-cell"><div class="s-num">100<span class="unit">%</span></div><div class="s-lab">Record &amp; replay — every run captured for audit and re-runs</div></div>
           <div class="spec-cell"><div class="s-num">EU</div><div class="s-lab">Data residency — built for the EU AI Act era, audit-ready trail</div></div>
           <div class="spec-cell"><div class="s-num">Hard</div><div class="s-lab">Budget cap per run — warns at 80%, stops at 100%, split across parallel branches</div></div>
@@ -952,6 +965,7 @@
         <div class="foot-brand">
           <div class="b">🏰 Sandcastle</div>
           <p>A source-available workflow orchestrator for AI agents. Build anything, on any model, anywhere — your rules. European-built.</p>
+          <p class="foot-maker">Built and maintained by <a href="https://github.com/gizmax" rel="author noopener">Tomas Pflanzer</a>, solo, in Europe — <a href="mailto:hello@sandcastle-ai.eu">hello@sandcastle-ai.eu</a>. Five months old and shipping weekly; the <a href="/whatsnew/">release log</a> is the whole record.</p>
         </div>
         <div class="foot-col">
           <h4>Product</h4>

@@ -33,51 +33,136 @@
   <!-- Structured data -->
   <script type="application/ld+json">
   {
-    "@context": "https://schema.org",
-    "@graph": [
-      {
-        "@type": "BreadcrumbList",
-        "@id": "https://sandcastle-ai.eu/compare/#breadcrumb",
-        "itemListElement": [
-          { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://sandcastle-ai.eu/" },
-          { "@type": "ListItem", "position": 2, "name": "Compare", "item": "https://sandcastle-ai.eu/compare/" }
-        ]
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "BreadcrumbList",
+      "@id": "https://sandcastle-ai.eu/compare/#breadcrumb",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://sandcastle-ai.eu/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Compare",
+          "item": "https://sandcastle-ai.eu/compare/"
+        }
+      ]
+    },
+    {
+      "@type": "WebPage",
+      "@id": "https://sandcastle-ai.eu/compare/#webpage",
+      "url": "https://sandcastle-ai.eu/compare/",
+      "name": "Sandcastle vs LangGraph, n8n, Temporal & Dify",
+      "description": "Honest comparison of AI workflow orchestrators, including the cases where Sandcastle is the wrong answer.",
+      "inLanguage": "en",
+      "datePublished": "2026-08-17",
+      "dateModified": "2026-08-19",
+      "isPartOf": {
+        "@id": "https://sandcastle-ai.eu/#website"
       },
-      {
-        "@type": "WebPage",
-        "@id": "https://sandcastle-ai.eu/compare/#webpage",
-        "url": "https://sandcastle-ai.eu/compare/",
-        "name": "Sandcastle vs LangGraph, n8n, Temporal & Dify",
-        "description": "Honest comparison of AI workflow orchestrators, including the cases where Sandcastle is the wrong answer.",
-        "inLanguage": "en",
-        "datePublished": "2026-08-17",
-        "dateModified": "2026-08-19",
-        "isPartOf": { "@id": "https://sandcastle-ai.eu/#website" },
-        "about": { "@id": "https://sandcastle-ai.eu/#software" },
-        "publisher": { "@id": "https://sandcastle-ai.eu/#organization" },
-        "breadcrumb": { "@id": "https://sandcastle-ai.eu/compare/#breadcrumb" }
+      "about": {
+        "@id": "https://sandcastle-ai.eu/#software"
       },
-      {
-        "@type": "FAQPage",
-        "@id": "https://sandcastle-ai.eu/compare/#faq",
-        "isPartOf": { "@id": "https://sandcastle-ai.eu/compare/#webpage" },
-        "mainEntity": [
-          { "@type": "Question", "name": "Is Sandcastle open source?",
-            "acceptedAnswer": { "@type": "Answer", "text": "The source is public and you can read, fork and modify it, but BSL 1.1 is not an OSI-approved open source licence - source-available is the accurate term. It converts to Apache 2.0 on 24 February 2030." } },
-          { "@type": "Question", "name": "Can I replace LangGraph with Sandcastle?",
-            "acceptedAnswer": { "@type": "Answer", "text": "Only if your graph is fixed. LangGraph exists so a model can pick its own route through a problem; Sandcastle runs a route you defined. Workflows with known steps port over well. Open-ended agent loops do not." } },
-          { "@type": "Question", "name": "What happens if the server dies mid-run?",
-            "acceptedAnswer": { "@type": "Answer", "text": "The run is marked failed and you decide what to do - replay it from any completed step, or fork it with different inputs. It is not resumed automatically. If you need automatic resumption across failures, Temporal is built for exactly that." } },
-          { "@type": "Question", "name": "How does this compare to n8n on integrations?",
-            "acceptedAnswer": { "@type": "Answer", "text": "It does not. Sandcastle ships 64 connectors covering 229 operations; n8n's catalogue is far larger. Sandcastle's argument is the workflow format, cost control and residency - not catalogue size." } },
-          { "@type": "Question", "name": "Who is behind Sandcastle and how big is the project?",
-            "acceptedAnswer": { "@type": "Answer", "text": "It is a young project - five months old at the time of writing, with one main author and a small contributor base. If your procurement process weighs bus factor and community size, weigh them honestly here." } },
-          { "@type": "Question", "name": "Do I have to use cloud models?",
-            "acceptedAnswer": { "@type": "Answer", "text": "No. Local inference through ollama, vLLM and MLX is a first-class path in the runtime, and workflows run with no cloud API key present at all." } }
-        ]
+      "publisher": {
+        "@id": "https://sandcastle-ai.eu/#organization"
+      },
+      "breadcrumb": {
+        "@id": "https://sandcastle-ai.eu/compare/#breadcrumb"
       }
-    ]
-  }
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "https://sandcastle-ai.eu/compare/#faq",
+      "isPartOf": {
+        "@id": "https://sandcastle-ai.eu/compare/#webpage"
+      },
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Is Sandcastle open source?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "The source is public and you can read, fork and modify it, but BSL 1.1 is not an OSI-approved open source licence - source-available is the accurate term. It converts to Apache 2.0 on 24 February 2030."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Can I replace LangGraph with Sandcastle?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Only if your graph is fixed. LangGraph exists so a model can pick its own route through a problem; Sandcastle runs a route you defined. Workflows with known steps port over well. Open-ended agent loops do not."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What happens if the server dies mid-run?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "The run is marked failed and you decide what to do - replay it from any completed step, or fork it with different inputs. It is not resumed automatically. If you need automatic resumption across failures, Temporal is built for exactly that."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How does this compare to n8n on integrations?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "It does not. Sandcastle ships 64 connectors covering 229 operations; n8n's catalogue is far larger. Sandcastle's argument is the workflow format, cost control and residency - not catalogue size."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Who is behind Sandcastle and how big is the project?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "It is a young project - five months old at the time of writing, with one main author and a small contributor base. If your procurement process weighs bus factor and community size, weigh them honestly here."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Do I have to use cloud models?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "No. Local inference through ollama, vLLM and MLX is a first-class path in the runtime, and workflows run with no cloud API key present at all."
+          }
+        }
+      ]
+    },
+    {
+      "@type": "TechArticle",
+      "@id": "https://sandcastle-ai.eu/compare/#article",
+      "headline": "Sandcastle vs LangGraph, n8n, Temporal & Dify",
+      "description": "Honest comparison of AI workflow orchestrators, including the cases where Sandcastle is the wrong answer.",
+      "image": {
+        "@type": "ImageObject",
+        "url": "https://sandcastle-ai.eu/og-image.jpeg",
+        "width": 1280,
+        "height": 720
+      },
+      "datePublished": "2026-08-17",
+      "dateModified": "2026-08-19",
+      "inLanguage": "en",
+      "author": {
+        "@type": "Person",
+        "name": "Tomas Pflanzer",
+        "url": "https://github.com/gizmax"
+      },
+      "publisher": {
+        "@id": "https://sandcastle-ai.eu/#organization"
+      },
+      "mainEntityOfPage": {
+        "@id": "https://sandcastle-ai.eu/compare/#webpage"
+      },
+      "isPartOf": {
+        "@id": "https://sandcastle-ai.eu/#website"
+      }
+    }
+  ]
+}
   </script>
 
   <!-- Google Analytics -->
@@ -671,7 +756,14 @@
     }
     .closer-note a{ color:var(--amber); text-underline-offset:3px; }
 
-  </style>
+  
+      .foot-maker{
+        margin-top:12px; font-size:13px; line-height:1.55;
+        color:var(--muted, #6b6b6b); max-width:52ch;
+      }
+      .foot-maker a{ color:inherit; text-decoration:underline; text-underline-offset:2px; }
+      .foot-maker a:hover{ color:var(--amber-ink, #8a5a1a); }
+</style>
 
   <!-- =========================== MASTHEAD =========================== -->
   <header class="masthead">
@@ -909,7 +1001,7 @@
 
         <div class="else-list">
           <article class="else-item">
-            <h3>The run must never lose state</h3>
+            <h3 id="when-the-run-must-never-lose-state">The run must never lose state</h3>
             <p>
               <strong>Choose Temporal.</strong> Its event history replays a workflow back to the
               exact line it was executing, across process and machine failures. Sandcastle
@@ -921,7 +1013,7 @@
           </article>
 
           <article class="else-item">
-            <h3>The model should choose its own path</h3>
+            <h3 id="when-the-model-should-choose-its-own-path">The model should choose its own path</h3>
             <p>
               <strong>Choose LangGraph or CrewAI.</strong> Sandcastle has an agent step and a
               delegate step, but the graph is something you wrote down in advance. If the
@@ -932,7 +1024,7 @@
           </article>
 
           <article class="else-item">
-            <h3>The AI part sits inside a bigger data pipeline</h3>
+            <h3 id="when-the-ai-part-sits-inside-a-bigger-data-pipeline">The AI part sits inside a bigger data pipeline</h3>
             <p>
               <strong>Choose Airflow.</strong> If the LLM call happens between a warehouse
               extract and a load, splitting that across two orchestrators is a permanent tax
@@ -944,7 +1036,7 @@
           </article>
 
           <article class="else-item">
-            <h3>The people building workflows don't write code</h3>
+            <h3 id="when-the-people-building-workflows-don-t-write-code">The people building workflows don't write code</h3>
             <p>
               <strong>Choose n8n or Dify.</strong> A YAML file is a developer artefact. If your
               ops or marketing team needs to build and change automations themselves, a canvas
@@ -955,7 +1047,7 @@
           </article>
 
           <article class="else-item">
-            <h3>You need OSI-approved open source today</h3>
+            <h3 id="when-you-need-osi-approved-open-source-today">You need OSI-approved open source today</h3>
             <p>
               <strong>Choose Temporal, Airflow or Prefect.</strong> Sandcastle's source is
               published and auditable, but BSL 1.1 permits non-production use only until it
@@ -966,7 +1058,7 @@
           </article>
 
           <article class="else-item">
-            <h3>You are a Go, Java or .NET shop</h3>
+            <h3 id="when-you-are-a-go-java-or-net-shop">You are a Go, Java or .NET shop</h3>
             <p>
               <strong>Choose Temporal.</strong> Sandcastle is Python. Temporal has seven
               official SDKs, so your existing services keep their language.
@@ -1185,6 +1277,7 @@
         <div class="foot-brand">
           <div class="b">🏰 Sandcastle</div>
           <p>A source-available workflow orchestrator for AI agents. Build anything, on any model, anywhere — your rules. European-built.</p>
+          <p class="foot-maker">Built and maintained by <a href="https://github.com/gizmax" rel="author noopener">Tomas Pflanzer</a>, solo, in Europe — <a href="mailto:hello@sandcastle-ai.eu">hello@sandcastle-ai.eu</a>. Five months old and shipping weekly; the <a href="/whatsnew/">release log</a> is the whole record.</p>
         </div>
         <div class="foot-col">
           <h4>Product</h4>
