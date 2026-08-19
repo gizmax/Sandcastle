@@ -48,6 +48,25 @@ jobs:
           fi
           bash scripts/deploy-site.sh
 
+      - name: Verify the security headers survived
+        run: |
+          set -uo pipefail
+          fail=0
+          hdrs=$(curl -sSI --connect-timeout 15 --max-time 45 https://sandcastle-ai.eu/)
+          for h in "x-content-type-options" "referrer-policy" "strict-transport-security" "x-frame-options"; do
+            if ! grep -qi "^$h:" <<<"$hdrs"; then
+              echo "::error::missing header $h - .htaccess may not have uploaded"
+              fail=1
+            fi
+          done
+          grep -qi "^content-type:.*charset" <<<"$hdrs" || {
+            echo "::error::Content-Type lost its charset"; fail=1; }
+          # www must collapse to the apex in a single hop
+          code=$(curl -s -o /dev/null --connect-timeout 15 --max-time 45 -w '%{http_code}' https://www.sandcastle-ai.eu/)
+          [ "$code" = "301" ] || { echo "::error::www returned $code, expected 301"; fail=1; }
+          [ $fail -eq 0 ] && echo "headers, charset and the www redirect are all in place"
+          exit $fail
+
       - name: Verify the live site
         if: github.event_name == 'push' || inputs.dry_run != true
         run: |
