@@ -204,6 +204,13 @@
     nav.primary a.cta:hover{ background:var(--ink); color:var(--paper); }
     @media (max-width:780px){
       nav.primary a.muted{ display:none; }
+
+        /* The current-page link stays visible on mobile while the rest hide,
+           so the header's width depends on that page's name. "What's New" plus
+           the CTA came to 428px on a 390px screen. The H1 already says which
+           page this is, so hide it too - and no future page name can reintroduce
+           the overflow. */
+        nav.primary a[aria-current="page"]{ display:none; }
     }
 
     /* ============================================================
@@ -489,6 +496,19 @@
       }
       .foot-maker a{ color:inherit; text-decoration:underline; text-underline-offset:2px; }
       .foot-maker a:hover{ color:var(--amber-ink, #8a5a1a); }
+
+      /* Long header names like `Referrer-Policy: strict-origin-when-cross-origin`
+         are one unbreakable token in a monospace face; at 390px that single
+         string pushed the card, and the page, 22px wide. Let them break rather
+         than widen the document - the grid already uses minmax(0,...), so this
+         was the only thing left refusing to shrink. */
+      .m-list code, .m-body code{
+        /* white-space:nowrap is inherited from the shared code style and beats
+           any wrapping rule, which is why overflow-wrap alone did nothing here.
+           Resetting it is the load-bearing part. */
+        white-space:normal;
+        overflow-wrap:anywhere; word-break:break-word;
+      }
 </style>
 </head>
 <body>

@@ -205,6 +205,13 @@
     nav.primary a.cta:hover{ background:var(--ink); color:var(--paper); }
     @media (max-width:780px){
       nav.primary a.muted{ display:none; }
+
+        /* The current-page link stays visible on mobile while the rest hide,
+           so the header's width depends on that page's name. "What's New" plus
+           the CTA came to 428px on a 390px screen. The H1 already says which
+           page this is, so hide it too - and no future page name can reintroduce
+           the overflow. */
+        nav.primary a[aria-current="page"]{ display:none; }
     }
 
     /* ============================================================
