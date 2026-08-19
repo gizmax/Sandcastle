@@ -431,7 +431,7 @@ class TestGateMultipleStrategies:
         context = make_ctx(run_id=run_id)
 
         result = await _execute_gate_step(gate_step, context, MagicMock())
-        assert result.status == "completed"
+        assert result.status == "failed"
         assert result.output["decision"] == "rejected"
         assert result.output["strategy"] == "timeout"
 

@@ -380,6 +380,8 @@ steps:
     type: gate
     depends_on: [build_cancel_set]
     gate_config:
+      # Advisory: rejection also fires when in_band_count is 0 (nothing worth cancelling this month) - a normal outcome; the audit summary must still post.
+      fail_on_reject: false
       strategies:
         - type: human
           config:

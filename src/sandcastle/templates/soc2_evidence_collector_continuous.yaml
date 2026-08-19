@@ -311,6 +311,8 @@ steps:
   - id: sufficiency_gate
     type: gate
     gate_config:
+      # Advisory: per-control. Rejection means 'this control's evidence has a gap' - routed to needs_human_branch and counted in coverage_pct; the sweep must continue.
+      fail_on_reject: false
       strategies:
         - type: llm_eval
           config:

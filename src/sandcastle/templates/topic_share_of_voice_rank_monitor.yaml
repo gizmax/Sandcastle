@@ -467,6 +467,8 @@ steps:
   - id: materiality_gate
     type: gate
     gate_config:
+      # Advisory: per-keyword. Rejection means 'normal SERP churn, not a real overtake' - the normal case; the sweep must continue to notify_clean.
+      fail_on_reject: false
       strategies:
         - type: llm_eval
           config:

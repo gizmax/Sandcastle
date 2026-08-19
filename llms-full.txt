@@ -71,7 +71,10 @@ Every step has `id`, `type`, optional `depends_on: [...]`, optional `model:`, op
   model: haiku, branches: { a: [ids], b: [ids] } }`.
 - gate: `gate_config: { strategies: [ { type: llm_eval, config: { prompt, input:
   "{steps.X.output}", model } }, { type: human, config: { message, timeout_hours,
-  on_timeout: abort } } ] }`. ALL strategies must pass. Only `llm_eval` / `human` /
+  on_timeout: abort } } ] }`. ALL strategies must pass; the first rejection
+  short-circuits and FAILS the step, stopping the run. Set `fail_on_reject: false`
+  for the legacy advisory behavior, where the verdict is reported in
+  `output.decision` and the workflow continues. Only `llm_eval` / `human` /
   `timeout` exist (no quorum). A two-judge gate = two `llm_eval` strategies on different
   `model:`.
 - condition: `condition_config: { expression: "{steps.X.output.fail_count} > 0",

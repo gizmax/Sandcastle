@@ -23,6 +23,7 @@ from simpleeval import simple_eval
 
 from sandcastle.engine.dag import (
     ExecutionPlan,
+    GateConfig,
     ManagedAgentConfig,
     StepDefinition,
     ToolConfig,
@@ -6785,6 +6786,49 @@ async def _execute_sensor_step(
         )
 
 
+def _gate_rejection(
+    step: StepDefinition,
+    cfg: GateConfig,
+    *,
+    output: dict,
+    reason: str,
+    strategy: str,
+    total_cost: float,
+    duration: float,
+) -> StepResult:
+    """Build the StepResult for a gate whose strategy rejected.
+
+    A gate that reports "rejected" and lets the run continue is not a gate.
+    Rejection fails the step by default so the workflow stops.
+
+    The verdict is kept on the StepResult and restated in .error, because a
+    failed step's output is not published into run.outputs - an operator
+    reading back a stopped run sees the reason in the error, not under
+    {steps.gate.decision}.  Workflows that genuinely want to branch on a
+    verdict should set fail_on_reject: false and read the output as before.
+
+    retryable is False because re-running the judge until it says yes would
+    turn a guard rail into a dice roll.
+    """
+    if not cfg.fail_on_reject:
+        return StepResult(
+            step_id=step.id,
+            output=output,
+            cost_usd=total_cost,
+            duration_seconds=duration,
+            status="completed",
+        )
+    return StepResult(
+        step_id=step.id,
+        output=output,
+        cost_usd=total_cost,
+        duration_seconds=duration,
+        status="failed",
+        error=f"Gate rejected by {strategy} strategy: {reason}",
+        retryable=False,
+    )
+
+
 async def _execute_gate_step(
     step: StepDefinition,
     context: RunContext,
@@ -6878,16 +6922,18 @@ async def _execute_gate_step(
                 if not approved:
                     # Immediate rejection - no need to check further strategies
                     duration = time.monotonic() - started_at
-                    return StepResult(
-                        step_id=step.id,
+                    return _gate_rejection(
+                        step,
+                        cfg,
                         output={
                             "decision": "rejected",
                             "reason": llm_response,
                             "strategy": "llm_eval",
                         },
-                        cost_usd=total_cost,
-                        duration_seconds=duration,
-                        status="completed",
+                        reason=llm_response,
+                        strategy="llm_eval",
+                        total_cost=total_cost,
+                        duration=duration,
                     )
 
                 strategy_results.append({
@@ -6942,16 +6988,19 @@ async def _execute_gate_step(
                 if action != "approve":
                     # Immediate rejection
                     duration = time.monotonic() - started_at
-                    return StepResult(
-                        step_id=step.id,
+                    reason = f"Auto-{action} after {delay}s timeout"
+                    return _gate_rejection(
+                        step,
+                        cfg,
                         output={
                             "decision": "rejected",
-                            "reason": f"Auto-{action} after {delay}s timeout",
+                            "reason": reason,
                             "strategy": "timeout",
                         },
-                        cost_usd=total_cost,
-                        duration_seconds=duration,
-                        status="completed",
+                        reason=reason,
+                        strategy="timeout",
+                        total_cost=total_cost,
+                        duration=duration,
                     )
 
                 strategy_results.append({

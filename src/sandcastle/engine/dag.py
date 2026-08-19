@@ -244,6 +244,10 @@ class GateConfig:
     strategies: list[dict] = field(
         default_factory=list
     )  # [{type: "llm_eval"|"human"|"timeout", config: {...}}]
+    # A rejected gate fails the step, so the workflow stops instead of walking
+    # past its own guard rail.  Set False to keep the legacy advisory behavior,
+    # where the rejection lands in output.decision and nothing acts on it.
+    fail_on_reject: bool = True
 
 
 @dataclass
@@ -1228,6 +1232,7 @@ def _parse_gate_config(data: dict | None) -> GateConfig | None:
         return None
     return GateConfig(
         strategies=data.get("strategies", []),
+        fail_on_reject=bool(data.get("fail_on_reject", True)),
     )
 
 

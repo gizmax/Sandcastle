@@ -434,6 +434,8 @@ steps:
     type: gate
     depends_on: [route_band]
     gate_config:
+      # Advisory: decide_review_outcome reads output.decision and review_branch routes a rejection to tag_reviewed_distinct. 'Keep the records separate' is a normal steward decision.
+      fail_on_reject: false
       strategies:
         - type: human
           config:

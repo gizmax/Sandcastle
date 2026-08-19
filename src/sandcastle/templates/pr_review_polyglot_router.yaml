@@ -298,6 +298,8 @@ steps:
     type: gate
     depends_on: ["secrets_scan", "review_chunks"]
     gate_config:
+      # Advisory: rejection means 'this PR has secrets or a critical finding' - the case the workflow exists to REPORT, via decide_action -> post_blocking_review.
+      fail_on_reject: false
       strategies:
         - type: llm_eval
           config:

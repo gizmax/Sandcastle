@@ -359,6 +359,8 @@ steps:
     type: gate
     depends_on: [merge_verdicts]
     gate_config:
+      # Advisory: BLOCKING is this guardrail's normal output. final_decision, the bounded repair_loop, the audit_log and notify_block only run if the workflow continues.
+      fail_on_reject: false
       strategies:
         - type: llm_eval
           config:

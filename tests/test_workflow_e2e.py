@@ -770,10 +770,12 @@ steps:
             action: reject
 """
         result, _ = await _run_workflow(yaml)
-        assert result.status == "completed"
-        gate_output = result.outputs.get("gate")
-        assert gate_output is not None
-        assert gate_output["decision"] == "rejected"
+        # The run must NOT complete: a gate that rejects and lets the workflow
+        # carry on is the bug this asserts against.  A failed step publishes no
+        # output onto the run, so the verdict is checked in the error instead.
+        assert result.status == "failed"
+        assert result.outputs.get("gate") is None
+        assert "Gate rejected" in (result.error or "")
 
 
 # ──────────────────────────────────────────────────────────────
