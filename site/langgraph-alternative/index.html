@@ -3,28 +3,28 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sandcastle vs LangGraph, n8n, Temporal &amp; Dify</title>
-  <meta name="description" content="Honest comparison of AI workflow orchestrators: Sandcastle vs LangGraph, n8n, Temporal, Airflow and Dify - including when to pick something else.">
+  <title>LangGraph alternative for teams that already run LangGraph — Sandcastle</title>
+  <meta name="description" content="LangGraph runs the agent loop. Schedules, budget ceilings, retries, cost per step and an audit trail are yours to build. What Sandcastle adds around it - and four cases where you should stay exactly where you are.">
   <meta name="keywords" content="Sandcastle vs LangGraph, Sandcastle vs n8n, AI workflow orchestrator comparison, LangGraph alternative, n8n alternative, self-hosted AI orchestration">
   <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
   <meta name="author" content="Tomas Pflanzer">
-  <link rel="canonical" href="https://sandcastle-ai.eu/compare/">
+  <link rel="canonical" href="https://sandcastle-ai.eu/langgraph-alternative/">
   <link rel="alternate" hreflang="en" href="https://sandcastle-ai.eu/compare/">
   <link rel="alternate" hreflang="x-default" href="https://sandcastle-ai.eu/compare/">
 
   <!-- Open Graph -->
-  <meta property="og:title" content="Sandcastle vs LangGraph, n8n, Temporal &amp; Dify">
-  <meta property="og:description" content="Nine tools, three different jobs. An honest comparison of AI workflow orchestrators - including the cases where Sandcastle is the wrong answer.">
+  <meta property="og:title" content="LangGraph alternative for teams that already run LangGraph — Sandcastle">
+  <meta property="og:description" content="LangGraph runs the agent loop. Schedules, budget ceilings, retries, cost per step and an audit trail are yours to build. What Sandcastle adds around it - and four cases where you should stay exactly where you are.">
   <meta property="og:image" content="https://sandcastle-ai.eu/og-image.jpeg">
-  <meta property="og:url" content="https://sandcastle-ai.eu/compare/">
+  <meta property="og:url" content="https://sandcastle-ai.eu/langgraph-alternative/">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Sandcastle">
   <meta property="og:locale" content="en_US">
 
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Sandcastle vs LangGraph, n8n, Temporal &amp; Dify">
-  <meta name="twitter:description" content="Nine tools, three different jobs. An honest comparison - including when to pick something else.">
+  <meta name="twitter:title" content="LangGraph alternative for teams that already run LangGraph — Sandcastle">
+  <meta name="twitter:description" content="LangGraph runs the agent loop. Schedules, budget ceilings, retries, cost per step and an audit trail are yours to build. What Sandcastle adds around it - and four cases where you should stay exactly where you are.">
   <meta name="twitter:image" content="https://sandcastle-ai.eu/og-image.jpeg">
   <meta name="twitter:creator" content="@iuditg">
 
@@ -32,12 +32,12 @@
 
   <!-- Structured data -->
   <script type="application/ld+json">
-  {
+{
   "@context": "https://schema.org",
   "@graph": [
     {
       "@type": "BreadcrumbList",
-      "@id": "https://sandcastle-ai.eu/compare/#breadcrumb",
+      "@id": "https://sandcastle-ai.eu/langgraph-alternative/#breadcrumb",
       "itemListElement": [
         {
           "@type": "ListItem",
@@ -48,102 +48,39 @@
         {
           "@type": "ListItem",
           "position": 2,
-          "name": "Compare",
-          "item": "https://sandcastle-ai.eu/compare/"
+          "name": "LangGraph alternative",
+          "item": "https://sandcastle-ai.eu/langgraph-alternative/"
         }
       ]
     },
     {
       "@type": "WebPage",
-      "@id": "https://sandcastle-ai.eu/compare/#webpage",
-      "url": "https://sandcastle-ai.eu/compare/",
-      "name": "Sandcastle vs LangGraph, n8n, Temporal & Dify",
-      "description": "Honest comparison of AI workflow orchestrators, including the cases where Sandcastle is the wrong answer.",
+      "@id": "https://sandcastle-ai.eu/langgraph-alternative/#webpage",
+      "url": "https://sandcastle-ai.eu/langgraph-alternative/",
+      "name": "LangGraph alternative for teams that already run LangGraph — Sandcastle",
+      "description": "LangGraph runs the agent loop. Schedules, budget ceilings, retries, cost per step and an audit trail are yours to build. What Sandcastle adds around it - and four cases where you should stay exactly where you are.",
       "inLanguage": "en",
-      "datePublished": "2026-08-17",
-      "dateModified": "2026-08-19",
       "isPartOf": {
         "@id": "https://sandcastle-ai.eu/#website"
       },
-      "about": {
-        "@id": "https://sandcastle-ai.eu/#software"
-      },
-      "publisher": {
-        "@id": "https://sandcastle-ai.eu/#organization"
-      },
       "breadcrumb": {
-        "@id": "https://sandcastle-ai.eu/compare/#breadcrumb"
-      }
-    },
-    {
-      "@type": "FAQPage",
-      "@id": "https://sandcastle-ai.eu/compare/#faq",
-      "isPartOf": {
-        "@id": "https://sandcastle-ai.eu/compare/#webpage"
+        "@id": "https://sandcastle-ai.eu/langgraph-alternative/#breadcrumb"
       },
-      "mainEntity": [
-        {
-          "@type": "Question",
-          "name": "Is Sandcastle open source?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "The source is public and you can read, fork and modify it, but BSL 1.1 is not an OSI-approved open source licence - source-available is the accurate term. It converts to Apache 2.0 on 24 February 2030."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "Can I replace LangGraph with Sandcastle?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "Only if your graph is fixed. LangGraph exists so a model can pick its own route through a problem; Sandcastle runs a route you defined. Workflows with known steps port over well. Open-ended agent loops do not."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "What happens if the server dies mid-run?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "The run is marked failed and you decide what to do - replay it from any completed step, or fork it with different inputs. It is not resumed automatically. If you need automatic resumption across failures, Temporal is built for exactly that."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "How does this compare to n8n on integrations?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "It does not. Sandcastle ships 64 connectors covering 229 operations; n8n's catalogue is far larger. Sandcastle's argument is the workflow format, cost control and residency - not catalogue size."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "Who is behind Sandcastle and how big is the project?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "It is a young project - five months old at the time of writing, with one main author and a small contributor base. If your procurement process weighs bus factor and community size, weigh them honestly here."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "Do I have to use cloud models?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "No. Local inference through ollama, vLLM and MLX is a first-class path in the runtime, and workflows run with no cloud API key present at all."
-          }
-        }
-      ]
+      "datePublished": "2026-08-19",
+      "dateModified": "2026-08-19"
     },
     {
       "@type": "TechArticle",
-      "@id": "https://sandcastle-ai.eu/compare/#article",
-      "headline": "Sandcastle vs LangGraph, n8n, Temporal & Dify",
-      "description": "Honest comparison of AI workflow orchestrators, including the cases where Sandcastle is the wrong answer.",
+      "@id": "https://sandcastle-ai.eu/langgraph-alternative/#article",
+      "headline": "LangGraph runs the agent. Something has to run the rest.",
+      "description": "LangGraph runs the agent loop. Schedules, budget ceilings, retries, cost per step and an audit trail are yours to build. What Sandcastle adds around it - and four cases where you should stay exactly where you are.",
       "image": {
         "@type": "ImageObject",
         "url": "https://sandcastle-ai.eu/og-image.jpeg",
         "width": 1280,
         "height": 720
       },
-      "datePublished": "2026-08-17",
+      "datePublished": "2026-08-19",
       "dateModified": "2026-08-19",
       "inLanguage": "en",
       "author": {
@@ -155,7 +92,7 @@
         "@id": "https://sandcastle-ai.eu/#organization"
       },
       "mainEntityOfPage": {
-        "@id": "https://sandcastle-ai.eu/compare/#webpage"
+        "@id": "https://sandcastle-ai.eu/langgraph-alternative/#webpage"
       },
       "isPartOf": {
         "@id": "https://sandcastle-ai.eu/#website"
@@ -163,61 +100,89 @@
     },
     {
       "@type": "ItemList",
-      "@id": "https://sandcastle-ai.eu/compare/#wrong-answer",
-      "name": "Cases where Sandcastle is the wrong answer",
-      "description": "Situations in which a competing tool is the better choice, stated by Sandcastle's own maintainers, each anchored to its own URL fragment.",
+      "@id": "https://sandcastle-ai.eu/langgraph-alternative/#gaps",
+      "name": "What LangGraph leaves to you",
+      "description": "Concerns that sit outside an agent framework and become the caller's problem.",
       "itemListOrder": "https://schema.org/ItemListUnordered",
-      "numberOfItems": 6,
+      "numberOfItems": 4,
       "isPartOf": {
-        "@id": "https://sandcastle-ai.eu/compare/#webpage"
+        "@id": "https://sandcastle-ai.eu/langgraph-alternative/#webpage"
       },
       "itemListElement": [
         {
           "@type": "ListItem",
           "position": 1,
-          "name": "The run must never lose state",
-          "url": "https://sandcastle-ai.eu/compare/#when-the-run-must-never-lose-state",
-          "description": "Choose Temporal. Its event history replays a workflow back to the exact line it was executing, across process and machine failures. Sandcastle persists each step to the database and can replay a run from any step, but a worker that dies mid-step marks the run failed and a human decides what happens next. For payment flows or anything where a lost run means a lost customer, that gap matters."
+          "name": "You cannot answer what a run cost",
+          "url": "https://sandcastle-ai.eu/langgraph-alternative/#bite-cost",
+          "description": "Token accounting is not in the framework. Teams reach for LangSmith, which bills per trace &mdash; so observability becomes a line item that scales with usage, and the numbers live in someone else's system. Sandcastle records tokens and cost per step in your own database, because it is the same system that ran the step."
         },
         {
           "@type": "ListItem",
           "position": 2,
-          "name": "The model should choose its own path",
-          "url": "https://sandcastle-ai.eu/compare/#when-the-model-should-choose-its-own-path",
-          "description": "Choose LangGraph or CrewAI. Sandcastle has an agent step and a delegate step, but the graph is something you wrote down in advance. If the value of your system is that the model decides the sequence — branching into research it wasn't told about, calling tools you didn't anticipate — a framework built for that will fight you less."
+          "name": "Nothing stops a loop that is spending",
+          "url": "https://sandcastle-ai.eu/langgraph-alternative/#bite-budget",
+          "description": "An agent that retries its way through a bad tool response can burn real money before anyone notices. There is no built-in ceiling; you write the guard. Sandcastle takes budget_limit_usd on the workflow and stops at it."
         },
         {
           "@type": "ListItem",
           "position": 3,
-          "name": "The AI part sits inside a bigger data pipeline",
-          "url": "https://sandcastle-ai.eu/compare/#when-the-ai-part-sits-inside-a-bigger-data-pipeline",
-          "description": "Choose Airflow. If the LLM call happens between a warehouse extract and a load, splitting that across two orchestrators is a permanent tax on your team. Airflow's official AI provider now offers @task.llm and @task.agent with step-level caching, plus human-in-the-loop operators. It's young — version 0.7.0, first released April 2026 — but it lives where your data already is."
+          "name": "The data leaves, and you have to prove it did not",
+          "url": "https://sandcastle-ai.eu/langgraph-alternative/#bite-residency",
+          "description": "Hosted tracing means prompts and outputs go somewhere else. For an EU team answering to the AI Act, &ldquo;we self-host the agent but ship the traces to a US SaaS&rdquo; is the awkward half of the sentence. Sandcastle runs on your hardware end to end, and the audit trail stays there with it."
         },
         {
           "@type": "ListItem",
           "position": 4,
-          "name": "The people building workflows don't write code",
-          "url": "https://sandcastle-ai.eu/compare/#when-the-people-building-workflows-don-t-write-code",
-          "description": "Choose n8n or Dify. A YAML file is a developer artefact. If your ops or marketing team needs to build and change automations themselves, a canvas they can see is worth more than a file your engineers can review. n8n's integration catalogue is also an order of magnitude larger than Sandcastle's 64 connectors."
+          "name": "The workflow is not reviewable",
+          "url": "https://sandcastle-ai.eu/langgraph-alternative/#bite-review",
+          "description": "A graph assembled in Python is code, and code review shows you a diff of the assembly, not of the behaviour. A YAML workflow diffs as what changed: this step, this model, this budget. That matters more the more people touch it."
+        }
+      ]
+    },
+    {
+      "@type": "ItemList",
+      "@id": "https://sandcastle-ai.eu/langgraph-alternative/#stay",
+      "name": "Cases where staying on LangGraph is the right call",
+      "description": "Situations in which Sandcastle is the wrong choice, stated by its own maintainers, each anchored to its own URL fragment.",
+      "itemListOrder": "https://schema.org/ItemListUnordered",
+      "numberOfItems": 4,
+      "isPartOf": {
+        "@id": "https://sandcastle-ai.eu/langgraph-alternative/#webpage"
+      },
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "The model must choose its own path",
+          "url": "https://sandcastle-ai.eu/langgraph-alternative/#stay-dynamic",
+          "description": "If the sequence genuinely cannot be written down &mdash; the agent decides at runtime what to do next, and that is the point &mdash; a declarative workflow is the wrong shape. Keep LangGraph. Sandcastle's agent step delegates to a model, but the workflow around it is still a graph you wrote."
         },
         {
           "@type": "ListItem",
-          "position": 5,
-          "name": "You need OSI-approved open source today",
-          "url": "https://sandcastle-ai.eu/compare/#when-you-need-osi-approved-open-source-today",
-          "description": "Choose Temporal, Airflow or Prefect. Sandcastle's source is published and auditable, but BSL 1.1 permits non-production use only until it converts to Apache 2.0 on 24 February 2030. If your policy requires a genuinely open licence for production right now, that is a hard blocker and no amount of goodwill changes it."
+          "position": 2,
+          "name": "Losing a run is unacceptable",
+          "url": "https://sandcastle-ai.eu/langgraph-alternative/#stay-state",
+          "description": "Sandcastle is not a durable execution engine. If the process dies mid-run, the run dies with it. When a workflow moves money or provisions infrastructure and must survive a crash exactly once, that is Temporal's job, not this one &mdash; and not LangGraph's either."
         },
         {
           "@type": "ListItem",
-          "position": 6,
-          "name": "You are a Go, Java or .NET shop",
-          "url": "https://sandcastle-ai.eu/compare/#when-you-are-a-go-java-or-net-shop",
-          "description": "Choose Temporal. Sandcastle is Python. Temporal has seven official SDKs, so your existing services keep their language."
+          "position": 3,
+          "name": "Your team wants to stay in Python",
+          "url": "https://sandcastle-ai.eu/langgraph-alternative/#stay-python",
+          "description": "Some teams simply prefer their orchestration in the same language and repository as everything else, with the full expressive power that gives them. That is a legitimate preference and no comparison table overturns it."
+        },
+        {
+          "@type": "ListItem",
+          "position": 4,
+          "name": "You need OSI-approved open source",
+          "url": "https://sandcastle-ai.eu/langgraph-alternative/#stay-osi",
+          "description": "LangGraph is MIT. Sandcastle is BSL 1.1 &mdash; source-available, free to read, modify and self-host, but production use needs a licence. If your policy requires an OSI licence today, that is a hard stop and no feature closes it."
         }
       ]
     }
   ]
 }
+    
   </script>
 
   <!-- Google Analytics -->
@@ -846,465 +811,273 @@
       <div class="wrap">
         <div class="kicker">
           <span class="tick" aria-hidden="true"></span>
-          <span class="mono">Compare / Where Sandcastle Fits</span>
+          <span class="mono">LangGraph / What Sits Around It</span>
         </div>
 
-        <h1 id="ph-title">Nine tools.<br><em>Three different jobs.</em></h1>
+        <h1 id="ph-title">LangGraph runs the agent.<br><em>Something has to run the rest.</em></h1>
 
         <div class="lede">
           <p>
-            &ldquo;AI orchestration&rdquo; covers three categories that solve different problems, and most
-            comparisons pretend otherwise. This page separates them, says plainly what
-            Sandcastle is good at, and names the cases where <strong>you should pick something
-            else</strong>. Every figure was verified from primary sources on 17&nbsp;August&nbsp;2026.
+            LangGraph is a good agent framework. If you are choosing one, that is not the
+            argument this page is having. The question this page answers is the one that
+            arrives <strong>six months later</strong>, when the agent works and the things
+            around it &mdash; schedules, budgets, retries, an audit trail, someone asking what
+            last Tuesday cost &mdash; turn out to be yours to build.
           </p>
           <div class="meta">
-            Verified&nbsp;··&nbsp;<b>2026-08-17</b><br>
-            Sources&nbsp;··&nbsp;<b>Official docs, GitHub, pricing pages</b><br>
-            Method&nbsp;··&nbsp;<b>No vendor claims taken on trust</b>
+            Written for&nbsp;··&nbsp;<b>Teams already running LangGraph</b><br>
+            Not for&nbsp;··&nbsp;<b>Teams choosing their first agent framework</b><br>
+            Verified&nbsp;··&nbsp;<b>2026-08-19, primary sources</b>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- =========================== THE THREE CATEGORIES =========================== -->
+    <!-- =========================== THE BOUNDARY =========================== -->
     <section class="cats" aria-labelledby="cats-h">
       <div class="wrap">
-        <span class="mono lab">01 / The categories</span>
-        <h2 id="cats-h">These tools are not substitutes for each other.</h2>
+        <p class="sec-num">01 / The boundary</p>
+        <h2 id="cats-h">These are not competitors.<br>They are two halves of one system.</h2>
 
         <div class="cat-grid">
           <article class="cat">
-            <h3>Durable execution engines</h3>
-            <p class="who">Temporal · Prefect · Airflow</p>
+            <h3>What LangGraph owns</h3>
             <p>
-              Built to make work survive failure. A process dies mid-run and the workflow
-              resumes where it stopped, sometimes mid-function. Decades of operational
-              thinking, and the strongest reliability guarantees of anything on this page.
-              AI features are recent additions on top.
+              The loop. State across turns, branching on what the model decides, tool calls,
+              human-in-the-loop interrupts, streaming partial results. It is a library you
+              import into a Python process, and it is good at this.
             </p>
           </article>
-
           <article class="cat">
-            <h3>Agent frameworks</h3>
-            <p class="who">LangGraph · LangChain · CrewAI</p>
+            <h3>What nobody owns until you build it</h3>
             <p>
-              Built so a model can decide what happens next. You describe tools, state and
-              control flow in code, and the model drives. Unmatched provider ecosystems and
-              the richest primitives for agent loops, memory and tool calling.
-              Already running one? What sits <a href="/langgraph-alternative/">around the agent</a> &mdash; schedules, budgets, the audit trail &mdash; is a separate question, and has its own page.
+              Running that process on a schedule. Stopping it when it has spent enough.
+              Retrying the step that failed without replaying the twelve that worked. Keeping
+              a record a compliance officer can read. Answering &ldquo;what did this cost&rdquo;
+              without instrumenting it yourself.
             </p>
           </article>
-
           <article class="cat">
-            <h3>Workflow orchestrators</h3>
-            <p class="who">Sandcastle · n8n · Dify</p>
+            <h3>Where Sandcastle sits</h3>
             <p>
-              Built so a <em>person</em> decides what happens next, and the model does the
-              parts models are good at. The workflow is a declared artefact — a file or a
-              canvas — rather than a program. Sandcastle sits here.
-            </p>
-          </article>
-        </div>
-
-        <p class="cat-note">
-          The honest version: if a model needs to choose its own path through an open-ended
-          problem, an agent framework fits better. If a workflow absolutely cannot lose state
-          when a machine dies, a durable execution engine fits better. Sandcastle is for the
-          large middle ground where the steps are known, the sequence is fixed, and what you
-          want is for it to be readable, reviewable and cheap to run.
-        </p>
-      </div>
-    </section>
-
-    <!-- =========================== THE TABLE =========================== -->
-    <section class="matrix" aria-labelledby="matrix-h">
-      <div class="wrap">
-        <span class="mono lab">02 / The comparison</span>
-        <h2 id="matrix-h">What actually differs.</h2>
-        <p class="matrix-intro">
-          Figures verified 2026-08-17. Star counts and prices move — check the linked source
-          before you make a decision on them.
-        </p>
-
-        <div class="table-scroll" tabindex="0" role="region" aria-label="Feature comparison table, scrolls horizontally">
-          <table class="cmp">
-            <thead>
-              <tr>
-                <th scope="col" class="rowhead">&nbsp;</th>
-                <th scope="col" class="self">Sandcastle</th>
-                <th scope="col">LangGraph</th>
-                <th scope="col">n8n</th>
-                <th scope="col">Temporal</th>
-                <th scope="col">Dify</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <th scope="row">Workflow is defined as</th>
-                <td class="self">YAML file</td>
-                <td>Python / JS code</td>
-                <td>Visual canvas</td>
-                <td>Code, 7&nbsp;SDKs</td>
-                <td>Visual canvas <span class="note">(YAML DSL export)</span></td>
-              </tr>
-              <tr>
-                <th scope="row">License</th>
-                <td class="self">BSL&nbsp;1.1 <span class="note">source-available</span></td>
-                <td>MIT <span class="note">library</span> · Elastic&nbsp;2.0 <span class="note">server</span></td>
-                <td>Sustainable Use <span class="note">fair-code</span></td>
-                <td>MIT</td>
-                <td>Apache&nbsp;2.0 <span class="note">+ conditions</span></td>
-              </tr>
-              <tr>
-                <th scope="row">OSI-approved open source</th>
-                <td class="self no">No</td>
-                <td class="part">Library yes, server no</td>
-                <td class="no">No</td>
-                <td class="yes">Yes</td>
-                <td class="part">Yes, with two conditions</td>
-              </tr>
-              <tr>
-                <th scope="row">Free self-hosted production use</th>
-                <td class="self no">No <span class="note">until 2030</span></td>
-                <td class="part">License key required</td>
-                <td class="part">Internal business use</td>
-                <td class="yes">Yes</td>
-                <td class="yes">Yes <span class="note">single-tenant</span></td>
-              </tr>
-              <tr>
-                <th scope="row">Workflows reviewable in git</th>
-                <td class="self yes">Yes <span class="note">plain files</span></td>
-                <td class="yes">Yes <span class="note">it's code</span></td>
-                <td class="no">No PR review <span class="note">git on Business tier</span></td>
-                <td class="yes">Yes <span class="note">it's code</span></td>
-                <td class="no">No git integration</td>
-              </tr>
-              <tr>
-                <th scope="row">Token &amp; cost tracking built in</th>
-                <td class="self yes">Yes</td>
-                <td class="part">Via LangSmith <span class="note">paid</span></td>
-                <td class="part">Partial</td>
-                <td class="no">No</td>
-                <td class="yes">Yes</td>
-              </tr>
-              <tr>
-                <th scope="row">Survives a crashed worker</th>
-                <td class="self no">No <span class="note">run is marked failed</span></td>
-                <td class="yes">Yes <span class="note">checkpointed</span></td>
-                <td class="part">Partial</td>
-                <td class="yes">Yes <span class="note">resumes mid-function</span></td>
-                <td class="part">Partial</td>
-              </tr>
-              <tr>
-                <th scope="row">Human approval steps</th>
-                <td class="self yes">Yes <span class="note">gate / approval</span></td>
-                <td class="yes">Yes <span class="note">interrupt()</span></td>
-                <td class="yes">Yes</td>
-                <td class="yes">Yes <span class="note">signals</span></td>
-                <td class="yes">Yes</td>
-              </tr>
-              <tr>
-                <th scope="row">Local models first-class</th>
-                <td class="self yes">Yes <span class="note">ollama, vLLM, MLX</span></td>
-                <td class="yes">Yes <span class="note">Ollama featured</span></td>
-                <td class="yes">Yes</td>
-                <td class="na">n/a <span class="note">you write it</span></td>
-                <td class="yes">Yes</td>
-              </tr>
-              <tr>
-                <th scope="row">Data residency enforced in code</th>
-                <td class="self yes">Yes <span class="note">EU</span></td>
-                <td class="no">No</td>
-                <td class="no">No</td>
-                <td class="no">No</td>
-                <td class="no">No</td>
-              </tr>
-              <tr>
-                <th scope="row">GitHub stars</th>
-                <td class="self">~0.1k</td>
-                <td>39.9k</td>
-                <td>201.0k</td>
-                <td>22.4k</td>
-                <td>152.7k</td>
-              </tr>
-              <tr>
-                <th scope="row">Project age</th>
-                <td class="self">5 months</td>
-                <td>~3 years</td>
-                <td>~6 years</td>
-                <td>~7 years</td>
-                <td>~2 years</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <p class="matrix-foot">
-          The bottom two rows are the ones to take seriously. Sandcastle is a five-month-old
-          project with one main author; every other tool here has years of production
-          scar tissue and a community to answer your questions at 2am. That is a real
-          difference and no feature column offsets it.
-        </p>
-      </div>
-    </section>
-
-    <!-- =========================== PICK SOMETHING ELSE =========================== -->
-    <section class="elsewhere" aria-labelledby="else-h">
-      <div class="wrap">
-        <span class="mono lab">03 / Pick something else when</span>
-        <h2 id="else-h">Cases where Sandcastle is the wrong answer.</h2>
-
-        <div class="else-list">
-          <article class="else-item">
-            <h3 id="when-the-run-must-never-lose-state">The run must never lose state</h3>
-            <p>
-              <strong>Choose Temporal.</strong> Its event history replays a workflow back to the
-              exact line it was executing, across process and machine failures. Sandcastle
-              persists each step to the database and can replay a run from any step, but a
-              worker that dies mid-step marks the run failed and a human decides what happens
-              next. For payment flows or anything where a lost run means a lost customer,
-              that gap matters.
-            </p>
-          </article>
-
-          <article class="else-item">
-            <h3 id="when-the-model-should-choose-its-own-path">The model should choose its own path</h3>
-            <p>
-              <strong>Choose LangGraph or CrewAI.</strong> Sandcastle has an agent step and a
-              delegate step, but the graph is something you wrote down in advance. If the
-              value of your system is that the model decides the sequence — branching into
-              research it wasn't told about, calling tools you didn't anticipate — a framework
-              built for that will fight you less.
-            </p>
-          </article>
-
-          <article class="else-item">
-            <h3 id="when-the-ai-part-sits-inside-a-bigger-data-pipeline">The AI part sits inside a bigger data pipeline</h3>
-            <p>
-              <strong>Choose Airflow.</strong> If the LLM call happens between a warehouse
-              extract and a load, splitting that across two orchestrators is a permanent tax
-              on your team. Airflow's official AI provider now offers
-              <span class="mono">@task.llm</span> and <span class="mono">@task.agent</span>
-              with step-level caching, plus human-in-the-loop operators. It's young — version
-              0.7.0, first released April 2026 — but it lives where your data already is.
-            </p>
-          </article>
-
-          <article class="else-item">
-            <h3 id="when-the-people-building-workflows-don-t-write-code">The people building workflows don't write code</h3>
-            <p>
-              <strong>Choose n8n or Dify.</strong> A YAML file is a developer artefact. If your
-              ops or marketing team needs to build and change automations themselves, a canvas
-              they can see is worth more than a file your engineers can review. n8n's
-              integration catalogue is also an order of magnitude larger than Sandcastle's 64
-              connectors.
-            </p>
-          </article>
-
-          <article class="else-item">
-            <h3 id="when-you-need-osi-approved-open-source-today">You need OSI-approved open source today</h3>
-            <p>
-              <strong>Choose Temporal, Airflow or Prefect.</strong> Sandcastle's source is
-              published and auditable, but BSL 1.1 permits non-production use only until it
-              converts to Apache 2.0 on 24 February 2030. If your policy requires a
-              genuinely open licence for production right now, that is a hard blocker and no
-              amount of goodwill changes it.
-            </p>
-          </article>
-
-          <article class="else-item">
-            <h3 id="when-you-are-a-go-java-or-net-shop">You are a Go, Java or .NET shop</h3>
-            <p>
-              <strong>Choose Temporal.</strong> Sandcastle is Python. Temporal has seven
-              official SDKs, so your existing services keep their language.
+              Around it. A workflow is one YAML file: steps, dependencies, budgets, retries.
+              Every run is recorded and replayable. It calls models directly, and it can call
+              a LangGraph service as an <code>http</code> step &mdash; the two compose rather
+              than replace.
             </p>
           </article>
         </div>
       </div>
     </section>
 
-    <!-- =========================== WHERE IT FITS =========================== -->
-    <section class="fits" aria-labelledby="fits-h">
+    <!-- =========================== WHAT ACTUALLY BITES =========================== -->
+    <section class="elsewhere" aria-labelledby="bites-h">
       <div class="wrap">
-        <span class="mono lab">04 / Where it does fit</span>
-        <h2 id="fits-h">Four cases where Sandcastle is the better tool.</h2>
+        <p class="sec-num">02 / What actually bites</p>
+        <h2 id="bites-h">The four things teams hit after the agent works.</h2>
+        <p class="else-lede">
+          None of these are LangGraph defects. They are simply outside what a framework is
+          for &mdash; which is exactly why they land on you.
+        </p>
 
-        <div class="fit-grid">
-          <article class="fit">
-            <h3>The workflow belongs in code review</h3>
+        <div class="else-grid">
+          <article class="else-card">
+            <h3 id="bite-cost">You cannot answer what a run cost</h3>
             <p>
-              A Sandcastle workflow is a YAML file in your repository. It diffs, it branches,
-              it gets reviewed in a pull request, it rolls back. n8n's own documentation
-              states that its source control &ldquo;doesn't support a pull request-style review
-              and merge process&rdquo; and that pulling &ldquo;overwrites any changes you've made if
-              they aren't stored in Git&rdquo; — and git integration sits on a tier costing
-              €667 per month. Dify has no git integration at all.
+              Token accounting is not in the framework. Teams reach for LangSmith, which bills
+              per trace &mdash; so observability becomes a line item that scales with usage,
+              and the numbers live in someone else's system. Sandcastle records tokens and
+              cost <strong>per step</strong> in your own database, because it is the same
+              system that ran the step.
             </p>
           </article>
-
-          <article class="fit">
-            <h3>You need to know what a run cost</h3>
+          <article class="else-card">
+            <h3 id="bite-budget">Nothing stops a loop that is spending</h3>
             <p>
-              Cost and token accounting is in the engine and recorded per step, and a budget
-              cap on the run warns at 80% and stops it at 100% — split evenly across parallel
-              branches so a fan-out can't blow through it. Neither Temporal nor Airflow nor Prefect
-              tracks LLM tokens or cost at all — that is code you write and maintain yourself.
-              LangGraph routes it through LangSmith, which is a paid product with per-trace
-              billing.
+              An agent that retries its way through a bad tool response can burn real money
+              before anyone notices. There is no built-in ceiling; you write the guard.
+              Sandcastle takes <code>budget_limit_usd</code> on the workflow and stops at it.
             </p>
           </article>
-
-          <article class="fit">
-            <h3>The data cannot leave the EU</h3>
+          <article class="else-card">
+            <h3 id="bite-residency">The data leaves, and you have to prove it did not</h3>
             <p>
-              Residency is enforced at the runtime layer, not promised in a subprocessor list,
-              and local models are a first-class path rather than a fallback — ollama, vLLM and
-              MLX endpoints run without any cloud key present. Combined with a tamper-evident
-              audit chain and the Article-by-Article mapping on our
-              <a href="/eu-ai-act/">EU AI Act page</a>, that is a different starting position
-              from a US SaaS with an EU region.
+              Hosted tracing means prompts and outputs go somewhere else. For an EU team
+              answering to the AI Act, &ldquo;we self-host the agent but ship the traces to a
+              US SaaS&rdquo; is the awkward half of the sentence. Sandcastle runs on your
+              hardware end to end, and the audit trail stays there with it.
             </p>
           </article>
-
-          <article class="fit">
-            <h3>You want one file, not a framework</h3>
+          <article class="else-card">
+            <h3 id="bite-review">The workflow is not reviewable</h3>
             <p>
-              Twenty-five step types cover parallel fan-out, conditions, loops, gates,
-              approvals, sub-workflows and deterministic steps that cost nothing to run. The
-              deterministic ones matter more than they sound: most workflows are mostly
-              plumbing, and plumbing shouldn't be billed per token.
+              A graph assembled in Python is code, and code review shows you a diff of the
+              assembly, not of the behaviour. A YAML workflow diffs as what changed:
+              this step, this model, this budget. That matters more the more people touch it.
             </p>
           </article>
         </div>
       </div>
     </section>
 
-    <!-- =========================== LICENSING =========================== -->
-    <section class="lic" aria-labelledby="lic-h">
+    <!-- =========================== WHEN TO STAY =========================== -->
+    <section class="fits" aria-labelledby="stay-h">
       <div class="wrap">
-        <span class="mono lab">05 / Licensing, without spin</span>
-        <h2 id="lic-h">Nobody in this category is simply &ldquo;open source&rdquo;.</h2>
-
-        <p class="lic-lede">
-          It is the most misrepresented axis in the market, so here is the whole picture,
-          including the part that is inconvenient for us.
+        <p class="sec-num">03 / When to stay exactly where you are</p>
+        <h2 id="stay-h">Cases where this page is the wrong advice.</h2>
+        <p class="else-lede">
+          The comparison page has a section like this too. It is the part worth reading.
         </p>
 
-        <div class="lic-grid">
-          <div class="lic-cell own">
-            <h3>Sandcastle · BSL 1.1</h3>
+        <div class="else-grid">
+          <article class="else-card">
+            <h3 id="stay-dynamic">The model must choose its own path</h3>
             <p>
-              Source is public and auditable. Free for development, testing and personal
-              projects; <strong>production use requires a commercial licence</strong> until the
-              change date of 24 February 2030, when the whole thing becomes Apache 2.0. On the
-              question &ldquo;can I run this in production for free today&rdquo;, this is the most
-              restrictive licence on this page. What it buys you is a dated, contractual exit:
-              one licence covering the entire repository, no separate enterprise directory, no
-              branding requirement, and a guarantee it gets more permissive, never less.
+              If the sequence genuinely cannot be written down &mdash; the agent decides at
+              runtime what to do next, and that is the point &mdash; a declarative workflow is
+              the wrong shape. Keep LangGraph. Sandcastle's <code>agent</code> step delegates
+              to a model, but the workflow around it is still a graph you wrote.
             </p>
-          </div>
-
-          <div class="lic-cell">
-            <h3>LangGraph · MIT + Elastic 2.0</h3>
+          </article>
+          <article class="else-card">
+            <h3 id="stay-state">Losing a run is unacceptable</h3>
             <p>
-              The library is MIT. The Agent Server you self-host is Elastic 2.0, needs a
-              licence key, and reports usage to the vendor. RBAC, SSO and audit logs are
-              enterprise features.
+              Sandcastle is <strong>not</strong> a durable execution engine. If the process
+              dies mid-run, the run dies with it. When a workflow moves money or provisions
+              infrastructure and must survive a crash exactly once, that is Temporal's job,
+              not this one &mdash; and not LangGraph's either.
             </p>
-          </div>
-
-          <div class="lic-cell">
-            <h3>n8n · Sustainable Use</h3>
+          </article>
+          <article class="else-card">
+            <h3 id="stay-python">Your team wants to stay in Python</h3>
             <p>
-              Not open source, and n8n says so plainly — they call it fair-code. Internal
-              business use is permitted; offering it as a service is not. Enterprise-licensed
-              files live inside the same repository.
+              Some teams simply prefer their orchestration in the same language and repository
+              as everything else, with the full expressive power that gives them. That is a
+              legitimate preference and no comparison table overturns it.
             </p>
-          </div>
-
-          <div class="lic-cell">
-            <h3>Dify · Apache 2.0 + conditions</h3>
+          </article>
+          <article class="else-card">
+            <h3 id="stay-osi">You need OSI-approved open source</h3>
             <p>
-              Genuinely permissive for single-tenant production. Two conditions: no
-              multi-tenant service without a commercial licence, and the frontend keeps its
-              branding. Contributors grant terms that permit relicensing.
+              LangGraph is MIT. Sandcastle is BSL 1.1 &mdash; source-available, free to read,
+              modify and self-host, but production use needs a licence. If your policy requires
+              an OSI licence today, that is a hard stop and no feature closes it.
             </p>
-          </div>
-
-          <div class="lic-cell">
-            <h3>Temporal · MIT</h3>
-            <p>
-              Unambiguous, OSI-approved, no strings. If licence purity is your deciding
-              factor, this is the cleanest answer in the category.
-            </p>
-          </div>
-
-          <div class="lic-cell">
-            <h3>Airflow · Apache 2.0</h3>
-            <p>
-              Apache 2.0 under Apache Software Foundation governance — vendor-neutral, which
-              no commercially-backed project here can offer.
-            </p>
-          </div>
+          </article>
         </div>
+      </div>
+    </section>
+
+    <!-- =========================== RUNNING BOTH =========================== -->
+    <section class="lic" aria-labelledby="both-h">
+      <div class="wrap">
+        <p class="sec-num">04 / Running both</p>
+        <h2 id="both-h">The realistic answer is usually not a migration.</h2>
+        <p class="else-lede">
+          Most teams that end up here do not rewrite the agent. They wrap it: keep the graph
+          that works, and put the schedule, the budget, the record and the retries outside it.
+        </p>
+
+        <div class="code-block">
+          <pre><code>steps:
+  - id: fetch_tickets
+    type: http                      # deterministic, $0
+    url: "{input.helpdesk_url}/api/tickets?since={input.since}"
+
+  - id: triage
+    type: http                      # your existing LangGraph service
+    url: "http://langgraph-svc:8000/invoke"
+    depends_on: [fetch_tickets]
+    body:
+      tickets: "{steps.fetch_tickets.output}"
+    context_strategy: prune         # shrink an over-budget payload, keep the ending
+    output_max_tokens: 4000
+    retry:
+      max_attempts: 3
+
+  - id: summarise
+    type: llm
+    model: claude/sonnet-5
+    depends_on: [triage]
+    prompt: "Write the shift handover from: {steps.triage.output}"
+
+budget_limit_usd: 5.00            # the run stops here, whatever happens</code></pre>
+        </div>
+
+        <p class="else-lede">
+          The agent keeps doing what it is good at. What changed is that the run has a ceiling,
+          a retry that resumes rather than restarts, and a row in your own database saying what
+          it cost. If that is the gap you have, this is a smaller change than it looks.
+        </p>
       </div>
     </section>
 
     <!-- =========================== FAQ =========================== -->
     <section class="faq" aria-labelledby="faq-h">
       <div class="wrap">
-        <span class="mono lab">06 / Straight answers</span>
+        <p class="sec-num">05 / Straight answers</p>
         <h2 id="faq-h">Questions people actually ask.</h2>
 
-        <div class="qa">
-          <div class="row">
-            <h3>Is Sandcastle open source?</h3>
-            <p>
-              The source is public and you can read, fork and modify it, but BSL 1.1 is not an
-              OSI-approved open source licence — source-available is the accurate term. It
-              converts to Apache 2.0 on 24 February 2030.
-            </p>
-          </div>
-          <div class="row">
-            <h3>Can I replace LangGraph with Sandcastle?</h3>
-            <p>
-              Only if your graph is fixed. LangGraph exists so a model can pick its own route
-              through a problem; Sandcastle runs a route you defined. Workflows with known
-              steps port over well. Open-ended agent loops do not.
-            </p>
-          </div>
-          <div class="row">
-            <h3>What happens if the server dies mid-run?</h3>
-            <p>
-              The run is marked failed and you decide what to do — replay it from any completed
-              step, or fork it with different inputs. It is not resumed automatically. If you
-              need automatic resumption across failures, Temporal is built for exactly that.
-            </p>
-          </div>
-          <div class="row">
-            <h3>How does this compare to n8n on integrations?</h3>
-            <p>
-              It doesn't. Sandcastle ships 64 connectors covering 229 operations; n8n's
-              catalogue is far larger. Sandcastle's argument is the workflow format, cost
-              control and residency — not catalogue size.
-            </p>
-          </div>
-          <div class="row">
-            <h3>Who is behind it and how big is the project?</h3>
-            <p>
-              It is a young project — five months old at the time of writing, with one main
-              author and a small contributor base. If your procurement process weighs
-              bus factor and community size, weigh them honestly here.
-            </p>
-          </div>
-          <div class="row">
-            <h3>Do I have to use cloud models?</h3>
-            <p>
-              No. Local inference through ollama, vLLM and MLX is a first-class path in the
-              runtime, and workflows run with no cloud API key present at all.
-            </p>
-          </div>
+        <div class="faq-list">
+          <details class="qa">
+            <summary>Is Sandcastle a drop-in replacement for LangGraph?</summary>
+            <div class="qa-body">
+              <p>
+                No, and treating it as one leads to a bad migration. LangGraph models an agent
+                deciding its own next move; Sandcastle models a workflow whose shape you wrote
+                down. If your graph's branching is genuinely dynamic, that logic belongs in an
+                agent &mdash; either LangGraph behind an <code>http</code> step, or Sandcastle's
+                own <code>agent</code> step.
+              </p>
+            </div>
+          </details>
+          <details class="qa">
+            <summary>Do I have to give up LangSmith?</summary>
+            <div class="qa-body">
+              <p>
+                Not unless you want to. Sandcastle records its own runs &mdash; every step, its
+                tokens, its cost, its output &mdash; in your database, so for steps it runs you
+                already have the trail. Where it calls a LangGraph service, that service traces
+                to LangSmith exactly as before. Teams usually keep both for a while and then
+                notice they stopped opening one of them.
+              </p>
+            </div>
+          </details>
+          <details class="qa">
+            <summary>What happens if the process dies mid-run?</summary>
+            <div class="qa-body">
+              <p>
+                The run fails and is recorded as failed. Sandcastle is not a durable execution
+                engine and does not pretend to be: there is no crash-consistent resume from the
+                exact step. Completed steps are persisted, so a re-run is not a blank start, but
+                if exactly-once survival is a requirement then Temporal is the honest answer.
+              </p>
+            </div>
+          </details>
+          <details class="qa">
+            <summary>Can I run it entirely in the EU?</summary>
+            <div class="qa-body">
+              <p>
+                Yes &mdash; that is the design premise, not a deployment option. It self-hosts,
+                runs local models through Ollama or oMLX at zero marginal cost, and keeps the
+                run record in your own Postgres. Nothing phones home. The
+                <a href="/eu-ai-act/">EU AI Act page</a> sets out what that does and does not
+                mean legally.
+              </p>
+            </div>
+          </details>
+          <details class="qa">
+            <summary>How mature is this compared with LangGraph?</summary>
+            <div class="qa-body">
+              <p>
+                Far less. LangGraph has a large team, a large community and years behind it.
+                Sandcastle is five months old with one main author. If you need the reassurance
+                of a big ecosystem, that gap is real and you should weigh it. What you get in
+                exchange is a smaller surface: one YAML file, one binary, no control plane you
+                do not own.
+              </p>
+            </div>
+          </details>
         </div>
       </div>
     </section>
@@ -1312,21 +1085,21 @@
     <!-- =========================== CLOSER =========================== -->
     <section class="closer" aria-labelledby="closer-h">
       <div class="wrap">
-        <p class="pre">If the fit is right, it takes one command.</p>
-        <h2 id="closer-h">Try it against your own workflow.</h2>
+        <p class="pre">Keep the agent. Wrap the rest.</p>
+        <h2 id="closer-h">Try it against a workflow you already run.</h2>
         <span class="big-install" id="bigInstall" role="button" tabindex="0" aria-label="Copy: pip install sandcastle-ai">
           <span class="pmt">$</span><span>pip install sandcastle-ai</span>
           <span class="ci" id="bigCopyLabel">Copy</span>
         </span>
         <p class="closer-note">
-          Still unsure? <a href="mailto:hello@sandcastle-ai.eu">Tell us what you're building</a>
-          and we'll say honestly whether this is the right tool — including when it isn't.
+          Not sure it fits? <a href="mailto:hello@sandcastle-ai.eu">Describe what you are running</a>
+          and you will get an honest answer &mdash; including &ldquo;stay where you are&rdquo;.
+          The <a href="/compare/">full comparison</a> covers the other eight tools.
         </p>
       </div>
     </section>
   </main>
 
-  <!-- =========================== FOOTER =========================== -->
   <footer class="foot">
     <div class="wrap">
       <div class="foot-top">
@@ -1338,7 +1111,7 @@
         <div class="foot-col">
           <h4>Product</h4>
           <a href="/pricing/">Pricing</a>
-          <a href="/langgraph-alternative/">vs LangGraph</a>
+          <a href="/compare/">Compare</a>
           <a href="/hub/">Community Hub</a>
           <a href="/whatsnew/">What's new</a>
           <a href="https://pypi.org/project/sandcastle-ai/">PyPI ↗</a>

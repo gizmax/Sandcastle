@@ -2,8 +2,15 @@
 # https://www.rfc-editor.org/rfc/rfc9309
 
 # Default policy for all crawlers
+#
+# The one exclusion: /hub/ renders 283 crawlable /hub/?template=<slug> links so
+# the catalogue is readable without JavaScript. Each serves byte-identical HTML
+# to /hub/ and self-references the clean URL as canonical, so indexing was never
+# at risk - but crawling 283 copies of one page is waste that grows with the
+# registry. The static catalogue stays crawlable; only the query form is out.
 User-agent: *
 Allow: /
+Disallow: /hub/?template=
 
 # ---------------------------------------------------------------------------
 # AI / LLM training and retrieval crawlers
