@@ -261,6 +261,10 @@ async def _emit_audit(event_type: str, run_id: str | None, payload: dict) -> Non
                 actor_id="healer",
                 payload=payload,
             )
+            # append_audit_event only stages the row; without an explicit
+            # commit the context-manager exit rolls it back and every healer
+            # event silently vanishes from the audit chain.
+            await session.commit()
     except Exception as exc:
         logger.debug("Audit event %s failed: %s", event_type, exc)
 
