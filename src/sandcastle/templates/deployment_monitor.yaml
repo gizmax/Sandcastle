@@ -65,8 +65,8 @@ steps:
     depends_on: [check_metrics, check_deployments]
     condition_config:
       expression: "{steps.check_metrics.output.above_threshold} == true"
-      then_steps: [create_alert]
-      else_steps: [log_ok]
+      then: [create_alert]
+      else: [log_ok]
 
   - id: create_alert
     prompt: |

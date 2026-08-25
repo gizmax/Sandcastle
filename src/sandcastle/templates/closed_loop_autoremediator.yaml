@@ -500,8 +500,8 @@ steps:
     depends_on: [evaluate_recovery]
     condition_config:
       expression: "{steps.evaluate_recovery.output.fail_count} > 0"
-      then_steps: [auto_rollback, notify_failure]
-      else_steps: [notify_success]
+      then: [auto_rollback, notify_failure]
+      else: [notify_success]
 
   # 12a) Not recovered -> auto-rollback to last known-good Vercel deployment.
   - id: auto_rollback

@@ -1990,6 +1990,16 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
                 errors.append(
                     f"Condition step '{step.id}' must have condition_config with an expression"
                 )
+            if step.condition_config and not step.condition_config.then_steps \
+                    and not step.condition_config.else_steps:
+                # Three shipped workflows had exactly this: then_steps:/else_steps:
+                # instead of then:/else:, parsed as two empty branches, and the
+                # condition silently routed nothing.
+                errors.append(
+                    f"Condition step '{step.id}' routes nothing: both branches are "
+                    f"empty. The YAML keys are 'then:' and 'else:' - "
+                    f"'then_steps:'/'else_steps:' are silently ignored."
+                )
             if step.condition_config:
                 for sid in step.condition_config.then_steps:
                     if sid not in step_ids:

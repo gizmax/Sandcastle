@@ -577,3 +577,48 @@ class TestContractReviewAcceptGate:
 
         failed = [c for c in result.output["rounds"][-1]["checks"] if not c["passed"]]
         assert failed, "no check actually failed on a deliberately broken extraction"
+
+
+class TestConditionBranchKeysValidation:
+    """A condition with both branches empty is almost always the then_steps: typo.
+
+    Three shipped workflows carried it - the ACP example's clean-tree guard,
+    deployment_monitor's alert routing, and closed_loop_autoremediator's
+    recovery branch - each parsed to two empty lists and silently routed
+    nothing. The keys are then:/else:; validation now says so.
+    """
+
+    def test_empty_both_branches_is_rejected_with_the_key_hint(self):
+        from sandcastle.engine.dag import parse_yaml_string, validate
+
+        wf = parse_yaml_string(
+            """
+name: t
+steps:
+  - id: a
+    prompt: x
+  - id: c
+    type: condition
+    condition_config: {expression: "1 == 1", then_steps: [a]}
+    depends_on: [a]
+"""
+        )
+        errs = validate(wf)
+        assert any("routes nothing" in e and "'then:'" in e for e in errs)
+
+    def test_the_three_repaired_workflows_route_again(self):
+        from sandcastle.engine.dag import parse_yaml_string, validate
+
+        for path in (
+            "workflows/acp/acp-refactor-and-review.yaml",
+            "src/sandcastle/templates/deployment_monitor.yaml",
+            "src/sandcastle/templates/closed_loop_autoremediator.yaml",
+        ):
+            wf = parse_yaml_string(open(path).read())
+            assert validate(wf) == [], path
+            cond = [s for s in wf.steps if s.type == "condition"]
+            assert cond, path
+            assert any(
+                s.condition_config.then_steps or s.condition_config.else_steps
+                for s in cond
+            ), f"{path}: conditions still route nothing"

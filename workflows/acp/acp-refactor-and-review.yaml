@@ -51,8 +51,8 @@ steps:
     responsibility: Only let the agent loose on a clean working tree
     condition_config:
       expression: "{steps.preflight.output.clean} == True"
-      then_steps: [plan, implement, diffstat, review, notify]
-      else_steps: []
+      then: [plan, implement, diffstat, review, notify]
+      else: []
 
   # 2. Plan with our own model. Cheap, and it gives the harness a tight brief
   #    instead of a vague task string.
