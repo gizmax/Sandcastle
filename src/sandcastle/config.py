@@ -211,6 +211,21 @@ class Settings(BaseSettings):
     # ledger exists to prevent. Set True/False to override either way.
     effect_ledger_required: bool | None = None
 
+    # Crash-resume (queue/worker.py: _recover_stuck_runs). A run stranded in
+    # RUNNING by a dead worker is requeued in its own effect scope and
+    # re-executes from the top; the ledger memoizes the prefix that already
+    # landed, so nothing sends twice and the prefix costs $0. Turning this off
+    # restores the pre-0.46 behaviour: a crashed run goes straight to FAILED.
+    # Resume is *refused* - and the run failed as before - whenever the ledger
+    # is off or unreachable, because a replay without it would re-fire every
+    # completed effect, which is the exact bug 0.45 fixed.
+    crash_resume_enabled: bool = True
+    # How many times one run may be requeued after a crash before it is failed
+    # for good. Small on purpose: a run that kills its worker on the same step
+    # every time (OOM, a segfaulting sandbox) is a poison run, and this cap is
+    # the only thing standing between it and an infinite requeue loop.
+    max_recovery_attempts: int = 2
+
     # Hierarchical workflows
     max_workflow_depth: int = 5
     # Ceiling on what one evolution run may spend when the request does not set

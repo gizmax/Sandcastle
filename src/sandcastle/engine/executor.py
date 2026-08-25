@@ -834,6 +834,13 @@ async def _save_run_step(
                 if replayed:
                     existing.replayed = True
                     existing.original_cost_usd = original_cost_usd
+                    # A memoized step costs nothing *this* time, and the guard
+                    # above skips a falsy cost. Crash-resume re-executes under
+                    # the same run id (unlike replay/fork, which mint a new
+                    # one), so without this the row would keep the charge from
+                    # the execution that crashed: the run total reads $0.00
+                    # while the step row still claims $0.42.
+                    existing.cost_usd = cost_usd
                 if status in ("completed", "failed", "skipped"):
                     existing.completed_at = now
             else:
