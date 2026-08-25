@@ -2528,6 +2528,9 @@ EFFECT_LEDGER_TTL_DAYS=30      # settled rows are pruned at worker startup
 EFFECT_CLAIM_WAIT_SECONDS=5    # wait for another worker's in-flight claim
 # EFFECT_LEDGER_REQUIRED=      # unset = local runs live, servers fail closed
 
+# Silent-success sweep (`sandcastle audit silent-success --since 48h`)
+SILENT_SUCCESS_LAG_HOURS=1     # claims younger than this are counted, not flagged
+
 # Crash resume (a run stranded by a dead worker replays instead of failing)
 CRASH_RESUME_ENABLED=true      # false restores the pre-0.46 "mark it FAILED"
 MAX_RECOVERY_ATTEMPTS=2        # per run, then FAILED - stops a poison run looping

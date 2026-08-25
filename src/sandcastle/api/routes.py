@@ -108,6 +108,8 @@ from sandcastle.api.schemas import (
     SelfTuneNightsResponse,
     SettingsResponse,
     SettingsUpdateRequest,
+    SilentSuccessFindingResponse,
+    SilentSuccessReportResponse,
     StatsResponse,
     StepDiff,
     StepStatusResponse,
@@ -13002,6 +13004,93 @@ async def verify_run_audit(run_id: str, req: Request) -> ApiResponse:
             valid=valid,
             chain_length=chain_length,
             broken_at=broken_at,
+        )
+    )
+
+
+@router.get("/audit/silent-success")
+async def sweep_silent_success(
+    req: Request,
+    since: str = Query("24h", description="Window: 48h, 7d, 2w, or an ISO datetime"),
+    until: str | None = Query(None, description="Optional upper bound"),
+    run_id: str | None = Query(None, description="Sweep a single run instead"),
+    lag_hours: float | None = Query(
+        None,
+        ge=0,
+        description="Override the evidence-lag window (claims younger than this are not flagged)",
+    ),
+    limit: int = Query(500, ge=1, le=2000),
+) -> ApiResponse:
+    """Report completed runs whose success claims are not backed by evidence.
+
+    Cross-checks step outputs against the durable effect ledger and the audit
+    chain. A finding means the claim *lacks evidence* - not that the step
+    failed - and nothing here writes: it is a report, never a repair.
+
+    Tenant-scoped like the other run-derived list endpoints; not admin-only,
+    because it returns nothing a tenant cannot already read from its own runs.
+    """
+    from sandcastle.engine import timemachine as tm
+    from sandcastle.engine.silent_success import sweep_run, sweep_runs
+
+    tenant_id = get_tenant_id(req)
+    scoped_tenant = (
+        tenant_id if settings.auth_required and tenant_id is not None else None
+    )
+
+    if run_id is not None:
+        try:
+            uuid.UUID(run_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="INVALID_ID", message="Invalid run ID format")
+                ).model_dump(),
+            )
+        # Scope the single-run form the same way: resolve the run under the
+        # caller's tenant first, so a tenant cannot sweep somebody else's run.
+        if scoped_tenant is not None:
+            async with async_session() as session:
+                owner = await session.scalar(
+                    select(Run.tenant_id).where(Run.id == uuid.UUID(run_id))
+                )
+            if owner != scoped_tenant:
+                raise HTTPException(
+                    status_code=404,
+                    detail=ApiResponse(
+                        error=ErrorResponse(code="NOT_FOUND", message="Run not found")
+                    ).model_dump(),
+                )
+        report = await sweep_run(run_id, lag_hours=lag_hours)
+    else:
+        try:
+            since_dt = tm.parse_since(since)
+            until_dt = tm.parse_since(until) if until else None
+        except Exception:
+            raise HTTPException(
+                status_code=400,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="INVALID_SINCE",
+                        message="since/until must be a window like '48h', '7d', '2w' or an ISO datetime",
+                    )
+                ).model_dump(),
+            )
+        report = await sweep_runs(
+            since=since_dt,
+            until=until_dt,
+            tenant_id=scoped_tenant,
+            limit=limit,
+            lag_hours=lag_hours,
+        )
+
+    return ApiResponse(
+        data=SilentSuccessReportResponse(
+            findings=[
+                SilentSuccessFindingResponse(**f.to_dict()) for f in report.findings
+            ],
+            meta=report.meta(),
         )
     )
 

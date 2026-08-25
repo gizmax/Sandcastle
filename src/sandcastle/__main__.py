@@ -5292,6 +5292,101 @@ def _cmd_audit_verify(args: argparse.Namespace) -> None:
     sys.exit(1)
 
 
+def _cmd_audit_silent_success(args: argparse.Namespace) -> None:
+    """Report completed runs whose success claims are not backed by evidence.
+
+    A finding says the claim *lacks evidence* - the sweep cannot know whether
+    the notification arrived, only that the record which should exist does not.
+    Nothing is repaired. Exits 1 when there are findings, matching
+    ``audit verify``, so a cron wrapper needs no jq.
+    """
+    params: dict[str, Any] = {}
+    if getattr(args, "run", None):
+        params["run_id"] = args.run
+    else:
+        params["since"] = args.since
+    if getattr(args, "lag_hours", None) is not None:
+        params["lag_hours"] = args.lag_hours
+
+    body = _api_get(args, "/api/audit/silent-success", params=params)
+
+    if getattr(args, "json", False):
+        _json_out(body)
+        data = body.get("data") or {}
+        if data.get("findings"):
+            sys.exit(1)
+        return
+
+    data = body.get("data") or {}
+    findings = data.get("findings", [])
+    meta = data.get("meta", {})
+
+    print(
+        f"Swept {meta.get('runs_checked', 0)} completed run(s), "
+        f"{meta.get('steps_checked', 0)} completed step(s)."
+    )
+    if not meta.get("ledger_enabled", True):
+        print(
+            _color(
+                "  Effect ledger is disabled - the ledger-backed checks did not run.",
+                _C.YELLOW,
+            )
+        )
+
+    skipped = [
+        (meta.get("within_lag_window", 0), "inside the evidence-lag window"),
+        (meta.get("beyond_effect_ttl", 0), "older than the ledger TTL"),
+        (meta.get("replayed_skipped", 0), "memoized (replayed)"),
+        (meta.get("unresolved_steps", 0), "absent from the resolved workflow"),
+        (meta.get("suppressed_loose_match", 0), "matched only without parallel index"),
+    ]
+    for count, why in skipped:
+        if count:
+            print(_color(f"  Not checked: {count} step(s) {why}.", _C.DIM))
+    unresolved = meta.get("definition_unresolved") or []
+    if unresolved:
+        print(
+            _color(
+                f"  Not checked: {len(unresolved)} run(s) whose workflow definition "
+                "could not be resolved.",
+                _C.DIM,
+            )
+        )
+    print()
+
+    if not findings:
+        print(_color("PASS", _C.GREEN) + " - every claim checked has evidence behind it")
+        return
+
+    headers = ["RUN ID", "STEP", "FINDING", "SEVERITY", "FOUND"]
+    rows: list[list[str]] = []
+    for f in findings:
+        sev = f.get("severity", "")
+        if sev == "high":
+            sev_str = _color(sev, _C.RED)
+        elif sev == "medium":
+            sev_str = _color(sev, _C.YELLOW)
+        else:
+            sev_str = _color(sev, _C.DIM) if sev else "-"
+        rows.append(
+            [
+                f.get("run_id", "")[:12],
+                f.get("step_id", ""),
+                f.get("finding_type", ""),
+                sev_str,
+                f.get("found", ""),
+            ]
+        )
+    print(_table(headers, rows, max_col=52))
+    print()
+    print(
+        _color(f"{len(findings)} claim(s) lack evidence", _C.RED)
+        + " - this is a report, not a verdict: the sweep found no record of the"
+    )
+    print("effect, which is not the same as the step having failed. Investigate before acting.")
+    sys.exit(1)
+
+
 # ---------------------------------------------------------------------------
 # Argument parser
 # ---------------------------------------------------------------------------
@@ -5904,6 +5999,30 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Audit key to verify the signature with (default: AUDIT_KEY from env/.env)",
     )
 
+    p_audit_silent = audit_sub.add_parser(
+        "silent-success",
+        help="Find completed runs whose success claims have no evidence behind them",
+    )
+    p_audit_silent.add_argument(
+        "--since",
+        default="24h",
+        help="Window of runs to sweep: 48h, 7d, 2w, or an ISO datetime (default: 24h)",
+    )
+    p_audit_silent.add_argument(
+        "--run", default=None, help="Sweep a single run instead of a window"
+    )
+    p_audit_silent.add_argument(
+        "--lag-hours",
+        dest="lag_hours",
+        type=float,
+        default=None,
+        help=(
+            "Override the evidence-lag window: claims younger than this are "
+            "counted, not flagged (default: silent_success_lag_hours)"
+        ),
+    )
+    p_audit_silent.add_argument("--json", action="store_true", help="Output raw JSON")
+
     # --- tools ---
     p_tools = subparsers.add_parser("tools", help="Tool/connector management")
     tools_sub = p_tools.add_subparsers(dest="tools_action")
@@ -6314,10 +6433,17 @@ def main() -> None:
 
     # --- audit ---
     if args.command == "audit":
-        if getattr(args, "audit_action", None) == "verify":
+        audit_action = getattr(args, "audit_action", None)
+        if audit_action == "verify":
             _cmd_audit_verify(args)
+        elif audit_action == "silent-success":
+            _cmd_audit_silent_success(args)
         else:
-            print("Usage: sandcastle audit verify <run-id-or-cassette-path>", file=sys.stderr)
+            print(
+                "Usage: sandcastle audit verify <run-id-or-cassette-path>\n"
+                "       sandcastle audit silent-success [--since 48h] [--run <id>]",
+                file=sys.stderr,
+            )
             sys.exit(1)
         return
 

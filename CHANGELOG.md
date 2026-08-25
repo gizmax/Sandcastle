@@ -43,6 +43,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`sandcastle audit silent-success` - a sweep for runs that claim more than
+  they can prove.** The worst production failure is not a run that fails; it is
+  a run that reports `completed` with a step reporting "1 reply created" when
+  nothing was ever sent. Sandcastle already wrote three independent records of
+  what happened - the effect ledger, the audit chain, and the step rows - and
+  nothing ever compared them. The sweep does, over four claim/evidence pairs: a
+  `notify` step claiming `status: delivered` with no committed ledger row; any
+  side-effecting step the executor would have claimed (decided by calling the
+  engine's own `effect_mode_for`, so a GET or a `replay: live` is correctly
+  exempt) with no committed row; an `accept` verdict of `approved` with no
+  `step.accept` event on the chain; a side-effecting completion with no
+  `step.completed` event.
+
+  It is **a report, never a repair** - findings say "claim lacks evidence",
+  which is not the same sentence as "the step failed", and the module has no
+  write path. Suppressions are counted rather than hidden: memoized (`replayed`)
+  steps, claims inside the `SILENT_SUCCESS_LAG_HOURS` window (default 1), claims
+  older than `EFFECT_LEDGER_TTL_DAYS` (where the row is gone because it expired,
+  not because it never existed), dry-run notifies (which claim nothing), and
+  steps whose workflow definition no longer resolves. A run that committed no
+  effects at all reports at reduced severity, because that reads as an
+  unreachable ledger rather than as universal silence. Also at
+  `GET /api/audit/silent-success`, tenant-scoped. Design notes, including the
+  pairs that were rejected and why, in `docs/design/047-silent-success.md`.
 - **`type: accept` - an outcome gate.** "The agent finished" and "the agent
   succeeded" are different facts, and the engine recorded only the first. An
   accept step judges a target step's output: deterministic `checks:` first
