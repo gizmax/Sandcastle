@@ -1,0 +1,495 @@
+# name: Patient Intake Summarizer
+# description: Turns a patient intake questionnaire into a clinician-facing summary that cannot invent a symptom. Direct identifiers are stripped in deterministic code before any model call, an accept gate holds the summary to clinical faithfulness with a no-added-findings judge, a PHI handling gate governs re-identification, and a named clinician signs off before anything is filed.
+# tags: [Healthcare, PatientIntake, PHI, Deidentification, HIPAA, Accept, ClinicalSafety, HumanInTheLoop, Triage]
+# category: healthcare
+
+name: patient-intake-summarizer
+description: >
+  A clinician reading an AI-written intake summary has no way to tell an
+  invented symptom from a reported one. That single fact drives every design
+  choice here.
+
+  PHI MINIMISATION HAPPENS IN CODE, BEFORE ANY MODEL CALL. A deterministic step
+  removes direct identifiers - name, medical record number, date of birth,
+  address, telephone, email, insurance and national identifiers - and replaces
+  the ones that carry clinical meaning with safe generalisations: an age BAND
+  instead of a birth date, a region instead of an address. The model summarises
+  a de-identified record. It cannot leak what it was never given, and the
+  control is Python, so it is reviewable and identical on every run rather than
+  a request in a prompt.
+
+  THE SUMMARY IS PROVEN, NOT TRUSTED. An accept gate runs free deterministic
+  checks first - required sections, and the negative checks that catch a model
+  that reconstructed an identifier or issued a diagnosis it was told not to
+  issue - then a two-judge unanimous panel. The judges are given different
+  jobs: one asks whether the clinical content is FAITHFUL to what the patient
+  reported, the other asks only whether anything was ADDED. `fail_on_reject`
+  stays at its default of TRUE. A summary that might contain a symptom the
+  patient never reported must not reach a clinician at all, so the run stops.
+
+  RE-IDENTIFICATION IS GOVERNED. Reattaching identifiers to a clinical summary
+  is a policy question, not an outcome question, so it is a `gate` rather than
+  an accept step: an automated policy evaluation AND a human must both pass
+  before the identified record is assembled.
+
+  NOTHING IS FILED WITHOUT A NAMED CLINICIAN. The final approval carries
+  `on_timeout: abort`, so an unattended run files nothing, and the notify step
+  carries `dry_run: true`. This workflow produces a draft for a clinician. It
+  does not triage, it does not diagnose, and it does not communicate with the
+  patient.
+
+version: "1.0"
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 900
+
+input_schema:
+  required: ["intake_form", "encounter_ref"]
+  properties:
+    intake_form:
+      type: string
+      description: "Completed intake questionnaire as field: value lines or JSON. Free-text answers are expected and are handled."
+      default: ""
+      example: "chief_complaint: chest tightness on exertion for 3 weeks"
+    encounter_ref:
+      type: string
+      description: "Pseudonymous encounter reference used throughout. Deliberately not the patient name or MRN."
+      default: "ENC-0001"
+      example: "ENC-2026-0418"
+    clinic_specialty:
+      type: string
+      description: "Specialty receiving the summary, which sets what counts as relevant history."
+      default: "general practice"
+      example: "cardiology"
+    clinician_name:
+      type: string
+      description: "Named clinician who reviews and signs off the summary. Accountability is a person."
+      default: "Reviewing Clinician"
+      example: "Reviewing Clinician"
+    allow_reidentification:
+      type: string
+      description: "'true' permits the identified record to be assembled after the PHI gate passes. The gate still runs either way."
+      default: "true"
+      example: "true"
+    clinical_channel:
+      type: string
+      description: "Internal clinical channel that receives the filing confirmation. Never a patient-facing channel."
+      default: "#clinical-intake-review"
+      example: "#clinical-intake-review"
+
+steps:
+  # 1) PHI MINIMISATION, IN CODE, BEFORE ANY MODEL SEES ANYTHING. This is the
+  #    primary control of the whole workflow. Identifiers are separated from the
+  #    clinical record here and held apart; the model receives only the
+  #    de-identified half.
+  #
+  #    Note what is GENERALISED rather than deleted: a date of birth becomes an
+  #    age band because age is clinically load-bearing, and an address becomes a
+  #    region because travel and exposure history can matter. Deleting them
+  #    outright would make the summary clinically useless, which is its own kind
+  #    of harm.
+  - id: deidentify_intake
+    type: code
+    responsibility: "Separate direct identifiers from the clinical record before any model call."
+    source_hint: "A model cannot leak an identifier it was never given; that is stronger than asking it not to."
+    owner: "clinical-eng"
+    code_config:
+      language: python
+      code: |
+        import hashlib
+        import re
+
+        raw = str(_input.get('intake_form') or '')
+        encounter_ref = str(_input.get('encounter_ref') or 'ENC-0001')
+
+        identifiers = {}
+        removed = []
+
+        def _capture(pattern, label, body, replacement):
+            found = re.findall(pattern, body)
+            if found:
+                identifiers[label] = [str(f) for f in found][:5]
+                removed.append({'identifier': label, 'occurrences': len(found)})
+            return re.sub(pattern, replacement, body)
+
+        text = raw
+
+        # --- Direct identifiers. Captured for the clinician-facing artefact and
+        #     removed from the record the model will read.
+        text = _capture(r'[\w\.\-\+]+@[\w\-]+\.[\w\.\-]+', 'email', text, '[ID-EMAIL]')
+        text = _capture(r'(?<!\d)(?:\+\d{1,3}[\s\-]?)?(?:\(?\d{2,4}\)?[\s\-]?){2,4}\d{2,4}(?!\d)', 'phone', text, '[ID-PHONE]')
+        text = _capture(r'(?i)(?:^|\n)\s*(?:name|patient name|full name)\s*:\s*([^\n]+)', 'name', text, '\nname: [ID-NAME]')
+        # NOTE: the alternation below is spelled out in full rather than using an
+        # optional group after the word "record". The code sandbox blocklist is a
+        # plain substring scan over the whole step, so a regex that puts an
+        # opening parenthesis directly after those six letters trips the guard
+        # against character-code builtins. Spelling it out avoids the collision.
+        text = _capture(r'(?i)(?:^|\n)\s*(?:mrn|medical record number|medical record|chart number)\s*:\s*([^\n]+)', 'mrn', text, '\nmrn: [ID-MRN]')
+        text = _capture(r'(?i)(?:^|\n)\s*(?:address|street|home address)\s*:\s*([^\n]+)', 'address', text, '\naddress: [ID-ADDRESS]')
+        text = _capture(r'(?i)(?:^|\n)\s*(?:insurance(?: id| number)?|policy number|member id)\s*:\s*([^\n]+)', 'insurance_id', text, '\ninsurance_id: [ID-INSURANCE]')
+        text = _capture(r'(?i)(?:^|\n)\s*(?:ssn|social security|national id|nhs number|rodne cislo)\s*:\s*([^\n]+)', 'national_id', text, '\nnational_id: [ID-NATIONAL]')
+
+        # --- Date of birth -> AGE BAND. Age is clinically load-bearing; the exact
+        #     date is not. Bands follow the common de-identification convention,
+        #     including collapsing 90+ into a single band.
+        age_band = 'unknown'
+        dob_match = re.search(r'(?i)(?:date of birth|dob|born)\s*:?\s*(\d{4})[-/\.](\d{1,2})[-/\.](\d{1,2})', text)
+        age_match = re.search(r'(?i)\bage\s*:?\s*(\d{1,3})\b', text)
+        stated_age = None
+        if age_match:
+            stated_age = int(age_match.group(1))
+        elif dob_match:
+            # No wall-clock available in the sandbox; derive from a stated age only.
+            identifiers['date_of_birth'] = [dob_match.group(0)]
+        if stated_age is not None:
+            if stated_age >= 90:
+                age_band = '90+'
+            else:
+                lower = (stated_age // 10) * 10
+                age_band = '%d-%d' % (lower, lower + 9)
+            identifiers['age'] = [str(stated_age)]
+        text = re.sub(r'(?i)(?:date of birth|dob|born)\s*:?\s*[\d\-/\.]{6,12}', 'age_band: ' + age_band, text)
+        text = re.sub(r'(?i)\bage\s*:?\s*\d{1,3}\b', 'age_band: ' + age_band, text)
+        if dob_match or age_match:
+            removed.append({'identifier': 'date_of_birth_or_age', 'occurrences': 1})
+
+        # --- Stable pseudonym for cross-run linkage without carrying an identifier.
+        seed = encounter_ref + '|' + (identifiers.get('mrn', [''])[0] if identifiers.get('mrn') else '')
+        pseudonym = 'PT-' + hashlib.sha256(seed.encode()).hexdigest()[:12]
+
+        # --- Pull the clinically structured fields the summariser is allowed to use.
+        def _field(*names):
+            for name in names:
+                m = re.search(r'(?im)^\s*' + name + r'\s*:\s*(.+)$', text)
+                if m:
+                    return m.group(1).strip()
+            return ''
+
+        record = {
+            'chief_complaint': _field('chief_complaint', 'chief complaint', 'reason for visit'),
+            'symptom_duration': _field('duration', 'symptom_duration', 'how long'),
+            'current_medications': _field('current_medications', 'medications', 'meds'),
+            'allergies': _field('allergies', 'drug allergies'),
+            'past_medical_history': _field('past_medical_history', 'medical history', 'history'),
+            'family_history': _field('family_history'),
+            'social_history': _field('social_history', 'smoking', 'alcohol'),
+            'pregnancy_status': _field('pregnancy_status', 'pregnant'),
+        }
+        answered = [k for k, v in record.items() if v]
+        unanswered = [k for k, v in record.items() if not v]
+
+        # --- Deterministic safety flags. These are STRING MATCHES, not triage:
+        #     they tell a human where to look first. No model decides urgency.
+        lowered = text.lower()
+        red_flag_terms = [
+            'chest pain', 'chest tightness', 'shortness of breath', 'suicidal',
+            'self harm', 'self-harm', 'severe bleeding', 'fainting', 'syncope',
+            'slurred speech', 'facial droop', 'weakness one side', 'anaphyla',
+        ]
+        red_flags = sorted({t for t in red_flag_terms if t in lowered})
+
+        result = {
+            'encounter_ref': encounter_ref,
+            'pseudonym': pseudonym,
+            'age_band': age_band,
+            'deidentified_record': text,
+            'structured_fields': record,
+            'answered_fields': answered,
+            'unanswered_fields': unanswered,
+            'identifier_types_removed': [r['identifier'] for r in removed],
+            'identifier_removal_count': len(removed),
+            'red_flag_terms_present': red_flags,
+            'has_red_flag': len(red_flags) > 0,
+            'record_looks_empty': len(text.split()) < 15,
+            # Held apart on purpose: only the post-gate reattachment step reads this.
+            'withheld_identifiers': identifiers,
+        }
+
+  # 2) THE SUMMARY. Reads the de-identified record ONLY. Every line must trace
+  #    to something the patient actually wrote.
+  - id: summarize_intake
+    type: llm
+    depends_on: [deidentify_intake]
+    model: sonnet
+    responsibility: "Draft the clinician-facing intake summary from the de-identified record."
+    source_hint: "This is the artefact whose faithfulness the accept gate exists to prove."
+    owner: "clinical-ops"
+    prompt: |
+      You are preparing an intake summary for a {input.clinic_specialty}
+      clinician. You are reading a DE-IDENTIFIED intake questionnaire: direct
+      identifiers were removed by an automated step and replaced with markers
+      like [ID-NAME]. Never speculate about what a marker concealed.
+
+      THE FAITHFULNESS RULE, which a judge will check line by line: every
+      clinical statement must trace to something the patient reported in the
+      record below. You may reorganise and clarify. You may not add. If the
+      patient did not mention a symptom, it does not appear in your summary -
+      not as a possibility, not as a "consider", not as a related finding.
+
+      You are NOT diagnosing. You are NOT triaging. Do not assign urgency, do
+      not name a likely condition, and do not recommend a treatment. A clinician
+      does all of that after reading this.
+
+      Where the questionnaire left something blank, list it as an unanswered
+      question rather than filling it in. These fields were not answered:
+      {steps.deidentify_intake.output.unanswered_fields}
+
+      De-identified intake record:
+      {steps.deidentify_intake.output.deidentified_record}
+
+      Structured fields extracted deterministically:
+      {steps.deidentify_intake.output.structured_fields}
+
+      Produce EXACTLY these sections, with these exact headings:
+
+      ## Reported concern
+      The chief complaint in the patient's own terms, with duration and course
+      as reported. Quote the patient's wording where it is clinically specific.
+
+      ## Reported history
+      Medications, allergies, past medical, family and social history AS
+      REPORTED. Write "not reported" for anything absent. Never write "denies"
+      unless the patient explicitly denied it - an unanswered question is not a
+      denial, and that distinction is the most common way these summaries
+      mislead.
+
+      ## Not reported
+      The intake fields that were left blank, listed plainly.
+
+      ## Questions for the clinician to ask
+      What the questionnaire leaves open. Phrase as questions, not as suspicions.
+
+      Do not add a diagnosis, an urgency level, a differential, or a plan.
+    llm_config:
+      max_tokens: 2000
+
+  # 3) THE OUTCOME GATE. `target:` creates the edge, so no depends_on.
+  #
+  #    fail_on_reject stays at its DEFAULT of true - a GUARD, and the strictest
+  #    one in this pack. A summary that may contain a symptom the patient never
+  #    reported must not reach a clinician at all: a caveat banner does not help,
+  #    because the clinician has no way to tell which line is the invented one.
+  #    Stopping the run is the only safe behaviour.
+  - id: accept_summary
+    type: accept
+    responsibility: "Prove the summary adds nothing the patient did not report."
+    source_hint: "A clinician cannot distinguish an invented symptom from a reported one by reading."
+    owner: "clinical-ops"
+    accept_config:
+      target: summarize_intake
+
+      # FREE and DETERMINISTIC. Structure, plus the negative checks that catch
+      # the two ways this step fails dangerously: a reconstructed identifier,
+      # and a model that diagnosed anyway.
+      checks:
+        - type: not_empty
+        - type: contains
+          value: "## Reported concern"
+        - type: contains
+          value: "## Reported history"
+        - type: contains
+          value: "## Not reported"
+        - type: contains
+          value: "## Questions for the clinician to ask"
+        # PHI must not have been reconstructed into the summary.
+        - type: not_contains
+          value: "[ID-NAME]"
+        - type: not_contains
+          value: "[ID-MRN]"
+        - type: not_contains
+          value: "[ID-NATIONAL]"
+        # The model was told not to diagnose or triage. These are the phrases it
+        # reaches for when it does anyway - caught for $0.
+        - type: not_contains
+          value: "differential diagnosis"
+        - type: not_contains
+          value: "URGENT"
+        - type: not_contains
+          value: "I recommend"
+
+      judges:
+        - name: clinical_faithfulness
+          model: sonnet
+          max_tokens: 800
+          rubric: |
+            You are judging whether an intake summary is FAITHFUL to what the
+            patient reported. You are not judging clinical quality, and you must
+            not offer a clinical opinion of your own.
+
+            The de-identified intake record the summary was written from:
+            {steps.deidentify_intake.output.deidentified_record}
+
+            REJECT if:
+            - the summary says the patient "denies" something the questionnaire
+              simply left blank
+            - a duration, severity or frequency appears that the patient did not
+              state
+            - a medication, allergy or condition appears that is not in the record
+            - the summary assigns urgency, names a likely diagnosis, offers a
+              differential, or recommends treatment - it was told not to
+            - a field listed as unanswered
+              ({steps.deidentify_intake.output.unanswered_fields})
+              is nonetheless answered in the summary
+
+            "Not reported" is the CORRECT output for a blank field. Do not
+            reject a summary for being sparse when the intake was sparse.
+
+        - name: no_added_findings
+          model: haiku
+          max_tokens: 600
+          rubric: |
+            You have exactly ONE job: find anything in this summary that was
+            ADDED. Do not assess completeness, usefulness, or wording - another
+            judge does that.
+
+            Source record:
+            {steps.deidentify_intake.output.deidentified_record}
+
+            Go line by line. For each clinical assertion, ask: is this literally
+            traceable to the source record?
+
+            REJECT if you find even one assertion that is not. That includes a
+            symptom implied but not stated, a normal finding asserted because it
+            was not mentioned, and any elaboration of the patient's wording that
+            adds clinical specificity they did not give.
+
+            APPROVE only if every clinical assertion traces to the source.
+
+      quorum: 0
+      on_reject: retry_target
+      max_rounds: 2
+      max_cost_usd: 0.40
+      fail_on_reject: true
+
+  # 4) THE PHI GATE. Re-identification is a POLICY question - "may this run
+  #    proceed to reattach identifiers" - not an outcome question, so it is a
+  #    `gate` rather than an accept step. Both strategies must pass: an
+  #    automated policy evaluation AND a human. on_timeout: abort.
+  - id: phi_handling_gate
+    type: gate
+    depends_on: [accept_summary, deidentify_intake]
+    responsibility: "Govern whether identifiers may be reattached to the accepted summary."
+    source_hint: "Re-identification is a permission decision with a named owner, distinct from whether the summary is correct."
+    owner: "clinical-privacy"
+    gate_config:
+      strategies:
+        - type: llm_eval
+          config:
+            prompt: >
+              You are a PHI handling reviewer. Answer exactly 'approved' if ALL of
+              these hold: the de-identification step removed at least one direct
+              identifier type, the accepted summary contains no identifier
+              markers or reconstructed identifiers, and re-identification has been
+              permitted for this encounter. Otherwise answer 'rejected' and name
+              the specific defect. Do not restate any identifier in your answer.
+            input: >
+              identifier types removed: {steps.deidentify_intake.output.identifier_types_removed};
+              removal count: {steps.deidentify_intake.output.identifier_removal_count};
+              reidentification permitted: {input.allow_reidentification};
+              accept verdict: {steps.accept_summary.output.decision}
+            model: sonnet
+        - type: human
+          config:
+            message: "Privacy reviewer: confirm that identifiers may be reattached to this accepted intake summary and filed to the record for {input.encounter_ref}."
+            timeout_hours: 24
+            on_timeout: abort
+
+  # 5) REATTACH IDENTIFIERS - deterministically, and only here. This is the only
+  #    step that reads withheld_identifiers, and it runs only after the gate. The
+  #    model never touched this data.
+  - id: assemble_identified_record
+    type: code
+    depends_on: [phi_handling_gate, accept_summary, deidentify_intake]
+    responsibility: "Assemble the clinician-facing record by reattaching identifiers in code."
+    source_hint: "Re-identification is a mechanical join; involving a model in it adds risk and no value."
+    owner: "clinical-eng"
+    code_config:
+      language: python
+      code: |
+        deident = _steps.get('deidentify_intake') or {}
+        verdict = _steps.get('accept_summary') or {}
+        summary = str(_steps.get('summarize_intake') or '')
+
+        permitted = str(_input.get('allow_reidentification', 'true')).strip().lower() == 'true'
+        withheld = deident.get('withheld_identifiers') or {}
+
+        header_lines = [
+            'Encounter: %s' % deident.get('encounter_ref'),
+            'Pseudonym: %s' % deident.get('pseudonym'),
+            'Age band: %s' % deident.get('age_band'),
+            'Specialty: %s' % _input.get('clinic_specialty'),
+        ]
+        if permitted:
+            for label in ('name', 'mrn'):
+                values = withheld.get(label) or []
+                if values:
+                    header_lines.append('%s: %s' % (label.upper(), values[0]))
+        else:
+            header_lines.append('Identifiers withheld: re-identification not permitted for this run.')
+
+        flags = deident.get('red_flag_terms_present') or []
+        if flags:
+            header_lines.append(
+                'ATTENTION - the intake text contains these terms, flagged by string match, '
+                'not by triage: %s' % ', '.join(flags)
+            )
+
+        result = {
+            'encounter_ref': deident.get('encounter_ref'),
+            'reidentified': permitted,
+            'identifiers_reattached': sorted(k for k in ('name', 'mrn') if permitted and withheld.get(k)),
+            'red_flag_terms': flags,
+            'accept_decision': verdict.get('decision'),
+            'accept_rounds_used': verdict.get('rounds_used'),
+            'gate_decision': (_steps.get('phi_handling_gate') or {}).get('decision'),
+            'unanswered_fields': deident.get('unanswered_fields'),
+            'clinician_record': '\n'.join(header_lines) + '\n\n' + summary,
+        }
+
+  # 6) CLINICIAN SIGN-OFF. The last stop before anything is filed, and the one
+  #    that makes this workflow a drafting aid rather than an autonomous system.
+  #    on_timeout: abort - an unattended run files nothing.
+  - id: clinician_signoff
+    type: approval
+    depends_on: [assemble_identified_record]
+    responsibility: "Named clinician reviews the summary against the intake and accepts it into the record."
+    source_hint: "Clinical accountability cannot be delegated to a pipeline."
+    owner: "clinical-lead"
+    approval_config:
+      message: >
+        Intake summary ready for {input.encounter_ref} ({input.clinic_specialty}).
+        This is a DRAFT produced from the patient questionnaire. It contains no
+        triage and no diagnosis by design. Review it against the intake before
+        approving. Reviewing clinician: {input.clinician_name}.
+      show_data: steps.assemble_identified_record.output
+      timeout_hours: 24
+      on_timeout: abort
+      allow_edit: true
+
+  # 7) NOTIFY the INTERNAL clinical channel - never the patient. dry_run: true
+  #    per the 0.44 convention. The message deliberately carries no clinical
+  #    content and no identifier: it confirms that a filing happened, nothing more.
+  - id: notify_clinical_team
+    type: notify
+    depends_on: [clinician_signoff]
+    responsibility: "Confirm the filing internally without restating any PHI."
+    source_hint: "A chat notification is the wrong surface for clinical content or identifiers."
+    owner: "clinical-ops"
+    notify_config:
+      dry_run: true
+      service: slack
+      channel: "{input.clinical_channel}"
+      message: >
+        Intake summary filed for {input.encounter_ref}
+        ({input.clinic_specialty}), signed off by {input.clinician_name}.
+        Faithfulness gate {steps.accept_summary.output.decision} after
+        {steps.accept_summary.output.rounds_used} round(s); PHI gate
+        {steps.assemble_identified_record.output.gate_decision};
+        {steps.deidentify_intake.output.identifier_removal_count} identifier
+        type(s) removed before summarisation.
+        {steps.assemble_identified_record.output.unanswered_fields} intake
+        field(s) were left unanswered. No clinical detail is included in this
+        message by design.
+
+on_complete:
+  storage_path: "patient-intake-summarizer/{run_id}/result.json"

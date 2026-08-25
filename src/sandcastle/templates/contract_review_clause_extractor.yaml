@@ -1,0 +1,510 @@
+# name: Contract Review Clause Extractor
+# description: Extracts key terms and obligations from a contract, then proves the extraction is trustworthy with an accept gate - free deterministic checks first, then a two-judge unanimous panel on coverage and invention, with a bounded retry-with-critique loop. Low-confidence clauses escalate to a named human reviewer; the run stops rather than shipping an extraction that failed its rubric.
+# tags: [Legal, ContractReview, ClauseExtraction, Obligations, Accept, LLMJudge, DueDiligence, MSA, DPA, HumanInTheLoop]
+# category: hr_legal
+
+name: contract-review-clause-extractor
+description: >
+  The flagship of the 0.47 knowledge-work pack, and an argument about what
+  "the model read the contract" is worth on its own.
+
+  A PARSE step lifts the contract text. A DETERMINISTIC code step indexes it -
+  clause numbering, section map, document statistics - so that everything
+  downstream can be traced back to a location in the source rather than to a
+  model's memory of it. An LLM then extracts the key terms and every obligation,
+  and is required to cite the clause each one came from.
+
+  Then the load-bearing step: an ACCEPT gate decides whether that extraction
+  actually met the goal. It runs deterministic CHECKS first, which cost $0 - an
+  extraction that came back empty, lost its required headings, or still contains
+  the "not found" placeholder is rejected before a single judge is billed. Only
+  a structurally sound extraction reaches the two-judge panel, and the panel is
+  UNANIMOUS (quorum 0 resolves against the judge count). The two judges are
+  given deliberately different jobs: one asks whether the key terms were found
+  at all, the other asks whether anything was invented. Two judges asked the
+  same question are a retry, not a panel.
+
+  On rejection the extraction is not discarded. `on_reject: retry_target` sends
+  it back to the extractor with the judges' critique appended, at most three
+  rounds, bounded four ways (max_rounds, this step's max_cost_usd, the run
+  budget, and the depth guard). The critique is escaped before re-injection, so
+  a judge cannot smuggle a template variable into the next prompt.
+
+  If the panel still rejects after three rounds, the run STOPS. `fail_on_reject`
+  is left at its default of true on purpose: an extraction that failed its
+  rubric must not reach a lawyer's desk wearing the label "reviewed".
+
+  Separately from the accept verdict, a DETERMINISTIC confidence score counts
+  how many obligations carry a real clause citation. Below the threshold, a
+  named human reviewer is shown exactly which obligations are weakly sourced
+  and signs off before the memo is issued. That is a different question from
+  "did the extraction succeed", so it is a different step.
+
+version: "1.0"
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 900
+
+input_schema:
+  required: ["contract_file", "counterparty"]
+  properties:
+    contract_file:
+      type: string
+      description: "Path or upload reference to the contract PDF under review."
+      default: ""
+      example: "@upload:contract-2026-0418.pdf"
+    counterparty:
+      type: string
+      description: "Name of the counterparty, used in the memo and in the judges' rubrics."
+      default: ""
+      example: "Northwind Logistics GmbH"
+    contract_type:
+      type: string
+      description: "Contract family, which drives the key-term list the extractor is held to."
+      default: "MSA"
+      example: "MSA"
+    governing_law_expected:
+      type: string
+      description: "Governing law your playbook expects, so a deviation is visible in the memo."
+      default: "England and Wales"
+      example: "England and Wales"
+    citation_threshold:
+      type: number
+      description: "Fraction (0-1) of obligations that must carry a clause citation before the memo issues without a human reviewer."
+      default: 0.8
+      example: "0.8"
+    reviewer_name:
+      type: string
+      description: "Named human who signs off a low-confidence extraction. Accountability is a person, not a queue."
+      default: "Contracts Counsel"
+      example: "Contracts Counsel"
+    report_author:
+      type: string
+      description: "Author shown on the contract review memo."
+      default: "Legal Operations"
+      example: "Legal Operations"
+    slack_channel:
+      type: string
+      description: "Legal-ops channel that receives the review outcome."
+      default: "#legal-contract-review"
+      example: "#legal-contract-review"
+
+steps:
+  # 1) PARSE the contract into text. OCR on, because scanned counterparty
+  #    paper is the normal case, not the exception.
+  - id: read_contract
+    type: parse
+    responsibility: "Lift the contract text so every later step reads the same source."
+    source_hint: "The contract is the only authority here; nothing downstream may assert what is not in it."
+    owner: "legal-ops"
+    prompt: "{input.contract_file}"
+    parse_config:
+      output: markdown
+      pages: null
+      ocr: true
+      ocr_engine: auto
+
+  # 2) DETERMINISTIC document index. Builds the clause map the extraction will
+  #    be checked against: which numbered clauses exist, where the standard
+  #    section headings sit, how long the document is. No model - this is the
+  #    ground truth a judge cannot argue with.
+  - id: index_document
+    type: code
+    depends_on: [read_contract]
+    responsibility: "Index clause numbers and section headings so citations can be verified against the source."
+    source_hint: "A citation is only worth something if the cited clause provably exists in the document."
+    owner: "legal-eng"
+    code_config:
+      language: python
+      code: |
+        import re
+
+        text = str(_steps.get('read_contract') or '')
+
+        # --- Clause numbers: 1., 1.1, 1.1.1, and the "Clause 4.2" / "Section 4.2" forms.
+        numbered = re.findall(r'(?m)^\s{0,8}(\d{1,2}(?:\.\d{1,2}){0,3})[\.\)]?\s+\S', text)
+        referenced = re.findall(r'(?i)\b(?:clause|section|article)\s+(\d{1,2}(?:\.\d{1,2}){0,3})\b', text)
+        clause_ids = sorted({c.rstrip('.') for c in numbered + referenced})
+
+        # --- Standard headings we expect a commercial contract to carry. Their
+        #     ABSENCE is a real finding, so record it rather than hiding it.
+        expected_headings = [
+            'term', 'termination', 'payment', 'fees', 'liability', 'indemnit',
+            'confidential', 'data protection', 'governing law', 'assignment',
+            'warrant', 'force majeure', 'notice',
+        ]
+        lowered = text.lower()
+        headings_found = sorted(h for h in expected_headings if h in lowered)
+        headings_missing = sorted(h for h in expected_headings if h not in lowered)
+
+        # --- Auto-renewal and unilateral-uplift tripwires. Deterministic string
+        #     work, not judgement: the memo says "look here", a human decides.
+        auto_renew = bool(re.search(r'(?i)automatically\s+renew|auto[- ]renew|evergreen', text))
+        uplift = bool(re.search(r'(?i)(increase|uplift|adjust).{0,40}(annually|each year|per annum|CPI|RPI)', text))
+        unlimited_liability = bool(re.search(r'(?i)unlimited\s+liability|without\s+limit', text))
+
+        words = len(text.split())
+
+        result = {
+            'counterparty': _input.get('counterparty'),
+            'contract_type': _input.get('contract_type'),
+            'char_count': len(text),
+            'word_count': words,
+            'clause_ids': clause_ids[:400],
+            'clause_count': len(clause_ids),
+            'headings_found': headings_found,
+            'headings_missing': headings_missing,
+            'flag_auto_renewal': auto_renew,
+            'flag_annual_uplift': uplift,
+            'flag_unlimited_liability': unlimited_liability,
+            'parse_looks_empty': words < 50,
+        }
+
+  # 3) EXTRACT key terms and obligations. This is the step under review - it does
+  #    not know it is being judged, which is the point. The headings are fixed so
+  #    the accept step's deterministic checks can assert them for $0.
+  - id: extract_terms
+    type: llm
+    depends_on: [index_document]
+    model: sonnet
+    responsibility: "Produce the key-term and obligation extraction that the accept gate will judge."
+    source_hint: "Every downstream artefact derives from this; it is the work whose success must be proven."
+    owner: "legal-ops"
+    prompt: |
+      You are extracting the commercial and legal substance of a {input.contract_type}
+      with {input.counterparty}. Work ONLY from the contract text below. If something
+      is not in the text, write "NOT PRESENT" - never guess, never fill from what a
+      contract of this type usually says.
+
+      Clause numbers that provably exist in this document:
+      {steps.index_document.output.clause_ids}
+
+      Standard headings NOT found in this document (report these as gaps):
+      {steps.index_document.output.headings_missing}
+
+      Contract text:
+      {steps.read_contract.output}
+
+      Produce EXACTLY these sections, with these exact headings:
+
+      ## Key terms
+      A table with columns: Term | Value | Clause. One row each for: parties,
+      effective date, term length, renewal, notice period, fees, payment terms,
+      liability cap, indemnities, governing law, termination for convenience.
+      Every row MUST carry a clause number from the list above, or "NOT PRESENT".
+
+      ## Obligations
+      A numbered list. Each entry: who owes it, what is owed, by when, and the
+      clause it comes from in square brackets, e.g. [Clause 7.3]. Only cite
+      clause numbers that appear in the list above.
+
+      ## Deviations from playbook
+      Where the contract departs from the expected governing law
+      ({input.governing_law_expected}) or carries an unusual liability, renewal
+      or uplift position. Cite the clause.
+
+      ## Gaps
+      What a {input.contract_type} should contain and this one does not.
+
+      Do not write a preamble. Do not summarise. Do not pad.
+    llm_config:
+      max_tokens: 4000
+
+  # 4) THE OUTCOME GATE. `target:` creates the dependency edge on its own, so
+  #    this step deliberately carries no depends_on.
+  #
+  #    fail_on_reject is left at its DEFAULT of true - a GUARD, not a filter.
+  #    The artefact here is a single legal opinion a human will act on. If the
+  #    panel cannot accept it after three rounds, the correct behaviour is to
+  #    stop the run, not to hand a lawyer a flagged extraction and hope they
+  #    read the flag. Compare crm_lead_enrichment_quality_gate, where the
+  #    artefact is a batch and the same setting is deliberately inverted.
+  - id: accept_extraction
+    type: accept
+    responsibility: "Decide whether the extraction met the goal, and prove the decision with evidence."
+    source_hint: "'The model produced an extraction' and 'the extraction is safe to advise on' are different facts."
+    owner: "legal-ops"
+    accept_config:
+      target: extract_terms
+
+      # DETERMINISTIC and FREE. These run BEFORE any judge, so a structurally
+      # broken extraction is rejected for $0. llm_judge is banned in checks: by
+      # the engine precisely so paid judging cannot hide in the free half.
+      checks:
+        - type: not_empty
+        - type: contains
+          value: "## Key terms"
+        - type: contains
+          value: "## Obligations"
+        - type: contains
+          value: "## Deviations from playbook"
+        - type: contains
+          value: "## Gaps"
+        # An extraction that never cites a clause has not done the job, whatever
+        # it says. One bracketed citation is the floor, checked for free.
+        - type: regex_match
+          value: "\\[Clause [0-9]"
+        # Model boilerplate that means the extractor gave up mid-way.
+        - type: not_contains
+          value: "I don't have access"
+        - type: not_contains
+          value: "As an AI"
+
+      # TWO JUDGES, DIFFERENT JOBS, DIFFERENT MODELS. quorum: 0 means unanimous,
+      # resolved against len(judges) at runtime - so adding a third judge later
+      # TIGHTENS this panel instead of quietly loosening it.
+      judges:
+        - name: terms_coverage
+          model: sonnet
+          max_tokens: 800
+          rubric: |
+            You are judging COVERAGE of a contract extraction for a
+            {input.contract_type} with {input.counterparty}. Formatting has
+            already been checked deterministically - do not comment on it.
+
+            REJECT if any of the following is true:
+            - A key term that the contract clearly does contain is recorded as
+              "NOT PRESENT".
+            - The obligations list omits a payment, delivery, notice or renewal
+              duty that the contract text plainly imposes.
+            - The liability cap, termination rights, or governing law are
+              summarised so vaguely that a reader could not act on them.
+            - The "Gaps" section is empty while the document index reports
+              missing standard headings.
+
+            Standard headings the indexer could NOT find in this document:
+            {steps.index_document.output.headings_missing}
+
+            APPROVE only if a contracts lawyer could rely on this extraction to
+            brief a negotiation without re-reading the whole agreement.
+
+        - name: no_invented_terms
+          model: haiku
+          max_tokens: 800
+          rubric: |
+            You are judging whether a contract extraction INVENTED anything.
+            You are not judging whether it is complete - another judge does that.
+
+            The only clause numbers that exist in this document are:
+            {steps.index_document.output.clause_ids}
+
+            REJECT if any of the following is true:
+            - An obligation cites a clause number that is not in the list above.
+            - A term is stated as a fact of this contract without a clause
+              citation and without being marked "NOT PRESENT".
+            - A figure, date, cap or notice period appears that reads like a
+              market-standard default rather than something read off the page.
+            - The extraction asserts a deviation from playbook without pointing
+              at the clause that deviates.
+
+            An extraction that honestly says "NOT PRESENT" is CORRECT, not
+            incomplete. Do not reject it for that.
+
+      quorum: 0
+
+      # Send it back to the extractor with the critique rather than failing on
+      # the first miss. Bounded by max_rounds AND by max_cost_usd below.
+      on_reject: retry_target
+      max_rounds: 3
+
+      # This step's own ceiling, independent of the run budget - which a user
+      # of a bundled template may never have set. Two judges plus up to two
+      # re-extractions of a long contract stop here.
+      max_cost_usd: 0.75
+
+      fail_on_reject: true
+
+  # 5) DETERMINISTIC confidence score. Separate question from the accept verdict:
+  #    the panel said the extraction is sound; this asks how much of it is
+  #    actually sourced to a clause that exists. Pure counting, no model.
+  - id: score_citation_confidence
+    type: code
+    depends_on: [accept_extraction, index_document]
+    responsibility: "Count how many obligations carry a verifiable clause citation."
+    source_hint: "Confidence must be a number a reviewer can audit, not a model's self-report."
+    owner: "legal-eng"
+    code_config:
+      language: python
+      code: |
+        import re
+
+        extraction = str(_steps.get('extract_terms') or '')
+        index = _steps.get('index_document') or {}
+        known = set(index.get('clause_ids') or [])
+        threshold = float(_input.get('citation_threshold', 0.8) or 0.8)
+
+        # --- Isolate the Obligations section; that is where citations are required.
+        obligations_block = ''
+        parts = re.split(r'(?m)^##\s+', extraction)
+        for part in parts:
+            if part.lower().startswith('obligations'):
+                obligations_block = part
+                break
+
+        # --- One obligation per numbered line.
+        lines = [ln.strip() for ln in obligations_block.splitlines() if ln.strip()]
+        obligation_lines = [ln for ln in lines if re.match(r'^\d+[\.\)]\s', ln)]
+
+        cited = 0
+        uncited = []
+        bogus = []
+        for line in obligation_lines:
+            refs = re.findall(r'\[(?:Clause|Section|Article)\s+([0-9][0-9\.]*)\]', line)
+            if not refs:
+                uncited.append(line[:200])
+                continue
+            # A citation to a clause the indexer never saw is worse than none.
+            unknown = [r.rstrip('.') for r in refs if r.rstrip('.') not in known]
+            if unknown and known:
+                bogus.append({'line': line[:200], 'unknown_clauses': unknown})
+            else:
+                cited += 1
+
+        total = len(obligation_lines)
+        ratio = round(cited / total, 3) if total else 0.0
+
+        # --- "NOT PRESENT" is an honest answer, so count it separately from a gap.
+        not_present_count = len(re.findall(r'NOT PRESENT', extraction))
+
+        needs_review = (
+            total == 0
+            or ratio < threshold
+            or len(bogus) > 0
+            or bool(index.get('parse_looks_empty'))
+        )
+
+        result = {
+            'counterparty': _input.get('counterparty'),
+            'obligation_count': total,
+            'cited_count': cited,
+            'citation_ratio': ratio,
+            'citation_threshold': threshold,
+            'uncited_obligations': uncited[:20],
+            'bogus_citations': bogus[:20],
+            'not_present_count': not_present_count,
+            'accept_decision': (_steps.get('accept_extraction') or {}).get('decision'),
+            'accept_rounds_used': (_steps.get('accept_extraction') or {}).get('rounds_used'),
+            'needs_human_review': needs_review,
+            'confidence_label': 'low' if needs_review else 'high',
+        }
+
+  # 6) ROUTE on the deterministic confidence, not on a model's opinion.
+  - id: route_confidence
+    type: condition
+    depends_on: [score_citation_confidence]
+    responsibility: "Send weakly-sourced extractions to a named human before the memo issues."
+    source_hint: "A citation ratio below the playbook threshold is a review trigger, not a judgement call."
+    owner: "legal-ops"
+    condition_config:
+      expression: "{steps.score_citation_confidence.output.needs_human_review} == True"
+      then: [reviewer_signoff]
+      else: [record_auto_clear]
+
+  # 6a) LOW CONFIDENCE: a named human sees exactly which obligations are weakly
+  #     sourced - show_data, not a wall of prose - and signs off or rejects.
+  #     on_timeout: abort, because silence must never become approval on a
+  #     contract memo.
+  - id: reviewer_signoff
+    type: approval
+    responsibility: "Named counsel accepts responsibility for a weakly-sourced extraction."
+    source_hint: "Accountability for a legal opinion has to land on a person."
+    owner: "legal-counsel"
+    approval_config:
+      message: >
+        Contract review for {input.counterparty}: the extraction passed the accept
+        panel, but its citation confidence is below the {input.citation_threshold}
+        threshold. Review the uncited and unverifiable obligations below, then
+        approve to issue the memo or reject to send it back for manual extraction.
+        Reviewer of record: {input.reviewer_name}.
+      show_data: steps.score_citation_confidence.output
+      timeout_hours: 48
+      on_timeout: abort
+      allow_edit: true
+
+  # 6b) HIGH CONFIDENCE: record the auto-clear deterministically so the memo can
+  #     state which path it took. A branch that leaves no trace is not auditable.
+  - id: record_auto_clear
+    type: code
+    responsibility: "Record that the extraction cleared without human review, and why."
+    source_hint: "The memo must say which path issued it; 'no approval step ran' is not an audit trail."
+    owner: "legal-eng"
+    code_config:
+      language: python
+      code: |
+        score = _steps.get('score_citation_confidence') or {}
+        result = {
+            'path': 'auto_cleared',
+            'reviewer': None,
+            'reason': (
+                'citation ratio %s met the %s threshold, no bogus clause references, '
+                'and the accept panel approved the extraction'
+                % (score.get('citation_ratio'), score.get('citation_threshold'))
+            ),
+            'citation_ratio': score.get('citation_ratio'),
+        }
+
+  # 7) THE MEMO. Depends on BOTH branch heads so it runs whichever path cleared.
+  - id: review_memo
+    type: report
+    depends_on: [reviewer_signoff, record_auto_clear]
+    responsibility: "Issue the contract review memo with its evidence attached."
+    source_hint: "A reviewer downstream must be able to reconstruct why this memo was trusted."
+    owner: "legal-ops"
+    report_config:
+      template: research-report
+      format: pdf
+      theme: professional
+      title: "Contract Review - {input.counterparty} ({input.contract_type})"
+      author: "{input.report_author}"
+    prompt: |
+      Assemble the contract review memo. Present the extraction as findings, and
+      the accept evidence as the reason those findings can be relied on. Do not
+      restate the contract; do not add legal advice that is not in the material
+      below.
+
+      Section 1 - Document index (clause map, missing standard headings, tripwires):
+      {steps.index_document.output}
+
+      Section 2 - Key terms, obligations, deviations and gaps (the accepted extraction):
+      {steps.extract_terms.output}
+
+      Section 3 - Assurance. This memo issued because an accept gate approved the
+      extraction. Record the verdict, which judges voted, how many rounds of
+      re-work were needed, and what the panel cost:
+      {steps.accept_extraction.output}
+
+      Section 4 - Citation confidence (deterministic count of obligations traced
+      to a clause that provably exists in the document):
+      {steps.score_citation_confidence.output}
+
+      Section 5 - Review path. State plainly whether this memo was cleared
+      automatically or signed off by {input.reviewer_name}:
+      auto-clear record: {steps.record_auto_clear.output}
+      human sign-off: {steps.reviewer_signoff.output}
+
+  # 8) NOTIFY legal ops. dry_run: true - 0.44 made notify LIVE by default, and a
+  #    bundled template must be safe to run on the day it is installed. Flip
+  #    dry_run to false once the Slack connector is configured for your workspace.
+  - id: notify_legal_ops
+    type: notify
+    depends_on: [review_memo]
+    responsibility: "Announce the review outcome with its verdict and confidence."
+    source_hint: "Legal ops tracks turnaround and escalation rate from this channel."
+    owner: "legal-ops"
+    notify_config:
+      dry_run: true
+      service: slack
+      channel: "{input.slack_channel}"
+      message: >
+        Contract review complete: {input.counterparty} ({input.contract_type}).
+        Accept verdict {steps.accept_extraction.output.decision} after
+        {steps.accept_extraction.output.rounds_used} round(s), panel cost
+        ${steps.accept_extraction.output.cost_usd}. Citation confidence
+        {steps.score_citation_confidence.output.citation_ratio} against a
+        {input.citation_threshold} threshold -
+        {steps.score_citation_confidence.output.confidence_label}. Obligations
+        extracted: {steps.score_citation_confidence.output.obligation_count},
+        traced to a real clause: {steps.score_citation_confidence.output.cited_count}.
+
+on_complete:
+  storage_path: "contract-review-clause-extractor/{run_id}/result.json"
