@@ -13,7 +13,7 @@ _logger = logging.getLogger(__name__)
 
 _VALID_SANDBOX_BACKENDS = frozenset({"e2b", "docker", "local", "cloudflare"})
 _VALID_STORAGE_BACKENDS = frozenset({"local", "s3"})
-_VALID_MEMORY_BACKENDS = frozenset({"local", "cloud"})
+_VALID_MEMORY_BACKENDS = frozenset({"local", "cloud", "filesystem"})
 _VALID_LOG_LEVELS = frozenset({"debug", "info", "warning", "error", "critical"})
 _VALID_UPDATE_CHANNELS = frozenset({"stable", "beta", "pin"})
 
@@ -272,10 +272,15 @@ class Settings(BaseSettings):
 
     # Memory
     memory_enabled: bool = True
-    memory_backend: str = "local"  # "local" | "cloud"
+    memory_backend: str = "local"  # "local" | "cloud" | "filesystem"
     memory_graph_enabled: bool = False
     memory_max_age_days: int = 90  # TTL for memory decay (0 = no expiry)
     memory_admit_threshold: float = 0.3  # Minimum importance score to store
+
+    # Filesystem ("markdown vault") backend. Only read when
+    # memory_backend == "filesystem"; empty root means <data_dir>/memory-vault.
+    memory_fs_root: str = ""
+    memory_fs_git: bool = True  # Commit each run's memory changes to the vault repo
 
     # Security
     credential_encryption_key: str = ""  # Fernet key for encrypting tool credentials at rest

@@ -189,6 +189,9 @@ def _get_client(backend: str = "local") -> Any:
       - "local" (default): Anthropic LLM + fastembed local embeddings via Memory()
       - "cloud": Mem0 cloud platform (not yet implemented)
 
+    "filesystem" never reaches here - _get_backend resolves it to the markdown
+    vault, which needs no Mem0 client at all.
+
     Thread-safe: a lock prevents duplicate initialization under concurrent calls.
     """
     # Fast path (no lock needed once initialized)
@@ -206,7 +209,7 @@ def _get_client(backend: str = "local") -> Any:
     if backend != "local":
         raise MemoryBackendError(
             f"Unknown memory backend: {backend!r}. "
-            "Supported: 'local', 'cloud'."
+            "Supported: 'local', 'cloud', 'filesystem'."
         )
 
     with _clients_lock:
@@ -812,7 +815,14 @@ def _get_backend(backend: str = "") -> Any:
         # Re-check inside the lock (double-checked locking pattern)
         if name in _backends:
             return _backends[name]
-        adapter = _Mem0Backend(name)
+        if name == "filesystem":
+            # Imported here, not at module scope: memory_fs imports this
+            # module, and the vault must not be a cost for the default path.
+            from sandcastle.engine.memory_fs import FilesystemMemoryBackend
+
+            adapter: Any = FilesystemMemoryBackend()
+        else:
+            adapter = _Mem0Backend(name)
         _backends[name] = adapter
         return adapter
 
