@@ -1696,7 +1696,7 @@ Real-time activity stream on the dashboard: workflow runs, failures, edits, API 
   <img src="docs/screenshots/template-browser.png" alt="Template Browser" width="720" />
 </p>
 
-Sandcastle ships with 248 built-in workflow templates. The [Community Hub](https://sandcastle-ai.eu/hub) lists 181 templates, including 8 community-submitted templates, alongside curated collections for marketing, sales, DevOps, and more.
+Sandcastle ships with 248 built-in workflow templates. The [Community Hub](https://sandcastle-ai.eu/hub) lists 283 templates, including 35 community-submitted templates, alongside curated collections for marketing, sales, DevOps, and more.
 
 | Category | Built-in Templates |
 |----------|-----------|

@@ -1,0 +1,503 @@
+# name: Recruiting Screen with Evidence Gate
+# description: Screens a CV against a role spec where every claim about the candidate must quote the CV verbatim. Protected attributes are stripped deterministically before the screener model sees the document, an accept gate holds the screen to evidence-traceability and a bias rubric, and no advance or rejection message leaves the building without a named human approving it first.
+# tags: [Recruiting, Screening, CV, ATS, Accept, EvidenceTraceability, BiasGuard, HumanInTheLoop, HiringCompliance, EUAIAct]
+# category: hr_legal
+
+name: recruiting-screen-evidence-gate
+description: >
+  A CV screen that is auditable by construction, and a template that models the
+  safe defaults its domain requires rather than describing them.
+
+  Three commitments are wired into the workflow, not into a comment.
+
+  ONE - protected attributes never reach the screener. A DETERMINISTIC code step
+  redacts name, address, date of birth and age, gender and title, nationality
+  and citizenship, marital status and photograph references BEFORE any model is
+  called. The screener model literally cannot weigh what it cannot see. The
+  redaction is Python, so it is reviewable, testable and identical on every run.
+
+  TWO - every claim about the candidate must quote the CV. The screener is
+  required to attach a verbatim quotation to each assessment, and an ACCEPT gate
+  enforces it: free deterministic checks assert that quoted evidence is present
+  and that redacted attributes have not crept back in, then a two-judge
+  unanimous panel judges evidence-traceability and bias separately. The bias
+  judge is a BACKSTOP, not the only defence - the redaction step is the primary
+  control.
+
+  THREE - nothing reaches the candidate without a named human. Both outcomes are
+  gated by an `approval` step with `on_timeout: abort`, so an unattended run
+  sends nothing at all. The rejection path is gated because a wrongly rejected
+  candidate cannot appeal a message they were never told the reasoning for; the
+  advance path is gated because a wrongly advanced candidate costs an
+  interviewer a day and the candidate a false hope. Both notify steps carry
+  `dry_run: true`.
+
+  The accept gate is a GUARD - fail_on_reject stays at its default of true. A
+  screen the panel could not accept has nothing in it for a recruiter to
+  approve, so the run stops rather than presenting an unevidenced judgement of a
+  person as if it were a screen.
+
+version: "1.0"
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 900
+
+input_schema:
+  required: ["cv_file", "role_title", "must_have_requirements"]
+  properties:
+    cv_file:
+      type: string
+      description: "Path or upload reference to the candidate CV / application document."
+      default: ""
+      example: "@upload:application-4471.pdf"
+    candidate_ref:
+      type: string
+      description: "Pseudonymous candidate reference used in every artefact. Deliberately NOT the candidate's name."
+      default: "CAND-0001"
+      example: "CAND-4471"
+    role_title:
+      type: string
+      description: "Role being screened for."
+      default: ""
+      example: "Senior Data Engineer"
+    role_spec:
+      type: string
+      description: "Full role specification: responsibilities, team context, level expectations."
+      default: ""
+      example: "Own the batch and streaming pipelines feeding the analytics warehouse..."
+    must_have_requirements:
+      type: string
+      description: "Semicolon-separated hard requirements. These are the only criteria that can produce a rejection."
+      default: ""
+      example: "5+ years Python; production Spark or Flink; SQL at scale; right to work in EU"
+    nice_to_have_requirements:
+      type: string
+      description: "Semicolon-separated preferences. These may rank a candidate but must never reject one."
+      default: ""
+      example: "dbt; Kafka; Terraform; German"
+    min_must_haves_to_advance:
+      type: number
+      description: "How many must-have requirements need CV evidence before the candidate advances."
+      default: 3
+      example: "3"
+    recruiter_name:
+      type: string
+      description: "Named recruiter who approves the outcome and owns the decision."
+      default: "Talent Partner"
+      example: "Talent Partner"
+    ats_channel:
+      type: string
+      description: "Recruiting-team channel that receives the screen outcome."
+      default: "#recruiting-screens"
+      example: "#recruiting-screens"
+
+steps:
+  # 1) PARSE the CV. OCR on: candidates submit scans and exported designs.
+  - id: read_cv
+    type: parse
+    responsibility: "Lift the CV text so the redactor has something deterministic to work on."
+    source_hint: "The CV is the only evidence base; nothing may be asserted about the candidate that is not in it."
+    owner: "talent-ops"
+    prompt: "{input.cv_file}"
+    parse_config:
+      output: markdown
+      pages: null
+      ocr: true
+      ocr_engine: auto
+
+  # 2) THE PRIMARY BIAS CONTROL, and it is deterministic. Strip protected
+  #    attributes and their common proxies BEFORE any model call. A model cannot
+  #    weigh what it never receives, which is a stronger guarantee than asking a
+  #    model politely not to weigh it.
+  #
+  #    Note what is deliberately NOT stripped: employment dates and education
+  #    dates stay, because a screen has to reason about seniority. What IS
+  #    stripped is age, which is what those dates are usually used to proxy.
+  - id: redact_protected_attributes
+    type: code
+    depends_on: [read_cv]
+    responsibility: "Remove protected attributes and their proxies before the screener model runs."
+    source_hint: "EU AI Act treats CV screening as high risk; the control has to be in code, not in a prompt."
+    owner: "talent-eng"
+    code_config:
+      language: python
+      code: |
+        import re
+
+        text = str(_steps.get('read_cv') or '')
+        redactions = []
+
+        def _scrub(pattern, label, body):
+            hits = re.findall(pattern, body)
+            if hits:
+                redactions.append({'attribute': label, 'occurrences': len(hits)})
+            return re.sub(pattern, '[REDACTED-' + label.upper() + ']', body)
+
+        # --- Contact identity: email, phone, postal address, profile URLs.
+        text = _scrub(r'[\w\.\-\+]+@[\w\-]+\.[\w\.\-]+', 'email', text)
+        text = _scrub(r'(?<!\d)(?:\+\d{1,3}[\s\-]?)?(?:\(?\d{2,4}\)?[\s\-]?){2,4}\d{2,4}(?!\d)', 'phone', text)
+        text = _scrub(r'(?i)\b(?:linkedin\.com|github\.com|xing\.com)/[\w\-/]+', 'profile_url', text)
+        text = _scrub(r'(?i)^\s*address\s*:.*$', 'address', text)
+
+        # --- Age and date of birth, plus the explicit age statement.
+        text = _scrub(r'(?i)\b(?:date of birth|d\.?o\.?b\.?|born)\s*:?\s*[\w\s,/\.\-]{4,20}', 'date_of_birth', text)
+        text = _scrub(r'(?i)\bage\s*:?\s*\d{1,2}\b', 'age', text)
+
+        # --- Gender, title and marital status.
+        text = _scrub(r'(?i)\b(?:mr|mrs|ms|miss|mx|herr|frau|pan|pani)\.?\s+(?=[A-Z])', 'title', text)
+        text = _scrub(r'(?i)\b(?:gender|sex|marital status|civil status)\s*:?\s*\w+', 'gender_or_marital', text)
+        text = _scrub(r'(?i)\b(?:he/him|she/her|they/them)\b', 'pronouns', text)
+
+        # --- Nationality and citizenship. Right-to-work is a MUST-HAVE that may
+        #     legitimately be screened, so it is preserved as a neutral flag below
+        #     rather than being inferred from a nationality line.
+        right_to_work = bool(re.search(r'(?i)\b(?:right to work|work permit|work authoris|work authoriz|eu citizen|permanent resident|visa status)\b', text))
+        text = _scrub(r'(?i)\b(?:nationality|citizenship|country of birth)\s*:?\s*[\w\s]{2,30}', 'nationality', text)
+
+        # --- Photographs and personal-image references.
+        text = _scrub(r'(?i)!\[[^\]]*\]\([^\)]*\)', 'image', text)
+        text = _scrub(r'(?i)\b(?:photo|photograph|headshot)\s*:?\s*\S*', 'photo_reference', text)
+
+        # --- The candidate name is the hardest to strip reliably. Take the
+        #     document's first non-empty line, which is where CVs put it, and
+        #     require the pseudonymous reference to be used everywhere instead.
+        lines = text.splitlines()
+        name_line_removed = ''
+        for i, line in enumerate(lines):
+            stripped = line.strip().lstrip('#').strip()
+            if not stripped:
+                continue
+            words = stripped.split()
+            looks_like_name = 1 < len(words) <= 4 and all(w[:1].isupper() for w in words if w[:1].isalpha())
+            if looks_like_name and len(stripped) < 60:
+                name_line_removed = stripped
+                lines[i] = '[REDACTED-NAME]'
+                redactions.append({'attribute': 'name', 'occurrences': 1})
+            break
+        text = '\n'.join(lines)
+
+        must_haves = [r.strip() for r in str(_input.get('must_have_requirements') or '').split(';') if r.strip()]
+        nice_to_haves = [r.strip() for r in str(_input.get('nice_to_have_requirements') or '').split(';') if r.strip()]
+
+        result = {
+            'candidate_ref': _input.get('candidate_ref'),
+            'redacted_cv': text,
+            'redactions': redactions,
+            'redaction_count': sum(r['occurrences'] for r in redactions),
+            'name_line_was_removed': bool(name_line_removed),
+            'mentions_right_to_work': right_to_work,
+            'must_haves': must_haves,
+            'must_have_count': len(must_haves),
+            'nice_to_haves': nice_to_haves,
+            'cv_word_count': len(text.split()),
+            'cv_looks_empty': len(text.split()) < 60,
+        }
+
+  # 3) THE SCREEN. Sees only the redacted CV. Every assessment must carry a
+  #    verbatim quotation, which the accept gate then enforces for $0.
+  - id: screen_candidate
+    type: llm
+    depends_on: [redact_protected_attributes]
+    model: sonnet
+    responsibility: "Assess the redacted CV against the must-have requirements, quoting evidence for every claim."
+    source_hint: "This is the work under review; the accept gate exists to prove it is evidenced, not merely fluent."
+    owner: "talent-ops"
+    prompt: |
+      You are screening candidate {input.candidate_ref} for the role of
+      {input.role_title}. You are reading a REDACTED CV: personal identifiers and
+      protected attributes have been removed by an automated step. If you notice
+      a redaction marker, ignore it - do not speculate about what was removed,
+      and never infer a protected attribute from context.
+
+      ROLE SPECIFICATION:
+      {input.role_spec}
+
+      MUST-HAVE REQUIREMENTS (the only criteria that can produce a rejection):
+      {steps.redact_protected_attributes.output.must_haves}
+
+      NICE-TO-HAVE REQUIREMENTS (may rank a candidate, must NEVER reject one):
+      {steps.redact_protected_attributes.output.nice_to_haves}
+
+      REDACTED CV:
+      {steps.redact_protected_attributes.output.redacted_cv}
+
+      THE EVIDENCE RULE, which is not negotiable: every statement you make about
+      this candidate must be followed by a verbatim quotation from the CV in
+      double quotes. If the CV does not support a statement, you may not make it.
+      Write "NO EVIDENCE IN CV" instead. Do not paraphrase and call it evidence.
+
+      Produce EXACTLY these sections, with these exact headings:
+
+      ## Must-have assessment
+      One entry per must-have requirement, in the order given. Each entry:
+      the requirement, then MET or NOT MET or UNCLEAR, then the verbatim
+      quotation from the CV that supports it, in double quotes. If nothing in
+      the CV addresses the requirement, write NOT MET and "NO EVIDENCE IN CV".
+
+      ## Strengths
+      What this candidate demonstrably brings, each with a quotation.
+
+      ## Gaps and risks
+      What the CV does not evidence. Frame these as absences of evidence, not as
+      deficiencies of the person. Do not speculate about why something is absent.
+
+      ## Suggested interview questions
+      Three questions that would resolve the UNCLEAR items above.
+
+      Do not recommend a hiring decision. Do not comment on career gaps,
+      institution prestige, or anything you cannot quote. A human decides.
+    llm_config:
+      max_tokens: 3000
+
+  # 4) THE OUTCOME GATE. `target:` creates the dependency edge, so no depends_on.
+  #
+  #    fail_on_reject stays at its DEFAULT of true - a GUARD. If the panel cannot
+  #    accept the screen, there is nothing here for a recruiter to approve: an
+  #    unevidenced judgement of a person must not reach the approval step wearing
+  #    the label "screen". Stopping the run is the correct outcome.
+  - id: accept_screen
+    type: accept
+    responsibility: "Prove the screen is evidence-traceable and bias-clean before a human is asked to act on it."
+    source_hint: "In a high-risk domain, 'the model produced a screen' is not the fact anyone needs."
+    owner: "talent-ops"
+    accept_config:
+      target: screen_candidate
+
+      # DETERMINISTIC and FREE, evaluated before any judge is billed.
+      checks:
+        - type: not_empty
+        - type: contains
+          value: "## Must-have assessment"
+        - type: contains
+          value: "## Strengths"
+        - type: contains
+          value: "## Gaps and risks"
+        - type: contains
+          value: "## Suggested interview questions"
+        # The evidence rule, asserted for $0: at least one substantial verbatim
+        # quotation must be present. A screen with no quotations at all has not
+        # followed the only instruction that matters here.
+        - type: regex_match
+          value: '"[^"]{15,}"'
+        # Protected attributes must not have been reconstructed in the output.
+        - type: not_contains
+          value: "nationality"
+        - type: not_contains
+          value: "date of birth"
+        # The screener was told not to make the decision. If it did anyway, the
+        # screen is out of scope and a human is being nudged, not informed.
+        - type: not_contains
+          value: "I recommend hiring"
+        - type: not_contains
+          value: "I recommend rejecting"
+
+      # TWO JUDGES, TWO DIFFERENT JOBS. Both must approve (quorum: 0 = unanimous).
+      judges:
+        - name: evidence_traceability
+          model: sonnet
+          max_tokens: 800
+          rubric: |
+            You are judging whether a CV screen is TRACEABLE - whether every
+            claim about the candidate is anchored to a verbatim quotation from
+            the CV. You are not judging whether the candidate is good.
+
+            REJECT if any of the following is true:
+            - A must-have is marked MET without a quotation that actually
+              supports it.
+            - A quotation is a paraphrase rather than verbatim text.
+            - A strength is asserted with no quotation attached.
+            - A gap is described as a fact about the person rather than as an
+              absence of evidence in the document.
+            - Any requirement from the must-have list is missing from the
+              assessment entirely.
+
+            The must-have requirements are:
+            {steps.redact_protected_attributes.output.must_haves}
+
+            APPROVE only if a recruiter could verify every single claim by
+            searching the CV for the quoted string.
+
+        - name: bias_guard
+          model: sonnet
+          max_tokens: 800
+          rubric: |
+            You are the BIAS BACKSTOP on a CV screen. Protected attributes were
+            already stripped in code before the screener ran; you are checking
+            whether any judgement nonetheless rests on a protected attribute or
+            a proxy for one.
+
+            REJECT if any assessment rests on, or even mentions as relevant:
+            - name, apparent ethnicity, national origin, or language of a name
+            - age, or an age inferred from graduation year or career length
+            - gender, pronouns, marital or family status
+            - nationality or citizenship, EXCEPT where right-to-work is itself
+              an explicit must-have requirement being checked neutrally
+            - disability, health, or a career gap treated as a deficiency
+            - the prestige, ranking or country of a university or employer,
+              used as a substitute for demonstrated skill
+            - a photograph or any physical description
+
+            REJECT also if the screen rejects the candidate on a NICE-TO-HAVE.
+            Nice-to-haves may rank; they may never exclude.
+
+            APPROVE if every judgement traces to a demonstrated skill or
+            experience relevant to the must-have requirements.
+
+      quorum: 0
+
+      # Two rounds, not three: a screen that needs three attempts to follow the
+      # evidence rule is a prompt problem, not a candidate problem, and burning
+      # the budget hides that.
+      on_reject: retry_target
+      max_rounds: 2
+      max_cost_usd: 0.50
+      fail_on_reject: true
+
+  # 5) THE DISPOSITION IS DETERMINISTIC. Count the must-haves the screen marked
+  #    MET and compare against the threshold. A model never decides whether a
+  #    person is rejected - it only supplies evidence that is then counted.
+  - id: score_disposition
+    type: code
+    depends_on: [accept_screen, redact_protected_attributes]
+    responsibility: "Count evidenced must-haves and derive the advance/reject disposition in code."
+    source_hint: "A decision about a person's application must be reproducible from the record, not re-rolled by a model."
+    owner: "talent-eng"
+    code_config:
+      language: python
+      code: |
+        import re
+
+        screen = str(_steps.get('screen_candidate') or '')
+        redaction = _steps.get('redact_protected_attributes') or {}
+        must_haves = redaction.get('must_haves') or []
+        threshold = int(float(_input.get('min_must_haves_to_advance', 3) or 3))
+
+        # --- Isolate the must-have section; only it can drive a rejection.
+        block = ''
+        for part in re.split(r'(?m)^##\s+', screen):
+            if part.lower().startswith('must-have assessment'):
+                block = part
+                break
+
+        met = len(re.findall(r'(?<![A-Z])MET\b(?!\s*NOT)', block)) - len(re.findall(r'NOT MET', block))
+        met = max(0, met)
+        not_met = len(re.findall(r'NOT MET', block))
+        unclear = len(re.findall(r'UNCLEAR', block))
+        quotations = len(re.findall(r'"[^"]{15,}"', block))
+        no_evidence = len(re.findall(r'NO EVIDENCE IN CV', block))
+
+        total = len(must_haves)
+        # The threshold can never exceed the number of requirements actually set.
+        effective_threshold = min(threshold, total) if total else threshold
+
+        advance = met >= effective_threshold and not redaction.get('cv_looks_empty')
+
+        # An UNCLEAR-heavy screen is not a rejection - it is a reason to interview.
+        if not advance and unclear >= max(1, total - met - not_met):
+            disposition = 'advance_with_questions'
+            advance = True
+        elif advance:
+            disposition = 'advance'
+        else:
+            disposition = 'reject'
+
+        result = {
+            'candidate_ref': _input.get('candidate_ref'),
+            'role_title': _input.get('role_title'),
+            'must_have_total': total,
+            'must_haves_met': met,
+            'must_haves_not_met': not_met,
+            'must_haves_unclear': unclear,
+            'threshold': effective_threshold,
+            'quotations_in_assessment': quotations,
+            'no_evidence_markers': no_evidence,
+            'disposition': disposition,
+            'advance': advance,
+            'accept_decision': (_steps.get('accept_screen') or {}).get('decision'),
+            'accept_rounds_used': (_steps.get('accept_screen') or {}).get('rounds_used'),
+            'redactions_applied': redaction.get('redaction_count'),
+        }
+
+  # 6) ROUTE on the counted disposition.
+  - id: route_disposition
+    type: condition
+    depends_on: [score_disposition]
+    responsibility: "Send the outcome to the right human approval path."
+    source_hint: "Advance and reject need different human scrutiny, so they are different steps."
+    owner: "talent-ops"
+    condition_config:
+      expression: "{steps.score_disposition.output.advance} == True"
+      then: [approve_advance]
+      else: [approve_rejection]
+
+  # 6a) REJECTION PATH - the one this template exists to protect. A named
+  #     recruiter must approve before ANY rejection communication is prepared.
+  #     on_timeout: abort means an unattended run sends nothing: silence is
+  #     never consent to reject a candidate.
+  - id: approve_rejection
+    type: approval
+    responsibility: "Named recruiter approves a rejection before any candidate-facing message is prepared."
+    source_hint: "A candidate rejected by an unattended pipeline has no accountable decision-maker to appeal to."
+    owner: "talent-partner"
+    approval_config:
+      message: >
+        {input.candidate_ref} did not meet the must-have threshold for
+        {input.role_title}. Review the counted evidence below BEFORE approving.
+        Approving prepares a rejection; rejecting this approval sends the
+        application back for manual review. Check specifically that every
+        unmet must-have is genuinely unevidenced in the CV rather than
+        evidenced in wording the screen did not recognise.
+        Decision owner: {input.recruiter_name}.
+      show_data: steps.score_disposition.output
+      timeout_hours: 72
+      on_timeout: abort
+      allow_edit: true
+
+  # 6b) ADVANCE PATH - also gated. A false advance costs an interviewer a day and
+  #     the candidate a wasted process, so it gets a human too. Same abort
+  #     semantics: an unattended run schedules nothing.
+  - id: approve_advance
+    type: approval
+    responsibility: "Named recruiter confirms the advance and the interview questions before scheduling."
+    source_hint: "Advancing on unread evidence wastes an interviewer's day and the candidate's."
+    owner: "talent-partner"
+    approval_config:
+      message: >
+        {input.candidate_ref} met the must-have threshold for {input.role_title}.
+        Review the counted evidence below and the screen's suggested interview
+        questions, then approve to advance. Decision owner: {input.recruiter_name}.
+      show_data: steps.score_disposition.output
+      timeout_hours: 72
+      on_timeout: abort
+      allow_edit: true
+
+  # 7) NOTIFY the RECRUITING TEAM - never the candidate. dry_run: true because
+  #    0.44 made notify live by default and this template's whole argument is
+  #    that outbound messages in this domain are opt-in. Candidate-facing
+  #    communication is deliberately NOT part of this workflow: it belongs
+  #    downstream of a human who has read the approval.
+  - id: notify_recruiting_team
+    type: notify
+    depends_on: [approve_advance, approve_rejection]
+    responsibility: "Record the approved outcome in the recruiting channel."
+    source_hint: "The team needs an audit trail of who approved which disposition and on what evidence."
+    owner: "talent-ops"
+    notify_config:
+      dry_run: true
+      service: slack
+      channel: "{input.ats_channel}"
+      message: >
+        Screen complete: {input.candidate_ref} for {input.role_title} ->
+        {steps.score_disposition.output.disposition} (approved by
+        {input.recruiter_name}). Must-haves evidenced
+        {steps.score_disposition.output.must_haves_met}/{steps.score_disposition.output.must_have_total}
+        against a threshold of {steps.score_disposition.output.threshold};
+        {steps.score_disposition.output.must_haves_unclear} unclear. Evidence gate
+        {steps.score_disposition.output.accept_decision} after
+        {steps.score_disposition.output.accept_rounds_used} round(s);
+        {steps.score_disposition.output.redactions_applied} protected-attribute
+        redactions were applied before screening. No candidate-facing message has
+        been sent by this workflow.
+
+on_complete:
+  storage_path: "recruiting-screen-evidence-gate/{run_id}/result.json"
