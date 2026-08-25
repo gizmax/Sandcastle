@@ -186,6 +186,26 @@ record is.**
 
 ---
 
+## 3a. Grading what is in here
+
+The metadata above is not only for reading — it is also the only thing that
+can answer *"how much of this is still true?"*. `sandcastle memory eval
+<scope>` reads it back and scores four things: staleness (age against TTL,
+split into entries consolidation will drop and entries the confirmations veto
+has made permanent), forgetting health (removals against entries ever
+written — a store that has never removed anything scores zero), contradiction
+pressure (supersede-chain depth, confirm-vs-supersede ratio, domains near
+their caps) and retrieval sanity (does querying what an entry *used to say*
+return its current text, or a live entry that still says the old thing).
+
+Every score is a division of two counted things and both are printed. It is
+read-only and takes no scope lock, so it can be run against a live vault.
+The scoring runs on any backend, but only the vault records enough for all
+four — on mem0 the command prints an explicit list of what it cannot measure
+there and why. See `docs/design/047-memory-eval.md`.
+
+---
+
 ## 4. Git, honestly
 
 Sandcastle owns a dedicated repository at the vault root — created with

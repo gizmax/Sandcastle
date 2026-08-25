@@ -43,6 +43,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`sandcastle memory eval <scope>` - grade the store, not the retrieval.**
+  Recall@k answers "can I find what I stored" and says nothing about whether
+  it should still be there; a memory with textbook retrieval scores can be
+  three-tenths stale with nothing ever deleted, which is a log with good
+  manners. The 0.46 vault already recorded the metadata a grade needs -
+  confirmation counters, timestamps, a supersede chain with an attic,
+  tombstones with reasons - and nothing read it back. `engine/memory_eval.py`
+  does, and scores four things per domain and per scope:
+
+  - **Staleness** splits the past-TTL population in two, because the halves
+    mean different things: entries that consolidation will drop at the next
+    run end, and entries the confirmations veto has made *immortal* - past
+    their TTL and never to be re-examined. The second is the number the
+    critique is about.
+  - **Forgetting health** counts removals from tombstones against entries ever
+    written. A store that has never removed anything scores **0.0** and is told
+    so in words; a store that supersedes briskly but removes nothing is told
+    that updating is not forgetting. Domain merges are counted separately -
+    moving two files into one does not mean the store remembers less.
+  - **Contradiction pressure** reads supersede-chain depth out of the attic,
+    with the confirm-vs-supersede ratio and any domain approaching the 32 KB
+    file cap or the 120-domain scope cap named.
+  - **Retrieval sanity** probes through the backend's own `load()` with what
+    each rewritten entry *used to say* - not with its current text, which
+    passes by construction - and fails it when the fact is no longer reachable
+    from its own history, or when a live entry that still says the superseded
+    thing outranks it.
+
+  Every score is a division of two counted things and both counts are printed
+  beside it; there is no weighting and no composite whose parts are hidden.
+  Unmeasurable is reported as `n/a`, never as zero. `--json` for machines.
+  On any backend without vault metadata the report runs what it can (age
+  against the TTL) and prints an explicit **"not measurable on this backend"**
+  section naming each missing metric and why - including the honest detail
+  that mem0 2.x *does* keep a per-memory history and an expiration date, and
+  that it is Sandcastle's own adapter that does not surface them. Scoring is
+  read-only and takes no scope lock. Design note:
+  `docs/design/047-memory-eval.md`.
+
 - **`type: accept` - an outcome gate.** "The agent finished" and "the agent
   succeeded" are different facts, and the engine recorded only the first. An
   accept step judges a target step's output: deterministic `checks:` first
