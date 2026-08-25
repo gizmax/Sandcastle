@@ -43,6 +43,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A crashed run now finishes instead of dying.** The effect ledger knew
+  exactly which side effects had landed; the worker threw that away.
+  `_recover_stuck_runs` marked every run stranded in `RUNNING` as `FAILED` -
+  "worker crashed, recovered on startup" - and that was the end of it, however
+  far through the workflow the run had got.
+
+  It now requeues the run in its own effect scope. The run replays from its
+  first step; every step whose effect already committed comes back out of the
+  ledger at `cost_usd=0.0` without touching the network, and a step whose claim
+  is still `in_flight` past its lease fails per its `on_uncertain` rather than
+  guessing. Kill the worker after step N of M: the run finishes anyway, steps
+  1..N cost $0 the second time, and nothing sends twice. Pure steps
+  (`transform`, `code`, `condition`) are `replay: live` by design and do run
+  again - the price of replay is wall-clock, not money.
+
+  This is deliberately *replay-based* resume. There is no new scheduler state
+  machine and no second checkpoint format: the ledger is the checkpoint.
+  Recovery passes no `skip_steps`, on purpose. The checkpoint path that replay
+  and fork use restores `step_outputs` but not `step_results`, so a skipped
+  step's `{steps.X.status}`, `{steps.X.error}` and `{steps.X.cost}` resolve to
+  nothing downstream and the step leaves no `run_steps` row for the Black Box.
+  A memoized step has neither problem. The checkpoint also covers strictly
+  less: a step cancelled mid-flight when a sibling paused the run never reaches
+  a checkpoint but does leave a ledger claim.
+
+  Bounded, because a run that kills its worker on the same step every time
+  would otherwise requeue forever. `MAX_RECOVERY_ATTEMPTS` (default 2) is
+  counted in a new `runs.recovery_attempts` column - durable, so a poison run
+  exhausts its attempts rather than resetting them at every restart. Past the
+  cap the run is `FAILED` with an error naming the attempt count and, where
+  `run_steps` still knows it, the step it died on.
+
+  `CRASH_RESUME_ENABLED=0` restores the old behaviour. So does an unreachable
+  or disabled ledger: recovery is refused and the run fails as before, with the
+  reason in the error, because replaying without a ledger would re-fire every
+  completed effect - the exact bug the ledger shipped to fix.
+
+  Also fixed on the way: `_save_run_step` skipped a falsy `cost_usd`, so a
+  memoized step re-executing under the *same* run id kept the charge from the
+  execution that crashed - a resumed run's total read `$0.00` while the step
+  row still claimed `$0.42`. Replay and fork never hit this because they mint a
+  new run id; crash-resume does not.
+
+  **Known gap:** a `sub_workflow` child executes in a scope of its own
+  (`_execute_sub_workflow_step` does not pass `effect_scope_id` down), so a
+  resumed parent re-executes a completed sub-workflow's side effects. Replay
+  and fork have always had this; crash-resume makes it easier to hit. Tracked
+  for a follow-up - fixing it needs a scope derivation that keeps a fan-out's
+  N children distinguishable.
+
+  **Deploy order:** migration `023` must land **before** workers restart on
+  0.46. A 0.46 worker against a `022` schema cannot read `recovery_attempts`;
+  its recovery sweep logs the error and leaves stuck runs alone rather than
+  requeuing them unbounded.
+
 - **A durable step effect ledger, so replay stops re-sending.**
   `sandcastle run --replay` re-spent tokens and re-sent HTTP requests. Cassette
   record/replay was real but lived inside `_execute_step_once`, and all 24 step

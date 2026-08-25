@@ -126,6 +126,13 @@ class Run(Base):
     # a pre-0.45 run reads as COALESCE(effect_scope_id, id), i.e. its own scope,
     # which is exactly right.
     effect_scope_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    # How many times a worker has requeued this run after finding it stranded
+    # in RUNNING (queue/worker.py: _recover_stuck_runs). Durable because the
+    # thing it bounds is a run that crashes the worker counting it: a poison
+    # run must exhaust its attempts, not reset them with every restart.
+    recovery_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     sub_workflow_of_step: Mapped[str | None] = mapped_column(String(255), nullable=True)
     workflow_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     depth: Mapped[int] = mapped_column(Integer, default=0, server_default="0")

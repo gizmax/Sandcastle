@@ -241,13 +241,22 @@ class TestWorkerDBPersistRetryExhaustion:
 
 
 class TestStuckRunRecovery:
-    """Test _recover_stuck_runs identifies and marks stuck runs as FAILED."""
+    """Test _recover_stuck_runs identifies runs stranded past 2x the timeout."""
 
     @pytest.mark.asyncio
     async def test_running_run_beyond_threshold_recovered(self):
-        """Runs in RUNNING state past 2x timeout should be marked FAILED."""
+        """A run past 2x timeout is picked up and no longer left RUNNING.
+
+        0.46 resumes such a run instead of burying it (see
+        tests/test_crash_resume_046.py). What this test still pins is the
+        *detection*: with crash resume opted out, the pre-0.46 answer stands,
+        which is the behaviour every deployment falls back to.
+        """
+        from sandcastle.config import settings
         from sandcastle.models.db import Run, RunStatus, async_session
         from sandcastle.queue.worker import _recover_stuck_runs
+
+        settings.crash_resume_enabled = False
 
         run_id = str(uuid.uuid4())
         run_uuid = uuid.UUID(run_id)
@@ -273,7 +282,7 @@ class TestStuckRunRecovery:
             assert run is not None
             assert run.status == RunStatus.FAILED
             assert run.completed_at is not None
-            assert "recovered" in run.error.lower()
+            assert "crashed or timed out" in run.error.lower()
 
     @pytest.mark.asyncio
     async def test_queued_run_beyond_threshold_is_not_recovered(self):

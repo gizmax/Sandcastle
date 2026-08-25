@@ -2521,6 +2521,17 @@ CSP_REPORT_ONLY=false          # Content-Security-Policy in report-only mode
 DEFAULT_MAX_COST_USD=0    # 0 = no global budget limit
 MAX_WORKFLOW_DEPTH=5      # max recursion depth for hierarchical workflows
 
+# Step effect ledger (a side effect fires once per replay lineage)
+EFFECT_LEDGER_ENABLED=true     # kill switch for the whole mechanism
+EFFECT_LEASE_SECONDS=900       # after this, an unfinished effect is "uncertain"
+EFFECT_LEDGER_TTL_DAYS=30      # settled rows are pruned at worker startup
+EFFECT_CLAIM_WAIT_SECONDS=5    # wait for another worker's in-flight claim
+# EFFECT_LEDGER_REQUIRED=      # unset = local runs live, servers fail closed
+
+# Crash resume (a run stranded by a dead worker replays instead of failing)
+CRASH_RESUME_ENABLED=true      # false restores the pre-0.46 "mark it FAILED"
+MAX_RECOVERY_ATTEMPTS=2        # per run, then FAILED - stops a poison run looping
+
 # Agent Memory
 MEMORY_BACKEND=local           # "local" (Qdrant + fastembed) or "cloud"
 MEMORY_MAX_AGE_DAYS=90         # TTL for memory decay (0 = keep forever)

@@ -6,7 +6,9 @@ import asyncio
 import logging
 import os
 import threading
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Any
 
 from arq.worker import func
 
@@ -370,13 +372,252 @@ async def run_evolution_job(
         return {"evolution_id": evolution_id, "status": "failed", "error": str(exc)}
 
 
-async def _recover_stuck_runs() -> None:
-    """Recover runs stuck in RUNNING after a worker crash.
+def _as_int(value: Any, default: int) -> int:
+    """Coerce a value to int, falling back when it is not a number.
 
-    Finds runs that have been RUNNING for longer than twice the job timeout
-    and marks them as FAILED. QUEUED jobs can legitimately remain in Redis
-    during a backlog, so they are left for the queue to deliver. Called during
-    worker startup to clean up after unexpected shutdowns.
+    Same reason ``engine/effects.py`` has ``_numeric_setting``: tests routinely
+    hand this code MagicMock rows and MagicMock settings, and a recovery sweep
+    that raised on one would fail loudly in suites that are not testing it.
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+@dataclass
+class _StuckRun:
+    """The fields of a stranded run, read once and carried out of the session.
+
+    Each run is then acted on in its own short transaction, so the sweep never
+    holds a session open across an enqueue.
+    """
+
+    id: Any
+    workflow_name: str
+    workflow_version: int | None
+    input_data: dict | None
+    max_cost_usd: float | None
+    admin_trusted: bool
+    effect_scope_id: Any
+    recovery_attempts: int
+
+
+async def _ledger_can_carry_a_resume() -> tuple[bool, str]:
+    """Whether a crashed run may be replayed, and if not, why not.
+
+    Crash-resume is replay: the run re-executes from its first step and the
+    step effect ledger is the only thing stopping the prefix that already
+    landed from landing again. Without a reachable ledger a "recovery" would
+    re-POST every completed effect - the exact bug 0.45 shipped the ledger to
+    fix - so the honest answer there is the pre-0.46 one: FAILED.
+
+    The probe is a real read of ``run_step_effects``. A missing table (a worker
+    started against a pre-022 schema) and an unreachable database both surface
+    here, once per sweep, before any run has been requeued.
+    """
+    if not settings.crash_resume_enabled:
+        return False, "crash resume is disabled (CRASH_RESUME_ENABLED=0)"
+    if not settings.effect_ledger_enabled:
+        return False, "the step effect ledger is disabled (EFFECT_LEDGER_ENABLED=0)"
+    try:
+        from sandcastle.engine.effects import EffectLedger
+
+        # A key that cannot exist: this asks whether the table is readable, not
+        # whether it holds anything.
+        await EffectLedger().lookup("crash-resume-probe")
+    except Exception as exc:  # noqa: BLE001 - any failure means "do not replay"
+        return False, f"the step effect ledger is unreachable ({exc})"
+    return True, ""
+
+
+async def _last_step_in_flight(run_id: Any) -> str:
+    """Best-effort description of where a run was when its worker died.
+
+    Steps are written to ``run_steps`` as RUNNING before they execute, so rows
+    still marked RUNNING name what was in flight - which for a poison run is
+    the step that keeps killing the worker. Returned as a phrase to splice into
+    an error message, or "" when nothing is knowable.
+    """
+    try:
+        from sqlalchemy import select
+
+        from sandcastle.models.db import RunStep, StepStatus, async_session
+
+        async with async_session() as session:
+            rows = await session.scalars(
+                select(RunStep.step_id)
+                .where(
+                    RunStep.run_id == run_id,
+                    RunStep.status == StepStatus.RUNNING,
+                )
+                .limit(4)
+            )
+            names = sorted({name for name in rows if name})
+        if not names:
+            return ""
+        if len(names) == 1:
+            return f" while executing step '{names[0]}'"
+        return " while executing steps " + ", ".join(f"'{n}'" for n in names)
+    except Exception as exc:  # noqa: BLE001 - diagnostics must not break recovery
+        logger.debug(
+            "Could not determine the in-flight step for run %s: %s", run_id, exc
+        )
+        return ""
+
+
+async def _fail_stuck_run(run_id: Any, error: str) -> bool:
+    """Mark one stranded run FAILED, but only while it is still RUNNING."""
+    from sqlalchemy import update
+
+    from sandcastle.models.db import Run, RunStatus, async_session
+
+    try:
+        async with async_session() as session:
+            result = await session.execute(
+                update(Run)
+                .where(Run.id == run_id, Run.status == RunStatus.RUNNING)
+                .values(
+                    status=RunStatus.FAILED,
+                    completed_at=datetime.now(timezone.utc),
+                    error=error[:4096],
+                )
+            )
+            await session.commit()
+            return bool(result.rowcount)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Could not fail stuck run %s: %s", run_id, exc)
+        return False
+
+
+async def _requeue_stuck_run(run: _StuckRun, attempt: int) -> bool:
+    """Put one stranded run back on the queue for a full replay.
+
+    The transition RUNNING -> QUEUED is a compare-and-swap on both the status
+    and the attempt counter, so two workers sweeping the same run in the same
+    second cannot both requeue it and cannot both claim attempt *n*.
+
+    Nothing is passed for ``skip_steps`` or ``initial_context``: this is a
+    replay from the top, and the ledger rather than the checkpoint is what
+    skips the completed prefix. ``_recover_stuck_runs`` explains why.
+    """
+    from sqlalchemy import update
+
+    # Imported here, not at module import time: routes imports the worker for
+    # enqueue_workflow, so a top-level import would be circular - and the
+    # version-aware loader is the same one replay and fork use, which is the
+    # point of borrowing it rather than writing a third copy.
+    from sandcastle.api.routes import _load_versioned_workflow_yaml
+    from sandcastle.models.db import Run, RunStatus, async_session
+
+    run_id = str(run.id)
+    # The lineage the completed effects were claimed in. A run that was itself
+    # a replay already carries its parent's scope; a fresh one is its own.
+    # Pinning it explicitly means the requeued job cannot drift into a new
+    # scope - which would re-fire everything.
+    scope_id = run.effect_scope_id or run.id
+
+    try:
+        workflow_yaml = await _load_versioned_workflow_yaml(
+            run.workflow_name, run.workflow_version
+        )
+    except Exception as exc:  # noqa: BLE001 - a missing workflow is not resumable
+        await _fail_stuck_run(
+            run.id,
+            "Worker crashed or timed out and the run could not be resumed: "
+            f"workflow '{run.workflow_name}' could not be loaded ({exc})",
+        )
+        return False
+
+    async with async_session() as session:
+        result = await session.execute(
+            update(Run)
+            .where(
+                Run.id == run.id,
+                Run.status == RunStatus.RUNNING,
+                Run.recovery_attempts == attempt - 1,
+            )
+            .values(
+                status=RunStatus.QUEUED,
+                recovery_attempts=attempt,
+                effect_scope_id=scope_id,
+                started_at=None,
+                completed_at=None,
+                error=None,
+            )
+        )
+        await session.commit()
+        if not result.rowcount:
+            # Another worker got there first, or the run settled on its own
+            # between the SELECT and here. Either way it is no longer ours.
+            return False
+
+    try:
+        await enqueue_workflow(
+            workflow_yaml,
+            run.input_data or {},
+            run_id,
+            max_cost_usd=run.max_cost_usd,
+            admin_trusted=run.admin_trusted,
+            # arq keeps a result under the original job id and silently drops
+            # an enqueue that reuses a spent one. One id per attempt.
+            job_id=f"{run_id}:recovery:{attempt}",
+        )
+    except Exception as exc:  # noqa: BLE001 - enqueue_workflow already failed the run
+        logger.error("Could not requeue crashed run %s: %s", run_id, exc)
+        return False
+
+    logger.warning(
+        "Requeued crashed run %s for replay (attempt %d/%d, effect scope %s)",
+        run_id,
+        attempt,
+        settings.max_recovery_attempts,
+        scope_id,
+    )
+    return True
+
+
+async def _recover_stuck_runs() -> None:
+    """Resume runs stranded in RUNNING by a dead worker.
+
+    Finds runs that have been RUNNING for longer than twice the job timeout -
+    arq kills a job at the timeout, so anything past twice it has no worker -
+    and puts them back on the queue instead of burying them. QUEUED jobs can
+    legitimately remain in Redis during a backlog, so they are left for the
+    queue to deliver. Called during worker startup.
+
+    **Replay, not rewind.** The requeued run executes from its first step in
+    the same effect scope. Every step whose effect already committed comes back
+    out of the ledger at ``cost_usd=0.0`` without touching the network; a step
+    whose claim is still ``in_flight`` past its lease is genuinely unknown, so
+    it fails per its ``on_uncertain``. There is no new scheduler state machine:
+    the ledger *is* the checkpoint.
+
+    **Why no ``skip_steps``.** The checkpoint path that replay and fork use
+    restores ``step_outputs`` and skips what it sees, and layering it under the
+    ledger as belt and braces looks free. It is not. ``RunContext.snapshot``
+    does not carry ``step_results`` and ``execute_workflow`` does not restore
+    it, so downstream references to a skipped step's ``{steps.X.status}``,
+    ``{steps.X.error}`` or ``{steps.X.cost}`` resolve to nothing; a skipped step
+    also writes no ``run_steps`` row, so it disappears from the Black Box
+    timeline. A memoized step has neither problem - it returns a real
+    ``StepResult`` through the ordinary completion path. And the checkpoint
+    covers strictly less than the ledger: a step cancelled mid-flight when a
+    sibling paused the run never reaches a checkpoint but does leave a ledger
+    claim. Skipping would buy nothing and cost two bugs.
+
+    The price of replaying from the top is wall-clock, not money: pure steps
+    (``transform``, ``code``, ``condition``) are ``replay: live`` by design and
+    do run again.
+
+    **Bounds.** ``settings.max_recovery_attempts`` caps the requeues per run,
+    counted in a column so a run that kills the worker counting it still runs
+    out of attempts. Past the cap the run is FAILED with the attempt count and,
+    where ``run_steps`` knows it, the step it died on.
+
+    **Refusals.** With ``crash_resume_enabled`` off, or the ledger disabled or
+    unreachable, the pre-0.46 behaviour stands: FAILED, with the reason in the
+    error. Replaying without a ledger would re-fire every completed effect.
     """
     from datetime import timedelta
 
@@ -397,25 +638,68 @@ async def _recover_stuck_runs() -> None:
                 Run.started_at <= cutoff,
             )
             result = await session.execute(stmt_running)
-            stuck_running = result.scalars().all()
-
-            recovered = 0
-            now = datetime.now(timezone.utc)
-            for run in stuck_running:
-                run.status = RunStatus.FAILED
-                run.completed_at = now
-                run.error = "Worker crashed or timed out - recovered on startup"
-                recovered += 1
-
-            if recovered:
-                await session.commit()
-                logger.warning(
-                    "Recovered %d stuck run(s) (threshold=%ds)",
-                    recovered,
-                    2 * timeout_seconds,
+            stuck = [
+                _StuckRun(
+                    id=run.id,
+                    workflow_name=run.workflow_name,
+                    workflow_version=run.workflow_version,
+                    input_data=run.input_data,
+                    max_cost_usd=run.max_cost_usd,
+                    admin_trusted=bool(run.admin_trusted),
+                    effect_scope_id=run.effect_scope_id,
+                    recovery_attempts=_as_int(run.recovery_attempts, 0),
                 )
+                for run in result.scalars().all()
+            ]
     except Exception as e:
         logger.error("Failed to recover stuck runs on startup: %s", e)
+        return
+
+    if not stuck:
+        return
+
+    resumable, refusal = await _ledger_can_carry_a_resume()
+    max_attempts = max(_as_int(settings.max_recovery_attempts, 2), 0)
+
+    requeued = 0
+    failed = 0
+    for run in stuck:
+        if not resumable:
+            if await _fail_stuck_run(
+                run.id,
+                f"Worker crashed or timed out - not resumed because {refusal}",
+            ):
+                failed += 1
+            continue
+
+        attempt = run.recovery_attempts + 1
+        if attempt > max_attempts:
+            where = await _last_step_in_flight(run.id)
+            if await _fail_stuck_run(
+                run.id,
+                f"Worker crashed or timed out{where}. Giving up after "
+                f"{run.recovery_attempts} recovery attempt(s), the configured "
+                f"maximum (max_recovery_attempts={max_attempts}).",
+            ):
+                failed += 1
+                logger.error(
+                    "Run %s exhausted its %d recovery attempt(s)%s",
+                    run.id,
+                    max_attempts,
+                    where,
+                )
+            continue
+
+        if await _requeue_stuck_run(run, attempt):
+            requeued += 1
+
+    if requeued or failed:
+        logger.warning(
+            "Stuck run sweep (threshold=%ds): %d requeued, %d failed",
+            2 * timeout_seconds,
+            requeued,
+            failed,
+        )
 
 
 async def _recover_stuck_evolutions() -> None:
@@ -566,6 +850,7 @@ async def enqueue_workflow(
     step_overrides: dict | None = None,
     admin_trusted: bool = False,
     mark_failed_on_error: bool = True,
+    job_id: str | None = None,
 ) -> None:
     """Enqueue a workflow job - via Redis (arq) or in-process (asyncio.create_task).
 
@@ -578,6 +863,12 @@ async def enqueue_workflow(
     timeout defined in workflow YAML files. If a workflow's sandbox timeout
     exceeds job_timeout, arq will kill the job mid-execution. Adjust
     SANDCASTLE_WORKER_JOB_TIMEOUT accordingly for long-running workflows.
+
+    ``job_id`` overrides the arq job id, which defaults to the run id so a
+    duplicate submission of the same run is deduplicated by Redis. Crash
+    recovery has to override it: the original job id is spent for as long as
+    arq keeps its result, and re-enqueueing under a spent id is silently
+    dropped. See ``_recover_stuck_runs``.
     """
     global _enqueue_redis_pool
 
@@ -603,7 +894,7 @@ async def enqueue_workflow(
                 skip_steps=skip_steps,
                 step_overrides=step_overrides,
                 admin_trusted=admin_trusted,
-                _job_id=run_id,
+                _job_id=job_id or run_id,
             )
         except Exception as enqueue_err:
             logger.error(
