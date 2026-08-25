@@ -43,6 +43,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`type: accept` - an outcome gate.** "The agent finished" and "the agent
+  succeeded" are different facts, and the engine recorded only the first. An
+  accept step judges a target step's output: deterministic `checks:` first
+  (they can reject for $0 before any judge is paid), then LLM judges with
+  per-judge models, an N-of-M quorum (`quorum: 0` = unanimous, so adding a
+  judge tightens the panel), and a human fallback through the existing
+  approvals surface. Judges fail closed - an HTTP error or an unreadable reply
+  is a reject with the error recorded, never a fabricated verdict. Every
+  decision writes an evidence pack (per-round target digests, check results,
+  each judge's verdict/reason/model/cost, the quorum arithmetic) into the step
+  output and the audit chain. `on_reject: retry_target` re-runs the judged
+  step with the escaped critique injected, bounded four ways (`max_rounds`
+  capped at 5, the accept step's own budget, the run-budget projection, the
+  depth guard). Rejection fails the step with `retryable=False`, mirroring
+  the gate.
+- **`MEMORY_BACKEND=filesystem` - a markdown vault an auditor can read.**
+  `INDEX.md` (hard-capped at 1,500 tokens) plus per-domain markdown files
+  under `<root>/<tenant>/<scope>/`, with an attic for superseded text and a
+  Forgotten ledger. Writes confirm (>=0.85 overlap), supersede (0.40-0.85) or
+  append; forgetting is TTL with a confirmations veto in one end-of-run pass.
+  Zero new dependencies - proven by running a workflow in a core-only venv.
+  Each vault git commit's SHA is pinned into the audit hash chain. Hard caps
+  (120 domains/scope, 32 KB/file) are errors by design - the price of
+  auditability. Documented, measured limitations ship in
+  `docs/memory-filesystem-vault.md`: the overlap measure counts stopwords, and
+  CJK/Cyrillic text degrades silently into `misc.md`. Mem0+Qdrant stays the
+  default.
 - **A crashed run now finishes instead of dying.** The effect ledger knew
   exactly which side effects had landed; the worker threw that away.
   `_recover_stuck_runs` marked every run stranded in `RUNNING` as `FAILED` -
