@@ -386,3 +386,86 @@ class TestConfigValidation:
 
         assert Settings(memory_backend="cloud").memory_backend == "cloud"
         assert Settings(memory_backend="LOCAL").memory_backend == "local"
+
+
+class TestMem0ApiGenerations:
+    """Reads must work against both mem0 API generations.
+
+    mem0 2.x rejects `user_id=` at top level (ValueError, "use filters=")
+    while 0.x/1.x raises TypeError on `filters=`/`top_k=`. Passing legacy
+    kwargs to 2.x and swallowing the ValueError meant every memory read on
+    the installed backend silently returned [] - found by the 0.47 memory
+    eval workstream, verified against mem0 2.0.18 live.
+    """
+
+    def _rows(self):
+        return {"results": [{"id": "m1", "memory": "fact", "metadata": {}}]}
+
+    def test_search_speaks_mem0_2x(self):
+        from sandcastle.engine.memory import _mem0_search
+
+        class Mem0V2:
+            def search(self, query, **kwargs):
+                if "user_id" in kwargs or "limit" in kwargs:
+                    raise ValueError(
+                        "Top-level entity parameters {'user_id'} are not "
+                        "supported in search(). Use filters={'user_id': ...}"
+                    )
+                assert kwargs["filters"] == {"user_id": "workflow:x"}
+                assert kwargs["top_k"] == 5
+                return {"results": [{"id": "m1", "memory": "fact", "metadata": {}}]}
+
+        out = _mem0_search(Mem0V2(), "q", "workflow:x", 5)
+        assert out["results"][0]["memory"] == "fact"
+
+    def test_search_falls_back_to_legacy_mem0(self):
+        from sandcastle.engine.memory import _mem0_search
+
+        class Mem0V1:
+            def search(self, query, user_id=None, limit=100):
+                assert user_id == "workflow:x" and limit == 5
+                return {"results": [{"id": "m1", "memory": "fact", "metadata": {}}]}
+
+        out = _mem0_search(Mem0V1(), "q", "workflow:x", 5)
+        assert out["results"][0]["memory"] == "fact"
+
+    def test_get_all_speaks_mem0_2x(self):
+        from sandcastle.engine.memory import _mem0_get_all
+
+        class Mem0V2:
+            def get_all(self, **kwargs):
+                if "user_id" in kwargs:
+                    raise ValueError("use filters=")
+                assert kwargs["filters"] == {"user_id": "workflow:x"}
+                return {"results": []}
+
+        assert _mem0_get_all(Mem0V2(), "workflow:x") == {"results": []}
+
+    def test_get_all_falls_back_to_legacy_mem0(self):
+        from sandcastle.engine.memory import _mem0_get_all
+
+        class Mem0V1:
+            def get_all(self, user_id=None):
+                assert user_id == "workflow:x"
+                return {"results": []}
+
+        assert _mem0_get_all(Mem0V1(), "workflow:x") == {"results": []}
+
+    @pytest.mark.asyncio
+    async def test_load_memories_returns_rows_on_mem0_2x(self):
+        """The end-to-end regression: reads must not silently return []."""
+        from unittest.mock import patch
+
+        from sandcastle.engine import memory as mem
+
+        class Mem0V2:
+            def search(self, query, **kwargs):
+                if "user_id" in kwargs:
+                    raise ValueError("use filters=")
+                return {"results": [{"id": "m1", "memory": "the fact", "metadata": {}}]}
+
+        with patch.object(mem, "_get_client", return_value=Mem0V2()):
+            rows = await mem.load_memories(
+                "workflow:x", query="anything", limit=3, backend="local",
+            )
+        assert [r["memory"] for r in rows] == ["the fact"]

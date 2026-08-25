@@ -680,6 +680,29 @@ class MemoryBackend(Protocol):
     async def health(self) -> None: ...
 
 
+def _mem0_search(client, query: str, scope_id: str, limit: int):
+    """Call mem0 search across both API generations.
+
+    mem0 2.x rejects ``user_id=`` at top level with a ValueError and wants
+    ``filters={'user_id': ...}`` + ``top_k=``; mem0 0.x/1.x is the reverse and
+    raises TypeError on the new kwargs. Trying legacy style against 2.x and
+    swallowing the error is how every memory read silently returned [] - so
+    the new style goes first, and the fallback exists only for old installs.
+    """
+    try:
+        return client.search(query, filters={"user_id": scope_id}, top_k=limit)
+    except TypeError:
+        return client.search(query, user_id=scope_id, limit=limit)
+
+
+def _mem0_get_all(client, scope_id: str):
+    """Call mem0 get_all across both API generations (see _mem0_search)."""
+    try:
+        return client.get_all(filters={"user_id": scope_id})
+    except TypeError:
+        return client.get_all(user_id=scope_id)
+
+
 class _Mem0Backend:
     """Mem0 + Qdrant backend - the historical default.
 
@@ -703,12 +726,11 @@ class _Mem0Backend:
         client = _get_client(self.name)
         if query:
             results = await asyncio.to_thread(
-                client.search, query,
-                user_id=scope_id, limit=limit,
+                _mem0_search, client, query, scope_id, limit,
             )
         else:
             results = await asyncio.to_thread(
-                client.get_all, user_id=scope_id,
+                _mem0_get_all, client, scope_id,
             )
 
         # Normalize mem0 response format
@@ -775,7 +797,7 @@ class _Mem0Backend:
         client = _get_client(self.name)
         # Probe with a harmless get_all on a non-existent scope
         await asyncio.to_thread(
-            client.get_all, user_id="__health_check__",
+            _mem0_get_all, client, "__health_check__",
         )
 
 

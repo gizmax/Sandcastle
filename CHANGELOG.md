@@ -41,6 +41,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   See *Changed* below. `local` is the default, so a default-configured
   deployment is unaffected.
 
+### Fixed
+
+- **Memory reads on the installed mem0 silently returned nothing.** mem0 2.x
+  moved `search`/`get_all` from `user_id=` to `filters={'user_id': ...}` and
+  rejects the old kwarg with a ValueError; `load_memories` caught it, logged a
+  warning, and returned `[]` - so on mem0 2.0.18 every memory injection came
+  back empty while writes kept succeeding. Reads now speak the 2.x API first
+  and fall back to the legacy kwargs on TypeError for old installs. Found by
+  the 0.47 memory-eval workstream while checking what mem0 actually exposes -
+  the exact silent-failure shape this release is about, in our own default
+  backend.
+
 ### Added
 
 - **`sandcastle audit silent-success` - a sweep for runs that claim more than
