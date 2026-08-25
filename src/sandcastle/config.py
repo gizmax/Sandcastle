@@ -211,6 +211,15 @@ class Settings(BaseSettings):
     # ledger exists to prevent. Set True/False to override either way.
     effect_ledger_required: bool | None = None
 
+    # Silent-success sweep (engine/silent_success.py): cross-check what a
+    # completed run *claimed* against the ledger and the audit chain. Evidence
+    # is written from more than one session, and the run row itself is written
+    # by the worker after the executor returns, so a claim observed this soon
+    # after it was made may simply be waiting for a record that is on its way.
+    # Claims younger than this are counted in the report, never flagged. 0
+    # disables the window.
+    silent_success_lag_hours: float = 1.0
+
     # Crash-resume (queue/worker.py: _recover_stuck_runs). A run stranded in
     # RUNNING by a dead worker is requeued in its own effect scope and
     # re-executes from the top; the ledger memoizes the prefix that already
