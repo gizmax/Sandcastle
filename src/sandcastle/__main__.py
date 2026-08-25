@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import sys
+import textwrap
 import time
 from pathlib import Path
 from typing import Any
@@ -5388,6 +5389,164 @@ def _cmd_audit_silent_success(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# memory - grade a memory scope
+# ---------------------------------------------------------------------------
+
+
+def _score_cell(score: float | None) -> str:
+    """Render a 0.0-1.0 score, colored, or a dim n/a when unmeasurable."""
+    if score is None:
+        return _color("n/a", _C.DIM)
+    text = f"{score:.2f}"
+    if score >= 0.80:
+        return _color(text, _C.GREEN)
+    if score >= 0.50:
+        return _color(text, _C.YELLOW)
+    return _color(text, _C.RED)
+
+
+def _print_memory_metric(metric: Any) -> None:
+    """One metric block: score, plain-language verdict, the counts, worst offenders."""
+    print(f"  {_color(metric.name.ljust(14), _C.BOLD)} {_score_cell(metric.score)}")
+    for line in textwrap.wrap(metric.verdict, width=76):
+        print(f"    {line}")
+    counts = "  ".join(
+        f"{k}={v}"
+        for k, v in metric.parts.items()
+        if isinstance(v, (int, float, bool))
+    )
+    if counts:
+        for line in textwrap.wrap(counts, width=76):
+            print(f"    {_color(line, _C.DIM)}")
+    for item in metric.worst[:5]:
+        bits = "  ".join(f"{k}={v}" for k, v in item.items() if k != "id")
+        print(f"    - {_color(str(item.get('id', '?')), _C.CYAN)}  {bits}")
+    print()
+
+
+def _cmd_memory_eval(args: argparse.Namespace) -> None:
+    """Grade a memory scope: staleness, forgetting, contradiction, retrieval."""
+    import asyncio
+
+    from sandcastle.engine.memory_eval import evaluate_scope
+
+    scope = args.scope
+    tenant = getattr(args, "tenant", None)
+    if tenant and not scope.startswith("tenant:"):
+        scope = f"tenant:{tenant}/{scope}"
+
+    try:
+        report = asyncio.run(
+            evaluate_scope(
+                scope,
+                backend_name=getattr(args, "backend", "") or "",
+                ttl_days=getattr(args, "ttl_days", None),
+                probe_limit=args.probe_limit,
+                max_probes=args.max_probes,
+            ),
+        )
+    except ValueError as exc:
+        print(_color(f"  {exc}", _C.RED), file=sys.stderr)
+        sys.exit(1)
+    except Exception as exc:
+        print(_color(f"  memory eval failed: {exc}", _C.RED), file=sys.stderr)
+        sys.exit(1)
+
+    if getattr(args, "json", False):
+        _json_out(report.to_dict())
+        return
+
+    print()
+    print(_color(f"  Memory eval - {report.scope_id}", _C.BOLD))
+    ttl = f"{report.ttl_days} days" if report.ttl_days > 0 else "disabled"
+    print(
+        f"  backend {report.backend}"
+        + (f"   tenant {report.tenant}" if report.tenant else "")
+        + f"   TTL {ttl}"
+    )
+    if report.scope_path:
+        print(_color(f"  {report.scope_path}", _C.DIM))
+    totals = "  ".join(f"{k}={v}" for k, v in report.totals.items())
+    if totals:
+        print(_color(f"  {totals}", _C.DIM))
+    print()
+
+    for metric in report.metrics:
+        _print_memory_metric(metric)
+
+    if report.domains:
+        headers = ["DOMAIN", "ENTRIES", "FILL", "STALE", "FORGET", "CONTRA", "RETR"]
+        rows = [
+            [
+                d.domain + (" (near cap)" if d.near_cap else ""),
+                str(d.live_entries),
+                f"{d.fill * 100:.0f}%",
+                _score_cell(d.staleness),
+                _score_cell(d.forgetting),
+                _score_cell(d.contradiction),
+                _score_cell(d.retrieval),
+            ]
+            for d in report.domains
+        ]
+        print(_table(headers, rows))
+        print()
+
+    if report.not_measurable:
+        print(_color("  not measurable on this backend:", _C.BOLD))
+        for item in report.not_measurable:
+            print(f"    {_color(item['metric'], _C.YELLOW)}")
+            for line in textwrap.wrap(item["reason"], width=72):
+                print(f"      {line}")
+        print(
+            _color(
+                "    The filesystem vault records all of the above; this backend "
+                "does not.",
+                _C.DIM,
+            ),
+        )
+        print()
+
+    for metric in report.metrics:
+        for caveat in metric.caveats:
+            for i, line in enumerate(textwrap.wrap(caveat, width=74)):
+                print(_color(("  ! " if i == 0 else "    ") + line, _C.DIM))
+    for caveat in report.caveats:
+        for i, line in enumerate(textwrap.wrap(caveat, width=74)):
+            print(_color(("  ! " if i == 0 else "    ") + line, _C.DIM))
+    print()
+
+    parts = ", ".join(
+        f"{name} {'n/a' if score is None else f'{score:.2f}'}"
+        for name, score in report.components.items()
+    )
+    if report.overall is None:
+        print(_color("  overall n/a", _C.BOLD) + f"  ({parts})")
+    else:
+        print(
+            _color("  overall ", _C.BOLD)
+            + _score_cell(report.overall)
+            + f"  ({parts})"
+        )
+    print(
+        _color(
+            "  Unweighted mean of the measurable components; every score above is "
+            "a division of the counts printed beside it.",
+            _C.DIM,
+        ),
+    )
+
+
+def _cmd_memory(args: argparse.Namespace) -> None:
+    """Route memory sub-commands."""
+    action = getattr(args, "memory_action", None)
+    if action == "eval":
+        _cmd_memory_eval(args)
+        return
+    print("Usage: sandcastle memory eval <scope>", file=sys.stderr)
+    sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
 # Argument parser
 # ---------------------------------------------------------------------------
 
@@ -5435,6 +5594,7 @@ _COMMAND_GROUPS: list[tuple[str, str, list[tuple[str, str]]]] = [
         "Evaluate and optimize workflow intelligence",
         [
             ("eval", "Run an eval suite against a workflow"),
+            ("memory", "Grade a memory scope (staleness, forgetting, contradiction)"),
             ("autopilot", "Manage AutoPilot experiments"),
         ],
     ),
@@ -5735,6 +5895,52 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Start MCP server for Claude Desktop / Cursor / Windsurf",
     )
     _add_connection_args(p_mcp)
+
+    # --- memory ---
+    p_memory = subparsers.add_parser("memory", help="Grade and inspect agent memory")
+    memory_sub = p_memory.add_subparsers(dest="memory_action")
+
+    p_memory_eval = memory_sub.add_parser(
+        "eval",
+        help="Score a memory scope: staleness, forgetting, contradiction, retrieval",
+    )
+    p_memory_eval.add_argument(
+        "scope",
+        help="Memory scope id, e.g. 'workflow:invoice-triage', 'agent:researcher' or 'global'",
+    )
+    p_memory_eval.add_argument(
+        "--tenant",
+        default=None,
+        help="Tenant id; prefixes the scope as 'tenant:<id>/<scope>' (same shape "
+        "as resolve_scope_id uses at runtime)",
+    )
+    p_memory_eval.add_argument(
+        "--backend",
+        default=None,
+        help="Memory backend to grade (default: MEMORY_BACKEND). "
+        "Only 'filesystem' records everything the score needs.",
+    )
+    p_memory_eval.add_argument(
+        "--ttl-days",
+        dest="ttl_days",
+        type=int,
+        default=None,
+        help="Override the TTL used for staleness (default: MEMORY_MAX_AGE_DAYS)",
+    )
+    p_memory_eval.add_argument(
+        "--probe-limit",
+        dest="probe_limit",
+        type=int,
+        default=10,
+        help="Results each retrieval-sanity probe asks for (default: 10)",
+    )
+    p_memory_eval.add_argument(
+        "--max-probes",
+        dest="max_probes",
+        type=int,
+        default=50,
+        help="Maximum retrieval-sanity probes to run (default: 50)",
+    )
 
     # --- memory-mcp ---
     p_memory_mcp = subparsers.add_parser("memory-mcp", help="Start the Memory MCP server")
@@ -6445,6 +6651,11 @@ def main() -> None:
                 file=sys.stderr,
             )
             sys.exit(1)
+        return
+
+    # --- memory ---
+    if args.command == "memory":
+        _cmd_memory(args)
         return
 
     # --- memory-mcp ---
