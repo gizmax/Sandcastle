@@ -798,8 +798,8 @@ class TestStepDefinitionFieldCount:
 
     def test_field_count(self):
         fields = dataclasses.fields(StepDefinition)
-        assert len(fields) == 56, (
-            f"Expected 56 fields, got {len(fields)}: "
+        assert len(fields) == 57, (
+            f"Expected 57 fields, got {len(fields)}: "
             f"{[f.name for f in fields]}"
         )
 

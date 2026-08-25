@@ -117,8 +117,9 @@ class TestRegistration:
     def test_acp_is_a_valid_step_type(self):
         assert "acp" in VALID_STEP_TYPES
 
-    def test_step_type_count_is_twenty_six(self):
-        assert len(VALID_STEP_TYPES) == 26
+    def test_step_type_count_is_twenty_seven(self):
+        """Was 26 in 0.45; 0.46 adds `accept`, the outcome gate."""
+        assert len(VALID_STEP_TYPES) == 27
 
     def test_acp_needs_no_prompt(self):
         """The brief lives in acp_config.message."""

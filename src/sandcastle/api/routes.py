@@ -3874,6 +3874,38 @@ async def estimate_run_cost(request: RunEstimateRequest) -> ApiResponse:
     total = 0.0
 
     for step in wf.steps:
+        # An accept step's cost is its judge panel, priced per judge and
+        # multiplied by (1 + max_rounds): max_rounds judging rounds, plus one
+        # more to stand in for the target re-work a rejection triggers, which
+        # nothing else in this estimator multiplies. Estimating off step.model
+        # would report the wrong model at the wrong multiple.
+        if step.type == "accept":
+            cfg = step.accept_config
+            rounds = 1 + min(cfg.max_rounds, 5) if cfg else 1
+            judges = list(cfg.judges) if cfg else []
+            accept_cost = 0.0
+            for judge in judges:
+                judge_info = PROVIDER_REGISTRY.get(judge.model) or PROVIDER_REGISTRY.get(
+                    "sonnet"
+                )
+                accept_cost += (
+                    1500 * judge_info.input_price_per_m
+                    + judge.max_tokens * judge_info.output_price_per_m
+                ) / 1_000_000
+            accept_cost *= rounds
+            step_estimates.append({
+                "step_id": step.id,
+                "type": step.type,
+                "model": ", ".join(j.model for j in judges) or None,
+                "estimated_cost_usd": round(accept_cost, 6),
+                "note": (
+                    f"{len(judges)} judge(s) x {rounds} round(s); checks are free"
+                    if judges
+                    else "checks only - no LLM cost"
+                ),
+            })
+            total += accept_cost
+            continue
         if step.type in NON_LLM or step.type == "approval":
             step_estimates.append({
                 "step_id": step.id,
@@ -9098,6 +9130,12 @@ async def _resume_after_approval(
 
     # Use the latest checkpoint
     initial_context = checkpoints[0].context_snapshot if checkpoints else None
+
+    # An escalating accept step carries the output it wants published on
+    # approval, because its step output is an evidence pack rather than the
+    # request_data a plain approval step echoes back verbatim.
+    if isinstance(output_data, dict) and "_on_approve" in output_data:
+        output_data = output_data["_on_approve"]
 
     # Set the approval step output in the context
     if initial_context:

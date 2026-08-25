@@ -22,6 +22,9 @@ from typing import Any
 from simpleeval import simple_eval
 
 from sandcastle.engine.dag import (
+    MAX_ACCEPT_ROUNDS,
+    AcceptConfig,
+    AcceptJudge,
     ExecutionPlan,
     GateConfig,
     ManagedAgentConfig,
@@ -1486,6 +1489,7 @@ def _write_pdf_report(
 
 _HYBRID_STEP_TYPES = {
     "llm",
+    "accept",
     "http",
     "code",
     "condition",
@@ -7347,6 +7351,623 @@ async def _execute_gate_step(
         )
 
 
+# ---------------------------------------------------------------------------
+# type: accept - the outcome gate
+# ---------------------------------------------------------------------------
+
+
+def _accept_digest(value: Any) -> str:
+    """A stable content digest for the output an accept step judged.
+
+    The evidence pack has to say *what* was judged, not merely that judging
+    happened, or a verdict cannot be re-checked after the fact.
+    """
+    import hashlib
+    import json as _json
+
+    try:
+        payload = _json.dumps(value, sort_keys=True, default=str)
+    except Exception:
+        payload = repr(value)
+    return "sha256:" + hashlib.sha256(payload.encode("utf-8", "replace")).hexdigest()
+
+
+def _accept_target_text(value: Any) -> str:
+    """Render a target step's output as the text a judge reads."""
+    import json as _json
+
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        for key in ("output", "text", "result", "content"):
+            inner = value.get(key)
+            if isinstance(inner, str) and inner:
+                return inner
+    try:
+        return _json.dumps(value, indent=2, default=str)
+    except Exception:
+        return str(value)
+
+
+def _accept_rejection(
+    step: StepDefinition,
+    cfg: AcceptConfig,
+    *,
+    output: dict,
+    reason: str,
+    total_cost: float,
+    duration: float,
+) -> StepResult:
+    """Build the StepResult for an accept step whose verdict was "rejected".
+
+    This is ``_gate_rejection`` applied to outcomes instead of permissions, and
+    it is deliberately the same shape: an outcome gate that reports "the work
+    did not meet the goal" and then lets the run continue is not a gate.
+
+    ``retryable`` is False for the reason the gate has it - a step-level
+    ``retry:`` would otherwise re-judge the same output up to three times and
+    let a rejected result through on the attempt where the judge happened to
+    say yes.  A verdict is not a flaky network call.
+
+    The verdict is restated in ``.error`` because a failed step publishes no
+    output into ``run.outputs``: an operator reading back a stopped run finds
+    the reason there, not under ``{steps.accept.decision}``.
+    """
+    if not cfg.fail_on_reject:
+        return StepResult(
+            step_id=step.id,
+            output=output,
+            cost_usd=total_cost,
+            duration_seconds=duration,
+            status="completed",
+        )
+    return StepResult(
+        step_id=step.id,
+        output=output,
+        cost_usd=total_cost,
+        duration_seconds=duration,
+        status="failed",
+        error=f"Accept rejected: {reason}",
+        retryable=False,
+    )
+
+
+def _parse_judge_verdict(text: str) -> tuple[bool | None, str]:
+    """Read APPROVE / REJECT and a reason out of a judge's reply.
+
+    Returns ``(approved, reason)``.  ``approved`` is None when the reply cannot
+    be read as a verdict at all - the caller fails that judge closed rather
+    than inventing a score, which is precisely the eval harness's mistake
+    (``autopilot._evaluate_llm_judge`` fabricates 0.5 on error).
+    """
+    import re as _re
+
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return None, "judge returned an empty reply"
+
+    verdict: bool | None = None
+    for line in cleaned.splitlines():
+        candidate = line.strip().strip("*_# ").upper()
+        if not candidate:
+            continue
+        candidate = candidate.removeprefix("VERDICT:").strip()
+        if _re.match(r"^APPROVE(D)?\b", candidate):
+            verdict = True
+            break
+        if _re.match(r"^REJECT(ED)?\b", candidate):
+            verdict = False
+            break
+        # Only the first meaningful line is treated as the verdict line, so a
+        # reason that happens to contain the word "approve" cannot flip it.
+        break
+
+    reason = cleaned
+    if len(reason) > 2000:
+        reason = reason[:2000] + "..."
+    return verdict, reason
+
+
+async def _run_accept_judge(
+    judge: AcceptJudge,
+    prompt: str,
+    timeout: int,
+) -> dict:
+    """Ask one LLM judge for a verdict, billing it through ``_safe_cost``.
+
+    This is the gate's direct-HTTP shape rather than the eval harness's judge
+    path.  ``eval._check_llm_judge`` -> ``autopilot._evaluate_llm_judge`` ->
+    ``generator._call_advisor_llm`` returns bare text, estimates its cost from
+    character counts into a side audit event and then discards it, takes no
+    per-judge model, and fabricates a 0.5 score when the call raises.  None of
+    that is acceptable for a step whose whole job is to be believed.
+    """
+    import httpx
+
+    from sandcastle.engine.providers import get_api_key, resolve_base_url, resolve_model
+
+    record: dict = {
+        "name": judge.name,
+        "model": judge.model,
+        "verdict": "rejected",
+        "reason": "",
+        "cost_usd": 0.0,
+    }
+
+    try:
+        model_info = resolve_model(judge.model)
+        _enforce_data_residency(model_info)
+        api_key = get_api_key(model_info)
+
+        if model_info.provider == "claude":
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": model_info.api_model_id,
+                        "max_tokens": judge.max_tokens,
+                        "messages": [{"role": "user", "content": prompt}],
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                reply = data["content"][0]["text"]
+                usage = data.get("usage", {})
+                in_tok = usage.get("input_tokens", 0)
+                out_tok = usage.get("output_tokens", 0)
+        else:
+            base_url = resolve_base_url(model_info)
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post(
+                    f"{base_url}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": model_info.api_model_id,
+                        "max_tokens": judge.max_tokens,
+                        "messages": [{"role": "user", "content": prompt}],
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                reply = data["choices"][0]["message"]["content"]
+                usage = data.get("usage", {})
+                in_tok = usage.get("prompt_tokens", 0)
+                out_tok = usage.get("completion_tokens", 0)
+
+        record["cost_usd"] = _safe_cost(
+            in_tok,
+            out_tok,
+            model_info.input_price_per_m,
+            model_info.output_price_per_m,
+        )
+        record["model_id"] = model_info.api_model_id
+        approved, reason = _parse_judge_verdict(reply)
+        record["reason"] = reason
+        if approved is None:
+            record["verdict"] = "rejected"
+            record["error"] = "unparseable verdict"
+        else:
+            record["verdict"] = "approved" if approved else "rejected"
+    except Exception as exc:
+        # Fail closed.  A judge we could not reach has not approved anything.
+        record["verdict"] = "rejected"
+        record["error"] = f"{type(exc).__name__}: {exc}"
+        record["reason"] = record["reason"] or str(exc)
+        logger.warning("Accept judge '%s' failed: %s", judge.name, exc)
+
+    return record
+
+
+def _build_judge_prompt(
+    judge: AcceptJudge,
+    targets: dict[str, str],
+    checks: list[dict],
+) -> str:
+    """Assemble the rubric, the work under review, and the reply contract."""
+    sections = [judge.rubric.strip()]
+    for target_id, text in targets.items():
+        sections.append(
+            f"--- OUTPUT UNDER REVIEW (step '{target_id}') ---\n{text}"
+        )
+    failed = [c for c in checks if not c.get("passed")]
+    if failed:
+        rendered = "\n".join(
+            f"- {c.get('type')}: {c.get('message') or 'failed'}" for c in failed
+        )
+        sections.append(f"--- FAILED DETERMINISTIC CHECKS ---\n{rendered}")
+    sections.append(
+        "--- HOW TO REPLY ---\n"
+        "First line: exactly APPROVE or REJECT.\n"
+        "Then one short paragraph giving the reason. If you REJECT, say "
+        "specifically what must change."
+    )
+    return "\n\n".join(sections)
+
+
+async def _accept_judge_round(
+    step: StepDefinition,
+    cfg: AcceptConfig,
+    context: RunContext,
+    round_no: int,
+) -> dict:
+    """Run one round of judging: checks first, then judges only if needed.
+
+    Returns the round's evidence dict.  Checks are deterministic and free, so
+    they run first and can reject the work for $0 before any judge is paid.
+    """
+    from sandcastle.engine.eval import check_assertion
+
+    target_texts: dict[str, str] = {}
+    target_meta: dict[str, dict] = {}
+    for target_id in cfg.targets:
+        value = context.step_outputs.get(target_id)
+        target_texts[target_id] = _accept_target_text(value)
+        result = context.step_results.get(target_id)
+        target_meta[target_id] = {
+            "digest": _accept_digest(value),
+            "chars": len(target_texts[target_id]),
+            "cost_usd": round(result.cost_usd, 6) if result else 0.0,
+            "duration_seconds": round(result.duration_seconds, 3) if result else 0.0,
+        }
+
+    primary = cfg.targets[0] if cfg.targets else ""
+    judged_value = context.step_outputs.get(primary)
+    primary_result = context.step_results.get(primary)
+    run_metadata = {
+        "cost_usd": primary_result.cost_usd if primary_result else 0.0,
+        "duration_seconds": primary_result.duration_seconds if primary_result else 0.0,
+    }
+
+    check_records: list[dict] = []
+    for assertion in cfg.checks:
+        outcome = await check_assertion(
+            assertion,
+            judged_value,
+            run_metadata=run_metadata,
+            step_outputs=context.step_outputs,
+        )
+        check_records.append(
+            {
+                "type": outcome.type,
+                "passed": bool(outcome.passed),
+                "expected": outcome.expected,
+                "actual": outcome.actual,
+                "message": outcome.message,
+            }
+        )
+
+    checks_passed = all(record["passed"] for record in check_records)
+
+    evidence: dict = {
+        "round": round_no,
+        "targets": target_meta,
+        "checks": check_records,
+        "checks_passed": checks_passed,
+        "judges": [],
+        "cost_usd": 0.0,
+    }
+
+    if not checks_passed:
+        failed = [c for c in check_records if not c["passed"]]
+        evidence["decision"] = "rejected"
+        evidence["rejected_by"] = "checks"
+        evidence["reason"] = "; ".join(
+            f"{c['type']}: {c['message'] or 'failed'}" for c in failed
+        )
+        return evidence
+
+    if not cfg.judges:
+        evidence["decision"] = "approved"
+        evidence["rejected_by"] = None
+        evidence["reason"] = "all deterministic checks passed"
+        return evidence
+
+    judge_records: list[dict] = []
+    total_cost = 0.0
+    for judge in cfg.judges:
+        # Each judge gets its own rubric, so each gets its own prompt.
+        judge_prompt = _build_judge_prompt(judge, target_texts, check_records)
+        record = await _run_accept_judge(judge, judge_prompt, step.timeout)
+        total_cost += record.get("cost_usd", 0.0)
+        judge_records.append(record)
+
+    approvals = sum(1 for r in judge_records if r["verdict"] == "approved")
+    # quorum 0 means unanimous, resolved here so that adding a judge tightens
+    # the panel instead of silently loosening it.
+    required = cfg.quorum if cfg.quorum > 0 else len(cfg.judges)
+    evidence["judges"] = judge_records
+    evidence["cost_usd"] = round(total_cost, 6)
+    evidence["quorum"] = {
+        "required": required,
+        "approved": approvals,
+        "total": len(judge_records),
+    }
+
+    if approvals >= required:
+        evidence["decision"] = "approved"
+        evidence["rejected_by"] = None
+        evidence["reason"] = f"{approvals}/{len(judge_records)} judges approved"
+    else:
+        dissent = [r for r in judge_records if r["verdict"] != "approved"]
+        evidence["decision"] = "rejected"
+        evidence["rejected_by"] = "quorum"
+        evidence["reason"] = "; ".join(
+            f"{r['name']}: {r['reason']}" for r in dissent
+        ) or f"only {approvals}/{required} judges approved"
+    return evidence
+
+
+async def _accept_rework_targets(
+    step: StepDefinition,
+    cfg: AcceptConfig,
+    context: RunContext,
+    sandbox: Any,
+    storage: StorageBackend,
+    workflow: WorkflowDefinition,
+    depth: int,
+    critique: str,
+    round_no: int,
+) -> float:
+    """Re-run the judged step(s) with the judge's critique injected.
+
+    The critique is escaped before it reaches a prompt.  It is attacker-shaped
+    text - a judge that writes ``{steps.secret.output}`` into its reason would
+    otherwise have that resolved on the way back in.
+    """
+    spent = 0.0
+    safe_critique = _escape_braces(critique)
+    for target_id in cfg.targets:
+        try:
+            target_step = workflow.get_step(target_id)
+        except ValueError:
+            continue
+        revision = (
+            f"{target_step.prompt}\n\n"
+            f"--- REVISION REQUEST (round {round_no}) ---\n"
+            f"A reviewer rejected the previous attempt for this reason:\n"
+            f"{safe_critique}\n"
+            f"Address it directly and produce a corrected result."
+        )
+        result = await execute_step_with_retry(
+            target_step,
+            context,
+            sandbox,
+            storage,
+            workflow=workflow,
+            depth=depth,
+            step_overrides={"prompt": revision},
+        )
+        async with context._lock:
+            context.step_outputs[target_id] = result.output
+            context.step_results[target_id] = result
+        spent += result.cost_usd
+    return spent
+
+
+async def _execute_accept_step(
+    step: StepDefinition,
+    context: RunContext,
+    sandbox: Any,
+    storage: StorageBackend,
+    workflow: WorkflowDefinition,
+    depth: int,
+) -> StepResult:
+    """Execute an accept step - judge whether a target step met the goal.
+
+    Checks run first and cost nothing.  Judges are paid only when the checks
+    pass, and every verdict is recorded as an evidence pack rather than a bare
+    boolean, both in the step output and on the audit chain.
+    """
+    import time
+
+    started_at = time.monotonic()
+    cfg = step.accept_config
+    if not cfg:
+        return StepResult(step_id=step.id, status="failed", error="Missing accept_config")
+
+    max_rounds = max(1, min(cfg.max_rounds, MAX_ACCEPT_ROUNDS))
+    total_cost = 0.0
+    rounds: list[dict] = []
+    evidence: dict = {}
+    stop_reason = ""
+
+    try:
+        for round_no in range(1, max_rounds + 1):
+            if await _check_cancel(context.run_id):
+                return StepResult(
+                    step_id=step.id,
+                    output={"decision": "cancelled", "rounds": rounds},
+                    cost_usd=total_cost,
+                    duration_seconds=time.monotonic() - started_at,
+                    status="failed",
+                    retryable=False,
+                    error="Run cancelled during accept",
+                )
+
+            evidence = await _accept_judge_round(step, cfg, context, round_no)
+            total_cost += evidence.get("cost_usd", 0.0)
+            rounds.append(evidence)
+
+            if evidence["decision"] == "approved":
+                break
+            if cfg.on_reject != "retry_target" or round_no == max_rounds:
+                break
+
+            # Bound 2: the accept step's own judging+re-work budget.
+            if cfg.max_cost_usd > 0 and total_cost >= cfg.max_cost_usd:
+                stop_reason = (
+                    f"accept budget ${cfg.max_cost_usd:.4f} reached after "
+                    f"{round_no} round(s)"
+                )
+                break
+            # Bound 3: the run budget, projected the way the loop step does it -
+            # this step's cost is not in context.costs until it returns.
+            if context.max_cost_usd is not None and context.max_cost_usd > 0:
+                projected = context.total_cost + total_cost
+                if projected >= context.max_cost_usd:
+                    stop_reason = (
+                        f"run budget ${context.max_cost_usd:.4f} reached after "
+                        f"{round_no} round(s)"
+                    )
+                    break
+
+            total_cost += await _accept_rework_targets(
+                step,
+                cfg,
+                context,
+                sandbox,
+                storage,
+                workflow,
+                depth,
+                evidence.get("reason", ""),
+                round_no + 1,
+            )
+
+        decision = evidence.get("decision", "rejected")
+        reason = evidence.get("reason", "no verdict was reached")
+        if stop_reason:
+            reason = f"{reason} ({stop_reason})"
+
+        pack = {
+            "decision": decision,
+            "reason": reason,
+            "targets": cfg.targets,
+            "rounds_used": len(rounds),
+            "max_rounds": max_rounds,
+            "rejected_by": evidence.get("rejected_by"),
+            "cost_usd": round(total_cost, 6),
+            "rounds": rounds,
+        }
+
+        await _emit_audit_event(
+            "step.accept",
+            context.run_id,
+            "system",
+            {
+                "step_id": step.id,
+                "decision": decision,
+                "reason": reason[:1000],
+                "targets": cfg.targets,
+                "rounds_used": len(rounds),
+                "rejected_by": evidence.get("rejected_by"),
+                "cost_usd": round(total_cost, 6),
+                "judges": [
+                    {
+                        "name": r.get("name"),
+                        "model": r.get("model"),
+                        "verdict": r.get("verdict"),
+                        "cost_usd": r.get("cost_usd"),
+                    }
+                    for last in rounds[-1:]
+                    for r in last.get("judges", [])
+                ],
+                "evidence": pack,
+            },
+        )
+
+        duration = time.monotonic() - started_at
+        if decision == "approved":
+            return StepResult(
+                step_id=step.id,
+                output=pack,
+                cost_usd=total_cost,
+                duration_seconds=duration,
+                status="completed",
+            )
+
+        if cfg.on_reject == "escalate_to_human":
+            await _accept_escalate(step, cfg, context, pack, total_cost)
+            raise AssertionError("Accept escalation returned without pausing")
+
+        return _accept_rejection(
+            step,
+            cfg,
+            output=pack,
+            reason=reason,
+            total_cost=total_cost,
+            duration=duration,
+        )
+    except WorkflowPaused:
+        raise
+    except Exception as exc:
+        duration = time.monotonic() - started_at
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=str(exc),
+            cost_usd=total_cost,
+            duration_seconds=duration,
+        )
+
+
+async def _accept_escalate(
+    step: StepDefinition,
+    cfg: AcceptConfig,
+    context: RunContext,
+    pack: dict,
+    total_cost: float,
+) -> None:
+    """Hand a rejected verdict to a human through the approval surface.
+
+    Approving resumes the run with the evidence pack rewritten to "approved"
+    and the human recorded as the deciding judge; rejecting fails the run, which
+    is the existing behaviour of ``/approvals/{id}/reject``.  The overlay is
+    carried in ``request_data['_on_approve']`` and applied by
+    ``_resume_after_approval``.
+    """
+    from sandcastle.models.db import (
+        ApprovalRequest,
+        ApprovalStatus,
+        Run,
+        RunStatus,
+        async_session,
+    )
+
+    approved_pack = dict(pack)
+    approved_pack["decision"] = "approved"
+    approved_pack["rejected_by"] = None
+    approved_pack["reason"] = "approved by a human after the panel rejected"
+    approved_pack["escalated"] = True
+
+    message = resolve_templates(cfg.escalation_message, context, step.depends_on)
+    async with async_session() as session:
+        approval = ApprovalRequest(
+            run_id=uuid.UUID(context.run_id),
+            step_id=step.id,
+            status=ApprovalStatus.PENDING,
+            request_data={"accept": pack, "_on_approve": approved_pack},
+            message=f"{message}: {pack.get('reason', '')}"[:2000],
+            timeout_at=None,
+            on_timeout=cfg.on_timeout,
+            allow_edit=False,
+        )
+        if cfg.timeout_hours:
+            approval.timeout_at = datetime.now(timezone.utc) + timedelta(
+                hours=cfg.timeout_hours
+            )
+        session.add(approval)
+        run = await session.get(Run, uuid.UUID(context.run_id))
+        if run:
+            run.status = RunStatus.AWAITING_APPROVAL
+        await session.commit()
+        await session.refresh(approval)
+        approval_id = str(approval.id)
+
+    raise WorkflowPaused(
+        approval_id=approval_id,
+        run_id=context.run_id,
+        accrued_cost_usd=total_cost,
+    )
+
+
 async def _execute_transform_step(
     step: StepDefinition,
     context: RunContext,
@@ -9146,6 +9767,29 @@ async def _execute_step_by_type(
         return await _execute_sensor_step(step, context)
     if step.type == "gate":
         return await _execute_gate_step(step, context, storage)
+    if step.type == "accept":
+        if workflow is None:
+            return StepResult(
+                step_id=step.id,
+                status="failed",
+                error="accept step requires its parent workflow",
+                retryable=False,
+            )
+        from sandcastle.config import settings as _accept_settings
+
+        if depth >= _accept_settings.max_workflow_depth:
+            return StepResult(
+                step_id=step.id,
+                status="failed",
+                error=(
+                    f"Max workflow depth ({_accept_settings.max_workflow_depth}) "
+                    f"exceeded at accept step '{step.id}'"
+                ),
+                retryable=False,
+            )
+        return await _execute_accept_step(
+            step, context, sandbox, storage, workflow, depth + 1
+        )
     if step.type == "transform":
         return await _execute_transform_step(step, context)
     if step.type == "notify":

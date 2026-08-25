@@ -251,6 +251,78 @@ class GateConfig:
     fail_on_reject: bool = True
 
 
+# An accept step may re-work its target at most this many times, whatever the
+# YAML asks for.  A judge that can be re-rolled without limit is a dice cup.
+MAX_ACCEPT_ROUNDS = 5
+
+VALID_ACCEPT_ON_REJECT = frozenset({"fail", "retry_target", "escalate_to_human"})
+
+# ``llm_judge`` is banned in checks:.  It routes into the eval harness's
+# advisor path, which returns bare text, discards the cost it estimated and
+# fabricates a 0.5 score on error.  checks: is the deterministic, free half of
+# the verdict; paid judging belongs in judges:, billed through _safe_cost.
+BANNED_ACCEPT_CHECK_TYPES = frozenset({"llm_judge"})
+
+VALID_ACCEPT_CHECK_TYPES = frozenset(
+    {
+        "contains",
+        "not_contains",
+        "not_empty",
+        "equals",
+        "regex_match",
+        "schema_match",
+        "max_cost",
+        "max_duration",
+    }
+)
+
+
+@dataclass
+class AcceptJudge:
+    """One LLM judge on an ``accept`` step's panel."""
+
+    rubric: str = ""
+    model: str = "haiku"
+    name: str = ""
+    max_tokens: int = 512
+
+
+@dataclass
+class AcceptConfig:
+    """Configuration for a ``type: accept`` step - an outcome gate.
+
+    A worker step produced output; an accept step decides whether that work met
+    the goal before the run is allowed to continue.  "The agent finished" and
+    "the agent succeeded" are different facts, and only this step records the
+    second one.
+
+    Cost is meant to stay visible: ``checks`` are deterministic and run first,
+    so work can be rejected for $0 before any judge is paid, and the defaults
+    are one judge and a unanimous quorum.
+    """
+
+    # The step(s) whose output is judged.  Spelled ``target:`` in the singular
+    # for the common one-step case.
+    targets: list[str] = field(default_factory=list)
+    # Deterministic assertions, evaluated before any judge runs.  These are
+    # eval.AssertionDef - the same objects an eval suite uses.
+    checks: list = field(default_factory=list)
+    judges: list[AcceptJudge] = field(default_factory=list)
+    # N-of-M.  0 means unanimous, resolved against len(judges) at runtime, so
+    # adding a judge tightens the panel rather than silently loosening it.
+    quorum: int = 0
+    on_reject: str = "fail"  # fail | retry_target | escalate_to_human
+    max_rounds: int = 1  # re-work rounds; hard-capped at MAX_ACCEPT_ROUNDS
+    max_cost_usd: float = 0.0  # accept-local judge budget; 0 = no local cap
+    # Mirrors GateConfig: a rejected accept fails the step so the workflow
+    # stops.  False keeps the verdict advisory, in output.decision.
+    fail_on_reject: bool = True
+    # Human fallback, raised through the existing ApprovalRequest surface.
+    escalation_message: str = "Accept gate needs a human verdict"
+    timeout_hours: float | None = None
+    on_timeout: str = "abort"
+
+
 @dataclass
 class TransformConfig:
     """Configuration for a template-based data transformation step."""
@@ -576,6 +648,7 @@ VALID_STEP_TYPES = frozenset(
         "computer-use",
         "tool",
         "acp",
+        "accept",
     }
 )
 
@@ -586,6 +659,8 @@ NON_PROMPT_TYPES = frozenset(
         "transform", "notify", "composio", "openclaw", "parse",
         "managed-agent", "agent", "trajectory-replay", "computer-use", "tool",
         "acp",
+        # An accept step carries no prompt of its own; each judge brings a rubric.
+        "accept",
     }
 )
 
@@ -595,6 +670,8 @@ NON_LLM_TYPES = frozenset(
         "http", "code", "condition", "loop", "race", "sensor",
         "transform", "notify", "composio", "openclaw", "parse",
         "managed-agent", "agent", "trajectory-replay", "computer-use", "tool",
+        # An accept step's models live on its judges, not on step.model.
+        "accept",
         # The model an ACP harness picks is its own business, not ours - it runs
         # against its own credentials. Without this, every acp step would fail
         # parsing on a model name we never validated in the first place.
@@ -652,6 +729,7 @@ class StepDefinition:
     report_config: ReportConfig | None = None
     managed_agent_config: ManagedAgentConfig | None = None
     acp_config: AcpConfig | None = None
+    accept_config: AcceptConfig | None = None
     trajectory_replay_config: dict | None = None
     computer_use_config: dict | None = None
     # Dynamic context retrieval before execution
@@ -1432,6 +1510,71 @@ def _parse_acp_config(data: dict | None) -> AcpConfig | None:
     )
 
 
+def _parse_accept_config(data: dict | None) -> AcceptConfig | None:
+    """Parse ``accept_config`` from YAML data.
+
+    ``target:`` is accepted as the singular spelling of ``targets:`` - judging
+    one step is the common case, and the plural reads badly there.
+
+    Checks are built as ``eval.AssertionDef`` rather than a new assertion type,
+    because ``eval.check_assertion`` is a pure async function over a value and
+    already implements every deterministic check an accept step needs.
+    """
+    if data is None:
+        return None
+    if not isinstance(data, dict):
+        return AcceptConfig()
+
+    from sandcastle.engine.eval import AssertionDef
+
+    targets = _str_list(data.get("targets")) or _str_list(data.get("target"))
+
+    checks: list = []
+    for entry in data.get("checks") or []:
+        if not isinstance(entry, dict):
+            continue
+        checks.append(
+            AssertionDef(
+                type=str(entry.get("type", "") or ""),
+                value=entry.get("value"),
+                criteria=str(entry.get("criteria", "") or ""),
+                threshold=float(entry.get("threshold", 0.7) or 0.7),
+                step=entry.get("step"),
+            )
+        )
+
+    judges: list[AcceptJudge] = []
+    for index, entry in enumerate(data.get("judges") or []):
+        if not isinstance(entry, dict):
+            continue
+        judges.append(
+            AcceptJudge(
+                rubric=str(entry.get("rubric", "") or ""),
+                model=str(entry.get("model", "haiku") or "haiku"),
+                name=str(entry.get("name", "") or "judge_%d" % (index + 1)),
+                max_tokens=int(entry.get("max_tokens", 512) or 512),
+            )
+        )
+
+    timeout_hours = data.get("timeout_hours")
+    default_message = "Accept gate needs a human verdict"
+    return AcceptConfig(
+        targets=targets,
+        checks=checks,
+        judges=judges,
+        quorum=int(data.get("quorum", 0) or 0),
+        on_reject=str(data.get("on_reject", "fail") or "fail"),
+        max_rounds=int(data.get("max_rounds", 1) or 1),
+        max_cost_usd=float(data.get("max_cost_usd", 0.0) or 0.0),
+        fail_on_reject=bool(data.get("fail_on_reject", True)),
+        escalation_message=str(
+            data.get("escalation_message", default_message) or default_message
+        ),
+        timeout_hours=float(timeout_hours) if timeout_hours is not None else None,
+        on_timeout=str(data.get("on_timeout", "abort") or "abort"),
+    )
+
+
 def _parse_managed_agent_config(data: dict | None) -> ManagedAgentConfig | None:
     """Parse Managed Agent / universal agent configuration from YAML data.
 
@@ -1590,6 +1733,7 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
             else data.get("agent_config")
         ),
         acp_config=_parse_acp_config(data.get("acp_config")),
+        accept_config=_parse_accept_config(data.get("accept_config")),
         trajectory_replay_config=(
             dict(data["trajectory_replay_config"])
             if isinstance(data.get("trajectory_replay_config"), dict)
@@ -2017,6 +2161,8 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
                 )
         elif step.type == "acp":
             errors.extend(_validate_acp_step(step))
+        elif step.type == "accept":
+            errors.extend(_validate_accept_step(step, workflow, step_ids))
         elif step.type == "parse":
             cfg = step.parse_config or ParseConfig()
             if cfg.output not in ("text", "markdown", "json"):
@@ -2119,6 +2265,11 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
         # Validate classify config model
         if step.classify_config and step.classify_config.model:
             all_models.add(step.classify_config.model)
+        # Each accept judge names its own model.
+        if step.accept_config:
+            for judge in step.accept_config.judges:
+                if judge.model:
+                    all_models.add(judge.model)
     for model_name in all_models:
         if not is_known_model(model_name):
             errors.append(
@@ -2355,6 +2506,150 @@ def _validate_acp_step(step: StepDefinition) -> list[str]:
     return errors
 
 
+def _accept_dependency_closure(
+    workflow: "WorkflowDefinition", start: str
+) -> set[str]:
+    """Every step *start* transitively depends on, explicit edges and template
+    references alike.
+
+    Used to prove an accept step is not inside the dependency closure of the
+    step it judges, which would make ``on_reject: retry_target`` re-run
+    something that needs the accept step's own output.
+    """
+    step_map = {s.id: s for s in workflow.steps}
+    seen: set[str] = set()
+    stack = [start]
+    while stack:
+        current = stack.pop()
+        step = step_map.get(current)
+        if step is None:
+            continue
+        deps = set(step.depends_on)
+        for text in _collect_step_template_fields(step):
+            deps |= _extract_step_refs(text)
+        for dep in deps:
+            if dep not in seen:
+                seen.add(dep)
+                stack.append(dep)
+    return seen
+
+
+def _validate_accept_step(
+    step: StepDefinition, workflow: "WorkflowDefinition", step_ids: set[str]
+) -> list[str]:
+    """Validate a ``type: accept`` step.
+
+    The structural bans matter more than the field checks: an accept step that
+    targets itself, or that sits inside its target's dependency closure, would
+    turn ``on_reject: retry_target`` into an unbounded re-execution loop at
+    runtime.  Both are cheap to prove false here and expensive to discover in
+    production.
+    """
+    errors: list[str] = []
+    cfg = step.accept_config
+    if not cfg:
+        return ["Accept step '%s' must have accept_config" % step.id]
+
+    if not cfg.targets:
+        errors.append(
+            "Accept step '%s' must have accept_config with a target" % step.id
+        )
+    for target in cfg.targets:
+        if target == step.id:
+            errors.append("Accept step '%s' cannot target itself" % step.id)
+        elif target not in step_ids:
+            errors.append(
+                "Accept step '%s' targets unknown step '%s'" % (step.id, target)
+            )
+        elif step.id in _accept_dependency_closure(workflow, target):
+            errors.append(
+                "Accept step '%s' cannot target '%s': that step depends on the "
+                "accept step, so re-working it would never terminate"
+                % (step.id, target)
+            )
+
+    if not cfg.judges and not cfg.checks:
+        errors.append(
+            "Accept step '%s' must have at least one check or one judge - "
+            "otherwise there is nothing to decide with" % step.id
+        )
+
+    for index, judge in enumerate(cfg.judges):
+        if not judge.rubric:
+            errors.append(
+                "Accept step '%s' judges[%d] must have a rubric" % (step.id, index)
+            )
+        if judge.max_tokens <= 0:
+            errors.append(
+                "Accept step '%s' judges[%d] max_tokens must be > 0, got %d"
+                % (step.id, index, judge.max_tokens)
+            )
+
+    names = [judge.name for judge in cfg.judges]
+    duplicates = sorted({name for name in names if names.count(name) > 1})
+    if duplicates:
+        errors.append(
+            "Accept step '%s' has duplicate judge names: %s"
+            % (step.id, ", ".join(duplicates))
+        )
+
+    for index, check in enumerate(cfg.checks):
+        ctype = getattr(check, "type", "")
+        if ctype in BANNED_ACCEPT_CHECK_TYPES:
+            errors.append(
+                "Accept step '%s' checks[%d] uses '%s', which is not allowed in "
+                "checks: it is an LLM call with no cost accounting. Use judges: "
+                "instead" % (step.id, index, ctype)
+            )
+        elif ctype not in VALID_ACCEPT_CHECK_TYPES:
+            errors.append(
+                "Accept step '%s' checks[%d] has unknown type '%s'. Must be one "
+                "of %s"
+                % (step.id, index, ctype, ", ".join(sorted(VALID_ACCEPT_CHECK_TYPES)))
+            )
+
+    if cfg.quorum < 0:
+        errors.append(
+            "Accept step '%s' quorum must be >= 0, got %d" % (step.id, cfg.quorum)
+        )
+    elif cfg.quorum > len(cfg.judges):
+        errors.append(
+            "Accept step '%s' quorum is %d but only %d judge(s) are configured"
+            % (step.id, cfg.quorum, len(cfg.judges))
+        )
+
+    if cfg.on_reject not in VALID_ACCEPT_ON_REJECT:
+        errors.append(
+            "Accept step '%s' has invalid on_reject '%s'. Must be one of %s"
+            % (step.id, cfg.on_reject, ", ".join(sorted(VALID_ACCEPT_ON_REJECT)))
+        )
+
+    if cfg.max_rounds < 1:
+        errors.append(
+            "Accept step '%s' max_rounds must be >= 1, got %d"
+            % (step.id, cfg.max_rounds)
+        )
+    elif cfg.max_rounds > MAX_ACCEPT_ROUNDS:
+        errors.append(
+            "Accept step '%s' max_rounds must be <= %d, got %d"
+            % (step.id, MAX_ACCEPT_ROUNDS, cfg.max_rounds)
+        )
+
+    if cfg.max_cost_usd < 0:
+        errors.append(
+            "Accept step '%s' max_cost_usd must be >= 0, got %s"
+            % (step.id, cfg.max_cost_usd)
+        )
+
+    if cfg.on_timeout not in ("abort", "approve", "reject"):
+        errors.append(
+            "Accept step '%s' has invalid on_timeout '%s'. Must be 'abort', "
+            "'approve' or 'reject'" % (step.id, cfg.on_timeout)
+        )
+
+    return errors
+
+
 def _collect_step_template_fields(step: StepDefinition) -> list[str]:
     """Collect all text fields from a step that may contain template variables."""
     fields: list[str] = [step.prompt]
@@ -2408,6 +2703,15 @@ def _collect_step_template_fields(step: StepDefinition) -> list[str]:
         if step.acp_config.cwd:
             fields.append(step.acp_config.cwd)
         fields.extend(str(v) for v in step.acp_config.env.values())
+    if step.accept_config:
+        # Naming a target is a data dependency, so express it the way every
+        # other implicit edge is expressed: the DAG builder and the
+        # unknown-step check both read it out of this list for free.
+        for target in step.accept_config.targets:
+            fields.append("{steps.%s.output}" % target)
+        for judge in step.accept_config.judges:
+            fields.append(judge.rubric)
+        fields.append(step.accept_config.escalation_message)
     if step.tool_config:
         # Tool arguments carry {steps.X.output} / {input.X} refs that drive
         # both implicit dependency ordering and unknown-ref validation. dict/
