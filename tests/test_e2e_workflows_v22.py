@@ -275,6 +275,16 @@ steps:
       agent: claude
       cwd: /srv/checkouts/repo
       message: "Implement {steps.std-step.output}"
+
+  - id: accept-step
+    type: accept
+    accept_config:
+      target: std-step
+      checks:
+        - type: not_empty
+      judges:
+        - model: haiku
+          rubric: "Did the step meet the goal?"
 """
 
 COMPOSIO_TEMPLATE_ACTION = """\

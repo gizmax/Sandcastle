@@ -99,6 +99,16 @@ _LIVE_STEP_TYPES = frozenset(
 # child steps that are guarded individually.
 GUARD_EXEMPT_STEP_TYPES = frozenset(
     {
+        # accept satisfies both halves of the rule above: like gate it blocks
+        # the run on a verdict rather than merely producing output, and with
+        # on_reject: retry_target it re-runs its target through
+        # execute_step_with_retry, where that step is guarded on its own.
+        # Guarding the accept step itself would memoize a verdict and, worse,
+        # fingerprint a re-work round as a repeat of the round before it.
+        # Because it is exempt it is never fingerprinted, so accept_config is
+        # deliberately absent from _CONFIG_ATTRS - the same treatment
+        # gate_config gets.
+        "accept",
         "approval",
         "classify",
         "condition",

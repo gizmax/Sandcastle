@@ -1,0 +1,134 @@
+name: accept-research-brief
+description: >
+  Write a research brief, then decide whether it MET THE GOAL before anyone
+  downstream is allowed to use it.
+
+  The argument this workflow makes: "the model produced a brief" and "the brief
+  is good enough to send" are different facts. A `gate` answers "may this run
+  proceed"; `accept` answers "did this work succeed", and it answers with an
+  evidence pack rather than a boolean - the target's content digest, every
+  deterministic check, and each judge's verdict, reason, model and cost.
+
+  Cost stays visible on purpose. The `checks:` are free and run first, so a
+  brief that is missing its required sections is rejected for $0 before either
+  judge is paid. Only then does the two-judge panel run, and it must be
+  unanimous.
+
+  On rejection the brief is not thrown away: `on_reject: retry_target` sends it
+  back to the writer with the judges' critique appended to the prompt, at most
+  twice, and re-judges. The loop is bounded four ways (max_rounds, this step's
+  own max_cost_usd, the run budget, and a depth guard), so it cannot spend the
+  run into the ground.
+version: "1.0"
+default_model: sonnet
+
+input_schema:
+  required: [topic]
+  properties:
+    topic:
+      type: string
+      description: What the brief should cover
+    audience:
+      type: string
+      description: Who is going to read it
+
+steps:
+  # 1. The worker. Nothing here knows it is being judged - that is the point.
+  - id: write_brief
+    type: llm
+    model: sonnet
+    responsibility: Produce the research brief under review
+    prompt: |
+      Write a research brief on: {input.topic}
+      Audience: {input.audience}
+
+      It must contain these sections, with these exact headings:
+        ## Summary
+        ## Key findings
+        ## Open questions
+        ## Sources
+
+      Be specific. Do not pad.
+    llm_config:
+      max_tokens: 1500
+
+  # 2. The outcome gate. `target:` creates the dependency edge on its own, so
+  #    this step needs no depends_on.
+  - id: accept_brief
+    type: accept
+    responsibility: Decide whether the brief met the goal, and prove the decision
+    accept_config:
+      target: write_brief
+
+      # Deterministic and free. These run BEFORE any judge, so a structurally
+      # broken brief costs nothing to reject. llm_judge is deliberately not
+      # allowed here - paid judging belongs in judges: below, where it is
+      # billed properly.
+      checks:
+        - type: not_empty
+        - type: contains
+          value: "## Summary"
+        - type: contains
+          value: "## Key findings"
+        - type: contains
+          value: "## Open questions"
+        - type: contains
+          value: "## Sources"
+        - type: not_contains
+          value: "Lorem ipsum"
+
+      # Two judges on different providers. quorum is left at 0, which means
+      # unanimous - resolved against the judge count, so adding a third judge
+      # tightens this panel rather than quietly loosening it.
+      judges:
+        - name: substance
+          model: sonnet
+          max_tokens: 600
+          rubric: |
+            You are judging whether a research brief is USEFUL, not whether it
+            is well formatted (that has already been checked).
+
+            Topic: {input.topic}
+            Audience: {input.audience}
+
+            REJECT if the key findings are generic enough to apply to any
+            topic, if the open questions are rhetorical rather than real, or if
+            the sources are vague ("various studies") rather than nameable.
+        - name: honesty
+          model: haiku
+          max_tokens: 600
+          rubric: |
+            You are judging whether a research brief OVERCLAIMS.
+
+            REJECT if it states contested claims as settled fact, presents
+            estimates without saying they are estimates, or cites sources that
+            do not plausibly support the claim attached to them.
+      quorum: 0
+
+      # Send it back to the writer with the critique instead of failing the run
+      # on the first miss. The critique is escaped before it re-enters the
+      # prompt, so a judge cannot smuggle a template into the next round.
+      on_reject: retry_target
+      max_rounds: 3
+
+      # This step's own ceiling, independent of the run budget. Judges plus
+      # re-work stop here even if max_rounds has rounds left.
+      max_cost_usd: 0.50
+
+  # 3. Only reachable when the brief was accepted: a rejected accept step fails
+  #    with retryable=False, so the run stops here rather than walking past its
+  #    own verdict.
+  - id: publish
+    type: notify
+    depends_on: [accept_brief]
+    responsibility: Send the brief that actually passed
+    notify_config:
+      service: slack
+      channel: "#research"
+      dry_run: true
+      message: |
+        Brief accepted on {input.topic}
+        rounds used: {steps.accept_brief.output.rounds_used}
+        verdict: {steps.accept_brief.output.reason}
+
+        {steps.write_brief.output}
