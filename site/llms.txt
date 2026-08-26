@@ -2,7 +2,7 @@
 
 > You write YAML. Sandcastle ships AI to production. Any model, any provider, zero lock-in. Sandcastle is a source-available, provider-neutral workflow orchestrator for AI agents: define a workflow once in YAML, and it runs on any of 7 model providers with automatic failover. The workflow is the asset; the model is swappable plumbing.
 
-Sandcastle turns a YAML file into a production AI pipeline. A workflow is a DAG of typed steps. The load-bearing decisions live in deterministic code or in cross-provider patterns (race failover, multi-provider consensus, two-judge gates), so swapping or losing a provider never changes the outcome. It ships with 283 templates - 248 built in plus 35 contributed, 25 step types, 64 system connectors, a vision-judge self-healing pattern for media, EU AI Act compliance mode, a SHA-256 audit chain, per-step data-residency enforcement, a React dashboard, and a CLI.
+Sandcastle turns a YAML file into a production AI pipeline. A workflow is a DAG of typed steps. The load-bearing decisions live in deterministic code or in cross-provider patterns (race failover, multi-provider consensus, two-judge gates), so swapping or losing a provider never changes the outcome. It ships with 283 templates - 248 built in plus 35 contributed, 27 step types, 64 system connectors, a vision-judge self-healing pattern for media, EU AI Act compliance mode, a SHA-256 audit chain, per-step data-residency enforcement, a React dashboard, and a CLI.
 
 Install: `pip install sandcastle-ai`. CLI: `sandcastle serve` then `sandcastle run <workflow.yaml>`.
 
@@ -15,7 +15,7 @@ Install: `pip install sandcastle-ai`. CLI: `sandcastle serve` then `sandcastle r
 ## Docs
 
 - [GitHub repository](https://github.com/gizmax/Sandcastle): source, README, templates under `src/sandcastle/templates/`.
-- [Step-type reference and example (llms-full.txt)](https://github.com/gizmax/Sandcastle/blob/main/llms-full.txt): the full YAML schema for all 25 step types, enough to author valid workflows.
+- [Step-type reference and example (llms-full.txt)](https://github.com/gizmax/Sandcastle/blob/main/llms-full.txt): the full YAML schema for all 27 step types, enough to author valid workflows.
 - [Website](https://sandcastle-ai.eu): overview and EU AI Act compliance.
 - [Live dashboard demo](https://gizmax.github.io/Sandcastle/): the workflow UI, no backend required.
 

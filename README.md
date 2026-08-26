@@ -2,7 +2,7 @@
 
 **Build once. Run anywhere.** Sandcastle is an open-source, production-ready orchestrator for AI agents. **Describe a workflow in plain English and it builds it** (or write the YAML yourself); run it on **any model** — Claude, GPT, Mistral, or a local model on your own box — and move between them with one line; deploy it **your way** — cloud, your own server, fully air-gapped, or EU-only; and it **gets better over time**, on its own. Local models run at `$0/run` with hard data-residency enforcement and a tamper-evident audit trail; the cloud is there too, with 7 providers and auto-failover, 26 step types, verified templates, and a full dashboard. Sovereign by default. European-built.
 
-[![PyPI](https://img.shields.io/badge/PyPI-v0.44.0-blue?style=flat-square)](https://pypi.org/project/sandcastle-ai/0.44.0/)
+[![PyPI](https://img.shields.io/badge/PyPI-v0.47.0-blue?style=flat-square)](https://pypi.org/project/sandcastle-ai/0.47.0/)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-17154%20passing-brightgreen?style=flat-square)](https://github.com/gizmax/Sandcastle/actions)
@@ -648,7 +648,7 @@ Once connected, ask your AI assistant to:
 | **Multi-provider model routing** (Claude, OpenAI, MiniMax, Google/Gemini, Mistral, Ollama, oMLX) | Yes |
 | **⚡ Spark Mode** — auto-detects NVIDIA DGX Spark, local-inference defaults, $0/run, air-gappable | Yes |
 | **64 built-in integrations** across 11 categories | Yes |
-| **26 step types** (standard, llm, http, code, race, sensor, gate, parse, managed-agent, acp...) | Yes |
+| **27 step types** (standard, llm, http, code, race, sensor, gate, parse, managed-agent, acp...) | Yes |
 | **Zero-config local mode** | Yes |
 | **DAG workflow orchestration** | Yes |
 | **Parallel step execution** | Yes |
@@ -989,7 +989,7 @@ For fine-grained control, you can still reference specific outputs explicitly us
 
 ## 26 Step Types
 
-Sandcastle supports 26 step types for building complex workflows beyond simple LLM prompts:
+Sandcastle supports 27 step types for building complex workflows beyond simple LLM prompts:
 
 | Phase | Type | Description |
 |-------|------|-------------|
@@ -2387,7 +2387,7 @@ flowchart TD
     A2A["A2A Agents"] -->|"POST /a2a"| API
     AGUI["AG-UI Clients"] -->|"GET /api/agui/stream"| API
 
-    API --> Engine["Workflow Engine\n(DAG executor, 26 step types)"]
+    API --> Engine["Workflow Engine\n(DAG executor, 27 step types)"]
 
     Engine --> Standard["Standard Steps"]
     Engine --> Sub["Sub-Workflow Steps\n(recursive execution)"]
