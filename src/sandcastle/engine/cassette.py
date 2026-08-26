@@ -7,10 +7,18 @@ cost, deterministically, and identically no matter which of the providers it tar
 the replay reads recorded outputs at the StepResult layer, strictly above every provider
 client, so nothing calls a model.
 
-Scope: v1 records the model-bearing ``standard`` prompt steps (where provider cost and
-non-determinism live); deterministic ``code``/``http``/control-flow steps re-execute
-live on replay (code is reproducible; you usually want http live or explicitly mocked).
-Recording the explicit ``llm`` step type and full hybrid coverage is a follow-up.
+Scope: the ``standard`` prompt steps key off their fully resolved prompt inside
+``_execute_step_once``; every hybrid type - ``llm``, ``http``, ``notify``, ``tool``
+and the rest - is covered from ``execute_step_with_retry``, keyed off a per-type
+*effect fingerprint* (see engine/effects.py) instead of a prompt, since an ``http``
+step has no prompt. Control flow that mutates branch selection (``condition``,
+``classify``, ``gate``) and composites (``loop``, ``race``, ``delegate``,
+``sub_workflow``) are deliberately never memoized: their children are recorded
+individually, and a memoized branch decision would silently un-skip the other branch.
+
+A cassette is a portable file. It says "this is what the model answered", never
+"this installation already POSTed". Cross-run side-effect suppression is the job of
+the durable, installation-local effect ledger in engine/effects.py.
 
 This turns a run into a portable, tamper-evident fixture: free/fast/offline CI, golden
 output diffing, deterministic eval as a regression gate, and attachable bug repros. It

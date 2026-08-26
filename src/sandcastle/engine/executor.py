@@ -22,7 +22,11 @@ from typing import Any
 from simpleeval import simple_eval
 
 from sandcastle.engine.dag import (
+    MAX_ACCEPT_ROUNDS,
+    AcceptConfig,
+    AcceptJudge,
     ExecutionPlan,
+    GateConfig,
     ManagedAgentConfig,
     StepDefinition,
     ToolConfig,
@@ -78,6 +82,12 @@ class StepResult:
     retryable: bool = True
     policy_outputs: dict[str, Any] = field(default_factory=dict)
     policies_applied: bool = False
+    # True when the output came from a memoized effect (effect ledger or
+    # cassette) instead of a live execution. cost_usd stays 0.0 on that path so
+    # budget accounting is automatically right; original_cost_usd carries what
+    # the first execution paid, purely for display.
+    replayed: bool = False
+    original_cost_usd: float = 0.0
 
 
 @dataclass
@@ -128,6 +138,11 @@ class RunContext:
     # recorded outputs offline at zero cost. See engine/cassette.py.
     cassette: Any = field(default=None, repr=False)
     cassette_mode: str | None = field(default=None, repr=False)  # "record" | "replay" | None
+    # Head of the replay/fork lineage this run belongs to. A side effect is
+    # claimed once per scope, so a replay inherits its parent's scope and sees
+    # the effects the parent already committed. Empty = the run is its own
+    # scope. See engine/effects.py.
+    effect_scope_id: str = field(default="", repr=False)
     policy_target_outputs: dict[str, dict[str, Any]] = field(
         default_factory=dict,
         repr=False,
@@ -167,6 +182,7 @@ class RunContext:
             tenant_id=self.tenant_id,
             cassette=self.cassette,
             cassette_mode=self.cassette_mode,
+            effect_scope_id=self.effect_scope_id,
             policy_target_outputs=copy.deepcopy(self.policy_target_outputs),
         )
 
@@ -183,6 +199,8 @@ class RunContext:
             "costs": self.costs,
             "total_cost": self.total_cost,
         }
+        if self.effect_scope_id:
+            snapshot["effect_scope_id"] = self.effect_scope_id
         if self.policy_target_outputs:
             snapshot["policy_target_outputs"] = self.policy_target_outputs
         return snapshot
@@ -758,6 +776,8 @@ async def _save_run_step(
     input_prompt: str | None = None,
     tokens_saved: int = 0,
     compaction_strategy: str | None = None,
+    replayed: bool = False,
+    original_cost_usd: float | None = None,
 ) -> None:
     """Create or update a RunStep record in the database.
 
@@ -814,6 +834,16 @@ async def _save_run_step(
                     existing.tokens_saved = (existing.tokens_saved or 0) + tokens_saved
                 if compaction_strategy:
                     existing.compaction_strategy = compaction_strategy
+                if replayed:
+                    existing.replayed = True
+                    existing.original_cost_usd = original_cost_usd
+                    # A memoized step costs nothing *this* time, and the guard
+                    # above skips a falsy cost. Crash-resume re-executes under
+                    # the same run id (unlike replay/fork, which mint a new
+                    # one), so without this the row would keep the charge from
+                    # the execution that crashed: the run total reads $0.00
+                    # while the step row still claims $0.42.
+                    existing.cost_usd = cost_usd
                 if status in ("completed", "failed", "skipped"):
                     existing.completed_at = now
             else:
@@ -832,6 +862,8 @@ async def _save_run_step(
                     input_prompt=input_prompt,
                     tokens_saved=tokens_saved,
                     compaction_strategy=compaction_strategy,
+                    replayed=replayed,
+                    original_cost_usd=original_cost_usd,
                     started_at=now if status == "running" else None,
                     completed_at=(now if status in ("completed", "failed", "skipped") else None),
                 )
@@ -1464,6 +1496,7 @@ def _write_pdf_report(
 
 _HYBRID_STEP_TYPES = {
     "llm",
+    "accept",
     "http",
     "code",
     "condition",
@@ -1487,6 +1520,11 @@ _HYBRID_STEP_TYPES = {
     "trajectory-replay",
     "computer-use",
     "tool",
+    # An acp step MUST be here. A type absent from this set does not fail
+    # loudly - it silently falls through to _execute_step_once and runs its
+    # placeholder prompt as a plain LLM call, which for `type: acp` would mean
+    # quietly answering with a model instead of driving the external harness.
+    "acp",
 }
 
 
@@ -1525,6 +1563,245 @@ def _scrub_for_event_bus(output: Any, step_id: str, context: Any) -> Any:
         return "[output withheld: PII scrubbing failed]"
 
 
+def _apply_step_overrides(
+    step: StepDefinition, step_overrides: dict | None
+) -> StepDefinition:
+    """Apply fork overrides to a step (dataclasses.replace preserves all fields).
+
+    The effect guard fingerprints the *overridden* step, so a fork that changes
+    a prompt produces a different effect key and correctly re-executes.
+    """
+    if not step_overrides:
+        return step
+    override_fields = {}
+    for key in ("prompt", "model", "max_turns", "timeout"):
+        if key in step_overrides:
+            override_fields[key] = step_overrides[key]
+    if not override_fields:
+        return step
+    return dataclasses.replace(step, **override_fields)
+
+
+@dataclass
+class _EffectGuard:
+    """Carries the claim between the pre-execution check and the outcome report."""
+
+    ledger: Any = None
+    effect_key: str = ""
+    cassette_key: str = ""
+
+
+async def _begin_effect_guard(
+    step: StepDefinition,
+    context: RunContext,
+    parallel_index: int | None,
+) -> tuple[_EffectGuard | None, StepResult | None]:
+    """Consult the cassette and the effect ledger before a step executes.
+
+    Returns ``(guard, memoized_result)``. A non-None result means the step must
+    not run: its output is already known (cassette hit or committed effect) or
+    its effect is uncertain (an abandoned claim, which fails rather than
+    re-firing). A non-None guard means we own the effect and must report its
+    outcome afterwards.
+
+    This is the site the pre-0.45 code was missing. The cassette lookup lived
+    inside ``_execute_step_once``, which only ``standard`` steps reach - every
+    one of the 24 hybrid types, ``llm`` and ``http`` included, dispatched down
+    ``_execute_step_by_type`` and never saw it.
+    """
+    from sandcastle.config import settings
+    from sandcastle.engine.effects import (
+        GUARD_EXEMPT_STEP_TYPES,
+        EffectLedger,
+        EffectUncertain,
+        compute_effect_key,
+        effect_mode_for,
+        on_uncertain_for,
+        step_effect_fingerprint,
+    )
+
+    # Control flow that writes branch_skip_steps (condition/classify), the
+    # approval gate, and composites whose children carry their own guards must
+    # always execute - a memoized return would silently un-skip a branch or
+    # swallow a whole sub-tree.
+    if step.type in GUARD_EXEMPT_STEP_TYPES:
+        return None, None
+
+    # ``standard`` steps are guarded where they already were, inside
+    # _execute_step_once. That hook keys off the *fully* resolved prompt -
+    # storage refs expanded, memories injected - which this one cannot see
+    # without doing I/O on a hot path. Memoizing on a coarser key than the one
+    # that determines the output would suppress steps whose real prompts
+    # differ, so the standard path is left exactly as it was and only the
+    # hybrid types are guarded here. That is precisely the gap: all 24 of them,
+    # ``llm`` and ``http`` included, dispatch through _execute_step_by_type and
+    # never reached a memoization check at all.
+    if step.type not in _HYBRID_STEP_TYPES:
+        return None, None
+
+    wants_cassette = context.cassette is not None
+    wants_ledger = settings.effect_ledger_enabled and effect_mode_for(step) == "memoize"
+    if not wants_cassette and not wants_ledger:
+        return None, None
+
+    try:
+        fingerprint = step_effect_fingerprint(step, context)
+    except Exception as exc:  # pragma: no cover - fingerprinting is pure
+        logger.warning("Effect fingerprint failed for step '%s': %s", step.id, exc)
+        return None, None
+
+    guard = _EffectGuard()
+
+    if wants_cassette:
+        guard.cassette_key = _compute_cache_key(
+            context.workflow_name,
+            step.id,
+            fingerprint,
+            step.model,
+            tenant_id=context.tenant_id,
+        )
+        if context.cassette_mode == "replay":
+            # A strict replay store raises CassetteMissError here rather than
+            # falling through, which is what keeps bundle verification offline.
+            recorded = context.cassette.get(guard.cassette_key)
+            if recorded is not None:
+                logger.info(
+                    "Step '%s' cassette REPLAY (key=%s...)",
+                    step.id,
+                    guard.cassette_key[:12],
+                )
+                return None, StepResult(
+                    step_id=step.id,
+                    parallel_index=parallel_index,
+                    output=recorded["output"],
+                    cost_usd=0.0,
+                    status="completed",
+                    replayed=True,
+                    original_cost_usd=float(recorded.get("cost_usd", 0.0) or 0.0),
+                    policies_applied=True,
+                )
+
+    if not wants_ledger:
+        return guard, None
+
+    scope_id = context.effect_scope_id or context.run_id
+    # Loop iterations share a step id and often a URL, so the iteration index is
+    # what keeps them separate effects. RunContext.with_item writes it as an int
+    # (executor: _execute_loop_step / _execute_fanout_step); anything else in
+    # input["_index"] is workflow data, not an iteration, and is ignored.
+    raw_index = context.input.get("_index")
+    iteration_index = raw_index if isinstance(raw_index, int) else None
+    guard.effect_key = compute_effect_key(
+        scope_id,
+        context.tenant_id,
+        step.id,
+        fingerprint,
+        parallel_index=parallel_index,
+        iteration_index=iteration_index,
+    )
+    ledger = EffectLedger()
+    try:
+        claim = await ledger.claim(
+            effect_key=guard.effect_key,
+            scope_id=scope_id,
+            run_id=context.run_id,
+            tenant_id=context.tenant_id,
+            step_id=step.id,
+            step_type=step.type,
+            parallel_index=parallel_index,
+            iteration_index=iteration_index,
+        )
+    except EffectUncertain as exc:
+        return None, StepResult(
+            step_id=step.id,
+            parallel_index=parallel_index,
+            status="failed",
+            error=str(exc),
+            retryable=False,
+        )
+
+    if claim.outcome == "memoized":
+        logger.info(
+            "Step '%s' effect MEMOIZED from run %s (key=%s...)",
+            step.id,
+            claim.owner_run_id,
+            guard.effect_key[:12],
+        )
+        return None, StepResult(
+            step_id=step.id,
+            parallel_index=parallel_index,
+            output=claim.output,
+            cost_usd=0.0,
+            status="completed",
+            replayed=True,
+            original_cost_usd=float(claim.cost_usd or 0.0),
+            policies_applied=True,
+        )
+
+    if claim.outcome == "uncertain":
+        if on_uncertain_for(step) == "retry":
+            logger.warning(
+                "Step '%s': %s - on_uncertain=retry, taking the claim over",
+                step.id,
+                claim.detail,
+            )
+            await ledger.take_over(guard.effect_key, context.run_id)
+            guard.ledger = ledger
+            return guard, None
+        # We do not know whether the side effect landed, and guessing is how a
+        # card gets charged twice. Fail loudly and let on_failure / the dead
+        # letter queue decide.
+        return None, StepResult(
+            step_id=step.id,
+            parallel_index=parallel_index,
+            status="failed",
+            error=f"EffectUncertain: {claim.detail}",
+            retryable=False,
+        )
+
+    if claim.outcome == "owned":
+        guard.ledger = ledger
+    # "unavailable" leaves guard.ledger None: the step runs live, having already
+    # warned. See settings.effect_ledger_required to make that a failure.
+    return guard, None
+
+
+async def _finish_effect_guard(
+    guard: _EffectGuard | None,
+    step: StepDefinition,
+    context: RunContext,
+    result: StepResult,
+) -> None:
+    """Report a step's outcome to the ledger and record it into the cassette."""
+    if guard is None:
+        return
+    if guard.ledger is not None and guard.effect_key:
+        if result.status == "completed":
+            await guard.ledger.commit(
+                guard.effect_key,
+                result.output,
+                result.cost_usd,
+                run_id=context.run_id,
+            )
+        else:
+            # A failed effect did not change the world (a half-completed one
+            # leaves the claim in_flight instead, which is the uncertain case).
+            await guard.ledger.mark_failed(guard.effect_key, result.error)
+    if (
+        guard.cassette_key
+        and result.status == "completed"
+        and context.cassette is not None
+        and context.cassette_mode == "record"
+    ):
+        context.cassette.put(
+            cache_key=guard.cassette_key,
+            output=result.output,
+            cost_usd=result.cost_usd,
+            model=result.model or step.model,
+            step_id=step.id,
+        )
+
+
 async def execute_step_with_retry(
     step: StepDefinition,
     context: RunContext,
@@ -1535,16 +1812,52 @@ async def execute_step_with_retry(
     workflow: WorkflowDefinition | None = None,
     depth: int = 0,
 ) -> StepResult:
-    """Execute a step with retry logic and exponential backoff."""
-    # Apply step overrides for fork (use dataclasses.replace to preserve all fields)
-    if step_overrides:
-        override_fields = {}
-        for key in ("prompt", "model", "max_turns", "timeout"):
-            if key in step_overrides:
-                override_fields[key] = step_overrides[key]
-        if override_fields:
-            step = dataclasses.replace(step, **override_fields)
+    """Execute a step, guarded by the cassette and the durable effect ledger.
 
+    The guard sits here because this is the one site every hybrid step type
+    passes through - top level, fan-out item and loop iteration alike, on every
+    retry attempt. A memoized effect returns before the retry loop, so it costs
+    $0 and fires no request. (``standard`` steps keep their existing hook inside
+    ``_execute_step_once``; see _begin_effect_guard for why.)
+    """
+    step = _apply_step_overrides(step, step_overrides)
+    guard, memoized = await _begin_effect_guard(step, context, parallel_index)
+    if memoized is not None:
+        return memoized
+    # Note what is deliberately NOT handled below: a CancelledError (an approval
+    # pause cancels its in-flight siblings) or a dead process leaves the claim
+    # in_flight, so the next run reports "we do not know whether this landed"
+    # instead of silently re-POSTing.
+    try:
+        result = await _execute_step_with_retry_inner(
+            step,
+            context,
+            sandbox,
+            storage,
+            parallel_index=parallel_index,
+            workflow=workflow,
+            depth=depth,
+        )
+    except (WorkflowPaused, StepBlocked) as exc:
+        # The step was gated before it did anything, so release the claim -
+        # a resume must run it, not report it as uncertain.
+        if guard is not None and guard.ledger is not None and guard.effect_key:
+            await guard.ledger.mark_failed(guard.effect_key, type(exc).__name__)
+        raise
+    await _finish_effect_guard(guard, step, context, result)
+    return result
+
+
+async def _execute_step_with_retry_inner(
+    step: StepDefinition,
+    context: RunContext,
+    sandbox: SandshoreRuntime,
+    storage: StorageBackend,
+    parallel_index: int | None = None,
+    workflow: WorkflowDefinition | None = None,
+    depth: int = 0,
+) -> StepResult:
+    """Execute a step with retry logic and exponential backoff."""
     # AutoPilot: pick variant if configured
     autopilot_experiment = None
     autopilot_variant = None
@@ -2521,6 +2834,7 @@ async def _execute_step_once(
                     context._memory_scope_id,
                     query=prompt[:500],
                     limit=context._memory_config.max_inject,
+                    backend=_mem_read_settings.memory_backend,
                 )
                 # Apply decay
                 max_age = (
@@ -2790,6 +3104,7 @@ async def _execute_step_once(
                         metadata=meta,
                         run_id=context.run_id,
                         skip_admission=True,  # already checked above
+                        backend=_mem_write_settings.memory_backend,
                     )
                     logger.info(
                         "Saved memory from step '%s' "
@@ -3955,6 +4270,296 @@ async def _execute_composio_step(
             error=f"Composio step failed: {e}",
             duration_seconds=time.monotonic() - started_at,
         )
+
+
+# stopReason -> (status, retryable). The agent finishing is not the agent
+# succeeding, which is why the worked example pairs every acp step with a
+# deterministic verification step. A refusal is deterministic: retrying it burns
+# the retry budget to be told no a second time.
+_ACP_STOP_REASONS: dict[str, tuple[str, bool]] = {
+    "end_turn": ("completed", True),
+    "max_tokens": ("completed", True),
+    "max_turn_requests": ("completed", True),
+    "refusal": ("failed", False),
+    "cancelled": ("failed", False),
+}
+
+# Failure classes from acp_client.AcpError that no amount of retrying fixes.
+_ACP_FATAL_KINDS = frozenset({"config", "version", "capability", "spawn"})
+
+
+def _acp_cost(cfg: Any, usage: dict | None, step_id: str) -> tuple[float, str]:
+    """Decide what an acp step cost. Returns ``(cost_usd, source)``.
+
+    ACP v1 reports ``usage_update{used, size, cost?}`` and nothing else. ``used``
+    is *context occupancy* - tokens currently in the window - not tokens
+    consumed; it goes down after a compaction, so summing it across updates
+    produces a number that means nothing. There is no inputTokens/outputTokens
+    anywhere in v1.
+
+    So: use the harness's own reported USD figure when it volunteers one (last
+    update wins, because ``cost`` is cumulative), fall back to the declared
+    ``cost_per_call`` otherwise, and never estimate. Estimating from ``used``
+    would be fabricating a bill, and a fabricated bill feeding ``max_cost_usd``
+    is worse than an honest zero.
+    """
+    declared = float(getattr(cfg, "cost_per_call", 0.0) or 0.0)
+    cost = usage.get("cost") if isinstance(usage, dict) else None
+    if not isinstance(cost, dict):
+        return declared, "declared"
+    currency = str(cost.get("currency") or "").upper()
+    try:
+        amount = float(cost.get("amount"))
+    except (TypeError, ValueError):
+        return declared, "declared"
+    if currency == "USD":
+        return amount, "agent_reported"
+    # Sandcastle has no FX layer, and inventing one silently corrupts every
+    # budget check downstream. Report the foreign amount, bill the declared one.
+    logger.warning(
+        "ACP step '%s' reported cost %.4f %s; Sandcastle does not convert "
+        "currencies, so cost_per_call (%.4f USD) is used for accounting",
+        step_id,
+        amount,
+        currency or "?",
+        declared,
+    )
+    return declared, "declared_foreign_currency"
+
+
+async def _execute_acp_step(
+    step: StepDefinition,
+    context: RunContext,
+    storage: StorageBackend,
+) -> StepResult:
+    """Drive an external agent harness over the Agent Client Protocol.
+
+    Sandcastle is the client: it spawns the harness, streams its message chunks
+    back as ``step.progress`` events, answers its permission requests from the
+    step's own rules, and can cancel a running turn gracefully - which none of
+    the four older agent integrations can do.
+
+    What it deliberately does not do is trust the harness. The command comes
+    from the step definition and never from an upstream step's output, the
+    environment is built rather than inherited, the working directory has to sit
+    inside a configured root, and every permission decision is recorded.
+    """
+    import time
+
+    from sandcastle.config import settings
+    from sandcastle.engine.acp_client import (
+        AcpError,
+        build_acp_env,
+        resolve_agent_shorthand,
+        resolve_workspace_path,
+        run_acp_turn,
+    )
+
+    started_at = time.monotonic()
+    cfg = step.acp_config
+    if not cfg:
+        return StepResult(
+            step_id=step.id, status="failed", error="Missing acp_config", retryable=False
+        )
+
+    # An acp step spawns an arbitrary local executable. That is the same blast
+    # radius as a code step, so it gets the same gate.
+    if not context.admin_trusted:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=(
+                "ACP steps spawn a local agent harness and require an "
+                "admin-trusted workflow"
+            ),
+            retryable=False,
+            duration_seconds=time.monotonic() - started_at,
+        )
+
+    # Data residency is enforced from a model-registry entry, and we do not know
+    # which model an external harness calls. A compliance mode that silently
+    # fails to apply to the newest step type is worse than no compliance mode,
+    # so this fails closed.
+    if getattr(settings, "data_residency", ""):
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=(
+                f"ACP steps cannot run under data_residency='{settings.data_residency}': "
+                "Sandcastle does not know which model an external agent harness calls, "
+                "so the residency guarantee cannot be enforced"
+            ),
+            retryable=False,
+            duration_seconds=time.monotonic() - started_at,
+        )
+
+    message = resolve_templates(
+        cfg.message or step.prompt or f"acp step {step.id}",
+        context,
+        step.depends_on,
+    )
+    message = await resolve_storage_refs(message, storage, context)
+
+    try:
+        command, args = resolve_agent_shorthand(cfg)
+        workspace = resolve_workspace_path(
+            resolve_templates(cfg.cwd, context, step.depends_on),
+            list(getattr(settings, "acp_allowed_roots", None) or []),
+        )
+        extra_dirs = [
+            str(
+                resolve_workspace_path(
+                    resolve_templates(raw, context, step.depends_on),
+                    list(getattr(settings, "acp_allowed_roots", None) or []),
+                    label="additional_directories",
+                )
+            )
+            for raw in cfg.additional_directories
+        ]
+        resolved_cfg = dataclasses.replace(
+            cfg,
+            env={
+                key: resolve_templates(str(value), context, step.depends_on)
+                for key, value in (cfg.env or {}).items()
+            },
+        )
+        env = build_acp_env(resolved_cfg)
+    except AcpError as exc:
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=f"ACP step '{step.id}': {exc}",
+            retryable=exc.kind not in _ACP_FATAL_KINDS,
+            duration_seconds=time.monotonic() - started_at,
+        )
+
+    def _on_event(kind: str, payload: dict) -> None:
+        # Same channel delegate already streams on, so the dashboard's existing
+        # progress plumbing shows an ACP turn as it happens instead of after it.
+        event_bus.publish(
+            "step.progress",
+            {
+                "run_id": context.run_id,
+                "step_id": step.id,
+                "step_name": step.id,
+                "acp_event": kind,
+                **payload,
+            },
+        )
+
+    async def _cancel_check() -> bool:
+        return await _check_cancel(context.run_id)
+
+    try:
+        turn = await run_acp_turn(
+            resolved_cfg,
+            message,
+            workspace=workspace,
+            env=env,
+            additional_directories=extra_dirs,
+            cancel_check=_cancel_check,
+            on_event=_on_event,
+        )
+    except AcpError as exc:
+        error = f"ACP step '{step.id}' failed ({exc.kind}): {exc}"
+        if exc.stderr_tail:
+            error = f"{error}; agent stderr tail: {exc.stderr_tail[-500:]}"
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=error,
+            retryable=exc.kind not in _ACP_FATAL_KINDS,
+            duration_seconds=time.monotonic() - started_at,
+            input_prompt=message,
+        )
+    except Exception as exc:  # noqa: BLE001 - errors are values on this path
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=f"ACP step '{step.id}' failed: {exc}",
+            duration_seconds=time.monotonic() - started_at,
+            input_prompt=message,
+        )
+
+    status, retryable = _ACP_STOP_REASONS.get(turn.stop_reason, ("failed", True))
+    cost_usd, cost_source = _acp_cost(cfg, turn.usage, step.id)
+    truncated = turn.truncated or turn.stop_reason in ("max_tokens", "max_turn_requests")
+
+    usage_out: dict | None = None
+    if turn.usage is not None:
+        usage_out = {**turn.usage, "cost_source": cost_source}
+    elif cost_usd:
+        usage_out = {"cost_source": cost_source}
+
+    if cfg.output_format == "full":
+        output: Any = {
+            "text": turn.text,
+            "stop_reason": turn.stop_reason,
+            "session_id": turn.session_id,
+            "agent": turn.agent_info,
+            "protocol_version": turn.protocol_version,
+            "modes": turn.modes,
+            "permissions": turn.permissions,
+            "usage": usage_out,
+            "plan": turn.plan,
+            "truncated": truncated,
+        }
+        if cfg.include_thoughts:
+            output["thoughts"] = turn.thoughts
+        if cfg.include_tool_calls:
+            output["tool_calls"] = turn.tool_calls
+    elif cfg.output_format == "json":
+        try:
+            output = json.loads(turn.text)
+        except (json.JSONDecodeError, ValueError):
+            output = {"raw_text": turn.text, "_parse_error": True}
+    else:
+        output = turn.text
+
+    # "this step was handed ANTHROPIC_API_KEY, ran claude-agent-acp 0.70.0, and
+    # said no to one execute request" belongs in the SHA-256 chain. Names only -
+    # never the values.
+    await _emit_audit_event(
+        "step.acp",
+        context.run_id,
+        "system",
+        {
+            "step_id": step.id,
+            "command": command,
+            "args": args,
+            "cwd": str(workspace),
+            "env_passthrough": list(cfg.env_passthrough),
+            "env_names": sorted(resolved_cfg.env.keys()),
+            "agent_info": turn.agent_info,
+            "protocol_version": turn.protocol_version,
+            "session_id": turn.session_id,
+            "stop_reason": turn.stop_reason,
+            "permissions": turn.permissions,
+            "filesystem": cfg.filesystem,
+            "cost_usd": cost_usd,
+            "cost_source": cost_source,
+        },
+    )
+
+    error: str | None = None
+    if status == "failed":
+        error = (
+            f"ACP turn ended with stopReason '{turn.stop_reason}'"
+            if turn.stop_reason
+            else "ACP turn produced no stopReason"
+        )
+
+    return StepResult(
+        step_id=step.id,
+        status=status,
+        output=output,
+        error=error,
+        cost_usd=cost_usd,
+        retryable=retryable,
+        duration_seconds=time.monotonic() - started_at,
+        input_prompt=message,
+        model=(turn.agent_info or {}).get("name") or command,
+    )
 
 
 async def _execute_openclaw_step(
@@ -6196,6 +6801,7 @@ async def _execute_race_step(
                 tenant_id=context.tenant_id,
                 cassette=context.cassette,
                 cassette_mode=context.cassette_mode,
+                effect_scope_id=context.effect_scope_id,
                 policy_target_outputs=copy.deepcopy(
                     context.policy_target_outputs
                 ),
@@ -6486,6 +7092,49 @@ async def _execute_sensor_step(
         )
 
 
+def _gate_rejection(
+    step: StepDefinition,
+    cfg: GateConfig,
+    *,
+    output: dict,
+    reason: str,
+    strategy: str,
+    total_cost: float,
+    duration: float,
+) -> StepResult:
+    """Build the StepResult for a gate whose strategy rejected.
+
+    A gate that reports "rejected" and lets the run continue is not a gate.
+    Rejection fails the step by default so the workflow stops.
+
+    The verdict is kept on the StepResult and restated in .error, because a
+    failed step's output is not published into run.outputs - an operator
+    reading back a stopped run sees the reason in the error, not under
+    {steps.gate.decision}.  Workflows that genuinely want to branch on a
+    verdict should set fail_on_reject: false and read the output as before.
+
+    retryable is False because re-running the judge until it says yes would
+    turn a guard rail into a dice roll.
+    """
+    if not cfg.fail_on_reject:
+        return StepResult(
+            step_id=step.id,
+            output=output,
+            cost_usd=total_cost,
+            duration_seconds=duration,
+            status="completed",
+        )
+    return StepResult(
+        step_id=step.id,
+        output=output,
+        cost_usd=total_cost,
+        duration_seconds=duration,
+        status="failed",
+        error=f"Gate rejected by {strategy} strategy: {reason}",
+        retryable=False,
+    )
+
+
 async def _execute_gate_step(
     step: StepDefinition,
     context: RunContext,
@@ -6579,16 +7228,18 @@ async def _execute_gate_step(
                 if not approved:
                     # Immediate rejection - no need to check further strategies
                     duration = time.monotonic() - started_at
-                    return StepResult(
-                        step_id=step.id,
+                    return _gate_rejection(
+                        step,
+                        cfg,
                         output={
                             "decision": "rejected",
                             "reason": llm_response,
                             "strategy": "llm_eval",
                         },
-                        cost_usd=total_cost,
-                        duration_seconds=duration,
-                        status="completed",
+                        reason=llm_response,
+                        strategy="llm_eval",
+                        total_cost=total_cost,
+                        duration=duration,
                     )
 
                 strategy_results.append({
@@ -6643,16 +7294,19 @@ async def _execute_gate_step(
                 if action != "approve":
                     # Immediate rejection
                     duration = time.monotonic() - started_at
-                    return StepResult(
-                        step_id=step.id,
+                    reason = f"Auto-{action} after {delay}s timeout"
+                    return _gate_rejection(
+                        step,
+                        cfg,
                         output={
                             "decision": "rejected",
-                            "reason": f"Auto-{action} after {delay}s timeout",
+                            "reason": reason,
                             "strategy": "timeout",
                         },
-                        cost_usd=total_cost,
-                        duration_seconds=duration,
-                        status="completed",
+                        reason=reason,
+                        strategy="timeout",
+                        total_cost=total_cost,
+                        duration=duration,
                     )
 
                 strategy_results.append({
@@ -6702,6 +7356,623 @@ async def _execute_gate_step(
             error=str(e),
             duration_seconds=duration,
         )
+
+
+# ---------------------------------------------------------------------------
+# type: accept - the outcome gate
+# ---------------------------------------------------------------------------
+
+
+def _accept_digest(value: Any) -> str:
+    """A stable content digest for the output an accept step judged.
+
+    The evidence pack has to say *what* was judged, not merely that judging
+    happened, or a verdict cannot be re-checked after the fact.
+    """
+    import hashlib
+    import json as _json
+
+    try:
+        payload = _json.dumps(value, sort_keys=True, default=str)
+    except Exception:
+        payload = repr(value)
+    return "sha256:" + hashlib.sha256(payload.encode("utf-8", "replace")).hexdigest()
+
+
+def _accept_target_text(value: Any) -> str:
+    """Render a target step's output as the text a judge reads."""
+    import json as _json
+
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        for key in ("output", "text", "result", "content"):
+            inner = value.get(key)
+            if isinstance(inner, str) and inner:
+                return inner
+    try:
+        return _json.dumps(value, indent=2, default=str)
+    except Exception:
+        return str(value)
+
+
+def _accept_rejection(
+    step: StepDefinition,
+    cfg: AcceptConfig,
+    *,
+    output: dict,
+    reason: str,
+    total_cost: float,
+    duration: float,
+) -> StepResult:
+    """Build the StepResult for an accept step whose verdict was "rejected".
+
+    This is ``_gate_rejection`` applied to outcomes instead of permissions, and
+    it is deliberately the same shape: an outcome gate that reports "the work
+    did not meet the goal" and then lets the run continue is not a gate.
+
+    ``retryable`` is False for the reason the gate has it - a step-level
+    ``retry:`` would otherwise re-judge the same output up to three times and
+    let a rejected result through on the attempt where the judge happened to
+    say yes.  A verdict is not a flaky network call.
+
+    The verdict is restated in ``.error`` because a failed step publishes no
+    output into ``run.outputs``: an operator reading back a stopped run finds
+    the reason there, not under ``{steps.accept.decision}``.
+    """
+    if not cfg.fail_on_reject:
+        return StepResult(
+            step_id=step.id,
+            output=output,
+            cost_usd=total_cost,
+            duration_seconds=duration,
+            status="completed",
+        )
+    return StepResult(
+        step_id=step.id,
+        output=output,
+        cost_usd=total_cost,
+        duration_seconds=duration,
+        status="failed",
+        error=f"Accept rejected: {reason}",
+        retryable=False,
+    )
+
+
+def _parse_judge_verdict(text: str) -> tuple[bool | None, str]:
+    """Read APPROVE / REJECT and a reason out of a judge's reply.
+
+    Returns ``(approved, reason)``.  ``approved`` is None when the reply cannot
+    be read as a verdict at all - the caller fails that judge closed rather
+    than inventing a score, which is precisely the eval harness's mistake
+    (``autopilot._evaluate_llm_judge`` fabricates 0.5 on error).
+    """
+    import re as _re
+
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return None, "judge returned an empty reply"
+
+    verdict: bool | None = None
+    for line in cleaned.splitlines():
+        candidate = line.strip().strip("*_# ").upper()
+        if not candidate:
+            continue
+        candidate = candidate.removeprefix("VERDICT:").strip()
+        if _re.match(r"^APPROVE(D)?\b", candidate):
+            verdict = True
+            break
+        if _re.match(r"^REJECT(ED)?\b", candidate):
+            verdict = False
+            break
+        # Only the first meaningful line is treated as the verdict line, so a
+        # reason that happens to contain the word "approve" cannot flip it.
+        break
+
+    reason = cleaned
+    if len(reason) > 2000:
+        reason = reason[:2000] + "..."
+    return verdict, reason
+
+
+async def _run_accept_judge(
+    judge: AcceptJudge,
+    prompt: str,
+    timeout: int,
+) -> dict:
+    """Ask one LLM judge for a verdict, billing it through ``_safe_cost``.
+
+    This is the gate's direct-HTTP shape rather than the eval harness's judge
+    path.  ``eval._check_llm_judge`` -> ``autopilot._evaluate_llm_judge`` ->
+    ``generator._call_advisor_llm`` returns bare text, estimates its cost from
+    character counts into a side audit event and then discards it, takes no
+    per-judge model, and fabricates a 0.5 score when the call raises.  None of
+    that is acceptable for a step whose whole job is to be believed.
+    """
+    import httpx
+
+    from sandcastle.engine.providers import get_api_key, resolve_base_url, resolve_model
+
+    record: dict = {
+        "name": judge.name,
+        "model": judge.model,
+        "verdict": "rejected",
+        "reason": "",
+        "cost_usd": 0.0,
+    }
+
+    try:
+        model_info = resolve_model(judge.model)
+        _enforce_data_residency(model_info)
+        api_key = get_api_key(model_info)
+
+        if model_info.provider == "claude":
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": model_info.api_model_id,
+                        "max_tokens": judge.max_tokens,
+                        "messages": [{"role": "user", "content": prompt}],
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                reply = data["content"][0]["text"]
+                usage = data.get("usage", {})
+                in_tok = usage.get("input_tokens", 0)
+                out_tok = usage.get("output_tokens", 0)
+        else:
+            base_url = resolve_base_url(model_info)
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post(
+                    f"{base_url}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": model_info.api_model_id,
+                        "max_tokens": judge.max_tokens,
+                        "messages": [{"role": "user", "content": prompt}],
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                reply = data["choices"][0]["message"]["content"]
+                usage = data.get("usage", {})
+                in_tok = usage.get("prompt_tokens", 0)
+                out_tok = usage.get("completion_tokens", 0)
+
+        record["cost_usd"] = _safe_cost(
+            in_tok,
+            out_tok,
+            model_info.input_price_per_m,
+            model_info.output_price_per_m,
+        )
+        record["model_id"] = model_info.api_model_id
+        approved, reason = _parse_judge_verdict(reply)
+        record["reason"] = reason
+        if approved is None:
+            record["verdict"] = "rejected"
+            record["error"] = "unparseable verdict"
+        else:
+            record["verdict"] = "approved" if approved else "rejected"
+    except Exception as exc:
+        # Fail closed.  A judge we could not reach has not approved anything.
+        record["verdict"] = "rejected"
+        record["error"] = f"{type(exc).__name__}: {exc}"
+        record["reason"] = record["reason"] or str(exc)
+        logger.warning("Accept judge '%s' failed: %s", judge.name, exc)
+
+    return record
+
+
+def _build_judge_prompt(
+    judge: AcceptJudge,
+    targets: dict[str, str],
+    checks: list[dict],
+) -> str:
+    """Assemble the rubric, the work under review, and the reply contract."""
+    sections = [judge.rubric.strip()]
+    for target_id, text in targets.items():
+        sections.append(
+            f"--- OUTPUT UNDER REVIEW (step '{target_id}') ---\n{text}"
+        )
+    failed = [c for c in checks if not c.get("passed")]
+    if failed:
+        rendered = "\n".join(
+            f"- {c.get('type')}: {c.get('message') or 'failed'}" for c in failed
+        )
+        sections.append(f"--- FAILED DETERMINISTIC CHECKS ---\n{rendered}")
+    sections.append(
+        "--- HOW TO REPLY ---\n"
+        "First line: exactly APPROVE or REJECT.\n"
+        "Then one short paragraph giving the reason. If you REJECT, say "
+        "specifically what must change."
+    )
+    return "\n\n".join(sections)
+
+
+async def _accept_judge_round(
+    step: StepDefinition,
+    cfg: AcceptConfig,
+    context: RunContext,
+    round_no: int,
+) -> dict:
+    """Run one round of judging: checks first, then judges only if needed.
+
+    Returns the round's evidence dict.  Checks are deterministic and free, so
+    they run first and can reject the work for $0 before any judge is paid.
+    """
+    from sandcastle.engine.eval import check_assertion
+
+    target_texts: dict[str, str] = {}
+    target_meta: dict[str, dict] = {}
+    for target_id in cfg.targets:
+        value = context.step_outputs.get(target_id)
+        target_texts[target_id] = _accept_target_text(value)
+        result = context.step_results.get(target_id)
+        target_meta[target_id] = {
+            "digest": _accept_digest(value),
+            "chars": len(target_texts[target_id]),
+            "cost_usd": round(result.cost_usd, 6) if result else 0.0,
+            "duration_seconds": round(result.duration_seconds, 3) if result else 0.0,
+        }
+
+    primary = cfg.targets[0] if cfg.targets else ""
+    judged_value = context.step_outputs.get(primary)
+    primary_result = context.step_results.get(primary)
+    run_metadata = {
+        "cost_usd": primary_result.cost_usd if primary_result else 0.0,
+        "duration_seconds": primary_result.duration_seconds if primary_result else 0.0,
+    }
+
+    check_records: list[dict] = []
+    for assertion in cfg.checks:
+        outcome = await check_assertion(
+            assertion,
+            judged_value,
+            run_metadata=run_metadata,
+            step_outputs=context.step_outputs,
+        )
+        check_records.append(
+            {
+                "type": outcome.type,
+                "passed": bool(outcome.passed),
+                "expected": outcome.expected,
+                "actual": outcome.actual,
+                "message": outcome.message,
+            }
+        )
+
+    checks_passed = all(record["passed"] for record in check_records)
+
+    evidence: dict = {
+        "round": round_no,
+        "targets": target_meta,
+        "checks": check_records,
+        "checks_passed": checks_passed,
+        "judges": [],
+        "cost_usd": 0.0,
+    }
+
+    if not checks_passed:
+        failed = [c for c in check_records if not c["passed"]]
+        evidence["decision"] = "rejected"
+        evidence["rejected_by"] = "checks"
+        evidence["reason"] = "; ".join(
+            f"{c['type']}: {c['message'] or 'failed'}" for c in failed
+        )
+        return evidence
+
+    if not cfg.judges:
+        evidence["decision"] = "approved"
+        evidence["rejected_by"] = None
+        evidence["reason"] = "all deterministic checks passed"
+        return evidence
+
+    judge_records: list[dict] = []
+    total_cost = 0.0
+    for judge in cfg.judges:
+        # Each judge gets its own rubric, so each gets its own prompt.
+        judge_prompt = _build_judge_prompt(judge, target_texts, check_records)
+        record = await _run_accept_judge(judge, judge_prompt, step.timeout)
+        total_cost += record.get("cost_usd", 0.0)
+        judge_records.append(record)
+
+    approvals = sum(1 for r in judge_records if r["verdict"] == "approved")
+    # quorum 0 means unanimous, resolved here so that adding a judge tightens
+    # the panel instead of silently loosening it.
+    required = cfg.quorum if cfg.quorum > 0 else len(cfg.judges)
+    evidence["judges"] = judge_records
+    evidence["cost_usd"] = round(total_cost, 6)
+    evidence["quorum"] = {
+        "required": required,
+        "approved": approvals,
+        "total": len(judge_records),
+    }
+
+    if approvals >= required:
+        evidence["decision"] = "approved"
+        evidence["rejected_by"] = None
+        evidence["reason"] = f"{approvals}/{len(judge_records)} judges approved"
+    else:
+        dissent = [r for r in judge_records if r["verdict"] != "approved"]
+        evidence["decision"] = "rejected"
+        evidence["rejected_by"] = "quorum"
+        evidence["reason"] = "; ".join(
+            f"{r['name']}: {r['reason']}" for r in dissent
+        ) or f"only {approvals}/{required} judges approved"
+    return evidence
+
+
+async def _accept_rework_targets(
+    step: StepDefinition,
+    cfg: AcceptConfig,
+    context: RunContext,
+    sandbox: Any,
+    storage: StorageBackend,
+    workflow: WorkflowDefinition,
+    depth: int,
+    critique: str,
+    round_no: int,
+) -> float:
+    """Re-run the judged step(s) with the judge's critique injected.
+
+    The critique is escaped before it reaches a prompt.  It is attacker-shaped
+    text - a judge that writes ``{steps.secret.output}`` into its reason would
+    otherwise have that resolved on the way back in.
+    """
+    spent = 0.0
+    safe_critique = _escape_braces(critique)
+    for target_id in cfg.targets:
+        try:
+            target_step = workflow.get_step(target_id)
+        except ValueError:
+            continue
+        revision = (
+            f"{target_step.prompt}\n\n"
+            f"--- REVISION REQUEST (round {round_no}) ---\n"
+            f"A reviewer rejected the previous attempt for this reason:\n"
+            f"{safe_critique}\n"
+            f"Address it directly and produce a corrected result."
+        )
+        result = await execute_step_with_retry(
+            target_step,
+            context,
+            sandbox,
+            storage,
+            workflow=workflow,
+            depth=depth,
+            step_overrides={"prompt": revision},
+        )
+        async with context._lock:
+            context.step_outputs[target_id] = result.output
+            context.step_results[target_id] = result
+        spent += result.cost_usd
+    return spent
+
+
+async def _execute_accept_step(
+    step: StepDefinition,
+    context: RunContext,
+    sandbox: Any,
+    storage: StorageBackend,
+    workflow: WorkflowDefinition,
+    depth: int,
+) -> StepResult:
+    """Execute an accept step - judge whether a target step met the goal.
+
+    Checks run first and cost nothing.  Judges are paid only when the checks
+    pass, and every verdict is recorded as an evidence pack rather than a bare
+    boolean, both in the step output and on the audit chain.
+    """
+    import time
+
+    started_at = time.monotonic()
+    cfg = step.accept_config
+    if not cfg:
+        return StepResult(step_id=step.id, status="failed", error="Missing accept_config")
+
+    max_rounds = max(1, min(cfg.max_rounds, MAX_ACCEPT_ROUNDS))
+    total_cost = 0.0
+    rounds: list[dict] = []
+    evidence: dict = {}
+    stop_reason = ""
+
+    try:
+        for round_no in range(1, max_rounds + 1):
+            if await _check_cancel(context.run_id):
+                return StepResult(
+                    step_id=step.id,
+                    output={"decision": "cancelled", "rounds": rounds},
+                    cost_usd=total_cost,
+                    duration_seconds=time.monotonic() - started_at,
+                    status="failed",
+                    retryable=False,
+                    error="Run cancelled during accept",
+                )
+
+            evidence = await _accept_judge_round(step, cfg, context, round_no)
+            total_cost += evidence.get("cost_usd", 0.0)
+            rounds.append(evidence)
+
+            if evidence["decision"] == "approved":
+                break
+            if cfg.on_reject != "retry_target" or round_no == max_rounds:
+                break
+
+            # Bound 2: the accept step's own judging+re-work budget.
+            if cfg.max_cost_usd > 0 and total_cost >= cfg.max_cost_usd:
+                stop_reason = (
+                    f"accept budget ${cfg.max_cost_usd:.4f} reached after "
+                    f"{round_no} round(s)"
+                )
+                break
+            # Bound 3: the run budget, projected the way the loop step does it -
+            # this step's cost is not in context.costs until it returns.
+            if context.max_cost_usd is not None and context.max_cost_usd > 0:
+                projected = context.total_cost + total_cost
+                if projected >= context.max_cost_usd:
+                    stop_reason = (
+                        f"run budget ${context.max_cost_usd:.4f} reached after "
+                        f"{round_no} round(s)"
+                    )
+                    break
+
+            total_cost += await _accept_rework_targets(
+                step,
+                cfg,
+                context,
+                sandbox,
+                storage,
+                workflow,
+                depth,
+                evidence.get("reason", ""),
+                round_no + 1,
+            )
+
+        decision = evidence.get("decision", "rejected")
+        reason = evidence.get("reason", "no verdict was reached")
+        if stop_reason:
+            reason = f"{reason} ({stop_reason})"
+
+        pack = {
+            "decision": decision,
+            "reason": reason,
+            "targets": cfg.targets,
+            "rounds_used": len(rounds),
+            "max_rounds": max_rounds,
+            "rejected_by": evidence.get("rejected_by"),
+            "cost_usd": round(total_cost, 6),
+            "rounds": rounds,
+        }
+
+        await _emit_audit_event(
+            "step.accept",
+            context.run_id,
+            "system",
+            {
+                "step_id": step.id,
+                "decision": decision,
+                "reason": reason[:1000],
+                "targets": cfg.targets,
+                "rounds_used": len(rounds),
+                "rejected_by": evidence.get("rejected_by"),
+                "cost_usd": round(total_cost, 6),
+                "judges": [
+                    {
+                        "name": r.get("name"),
+                        "model": r.get("model"),
+                        "verdict": r.get("verdict"),
+                        "cost_usd": r.get("cost_usd"),
+                    }
+                    for last in rounds[-1:]
+                    for r in last.get("judges", [])
+                ],
+                "evidence": pack,
+            },
+        )
+
+        duration = time.monotonic() - started_at
+        if decision == "approved":
+            return StepResult(
+                step_id=step.id,
+                output=pack,
+                cost_usd=total_cost,
+                duration_seconds=duration,
+                status="completed",
+            )
+
+        if cfg.on_reject == "escalate_to_human":
+            await _accept_escalate(step, cfg, context, pack, total_cost)
+            raise AssertionError("Accept escalation returned without pausing")
+
+        return _accept_rejection(
+            step,
+            cfg,
+            output=pack,
+            reason=reason,
+            total_cost=total_cost,
+            duration=duration,
+        )
+    except WorkflowPaused:
+        raise
+    except Exception as exc:
+        duration = time.monotonic() - started_at
+        return StepResult(
+            step_id=step.id,
+            status="failed",
+            error=str(exc),
+            cost_usd=total_cost,
+            duration_seconds=duration,
+        )
+
+
+async def _accept_escalate(
+    step: StepDefinition,
+    cfg: AcceptConfig,
+    context: RunContext,
+    pack: dict,
+    total_cost: float,
+) -> None:
+    """Hand a rejected verdict to a human through the approval surface.
+
+    Approving resumes the run with the evidence pack rewritten to "approved"
+    and the human recorded as the deciding judge; rejecting fails the run, which
+    is the existing behaviour of ``/approvals/{id}/reject``.  The overlay is
+    carried in ``request_data['_on_approve']`` and applied by
+    ``_resume_after_approval``.
+    """
+    from sandcastle.models.db import (
+        ApprovalRequest,
+        ApprovalStatus,
+        Run,
+        RunStatus,
+        async_session,
+    )
+
+    approved_pack = dict(pack)
+    approved_pack["decision"] = "approved"
+    approved_pack["rejected_by"] = None
+    approved_pack["reason"] = "approved by a human after the panel rejected"
+    approved_pack["escalated"] = True
+
+    message = resolve_templates(cfg.escalation_message, context, step.depends_on)
+    async with async_session() as session:
+        approval = ApprovalRequest(
+            run_id=uuid.UUID(context.run_id),
+            step_id=step.id,
+            status=ApprovalStatus.PENDING,
+            request_data={"accept": pack, "_on_approve": approved_pack},
+            message=f"{message}: {pack.get('reason', '')}"[:2000],
+            timeout_at=None,
+            on_timeout=cfg.on_timeout,
+            allow_edit=False,
+        )
+        if cfg.timeout_hours:
+            approval.timeout_at = datetime.now(timezone.utc) + timedelta(
+                hours=cfg.timeout_hours
+            )
+        session.add(approval)
+        run = await session.get(Run, uuid.UUID(context.run_id))
+        if run:
+            run.status = RunStatus.AWAITING_APPROVAL
+        await session.commit()
+        await session.refresh(approval)
+        approval_id = str(approval.id)
+
+    raise WorkflowPaused(
+        approval_id=approval_id,
+        run_id=context.run_id,
+        accrued_cost_usd=total_cost,
+    )
 
 
 async def _execute_transform_step(
@@ -8503,6 +9774,29 @@ async def _execute_step_by_type(
         return await _execute_sensor_step(step, context)
     if step.type == "gate":
         return await _execute_gate_step(step, context, storage)
+    if step.type == "accept":
+        if workflow is None:
+            return StepResult(
+                step_id=step.id,
+                status="failed",
+                error="accept step requires its parent workflow",
+                retryable=False,
+            )
+        from sandcastle.config import settings as _accept_settings
+
+        if depth >= _accept_settings.max_workflow_depth:
+            return StepResult(
+                step_id=step.id,
+                status="failed",
+                error=(
+                    f"Max workflow depth ({_accept_settings.max_workflow_depth}) "
+                    f"exceeded at accept step '{step.id}'"
+                ),
+                retryable=False,
+            )
+        return await _execute_accept_step(
+            step, context, sandbox, storage, workflow, depth + 1
+        )
     if step.type == "transform":
         return await _execute_transform_step(step, context)
     if step.type == "notify":
@@ -8522,6 +9816,8 @@ async def _execute_step_by_type(
         return await _execute_composio_step(step, context)
     if step.type == "openclaw":
         return await _execute_openclaw_step(step, context)
+    if step.type == "acp":
+        return await _execute_acp_step(step, context, storage)
     if step.type == "parse":
         return await _execute_parse_step(step, context)
     if step.type == "report":
@@ -8639,6 +9935,8 @@ async def _prepare_and_run_step(
                 model=model,
                 tokens_saved=context._compaction_saved.pop(step.id, 0),
                 compaction_strategy=context._compaction_strategy_used.pop(step.id, None),
+                replayed=result.replayed,
+                original_cost_usd=result.original_cost_usd if result.replayed else None,
             )
         else:
             async with context._lock:
@@ -9056,6 +10354,7 @@ async def execute_workflow(
     tenant_id: str | None = None,
     cassette: Any = None,
     cassette_mode: str | None = None,
+    effect_scope_id: str | None = None,
 ) -> WorkflowResult:
     """Execute a full workflow with parallel stages and retry logic.
 
@@ -9070,6 +10369,10 @@ async def execute_workflow(
         skip_steps: Set of step IDs to skip (already completed in replay).
         step_overrides: Per-step overrides for fork (e.g. {"score": {"model": "opus"}}).
         depth: Current nesting depth for hierarchical workflows.
+        effect_scope_id: Head of the replay/fork lineage. A side effect is
+            claimed once per scope, so a replay passes its parent's scope to
+            memoize effects the parent already committed. Defaults to run_id,
+            i.e. a fresh run is its own scope.
     """
     from sandcastle.config import settings
     from sandcastle.engine.storage import create_storage
@@ -9213,6 +10516,7 @@ async def execute_workflow(
         tenant_id=tenant_id,
         cassette=cassette,
         cassette_mode=cassette_mode,
+        effect_scope_id=effect_scope_id or run_id,
     )
 
     # Set telemetry context for this workflow run
@@ -9251,6 +10555,7 @@ async def execute_workflow(
                 context.memories = await load_memories(
                     context._memory_scope_id,
                     limit=workflow.memory.max_inject,
+                    backend=_mem_settings.memory_backend,
                 )
                 # Apply memory decay (TTL filtering)
                 max_age = (
@@ -9276,6 +10581,10 @@ async def execute_workflow(
             "policy_target_outputs", {}
         )
         context.costs = initial_context.get("costs", [])
+        # An explicit argument (the replay/fork route) wins over the snapshot;
+        # the snapshot is the fallback for a resume that predates the argument.
+        if not effect_scope_id and initial_context.get("effect_scope_id"):
+            context.effect_scope_id = initial_context["effect_scope_id"]
 
     # Resolve global policies from workflow definition
     global_policies = []

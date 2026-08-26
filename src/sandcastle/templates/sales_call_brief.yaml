@@ -1,0 +1,443 @@
+# name: Sales Call Brief with Grounding Gate
+# description: Builds a pre-call brief from CRM data, live news and what the account memory already knows, then puts an accept gate on GROUNDEDNESS - every claim about the account must trace to a retrieved source or to a graded memory. The gate is a filter, not a guard: a rep twenty minutes from a call gets the brief with the verdict attached rather than a failed run.
+# tags: [Sales, CallPrep, AccountResearch, Memory, Accept, Groundedness, MEDDIC, RevOps, Discovery]
+# category: sales_crm
+
+name: sales-call-brief
+description: >
+  A pre-call brief is the purest "what do we already know about this account"
+  problem in sales, which makes it the natural home for graded MEMORY - and the
+  place where an ungraded memory does the most damage, because a half-remembered
+  claim about a prospect said out loud on a call cannot be taken back.
+
+  The workflow mounts an agent-scoped memory with an explicit `admit_threshold`,
+  so a low-confidence recollection from a previous call is not admitted into
+  this brief at all. Memory here is a source with a bar, not a scratchpad.
+
+  Alongside memory, a RACE fans out to the CRM, a news source and a filings /
+  funding source in parallel and takes the first that answers - failover, not a
+  vote. A DETERMINISTIC step first normalises the account into a stable key so
+  that today's brief and last quarter's brief are remembered against the same
+  account rather than against two spellings of its name.
+
+  The brief is then written, and an ACCEPT gate judges it on GROUNDEDNESS: free
+  deterministic checks assert the structure and catch the tell-tale hedging
+  phrases that mean the model padded, then a two-judge unanimous panel asks
+  whether every claim traces to a retrieved source or an admitted memory, and
+  whether the discovery questions are actually answerable by the person on the
+  call.
+
+  `fail_on_reject: false` - this gate is a FILTER. A rep with twenty minutes
+  before a call is better served by a brief carrying a visible "this section was
+  not accepted" banner than by a failed run and no brief at all. The verdict and
+  its reason are packaged into the brief card itself and repeated in the notify,
+  so the caveat travels with the artefact rather than sitting in a log.
+
+version: "1.0"
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 600
+
+# Graded, agent-scoped memory. admit_threshold is the 0.47 lever: a recollection
+# below this confidence is not admitted into the brief. conflict_check catches a
+# memory that contradicts what the CRM says today - the account changed, and the
+# memory is stale rather than wrong.
+memory:
+  scope: agent
+  agent: sales-account-context
+  auto_inject: true
+  max_inject: 15
+  max_age_days: 270
+  admit_threshold: 0.55
+  enrich: true
+  conflict_check: true
+
+input_schema:
+  required: ["account_name", "call_purpose"]
+  properties:
+    account_name:
+      type: string
+      description: "The account you are about to call."
+      default: ""
+      example: "Northwind Logistics"
+    account_domain:
+      type: string
+      description: "Primary domain, used as the stable memory key. Names drift; domains do not."
+      default: ""
+      example: "northwind-logistics.de"
+    call_purpose:
+      type: string
+      description: "What this call is for. Drives the discovery questions and the brief's shape."
+      default: ""
+      example: "Second discovery call with the VP Engineering after a failed POC handoff"
+    attendees:
+      type: string
+      description: "Who is on the call, with titles if known."
+      default: ""
+      example: "VP Engineering, Head of Data Platform"
+    deal_stage:
+      type: string
+      description: "Current opportunity stage, so the brief pitches at the right altitude."
+      default: "discovery"
+      example: "discovery"
+    crm_api_url:
+      type: string
+      description: "CRM REST base for the account record, open opportunities and activity history."
+      default: "https://api.hubapi.com/crm/v3/objects/companies"
+      example: "https://api.hubapi.com/crm/v3/objects/companies"
+    news_api_url:
+      type: string
+      description: "News / press source queried in parallel."
+      default: "https://api.exa.ai/search"
+      example: "https://api.exa.ai/search"
+    funding_api_url:
+      type: string
+      description: "Funding, filings or hiring-signal source queried in parallel."
+      default: "https://api.crunchbase.com/api/v4/searches/organizations"
+      example: "https://api.crunchbase.com/api/v4/searches/organizations"
+    rep_channel:
+      type: string
+      description: "Channel or DM that receives the brief."
+      default: "#sales-call-prep"
+      example: "#sales-call-prep"
+
+steps:
+  # 1) DETERMINISTIC account key. Memory is only useful if today's brief and last
+  #    quarter's brief are filed against the same account. Names drift ("Northwind",
+  #    "Northwind Logistics GmbH"); the domain does not.
+  - id: build_account_key
+    type: code
+    responsibility: "Derive a stable account key and the search terms every source will use."
+    source_hint: "A memory keyed on a display name fragments the moment someone retypes it."
+    owner: "revops-eng"
+    code_config:
+      language: python
+      code: |
+        import re
+
+        name = str(_input.get('account_name') or '').strip()
+        domain = str(_input.get('account_domain') or '').strip().lower()
+        domain = re.sub(r'^https?://', '', domain).split('/')[0]
+        domain = re.sub(r'^www\.', '', domain)
+
+        # Strip legal suffixes before squashing, so "GmbH" cannot fork the key.
+        base = name.lower()
+        base = re.sub(r'\b(gmbh|ag|s\.?r\.?o\.?|a\.?s\.?|ltd|limited|inc|llc|plc|b\.?v\.?|sa|sas|oy|ab)\b', ' ', base)
+        squashed = re.sub(r'[^a-z0-9]+', '', base)
+
+        account_key = domain or squashed
+        attendees = [a.strip() for a in str(_input.get('attendees') or '').split(',') if a.strip()]
+
+        result = {
+            'account_key': account_key,
+            'account_name': name,
+            'account_domain': domain,
+            'name_squashed': squashed,
+            'attendees': attendees,
+            'attendee_count': len(attendees),
+            'deal_stage': str(_input.get('deal_stage') or 'discovery').lower(),
+            'call_purpose': str(_input.get('call_purpose') or ''),
+            'news_query': (name + ' funding OR layoffs OR acquisition OR product launch OR outage').strip(),
+            'key_is_domain_backed': bool(domain),
+        }
+
+  # 2) RACE BRANCHES - separate steps, no depends_on. First usable answer wins.
+  - id: fetch_crm_account
+    type: http
+    responsibility: "Pull the account record, open opportunities and recent activity."
+    source_hint: "The CRM is the only source that knows what we have already promised this account."
+    owner: "revops-eng"
+    http_config:
+      url: "{input.crm_api_url}/search?q={steps.build_account_key.output.account_key}&properties=name,domain,industry,numberofemployees,lifecyclestage,notes_last_updated"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.CRM_API_TOKEN}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  - id: fetch_recent_news
+    type: http
+    responsibility: "Find recent public news about the account."
+    source_hint: "A funding round or a layoff last week changes what this call should be about."
+    owner: "revops-eng"
+    http_config:
+      url: "{input.news_api_url}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.WEB_SEARCH_API_KEY}"
+      body: |
+        {
+          "query": "{steps.build_account_key.output.news_query}",
+          "numResults": 10,
+          "type": "keyword"
+        }
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  - id: fetch_funding_signals
+    type: http
+    responsibility: "Pull funding, filing and hiring signals."
+    source_hint: "Hiring and funding are the cheapest available proxies for budget and urgency."
+    owner: "revops-eng"
+    http_config:
+      url: "{input.funding_api_url}?query={steps.build_account_key.output.account_key}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.FUNDING_API_KEY}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  - id: account_signal_race
+    type: race
+    depends_on: [build_account_key]
+    responsibility: "Take the first account source that answers."
+    source_hint: "A brief is time-boxed; waiting for a slow vendor costs more than losing its data."
+    owner: "revops-eng"
+    race_config:
+      branches:
+        - [fetch_crm_account]
+        - [fetch_recent_news]
+        - [fetch_funding_signals]
+      validator: "len(str(output).strip()) > 20"
+
+  # 3) DRAFT THE BRIEF. This step both READS and WRITES memory: it draws on what
+  #    previous calls with this account established, and it commits what this
+  #    call is about so the next brief starts from further along.
+  #
+  #    The step-level admit_threshold is set HIGHER than the workflow default.
+  #    A brief is read aloud in front of a customer, so the bar for admitting a
+  #    recollection into it is higher than the bar for keeping it at all.
+  - id: draft_brief
+    type: llm
+    depends_on: [account_signal_race, build_account_key]
+    model: sonnet
+    responsibility: "Write the pre-call brief from retrieved signals and admitted memories only."
+    source_hint: "This is the artefact whose groundedness the accept gate exists to prove."
+    owner: "sales-ops"
+    memory:
+      read: true
+      write: true
+      admit_threshold: 0.65
+    prompt: |
+      Write a pre-call brief for a {input.deal_stage} call with
+      {input.account_name}.
+
+      Call purpose: {input.call_purpose}
+      Attendees: {steps.build_account_key.output.attendees}
+
+      THE GROUNDING RULE, which a judge will check: every factual claim about
+      this account must trace either to the retrieved signals below or to a
+      memory of a previous interaction that was admitted to you. Attach the
+      source in square brackets after each claim - [CRM], [news], [funding], or
+      [memory]. If you know nothing about something, write "UNKNOWN - ask on the
+      call" and turn it into a discovery question. That is a useful brief. A
+      confident brief full of industry-generic filler is not.
+
+      Retrieved account signals (from whichever source answered first):
+      {steps.account_signal_race.output}
+
+      Produce EXACTLY these sections, with these exact headings:
+
+      ## What we know
+      Account facts with sources attached. Include size, industry, and anything
+      recent and material. Mark unknowns explicitly.
+
+      ## Where the deal stands
+      What has already happened between us and this account, from CRM and
+      memory. If memory and CRM disagree, say so and treat the CRM as current.
+
+      ## What changed since last contact
+      New signals only. If nothing changed, say "no new signals" - do not pad.
+
+      ## Discovery questions
+      Five questions, each answerable by the people actually on this call
+      ({steps.build_account_key.output.attendees}). No question a VP could not
+      answer about their own organisation. No question already answered above.
+
+      ## Risks and landmines
+      What could go wrong on this call, including anything we promised and did
+      not deliver. Cite the source.
+
+      Be short. A brief that cannot be read in three minutes will not be read.
+    llm_config:
+      max_tokens: 2500
+
+  # 4) THE GROUNDING GATE. `target:` creates the edge, so no depends_on.
+  #
+  #    fail_on_reject: FALSE - a FILTER, and the reason is the clock. A rep
+  #    twenty minutes from a call is better off with a caveated brief than with
+  #    a failed run. The verdict is packaged into the card below so the caveat
+  #    travels WITH the artefact instead of dying in a log. Contrast the
+  #    contract-review gate in this pack, where the artefact is a legal opinion
+  #    and a rejection correctly stops everything.
+  - id: accept_brief
+    type: accept
+    responsibility: "Prove every claim in the brief traces to a source or an admitted memory."
+    source_hint: "An invented fact about a prospect, said out loud on a call, cannot be retracted."
+    owner: "sales-ops"
+    accept_config:
+      target: draft_brief
+
+      # FREE. Structure, and the hedging phrases that mean the model padded
+      # rather than admitted an unknown.
+      checks:
+        - type: not_empty
+        - type: contains
+          value: "## What we know"
+        - type: contains
+          value: "## Where the deal stands"
+        - type: contains
+          value: "## What changed since last contact"
+        - type: contains
+          value: "## Discovery questions"
+        - type: contains
+          value: "## Risks and landmines"
+        # At least one source attribution must be present. A brief with no
+        # bracketed sources has ignored the only rule that mattered.
+        - type: regex_match
+          value: '\[(CRM|news|funding|memory)\]'
+        # Generic filler that means the model wrote about the industry, not the
+        # account.
+        - type: not_contains
+          value: "companies like this typically"
+        - type: not_contains
+          value: "in today's fast-paced"
+
+      judges:
+        - name: groundedness
+          model: sonnet
+          max_tokens: 700
+          rubric: |
+            You are judging whether a sales pre-call brief is GROUNDED. You are
+            not judging whether it is persuasive or well written.
+
+            Every factual claim about {input.account_name} had to carry a source
+            marker: [CRM], [news], [funding] or [memory].
+
+            REJECT if:
+            - a specific claim (headcount, funding, tooling, a named person, a
+              past commitment) appears with no source marker
+            - a claim is attributed to [CRM] or [news] but nothing resembling it
+              appears in the retrieved signals shown to you
+            - the brief states as fact something the retrieved signals only
+              hint at
+            - "no new signals" is written while the signals clearly contain
+              something recent and material
+
+            An honest "UNKNOWN - ask on the call" is CORRECT. Do not reject a
+            brief for admitting ignorance.
+
+        - name: call_readiness
+          model: haiku
+          max_tokens: 600
+          rubric: |
+            You are judging whether this brief is USABLE on the call it was
+            written for.
+
+            Call purpose: {input.call_purpose}
+            Attendees: {steps.build_account_key.output.attendees}
+
+            REJECT if:
+            - a discovery question could not be answered by the people listed
+              as attending (asking a VP Engineering about procurement terms)
+            - a discovery question is already answered in the "What we know"
+              section
+            - the risks section is generic ("they may not have budget") rather
+              than specific to this account and this history
+            - the brief is long enough that it could not be read in three
+              minutes before a call
+
+      quorum: 0
+      on_reject: retry_target
+      max_rounds: 2
+      max_cost_usd: 0.35
+      fail_on_reject: false
+
+  # 5) PACKAGE THE CARD. Deterministic: attaches the verdict banner to the brief
+  #    so a rejected-but-published brief cannot be mistaken for an accepted one.
+  #    This is what makes fail_on_reject: false honest rather than merely lenient.
+  - id: assemble_brief_card
+    type: code
+    depends_on: [accept_brief, build_account_key]
+    responsibility: "Attach the gate verdict to the brief so the caveat travels with the artefact."
+    source_hint: "A filter is only safe if the thing it let through says it was let through."
+    owner: "sales-ops"
+    code_config:
+      language: python
+      code: |
+        import re
+
+        brief = str(_steps.get('draft_brief') or '')
+        verdict = _steps.get('accept_brief') or {}
+        key = _steps.get('build_account_key') or {}
+
+        decision = str(verdict.get('decision') or 'unknown')
+        reason = str(verdict.get('reason') or '')
+
+        if decision == 'approved':
+            banner = 'GROUNDING GATE: PASSED. Every claim traced to a source or an admitted memory.'
+        else:
+            banner = (
+                'GROUNDING GATE: NOT PASSED - read this brief with care. '
+                'Reviewer note: ' + reason[:400]
+            )
+
+        sourced = len(re.findall(r'\[(?:CRM|news|funding|memory)\]', brief))
+        unknowns = len(re.findall(r'UNKNOWN - ask on the call', brief))
+        questions = len(re.findall(r'(?m)^\s*\d+[\.\)]\s', brief))
+        minutes = round(len(brief.split()) / 200.0, 1)
+
+        result = {
+            'account_key': key.get('account_key'),
+            'account_name': key.get('account_name'),
+            'gate_decision': decision,
+            'gate_reason': reason[:600],
+            'gate_rounds_used': verdict.get('rounds_used'),
+            'gate_cost_usd': verdict.get('cost_usd'),
+            'banner': banner,
+            'sourced_claims': sourced,
+            'declared_unknowns': unknowns,
+            'numbered_items': questions,
+            'read_time_minutes': minutes,
+            'brief': banner + '\n\n' + brief,
+        }
+
+  # 6) DELIVER. dry_run: true - 0.44 made notify live by default, and a bundled
+  #    template must be safe on install day. Flip to false once your Slack
+  #    connector is configured.
+  - id: send_brief
+    type: notify
+    depends_on: [assemble_brief_card]
+    responsibility: "Deliver the brief with its verdict banner attached."
+    source_hint: "The rep needs the caveat and the brief in the same message, or only one gets read."
+    owner: "sales-ops"
+    notify_config:
+      dry_run: true
+      service: slack
+      channel: "{input.rep_channel}"
+      subject: "Call brief - {input.account_name}"
+      message: |
+        {steps.assemble_brief_card.output.banner}
+
+        Account: {input.account_name} ({steps.build_account_key.output.account_key})
+        Purpose: {input.call_purpose}
+        Sourced claims: {steps.assemble_brief_card.output.sourced_claims} |
+        declared unknowns: {steps.assemble_brief_card.output.declared_unknowns} |
+        read time ~{steps.assemble_brief_card.output.read_time_minutes} min |
+        gate cost ${steps.assemble_brief_card.output.gate_cost_usd} over
+        {steps.assemble_brief_card.output.gate_rounds_used} round(s).
+
+        {steps.draft_brief.output}
+
+on_complete:
+  storage_path: "sales-call-brief/{run_id}/result.json"

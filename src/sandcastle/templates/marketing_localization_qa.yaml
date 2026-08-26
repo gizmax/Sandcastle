@@ -1,0 +1,603 @@
+# name: Marketing Localization QA
+# description: QAs a localized campaign against its source copy - placeholder integrity, glossary terms, legal disclaimers, locale number and currency formatting - with the mechanical checks in deterministic code and an accept gate on the judgement half. Ships with an optional ACP branch that points a local agent harness at a locale repo, guarded off by default so the template runs on a stock install.
+# tags: [Marketing, Localization, i18n, l10n, TranslationQA, Accept, ACP, Glossary, LegalDisclaimer, Compliance]
+# category: marketing
+
+name: marketing-localization-qa
+description: >
+  Localization QA fails in two completely different ways, and most tooling
+  conflates them. Mechanical failures - a dropped {placeholder}, a currency
+  written in the source locale's format, a missing string key - are decidable by
+  a machine and should never cost a model call. Judgement failures - a legal
+  disclaimer that no longer says what legal approved, a claim that is
+  unsupportable in the target market, a tone that reads as machine output - need
+  a reader.
+
+  So this workflow puts the first kind in DETERMINISTIC code and the second kind
+  behind an ACCEPT gate, and never lets the second kind decide the first.
+
+  A code step diffs the source and localized bundles: placeholder token sets per
+  string, missing and orphaned keys, URL counts, digit-grouping and currency
+  conventions for the target locale, length ratios that signal truncation risk,
+  and required glossary terms. Those findings are facts. They are computed
+  before any model runs and they cost nothing.
+
+  The judgement pass then reviews the strings the code flagged plus the legally
+  sensitive ones, and an accept gate holds that review to two unanimous judges:
+  one on whether the localization is FAITHFUL to the source's claims and
+  disclaimers, one on whether it reads as native copy rather than as
+  translation. `fail_on_reject` stays at its default of TRUE - a guard. Shipping
+  a mistranslated legal disclaimer is the failure this template exists to
+  prevent, so a rejected review stops the run.
+
+  THE ACP BRANCH. `type: acp` ships DISABLED - `settings.acp_allowed_roots`
+  defaults to an empty list, so any acp step fails at runtime on a stock
+  install. A template whose happy path needed ACP would therefore be broken for
+  every default user. Here the ACP step sits behind a condition on
+  `use_local_agent`, which defaults to "false". The default path is a plain llm
+  review that works out of the box; the ACP path points a read-only local agent
+  harness at an actual locale repo so it can walk the file tree, compare
+  bundles the workflow was never handed, and check the strings in context. To
+  enable it you must set SANDCASTLE_ACP_ALLOWED_ROOTS to include the repo's
+  parent, run admin-trusted, and pass use_local_agent=true. Both branches feed
+  the same collector, so the DAG validates and plans completely either way.
+
+version: "1.0"
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 900
+
+input_schema:
+  required: ["source_bundle", "localized_bundle", "target_locale"]
+  properties:
+    source_bundle:
+      type: string
+      description: "Source-language strings as JSON (key: value) or as key=value lines."
+      default: ""
+      example: '{"cta.buy": "Buy now for {price}", "legal.terms": "Terms apply."}'
+    localized_bundle:
+      type: string
+      description: "Localized strings in the same key space."
+      default: ""
+      example: '{"cta.buy": "Kup teraz za {price}", "legal.terms": "Obowiazuja warunki."}'
+    target_locale:
+      type: string
+      description: "BCP-47 target locale. Drives number, date and currency convention checks."
+      default: ""
+      example: "de-DE"
+    source_locale:
+      type: string
+      description: "BCP-47 source locale."
+      default: "en-US"
+      example: "en-US"
+    glossary_terms:
+      type: string
+      description: "Semicolon-separated source=target term pairs that MUST be translated exactly this way (brand and product names, regulated terms)."
+      default: ""
+      example: "Sandcastle=Sandcastle; workflow=Workflow; free trial=kostenlose Testversion"
+    legal_string_keys:
+      type: string
+      description: "Comma-separated keys carrying legally approved wording. These get the strictest review."
+      default: "legal.terms,legal.disclaimer,legal.privacy"
+      example: "legal.terms,legal.disclaimer,legal.privacy"
+    max_length_ratio:
+      type: number
+      description: "Localized/source character ratio above which truncation risk is flagged (German and Finnish run long)."
+      default: 1.6
+      example: "1.6"
+    use_local_agent:
+      type: string
+      description: "'true' routes the review through a local ACP agent harness with read access to locale_repo_path. Defaults to 'false' because type:acp is disabled unless SANDCASTLE_ACP_ALLOWED_ROOTS is configured."
+      default: "false"
+      example: "false"
+    locale_repo_path:
+      type: string
+      description: "Absolute path to the locale repository. Used ONLY by the ACP branch, and only if it sits inside SANDCASTLE_ACP_ALLOWED_ROOTS."
+      default: "/srv/locales"
+      example: "/srv/locales"
+    loc_channel:
+      type: string
+      description: "Localization team channel that receives the QA outcome."
+      default: "#localization-qa"
+      example: "#localization-qa"
+
+steps:
+  # 1) THE MECHANICAL HALF, in code, for $0. Placeholder integrity, key
+  #    coverage, locale formatting, glossary compliance and truncation risk are
+  #    all decidable. None of them is a job for a model, and computing them
+  #    first means the model only ever reads the strings that need judgement.
+  - id: mechanical_diff
+    type: code
+    responsibility: "Compute every decidable localization defect before any model runs."
+    source_hint: "A dropped placeholder is a fact, not an opinion; it must never depend on a model call."
+    owner: "loc-eng"
+    code_config:
+      language: python
+      code: |
+        import json
+        import re
+
+        def _load(blob):
+            text = str(blob or '').strip()
+            if not text:
+                return {}
+            fence = re.search(r'```(?:json)?\s*(.+?)```', text, re.S)
+            if fence:
+                text = fence.group(1).strip()
+            try:
+                loaded = json.loads(text)
+                if isinstance(loaded, dict):
+                    return {str(k): str(v) for k, v in loaded.items()}
+            except ValueError:
+                pass
+            # key=value / key: value line format fallback
+            out = {}
+            for line in text.splitlines():
+                if '=' in line:
+                    k, _, v = line.partition('=')
+                elif ':' in line:
+                    k, _, v = line.partition(':')
+                else:
+                    continue
+                k = k.strip().strip('"\'')
+                v = v.strip().strip(',').strip('"\'')
+                if k:
+                    out[k] = v
+            return out
+
+        source = _load(_input.get('source_bundle'))
+        localized = _load(_input.get('localized_bundle'))
+        target_locale = str(_input.get('target_locale') or '').strip()
+        max_ratio = float(_input.get('max_length_ratio', 1.6) or 1.6)
+
+        legal_keys = [k.strip() for k in str(_input.get('legal_string_keys') or '').split(',') if k.strip()]
+        glossary = {}
+        for pair in str(_input.get('glossary_terms') or '').split(';'):
+            if '=' in pair:
+                src_term, _, tgt_term = pair.partition('=')
+                if src_term.strip():
+                    glossary[src_term.strip()] = tgt_term.strip()
+
+        # --- Placeholder families: {name}, {{name}}, %s / %1$s, $VAR, <tag>.
+        PLACEHOLDER = r'\{\{?[a-zA-Z0-9_\.]+\}?\}|%\d*\$?[sdfx]|\$[A-Z_]{2,}|<[a-zA-Z][^>]{0,20}>'
+
+        missing_keys = sorted(set(source) - set(localized))
+        orphan_keys = sorted(set(localized) - set(source))
+        shared = sorted(set(source) & set(localized))
+
+        placeholder_defects = []
+        untranslated = []
+        length_risks = []
+        url_defects = []
+        glossary_defects = []
+
+        for key in shared:
+            src = source[key]
+            tgt = localized[key]
+
+            src_tokens = sorted(re.findall(PLACEHOLDER, src))
+            tgt_tokens = sorted(re.findall(PLACEHOLDER, tgt))
+            if src_tokens != tgt_tokens:
+                placeholder_defects.append({
+                    'key': key,
+                    'source_tokens': src_tokens,
+                    'localized_tokens': tgt_tokens,
+                    'dropped': sorted(set(src_tokens) - set(tgt_tokens)),
+                    'added': sorted(set(tgt_tokens) - set(src_tokens)),
+                })
+
+            if src.strip() and src.strip() == tgt.strip() and len(src.strip()) > 3:
+                untranslated.append({'key': key, 'value': src[:120]})
+
+            if src.strip():
+                ratio = round(len(tgt) / max(1, len(src)), 2)
+                if ratio > max_ratio:
+                    length_risks.append({'key': key, 'ratio': ratio, 'limit': max_ratio})
+
+            src_urls = re.findall(r'https?://\S+', src)
+            tgt_urls = re.findall(r'https?://\S+', tgt)
+            if len(src_urls) != len(tgt_urls):
+                url_defects.append({'key': key, 'source_urls': len(src_urls), 'localized_urls': len(tgt_urls)})
+
+            for src_term, tgt_term in glossary.items():
+                if src_term.lower() in src.lower() and tgt_term and tgt_term.lower() not in tgt.lower():
+                    glossary_defects.append({'key': key, 'expected_term': tgt_term, 'source_term': src_term})
+
+        # --- Locale numeric convention. de-DE and most of the EU group with '.'
+        #     and decimalise with ','; en-US is the reverse. A number carried
+        #     over in source format is a real defect, not a style preference.
+        comma_decimal_locales = ('de', 'fr', 'es', 'it', 'pt', 'nl', 'pl', 'cs', 'sk', 'da', 'sv', 'nb', 'fi', 'tr', 'ru')
+        expects_comma_decimal = target_locale[:2].lower() in comma_decimal_locales
+        number_defects = []
+        for key in shared:
+            tgt = localized[key]
+            us_style = re.findall(r'\d{1,3}(?:,\d{3})+(?:\.\d+)?', tgt)
+            eu_style = re.findall(r'\d{1,3}(?:\.\d{3})+(?:,\d+)?', tgt)
+            if expects_comma_decimal and us_style:
+                number_defects.append({'key': key, 'found': us_style[:3], 'expected_style': 'eu_grouping'})
+            if not expects_comma_decimal and eu_style:
+                number_defects.append({'key': key, 'found': eu_style[:3], 'expected_style': 'us_grouping'})
+
+        legal_present = [k for k in legal_keys if k in localized]
+        legal_missing = [k for k in legal_keys if k in source and k not in localized]
+        legal_untranslated = [d['key'] for d in untranslated if d['key'] in legal_keys]
+
+        blocking = (
+            len(placeholder_defects) + len(missing_keys) + len(url_defects)
+            + len(legal_missing) + len(legal_untranslated)
+        )
+
+        result = {
+            'target_locale': target_locale,
+            'source_locale': _input.get('source_locale'),
+            'source_key_count': len(source),
+            'localized_key_count': len(localized),
+            'missing_keys': missing_keys[:60],
+            'orphan_keys': orphan_keys[:60],
+            'placeholder_defects': placeholder_defects[:60],
+            'untranslated_strings': untranslated[:60],
+            'length_risks': length_risks[:60],
+            'url_defects': url_defects[:60],
+            'glossary_defects': glossary_defects[:60],
+            'number_format_defects': number_defects[:60],
+            'legal_keys_present': legal_present,
+            'legal_keys_missing': legal_missing,
+            'legal_keys_untranslated': legal_untranslated,
+            'blocking_defect_count': blocking,
+            'mechanically_clean': blocking == 0,
+            'strings_for_human_judgement': {
+                k: {'source': source[k], 'localized': localized[k]}
+                for k in shared
+                if k in legal_keys
+                or any(d.get('key') == k for d in glossary_defects + length_risks + number_defects)
+            },
+        }
+
+  # 2) CHOOSE THE REVIEW ENGINE. Defaults to the model path, which works on a
+  #    stock install. The ACP path is opt-in and has prerequisites the default
+  #    user does not have.
+  - id: choose_qa_engine
+    type: condition
+    depends_on: [mechanical_diff]
+    responsibility: "Route to the local agent harness only when it has been explicitly enabled."
+    source_hint: "type:acp is disabled by default, so it can never be on the happy path of a bundled template."
+    owner: "loc-eng"
+    condition_config:
+      expression: "'{input.use_local_agent}' == 'true'"
+      then: [qa_with_local_agent]
+      else: [qa_with_model]
+
+  # 2a) THE OPT-IN ACP PATH. Reads the actual locale repository, so it can see
+  #     bundles, plural rules and context this workflow was never handed.
+  #
+  #     PREREQUISITES - all three, or this step fails at runtime:
+  #       * SANDCASTLE_ACP_ALLOWED_ROOTS must contain a parent of locale_repo_path.
+  #         It defaults to an empty list, which disables type:acp entirely.
+  #       * The run must be admin-trusted; an acp step spawns a local executable.
+  #       * settings.data_residency must be unset - Sandcastle cannot know which
+  #         model an external harness calls.
+  #
+  #     Every capability here is the closed one. filesystem: read, never
+  #     readwrite: a QA pass has no business editing the strings it is judging.
+  #     terminal: false is required by the engine in 0.45 and is correct anyway.
+  - id: qa_with_local_agent
+    type: acp
+    responsibility: "Review the localization in repository context using a read-only local agent harness."
+    source_hint: "Plural rules and sibling locales live in the repo, not in the two bundles pasted into this run."
+    owner: "loc-eng"
+    acp_config:
+      agent: claude
+      cwd: "{input.locale_repo_path}"
+      env_passthrough: ["ANTHROPIC_API_KEY"]
+      message: |
+        You are reviewing a {input.target_locale} localization against its
+        {input.source_locale} source. You have READ-ONLY access to this locale
+        repository. Do not attempt to edit anything.
+
+        A deterministic pass has already found the mechanical defects. Do not
+        re-report them; they are listed here so you can see them in context:
+        {steps.mechanical_diff.output.placeholder_defects}
+        {steps.mechanical_diff.output.glossary_defects}
+        {steps.mechanical_diff.output.number_format_defects}
+
+        Strings needing judgement (legally sensitive or already flagged):
+        {steps.mechanical_diff.output.strings_for_human_judgement}
+
+        Use the repository to check what the pasted bundles cannot show: plural
+        forms, how sibling locales rendered the same keys, and whether the
+        glossary file in this repo agrees with the terms enforced above.
+
+        Produce EXACTLY these sections:
+        ## Faithfulness findings
+        ## Native-reading findings
+        ## Repository context findings
+        ## Verdict summary
+      filesystem: read
+      permission: reject
+      permission_rules:
+        - kind: read
+          decision: allow_once
+        - kind: edit
+          decision: reject_always
+        - kind: execute
+          decision: reject_always
+      terminal: false
+      elicitation: decline
+      timeout: 600
+      idle_timeout: 180
+      protocol_version: 1
+      output_format: full
+      include_tool_calls: true
+
+  # 2b) THE DEFAULT PATH. Plain llm review of the strings the code flagged. Runs
+  #     on a stock install with no configuration at all.
+  - id: qa_with_model
+    type: llm
+    model: sonnet
+    responsibility: "Review the flagged and legally sensitive strings for faithfulness and register."
+    source_hint: "Whether a disclaimer still says what legal approved is a reading task, not a diffing task."
+    owner: "loc-ops"
+    prompt: |
+      You are reviewing a {input.target_locale} localization against its
+      {input.source_locale} source.
+
+      A deterministic pass has already found every mechanical defect. Do NOT
+      re-report placeholder mismatches, missing keys or number formatting - they
+      are listed below only so you can see the strings in context:
+        placeholder defects: {steps.mechanical_diff.output.placeholder_defects}
+        glossary defects: {steps.mechanical_diff.output.glossary_defects}
+        number format defects: {steps.mechanical_diff.output.number_format_defects}
+        length risks: {steps.mechanical_diff.output.length_risks}
+
+      Legally sensitive keys, which get the strictest reading:
+      {input.legal_string_keys}
+
+      Strings needing judgement (source and localized, side by side):
+      {steps.mechanical_diff.output.strings_for_human_judgement}
+
+      Judge only what a machine cannot: whether the localization says the same
+      thing, whether it promises more or less than the source, and whether it
+      reads as native copy. Where you are unsure because you lack market
+      context, say so - do not guess.
+
+      Produce EXACTLY these sections, with these exact headings:
+
+      ## Faithfulness findings
+      Where the localized string changes the meaning, the promise, or the legal
+      effect of the source. Quote both sides. Mark each BLOCKING or ADVISORY.
+      A legal string that changed meaning is always BLOCKING.
+
+      ## Native-reading findings
+      Where the copy reads as translated: calques, source word order, register
+      that is too formal or too casual for the target market. ADVISORY unless it
+      makes a claim unclear.
+
+      ## Repository context findings
+      State plainly: "not available - reviewed from pasted bundles only".
+
+      ## Verdict summary
+      One paragraph: is this bundle shippable, and if not, which keys block it.
+    llm_config:
+      max_tokens: 2500
+
+  # 3) COLLECT. Depends on BOTH branch heads so it runs whichever engine was
+  #    used, and normalises the two shapes into one. This is also what lets the
+  #    accept gate below have a single, always-present target: an accept step
+  #    aimed at a skipped branch would find no output at all.
+  - id: collect_qa_findings
+    type: code
+    depends_on: [qa_with_local_agent, qa_with_model, mechanical_diff]
+    responsibility: "Normalise whichever review engine ran into one findings record."
+    source_hint: "The gate must judge one shape regardless of which branch produced it."
+    owner: "loc-eng"
+    code_config:
+      language: python
+      code: |
+        import re
+
+        mech = _steps.get('mechanical_diff') or {}
+        agent_out = _steps.get('qa_with_local_agent')
+        model_out = _steps.get('qa_with_model')
+
+        # The acp branch returns a dict when output_format is 'full'; the llm
+        # branch returns text. Whichever ran, reduce it to review prose.
+        if isinstance(agent_out, dict):
+            review = str(agent_out.get('text') or '')
+            engine = 'acp_local_agent'
+            stop_reason = str(agent_out.get('stop_reason') or '')
+        elif agent_out:
+            review = str(agent_out)
+            engine = 'acp_local_agent'
+            stop_reason = ''
+        else:
+            review = str(model_out or '')
+            engine = 'model'
+            stop_reason = ''
+
+        blocking_findings = len(re.findall(r'\bBLOCKING\b', review))
+        advisory_findings = len(re.findall(r'\bADVISORY\b', review))
+
+        # A bundle ships only if BOTH halves are clean: the deterministic pass
+        # found no blocking defect AND the reviewer raised none.
+        mechanical_blocking = int(mech.get('blocking_defect_count') or 0)
+        shippable = mechanical_blocking == 0 and blocking_findings == 0 and bool(review.strip())
+
+        result = {
+            'target_locale': mech.get('target_locale'),
+            'engine': engine,
+            'engine_stop_reason': stop_reason,
+            'review': review,
+            'review_chars': len(review),
+            'blocking_findings': blocking_findings,
+            'advisory_findings': advisory_findings,
+            'mechanical_blocking_defects': mechanical_blocking,
+            'legal_keys_missing': mech.get('legal_keys_missing') or [],
+            'legal_keys_untranslated': mech.get('legal_keys_untranslated') or [],
+            'shippable': shippable,
+        }
+
+  # 4) THE OUTCOME GATE. `target:` creates the edge, so no depends_on.
+  #
+  #    fail_on_reject stays at its DEFAULT of true - a GUARD. Shipping a
+  #    mistranslated legal disclaimer is the exact failure this template exists
+  #    to prevent, and a caveat banner does not prevent it: campaign bundles get
+  #    picked up by a build, not read by a person. So a rejected review stops
+  #    the run.
+  - id: accept_localization
+    type: accept
+    responsibility: "Prove the localization review is complete and specific before anything ships."
+    source_hint: "A review that skipped the legal strings is worse than no review, because it looks like one."
+    owner: "loc-ops"
+    accept_config:
+      target: collect_qa_findings
+
+      # FREE. Structure of the merged record, plus the two conditions that make
+      # a review worthless: no review text at all, or a reviewer that ignored
+      # the instruction and re-listed the mechanical defects.
+      checks:
+        - type: not_empty
+        - type: schema_match
+          value:
+            type: object
+            properties:
+              target_locale: {type: string}
+              engine: {type: string}
+              review: {type: string}
+              blocking_findings: {type: integer}
+              advisory_findings: {type: integer}
+              mechanical_blocking_defects: {type: integer}
+              shippable: {type: boolean}
+        - type: contains
+          value: "## Faithfulness findings"
+        - type: contains
+          value: "## Verdict summary"
+        - type: not_contains
+          value: "I cannot review"
+
+      judges:
+        - name: faithfulness
+          model: sonnet
+          max_tokens: 800
+          rubric: |
+            You are judging a LOCALIZATION REVIEW - not the localization itself.
+            Your question is whether this review can be trusted to have caught a
+            meaning change.
+
+            Target locale: {input.target_locale}
+            Legally sensitive keys: {input.legal_string_keys}
+
+            REJECT if:
+            - a legally sensitive key was in scope and the review does not
+              mention it at all
+            - a finding asserts a meaning change without quoting both the source
+              and the localized string
+            - a finding about a legal string is marked ADVISORY rather than
+              BLOCKING
+            - the verdict summary contradicts the findings above it
+            - the review declares the bundle shippable while the deterministic
+              pass reported blocking defects
+              (mechanical blocking defects: {steps.mechanical_diff.output.blocking_defect_count})
+
+            A review that honestly says "unsure, lacks market context" on a
+            specific string is CORRECT. Do not reject it for that.
+
+        - name: review_specificity
+          model: haiku
+          max_tokens: 600
+          rubric: |
+            You are judging whether a localization review is SPECIFIC enough to
+            act on.
+
+            REJECT if:
+            - findings name no keys, so a translator cannot find what to fix
+            - the review restates the mechanical defects it was explicitly told
+              not to re-report
+            - "Native-reading findings" is generic advice about tone rather than
+              pointing at particular strings
+            - the review is empty in substance while being long in words
+
+            APPROVE if a translator could open the bundle and fix exactly the
+            strings named, without asking a follow-up question.
+
+      quorum: 0
+      on_reject: retry_target
+      max_rounds: 2
+      max_cost_usd: 0.40
+      fail_on_reject: true
+
+  # 5) ROUTE on the deterministic shippability flag, not on the review's prose.
+  - id: route_release
+    type: condition
+    depends_on: [accept_localization, collect_qa_findings]
+    responsibility: "Require a human override for any bundle with a blocking defect."
+    source_hint: "Shipping a blocking defect must be a decision someone made, not a default."
+    owner: "loc-ops"
+    condition_config:
+      expression: "{steps.collect_qa_findings.output.shippable} == True"
+      then: [record_clean_pass]
+      else: [approve_release_override]
+
+  # 5a) CLEAN: record the pass deterministically so the notify can cite it.
+  - id: record_clean_pass
+    type: code
+    responsibility: "Record a clean pass and what made it clean."
+    source_hint: "A green result must be as auditable as a red one."
+    owner: "loc-eng"
+    code_config:
+      language: python
+      code: |
+        findings = _steps.get('collect_qa_findings') or {}
+        verdict = _steps.get('accept_localization') or {}
+        result = {
+            'outcome': 'clean',
+            'requires_override': False,
+            'engine': findings.get('engine'),
+            'advisory_findings': findings.get('advisory_findings'),
+            'gate_decision': verdict.get('decision'),
+            'note': 'No mechanical blocking defects and no BLOCKING review findings.',
+        }
+
+  # 5b) BLOCKED: a named human must consciously override. on_timeout: abort, so
+  #     an unattended run never ships a blocking defect by simply waiting.
+  - id: approve_release_override
+    type: approval
+    responsibility: "A human accepts responsibility for shipping a bundle with a blocking defect."
+    source_hint: "Overriding a localization block is sometimes right, but it must be someone's decision."
+    owner: "loc-lead"
+    approval_config:
+      message: >
+        The {input.target_locale} bundle has blocking defects. Review them below.
+        Approve ONLY if you are consciously shipping with these defects and have
+        confirmed no legally approved wording changed meaning. Rejecting sends
+        the bundle back to translation.
+      show_data: steps.collect_qa_findings.output
+      timeout_hours: 24
+      on_timeout: abort
+      allow_edit: false
+
+  # 6) NOTIFY the localization team. dry_run: true per the 0.44 convention -
+  #    bundled templates never send on install day.
+  - id: notify_localization
+    type: notify
+    depends_on: [record_clean_pass, approve_release_override]
+    responsibility: "Report the QA outcome with both halves of the verdict."
+    source_hint: "The team needs the mechanical count and the review verdict in one place."
+    owner: "loc-ops"
+    notify_config:
+      dry_run: true
+      service: slack
+      channel: "{input.loc_channel}"
+      message: >
+        Localization QA {input.target_locale}: engine
+        {steps.collect_qa_findings.output.engine}. Mechanical pass -
+        {steps.mechanical_diff.output.blocking_defect_count} blocking defect(s),
+        {steps.mechanical_diff.output.source_key_count} source keys vs
+        {steps.mechanical_diff.output.localized_key_count} localized. Review pass -
+        {steps.collect_qa_findings.output.blocking_findings} BLOCKING,
+        {steps.collect_qa_findings.output.advisory_findings} ADVISORY. Gate
+        {steps.accept_localization.output.decision} after
+        {steps.accept_localization.output.rounds_used} round(s). Shippable:
+        {steps.collect_qa_findings.output.shippable}.
+
+on_complete:
+  storage_path: "marketing-localization-qa/{run_id}/result.json"

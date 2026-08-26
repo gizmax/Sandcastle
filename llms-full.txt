@@ -71,9 +71,31 @@ Every step has `id`, `type`, optional `depends_on: [...]`, optional `model:`, op
   model: haiku, branches: { a: [ids], b: [ids] } }`.
 - gate: `gate_config: { strategies: [ { type: llm_eval, config: { prompt, input:
   "{steps.X.output}", model } }, { type: human, config: { message, timeout_hours,
-  on_timeout: abort } } ] }`. ALL strategies must pass. Only `llm_eval` / `human` /
-  `timeout` exist (no quorum). A two-judge gate = two `llm_eval` strategies on different
-  `model:`.
+  on_timeout: abort } } ] }`. ALL strategies must pass; the first rejection
+  short-circuits and FAILS the step, stopping the run. Set `fail_on_reject: false`
+  for the legacy advisory behavior, where the verdict is reported in
+  `output.decision` and the workflow continues. Only `llm_eval` / `human` /
+  `timeout` exist (no quorum - use `accept` for that). A two-judge gate = two `llm_eval`
+  strategies on different `model:`.
+- accept: `accept_config: { target: <step id>, checks: [ { type: contains, value: "..." } ],
+  judges: [ { model: haiku, rubric: "...", name: j1, max_tokens: 512 } ], quorum: 0,
+  on_reject: fail|retry_target|escalate_to_human, max_rounds: 1, max_cost_usd: 0.0,
+  fail_on_reject: true, escalation_message: "...", timeout_hours: null }`. An OUTCOME
+  gate: it judges whether the target step's work MET THE GOAL, where `gate` judges
+  whether the run may proceed. Naming a `target:` creates the dependency edge, so no
+  `depends_on` is needed. `checks:` are deterministic `AssertionDef`s (contains,
+  not_contains, not_empty, equals, regex_match, schema_match, max_cost, max_duration)
+  that run FIRST and can reject for $0 before any judge is paid; `llm_judge` is NOT
+  allowed there - that is what `judges:` is for. `quorum: 0` means unanimous, resolved
+  against the judge count, so adding a judge tightens the panel. A judge that errors or
+  replies unreadably votes REJECT - it never fabricates a verdict. A rejection FAILS the
+  step with `retryable: false`, so a step-level `retry:` cannot re-roll the verdict; set
+  `fail_on_reject: false` to keep it advisory in `output.decision`. `on_reject:
+  retry_target` re-runs the target with the judge's critique appended to its prompt
+  (escaped, so a judge cannot inject templates), bounded by `max_rounds` (hard cap 5),
+  `max_cost_usd`, the run budget, and a depth guard. The step output is an EVIDENCE PACK
+  - target digest, every check result, each judge's verdict/reason/model/cost, and the
+  round number - and the same pack is written to the audit chain as `step.accept`.
 - condition: `condition_config: { expression: "{steps.X.output.fail_count} > 0",
   then: [ids], else: [ids] }`.
 - transform: `transform_config: { template: '<JSON/Jinja with {steps.X.output}>' }`.
@@ -88,6 +110,16 @@ Every step has `id`, `type`, optional `depends_on: [...]`, optional `model:`, op
   template name. Composes/fan-outs another workflow.
 - tool: `tool_config: { tool: <connector>, function: "...", arguments: [...] }`. Calls a
   built-in connector (e.g. nano-banana, openai, gemini for image-gen/vision).
+- acp: `acp_config: { agent: claude|codex|gemini|goose (or command + args), cwd: <abs path>,
+  message: "...", env_passthrough: [ANTHROPIC_API_KEY], permission: reject|ask|allow_once,
+  permission_rules: [{ kind: edit, decision: allow_once }], filesystem: none|read|readwrite,
+  timeout: 900, idle_timeout: 180, output_format: text|json|full, cost_per_call: 0.0 }`.
+  Drives an external agent harness over the Agent Client Protocol (stdio JSON-RPC,
+  protocol version 1). Requires an admin-trusted run and `cwd` inside
+  SANDCASTLE_ACP_ALLOWED_ROOTS. The harness bills its own credentials, so `max_cost_usd`
+  is ADVISORY here - use `timeout`/`idle_timeout` as the real limit. ALWAYS pair an acp
+  step with deterministic verification (a `code` step running `git diff`) plus a review:
+  `stopReason: end_turn` means the turn ended, not that the task was done.
 
 ## Model-independence patterns
 
@@ -98,6 +130,9 @@ Every step has `id`, `type`, optional `depends_on: [...]`, optional `model:`, op
   `_steps['voteA'...]`, tallies agreement, and routes a SPLIT to `approval`. Not a race.
 - Two-judge gate: a `gate` with two `llm_eval` strategies on different providers; both
   must agree.
+- Judged outcome (N-of-M): an `accept` step with several `judges:` on different `model:`
+  and a `quorum:`. Unlike a gate this votes, records an evidence pack, and can send the
+  work back for a bounded number of re-work rounds.
 - Deterministic code: the decision math (reconciliation, scoring, eligibility, diffs) in
   a sandboxed `code` step, so the outcome is identical on any model; a `gate`/`approval`
   adds human oversight.

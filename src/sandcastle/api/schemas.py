@@ -1225,6 +1225,41 @@ class AuditVerifyResponse(BaseModel):
     broken_at: dict[str, Any] | None = None
 
 
+class SilentSuccessFindingResponse(BaseModel):
+    """One claim a completed run made that its evidence does not back.
+
+    Deliberately not a verdict. ``found`` records what the sweep actually saw;
+    a finding means the claim lacks evidence, which is a different statement
+    from the step having failed.
+    """
+
+    run_id: str
+    workflow_name: str
+    step_id: str
+    parallel_index: int | None = None
+    finding_type: str
+    claim: str
+    expected_evidence: str
+    found: str
+    severity: str
+    detail: str = ""
+    occurred_at: datetime | None = None
+
+
+class SilentSuccessReportResponse(BaseModel):
+    """A silent-success sweep: findings plus what the sweep could not check.
+
+    ``meta`` carries the suppression counters (claims inside the evidence-lag
+    window, claims older than the ledger TTL, memoized steps, unresolved step
+    definitions). They matter as much as the findings: a sweep reporting zero
+    findings because it skipped everything would be the same failure mode the
+    sweep exists to catch.
+    """
+
+    findings: list[SilentSuccessFindingResponse]
+    meta: dict[str, Any]
+
+
 class EmergencyStopResponse(BaseModel):
     """Response after triggering a global emergency stop."""
 

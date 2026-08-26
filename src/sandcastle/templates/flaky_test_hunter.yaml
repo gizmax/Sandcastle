@@ -475,6 +475,8 @@ steps:
     type: gate
     depends_on: [assemble_quarantine]
     gate_config:
+      # Advisory: rejection also fires when the eligible list is EMPTY (a clean week with no flaky tests) - the scorecard must still be published.
+      fail_on_reject: false
       strategies:
         - type: llm_eval
           config:

@@ -121,6 +121,18 @@ class Run(Base):
     )
     replay_from_step: Mapped[str | None] = mapped_column(String(255), nullable=True)
     fork_changes: Mapped[dict | None] = mapped_column(JSONB_PG, nullable=True)
+    # Head of the replay/fork lineage this run belongs to - the scope a step
+    # effect is claimed in (engine/effects.py). Nullable with no backfill:
+    # a pre-0.45 run reads as COALESCE(effect_scope_id, id), i.e. its own scope,
+    # which is exactly right.
+    effect_scope_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    # How many times a worker has requeued this run after finding it stranded
+    # in RUNNING (queue/worker.py: _recover_stuck_runs). Durable because the
+    # thing it bounds is a run that crashes the worker counting it: a poison
+    # run must exhaust its attempts, not reset them with every restart.
+    recovery_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     sub_workflow_of_step: Mapped[str | None] = mapped_column(String(255), nullable=True)
     workflow_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     depth: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
@@ -200,6 +212,14 @@ class RunStep(Base):
     tokens_saved: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     # Which compaction strategy ran, when one did.
     compaction_strategy: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # True when this step returned a memoized effect instead of executing (the
+    # effect ledger or a cassette). cost_usd is 0.0 in that case, so the budget
+    # stays honest; original_cost_usd carries what the first execution paid, and
+    # stays NULL for a step that never replayed - distinguishable from 0.0.
+    replayed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
+    original_cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
     duration_seconds: Mapped[float] = mapped_column(Float, default=0.0, server_default="0.0")
     attempt: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -521,6 +541,70 @@ class RunCheckpoint(Base):
     context_snapshot: Mapped[dict] = mapped_column(JSONB_PG, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
+    )
+
+
+class StepEffect(Base):
+    """Durable claim + memo for one side effect within a replay lineage.
+
+    Written before the network call (``in_flight``) and updated after it
+    (``committed`` / ``failed``), so a replayed or resumed run can tell "this
+    POST already landed" from "this POST never ran" from "we do not know".
+    See engine/effects.py for the protocol.
+
+    ``effect_scope_id`` and ``run_id`` are plain strings rather than FKs to
+    ``runs``: the ledger is a lineage-scoped idempotency record that must
+    outlive the run row that created it, and scopes also come from contexts
+    with no run row at all (local CLI runs, mesh sub-executions). ``expires_at``
+    plus ``prune_expired_effects`` bound the growth instead of a cascade.
+    """
+
+    __tablename__ = "run_step_effects"
+    __table_args__ = (
+        UniqueConstraint("effect_key", name="uq_run_step_effects_key"),
+        Index("ix_run_step_effects_scope", "effect_scope_id"),
+        Index("ix_run_step_effects_run_id", "run_id"),
+        Index("ix_run_step_effects_expires_at", "expires_at"),
+        Index("ix_run_step_effects_lease", "status", "lease_expires_at"),
+        CheckConstraint("cost_usd >= 0", name="ck_run_step_effects_cost_non_negative"),
+        CheckConstraint(
+            "status IN ('in_flight', 'committed', 'failed')",
+            name="ck_run_step_effects_status",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    # The unique constraint IS the distributed lock: INSERT-or-lose works
+    # identically on SQLite and PostgreSQL. tenant and scope are already folded
+    # into the hash, so the key alone is unique - no composite needed.
+    effect_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    effect_scope_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    run_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    tenant_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    step_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    parallel_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    iteration_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    step_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="in_flight", server_default="in_flight"
+    )
+    # Wrapped as {"value": ...} so a scalar output (str, list, None) round-trips
+    # through a JSON column that expects an object at the top level.
+    output_data: Mapped[dict | None] = mapped_column(JSONB_PG, nullable=True)
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0, server_default="0.0")
+    attempt: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now()
+    )
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    committed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
 

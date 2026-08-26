@@ -304,6 +304,8 @@ steps:
   - id: actionability_gate
     type: gate
     gate_config:
+      # Advisory: per-message. Rejection means 'this email is not actionable' - the normal outcome for most mail; the triage loop must continue.
+      fail_on_reject: false
       strategies:
         - type: llm_eval
           config:

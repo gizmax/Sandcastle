@@ -53,10 +53,23 @@ MAX_BUNDLE_SIZE = 10 * 1024 * 1024  # 10MB archive on disk
 MAX_MEMBER_SIZE = 5 * 1024 * 1024  # 5MB per decompressed member
 MAX_MEMBERS = 32  # manifest + workflow + cassettes, with headroom
 
-# Step types the cassette fully covers on replay. Other types (code, http,
-# browser, ...) re-execute live, which verification of an untrusted bundle
-# must never do - workflows containing them are rejected at verify time.
-REPLAY_SAFE_STEP_TYPES = frozenset({"standard"})
+# Step types whose replay is provably inert *from the bundled file alone*.
+#
+# Since 0.45 the cassette hook sits in ``execute_step_with_retry``, so every
+# hybrid type is looked up before it executes and a strict-replay miss aborts
+# the step before any network. That makes far more types technically coverable
+# - but coverage is not the bar here. Verification runs untrusted content, so a
+# type only earns a place on this list when a cassette *hit* also causes
+# nothing: no request, no file, no spend. ``http``, ``notify``, ``code``,
+# ``browser``, ``computer-use``, ``tool``, ``composio``, ``openclaw``,
+# ``agent``, ``managed-agent``, ``delegate``, ``sub_workflow`` and ``report``
+# stay excluded regardless of the ledger, which is installation-local and must
+# never be consulted on somebody else's cassette. ``condition``/``classify``/
+# ``gate`` are excluded because the guard deliberately never intercepts them
+# (they mutate branch selection), so they would execute live.
+REPLAY_SAFE_STEP_TYPES = frozenset(
+    {"standard", "llm", "parse", "transform", "trajectory-replay"}
+)
 
 _REQUIRED_MANIFEST_FIELDS = (
     "format",

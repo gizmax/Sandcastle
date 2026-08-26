@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import sys
+import textwrap
 import time
 from pathlib import Path
 from typing import Any
@@ -5292,6 +5293,259 @@ def _cmd_audit_verify(args: argparse.Namespace) -> None:
     sys.exit(1)
 
 
+def _cmd_audit_silent_success(args: argparse.Namespace) -> None:
+    """Report completed runs whose success claims are not backed by evidence.
+
+    A finding says the claim *lacks evidence* - the sweep cannot know whether
+    the notification arrived, only that the record which should exist does not.
+    Nothing is repaired. Exits 1 when there are findings, matching
+    ``audit verify``, so a cron wrapper needs no jq.
+    """
+    params: dict[str, Any] = {}
+    if getattr(args, "run", None):
+        params["run_id"] = args.run
+    else:
+        params["since"] = args.since
+    if getattr(args, "lag_hours", None) is not None:
+        params["lag_hours"] = args.lag_hours
+
+    body = _api_get(args, "/api/audit/silent-success", params=params)
+
+    if getattr(args, "json", False):
+        _json_out(body)
+        data = body.get("data") or {}
+        if data.get("findings"):
+            sys.exit(1)
+        return
+
+    data = body.get("data") or {}
+    findings = data.get("findings", [])
+    meta = data.get("meta", {})
+
+    print(
+        f"Swept {meta.get('runs_checked', 0)} completed run(s), "
+        f"{meta.get('steps_checked', 0)} completed step(s)."
+    )
+    if not meta.get("ledger_enabled", True):
+        print(
+            _color(
+                "  Effect ledger is disabled - the ledger-backed checks did not run.",
+                _C.YELLOW,
+            )
+        )
+
+    skipped = [
+        (meta.get("within_lag_window", 0), "inside the evidence-lag window"),
+        (meta.get("beyond_effect_ttl", 0), "older than the ledger TTL"),
+        (meta.get("replayed_skipped", 0), "memoized (replayed)"),
+        (meta.get("unresolved_steps", 0), "absent from the resolved workflow"),
+        (meta.get("suppressed_loose_match", 0), "matched only without parallel index"),
+    ]
+    for count, why in skipped:
+        if count:
+            print(_color(f"  Not checked: {count} step(s) {why}.", _C.DIM))
+    unresolved = meta.get("definition_unresolved") or []
+    if unresolved:
+        print(
+            _color(
+                f"  Not checked: {len(unresolved)} run(s) whose workflow definition "
+                "could not be resolved.",
+                _C.DIM,
+            )
+        )
+    print()
+
+    if not findings:
+        print(_color("PASS", _C.GREEN) + " - every claim checked has evidence behind it")
+        return
+
+    headers = ["RUN ID", "STEP", "FINDING", "SEVERITY", "FOUND"]
+    rows: list[list[str]] = []
+    for f in findings:
+        sev = f.get("severity", "")
+        if sev == "high":
+            sev_str = _color(sev, _C.RED)
+        elif sev == "medium":
+            sev_str = _color(sev, _C.YELLOW)
+        else:
+            sev_str = _color(sev, _C.DIM) if sev else "-"
+        rows.append(
+            [
+                f.get("run_id", "")[:12],
+                f.get("step_id", ""),
+                f.get("finding_type", ""),
+                sev_str,
+                f.get("found", ""),
+            ]
+        )
+    print(_table(headers, rows, max_col=52))
+    print()
+    print(
+        _color(f"{len(findings)} claim(s) lack evidence", _C.RED)
+        + " - this is a report, not a verdict: the sweep found no record of the"
+    )
+    print("effect, which is not the same as the step having failed. Investigate before acting.")
+    sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# memory - grade a memory scope
+# ---------------------------------------------------------------------------
+
+
+def _score_cell(score: float | None) -> str:
+    """Render a 0.0-1.0 score, colored, or a dim n/a when unmeasurable."""
+    if score is None:
+        return _color("n/a", _C.DIM)
+    text = f"{score:.2f}"
+    if score >= 0.80:
+        return _color(text, _C.GREEN)
+    if score >= 0.50:
+        return _color(text, _C.YELLOW)
+    return _color(text, _C.RED)
+
+
+def _print_memory_metric(metric: Any) -> None:
+    """One metric block: score, plain-language verdict, the counts, worst offenders."""
+    print(f"  {_color(metric.name.ljust(14), _C.BOLD)} {_score_cell(metric.score)}")
+    for line in textwrap.wrap(metric.verdict, width=76):
+        print(f"    {line}")
+    counts = "  ".join(
+        f"{k}={v}"
+        for k, v in metric.parts.items()
+        if isinstance(v, (int, float, bool))
+    )
+    if counts:
+        for line in textwrap.wrap(counts, width=76):
+            print(f"    {_color(line, _C.DIM)}")
+    for item in metric.worst[:5]:
+        bits = "  ".join(f"{k}={v}" for k, v in item.items() if k != "id")
+        print(f"    - {_color(str(item.get('id', '?')), _C.CYAN)}  {bits}")
+    print()
+
+
+def _cmd_memory_eval(args: argparse.Namespace) -> None:
+    """Grade a memory scope: staleness, forgetting, contradiction, retrieval."""
+    import asyncio
+
+    from sandcastle.engine.memory_eval import evaluate_scope
+
+    scope = args.scope
+    tenant = getattr(args, "tenant", None)
+    if tenant and not scope.startswith("tenant:"):
+        scope = f"tenant:{tenant}/{scope}"
+
+    try:
+        report = asyncio.run(
+            evaluate_scope(
+                scope,
+                backend_name=getattr(args, "backend", "") or "",
+                ttl_days=getattr(args, "ttl_days", None),
+                probe_limit=args.probe_limit,
+                max_probes=args.max_probes,
+            ),
+        )
+    except ValueError as exc:
+        print(_color(f"  {exc}", _C.RED), file=sys.stderr)
+        sys.exit(1)
+    except Exception as exc:
+        print(_color(f"  memory eval failed: {exc}", _C.RED), file=sys.stderr)
+        sys.exit(1)
+
+    if getattr(args, "json", False):
+        _json_out(report.to_dict())
+        return
+
+    print()
+    print(_color(f"  Memory eval - {report.scope_id}", _C.BOLD))
+    ttl = f"{report.ttl_days} days" if report.ttl_days > 0 else "disabled"
+    print(
+        f"  backend {report.backend}"
+        + (f"   tenant {report.tenant}" if report.tenant else "")
+        + f"   TTL {ttl}"
+    )
+    if report.scope_path:
+        print(_color(f"  {report.scope_path}", _C.DIM))
+    totals = "  ".join(f"{k}={v}" for k, v in report.totals.items())
+    if totals:
+        print(_color(f"  {totals}", _C.DIM))
+    print()
+
+    for metric in report.metrics:
+        _print_memory_metric(metric)
+
+    if report.domains:
+        headers = ["DOMAIN", "ENTRIES", "FILL", "STALE", "FORGET", "CONTRA", "RETR"]
+        rows = [
+            [
+                d.domain + (" (near cap)" if d.near_cap else ""),
+                str(d.live_entries),
+                f"{d.fill * 100:.0f}%",
+                _score_cell(d.staleness),
+                _score_cell(d.forgetting),
+                _score_cell(d.contradiction),
+                _score_cell(d.retrieval),
+            ]
+            for d in report.domains
+        ]
+        print(_table(headers, rows))
+        print()
+
+    if report.not_measurable:
+        print(_color("  not measurable on this backend:", _C.BOLD))
+        for item in report.not_measurable:
+            print(f"    {_color(item['metric'], _C.YELLOW)}")
+            for line in textwrap.wrap(item["reason"], width=72):
+                print(f"      {line}")
+        print(
+            _color(
+                "    The filesystem vault records all of the above; this backend "
+                "does not.",
+                _C.DIM,
+            ),
+        )
+        print()
+
+    for metric in report.metrics:
+        for caveat in metric.caveats:
+            for i, line in enumerate(textwrap.wrap(caveat, width=74)):
+                print(_color(("  ! " if i == 0 else "    ") + line, _C.DIM))
+    for caveat in report.caveats:
+        for i, line in enumerate(textwrap.wrap(caveat, width=74)):
+            print(_color(("  ! " if i == 0 else "    ") + line, _C.DIM))
+    print()
+
+    parts = ", ".join(
+        f"{name} {'n/a' if score is None else f'{score:.2f}'}"
+        for name, score in report.components.items()
+    )
+    if report.overall is None:
+        print(_color("  overall n/a", _C.BOLD) + f"  ({parts})")
+    else:
+        print(
+            _color("  overall ", _C.BOLD)
+            + _score_cell(report.overall)
+            + f"  ({parts})"
+        )
+    print(
+        _color(
+            "  Unweighted mean of the measurable components; every score above is "
+            "a division of the counts printed beside it.",
+            _C.DIM,
+        ),
+    )
+
+
+def _cmd_memory(args: argparse.Namespace) -> None:
+    """Route memory sub-commands."""
+    action = getattr(args, "memory_action", None)
+    if action == "eval":
+        _cmd_memory_eval(args)
+        return
+    print("Usage: sandcastle memory eval <scope>", file=sys.stderr)
+    sys.exit(1)
+
+
 # ---------------------------------------------------------------------------
 # Argument parser
 # ---------------------------------------------------------------------------
@@ -5340,6 +5594,7 @@ _COMMAND_GROUPS: list[tuple[str, str, list[tuple[str, str]]]] = [
         "Evaluate and optimize workflow intelligence",
         [
             ("eval", "Run an eval suite against a workflow"),
+            ("memory", "Grade a memory scope (staleness, forgetting, contradiction)"),
             ("autopilot", "Manage AutoPilot experiments"),
         ],
     ),
@@ -5641,6 +5896,52 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_connection_args(p_mcp)
 
+    # --- memory ---
+    p_memory = subparsers.add_parser("memory", help="Grade and inspect agent memory")
+    memory_sub = p_memory.add_subparsers(dest="memory_action")
+
+    p_memory_eval = memory_sub.add_parser(
+        "eval",
+        help="Score a memory scope: staleness, forgetting, contradiction, retrieval",
+    )
+    p_memory_eval.add_argument(
+        "scope",
+        help="Memory scope id, e.g. 'workflow:invoice-triage', 'agent:researcher' or 'global'",
+    )
+    p_memory_eval.add_argument(
+        "--tenant",
+        default=None,
+        help="Tenant id; prefixes the scope as 'tenant:<id>/<scope>' (same shape "
+        "as resolve_scope_id uses at runtime)",
+    )
+    p_memory_eval.add_argument(
+        "--backend",
+        default=None,
+        help="Memory backend to grade (default: MEMORY_BACKEND). "
+        "Only 'filesystem' records everything the score needs.",
+    )
+    p_memory_eval.add_argument(
+        "--ttl-days",
+        dest="ttl_days",
+        type=int,
+        default=None,
+        help="Override the TTL used for staleness (default: MEMORY_MAX_AGE_DAYS)",
+    )
+    p_memory_eval.add_argument(
+        "--probe-limit",
+        dest="probe_limit",
+        type=int,
+        default=10,
+        help="Results each retrieval-sanity probe asks for (default: 10)",
+    )
+    p_memory_eval.add_argument(
+        "--max-probes",
+        dest="max_probes",
+        type=int,
+        default=50,
+        help="Maximum retrieval-sanity probes to run (default: 50)",
+    )
+
     # --- memory-mcp ---
     p_memory_mcp = subparsers.add_parser("memory-mcp", help="Start the Memory MCP server")
     memory_mcp_sub = p_memory_mcp.add_subparsers(dest="memory_mcp_action", required=True)
@@ -5903,6 +6204,30 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Audit key to verify the signature with (default: AUDIT_KEY from env/.env)",
     )
+
+    p_audit_silent = audit_sub.add_parser(
+        "silent-success",
+        help="Find completed runs whose success claims have no evidence behind them",
+    )
+    p_audit_silent.add_argument(
+        "--since",
+        default="24h",
+        help="Window of runs to sweep: 48h, 7d, 2w, or an ISO datetime (default: 24h)",
+    )
+    p_audit_silent.add_argument(
+        "--run", default=None, help="Sweep a single run instead of a window"
+    )
+    p_audit_silent.add_argument(
+        "--lag-hours",
+        dest="lag_hours",
+        type=float,
+        default=None,
+        help=(
+            "Override the evidence-lag window: claims younger than this are "
+            "counted, not flagged (default: silent_success_lag_hours)"
+        ),
+    )
+    p_audit_silent.add_argument("--json", action="store_true", help="Output raw JSON")
 
     # --- tools ---
     p_tools = subparsers.add_parser("tools", help="Tool/connector management")
@@ -6314,11 +6639,23 @@ def main() -> None:
 
     # --- audit ---
     if args.command == "audit":
-        if getattr(args, "audit_action", None) == "verify":
+        audit_action = getattr(args, "audit_action", None)
+        if audit_action == "verify":
             _cmd_audit_verify(args)
+        elif audit_action == "silent-success":
+            _cmd_audit_silent_success(args)
         else:
-            print("Usage: sandcastle audit verify <run-id-or-cassette-path>", file=sys.stderr)
+            print(
+                "Usage: sandcastle audit verify <run-id-or-cassette-path>\n"
+                "       sandcastle audit silent-success [--since 48h] [--run <id>]",
+                file=sys.stderr,
+            )
             sys.exit(1)
+        return
+
+    # --- memory ---
+    if args.command == "memory":
+        _cmd_memory(args)
         return
 
     # --- memory-mcp ---

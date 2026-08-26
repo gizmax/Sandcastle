@@ -5,7 +5,311 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.47.0] - 2026-08-26 - "Leave the Room"
+
+### ⚠️ Breaking
+
+- **A rejected `gate` now stops the run.** A gate whose `llm_eval` or `timeout`
+  strategy rejected returned `status="completed"`, and nothing in the engine
+  ever read `output.decision` - zero of the 83 bundled templates containing a
+  gate read it. So every gate was advisory: it judged, wrote down "rejected",
+  and the workflow walked past its own guard rail. Among them a sanctions
+  screener, a three-way-match payment run and a discount approval.
+
+  `gate_config` gains `fail_on_reject` (default `true`), following the
+  `fail_on_error` precedent on `http` steps. Rejection now fails the step, and
+  the result is not retryable - re-running a judge until it says yes turns a
+  guard rail into a dice roll.
+
+  Two consequences on upgrade:
+
+  1. **A gate used as a filter now fails the run.** Rejection is the normal
+     outcome for some gates - "no material deals today", "this email is not
+     actionable". 32 of the 88 bundled gates are filters and now carry
+     `fail_on_reject: false` with a stated reason. Third-party workflows using
+     a gate this way must do the same.
+  2. **A failed step publishes no output onto the run**, so the verdict is read
+     from `.error`, not from `{steps.gate.decision}`. Workflows that branch on
+     a verdict should set `fail_on_reject: false` and read the output as before.
+
+  Also fixed: two bundled templates had been rejecting 100% of the time and it
+  was invisible precisely because rejection did nothing. Their prompts ask the
+  judge to answer `PASS`/`FAIL` while the executor decides on `"approved"`. All
+  116 `llm_eval` prompts were scanned; these were the only two.
+
+- **`MEMORY_BACKEND=cloud` now errors instead of silently giving you `local`.**
+  See *Changed* below. `local` is the default, so a default-configured
+  deployment is unaffected.
+
+### Fixed
+
+- **Memory reads on the installed mem0 silently returned nothing.** mem0 2.x
+  moved `search`/`get_all` from `user_id=` to `filters={'user_id': ...}` and
+  rejects the old kwarg with a ValueError; `load_memories` caught it, logged a
+  warning, and returned `[]` - so on mem0 2.0.18 every memory injection came
+  back empty while writes kept succeeding. Reads now speak the 2.x API first
+  and fall back to the legacy kwargs on TypeError for old installs. Found by
+  the 0.47 memory-eval workstream while checking what mem0 actually exposes -
+  the exact silent-failure shape this release is about, in our own default
+  backend.
+
+### Added
+
+- **`sandcastle audit silent-success` - a sweep for runs that claim more than
+  they can prove.** The worst production failure is not a run that fails; it is
+  a run that reports `completed` with a step reporting "1 reply created" when
+  nothing was ever sent. Sandcastle already wrote three independent records of
+  what happened - the effect ledger, the audit chain, and the step rows - and
+  nothing ever compared them. The sweep does, over four claim/evidence pairs: a
+  `notify` step claiming `status: delivered` with no committed ledger row; any
+  side-effecting step the executor would have claimed (decided by calling the
+  engine's own `effect_mode_for`, so a GET or a `replay: live` is correctly
+  exempt) with no committed row; an `accept` verdict of `approved` with no
+  `step.accept` event on the chain; a side-effecting completion with no
+  `step.completed` event.
+
+  It is **a report, never a repair** - findings say "claim lacks evidence",
+  which is not the same sentence as "the step failed", and the module has no
+  write path. Suppressions are counted rather than hidden: memoized (`replayed`)
+  steps, claims inside the `SILENT_SUCCESS_LAG_HOURS` window (default 1), claims
+  older than `EFFECT_LEDGER_TTL_DAYS` (where the row is gone because it expired,
+  not because it never existed), dry-run notifies (which claim nothing), and
+  steps whose workflow definition no longer resolves. A run that committed no
+  effects at all reports at reduced severity, because that reads as an
+  unreachable ledger rather than as universal silence. Also at
+  `GET /api/audit/silent-success`, tenant-scoped. Design notes, including the
+  pairs that were rejected and why, in `docs/design/047-silent-success.md`.
+
+- **`sandcastle memory eval <scope>` - grade the store, not the retrieval.**
+  Recall@k answers "can I find what I stored" and says nothing about whether
+  it should still be there; a memory with textbook retrieval scores can be
+  three-tenths stale with nothing ever deleted, which is a log with good
+  manners. The 0.46 vault already recorded the metadata a grade needs -
+  confirmation counters, timestamps, a supersede chain with an attic,
+  tombstones with reasons - and nothing read it back. `engine/memory_eval.py`
+  does, and scores four things per domain and per scope:
+
+  - **Staleness** splits the past-TTL population in two, because the halves
+    mean different things: entries that consolidation will drop at the next
+    run end, and entries the confirmations veto has made *immortal* - past
+    their TTL and never to be re-examined. The second is the number the
+    critique is about.
+  - **Forgetting health** counts removals from tombstones against entries ever
+    written. A store that has never removed anything scores **0.0** and is told
+    so in words; a store that supersedes briskly but removes nothing is told
+    that updating is not forgetting. Domain merges are counted separately -
+    moving two files into one does not mean the store remembers less.
+  - **Contradiction pressure** reads supersede-chain depth out of the attic,
+    with the confirm-vs-supersede ratio and any domain approaching the 32 KB
+    file cap or the 120-domain scope cap named.
+  - **Retrieval sanity** probes through the backend's own `load()` with what
+    each rewritten entry *used to say* - not with its current text, which
+    passes by construction - and fails it when the fact is no longer reachable
+    from its own history, or when a live entry that still says the superseded
+    thing outranks it.
+
+  Every score is a division of two counted things and both counts are printed
+  beside it; there is no weighting and no composite whose parts are hidden.
+  Unmeasurable is reported as `n/a`, never as zero. `--json` for machines.
+  On any backend without vault metadata the report runs what it can (age
+  against the TTL) and prints an explicit **"not measurable on this backend"**
+  section naming each missing metric and why - including the honest detail
+  that mem0 2.x *does* keep a per-memory history and an expiration date, and
+  that it is Sandcastle's own adapter that does not surface them. Scoring is
+  read-only and takes no scope lock. Design note:
+  `docs/design/047-memory-eval.md`.
+
+- **`type: accept` - an outcome gate.** "The agent finished" and "the agent
+  succeeded" are different facts, and the engine recorded only the first. An
+  accept step judges a target step's output: deterministic `checks:` first
+  (they can reject for $0 before any judge is paid), then LLM judges with
+  per-judge models, an N-of-M quorum (`quorum: 0` = unanimous, so adding a
+  judge tightens the panel), and a human fallback through the existing
+  approvals surface. Judges fail closed - an HTTP error or an unreadable reply
+  is a reject with the error recorded, never a fabricated verdict. Every
+  decision writes an evidence pack (per-round target digests, check results,
+  each judge's verdict/reason/model/cost, the quorum arithmetic) into the step
+  output and the audit chain. `on_reject: retry_target` re-runs the judged
+  step with the escaped critique injected, bounded four ways (`max_rounds`
+  capped at 5, the accept step's own budget, the run-budget projection, the
+  depth guard). Rejection fails the step with `retryable=False`, mirroring
+  the gate.
+- **`MEMORY_BACKEND=filesystem` - a markdown vault an auditor can read.**
+  `INDEX.md` (hard-capped at 1,500 tokens) plus per-domain markdown files
+  under `<root>/<tenant>/<scope>/`, with an attic for superseded text and a
+  Forgotten ledger. Writes confirm (>=0.85 overlap), supersede (0.40-0.85) or
+  append; forgetting is TTL with a confirmations veto in one end-of-run pass.
+  Zero new dependencies - proven by running a workflow in a core-only venv.
+  Each vault git commit's SHA is pinned into the audit hash chain. Hard caps
+  (120 domains/scope, 32 KB/file) are errors by design - the price of
+  auditability. Documented, measured limitations ship in
+  `docs/memory-filesystem-vault.md`: the overlap measure counts stopwords, and
+  CJK/Cyrillic text degrades silently into `misc.md`. Mem0+Qdrant stays the
+  default.
+- **A crashed run now finishes instead of dying.** The effect ledger knew
+  exactly which side effects had landed; the worker threw that away.
+  `_recover_stuck_runs` marked every run stranded in `RUNNING` as `FAILED` -
+  "worker crashed, recovered on startup" - and that was the end of it, however
+  far through the workflow the run had got.
+
+  It now requeues the run in its own effect scope. The run replays from its
+  first step; every step whose effect already committed comes back out of the
+  ledger at `cost_usd=0.0` without touching the network, and a step whose claim
+  is still `in_flight` past its lease fails per its `on_uncertain` rather than
+  guessing. Kill the worker after step N of M: the run finishes anyway, steps
+  1..N cost $0 the second time, and nothing sends twice. Pure steps
+  (`transform`, `code`, `condition`) are `replay: live` by design and do run
+  again - the price of replay is wall-clock, not money.
+
+  This is deliberately *replay-based* resume. There is no new scheduler state
+  machine and no second checkpoint format: the ledger is the checkpoint.
+  Recovery passes no `skip_steps`, on purpose. The checkpoint path that replay
+  and fork use restores `step_outputs` but not `step_results`, so a skipped
+  step's `{steps.X.status}`, `{steps.X.error}` and `{steps.X.cost}` resolve to
+  nothing downstream and the step leaves no `run_steps` row for the Black Box.
+  A memoized step has neither problem. The checkpoint also covers strictly
+  less: a step cancelled mid-flight when a sibling paused the run never reaches
+  a checkpoint but does leave a ledger claim.
+
+  Bounded, because a run that kills its worker on the same step every time
+  would otherwise requeue forever. `MAX_RECOVERY_ATTEMPTS` (default 2) is
+  counted in a new `runs.recovery_attempts` column - durable, so a poison run
+  exhausts its attempts rather than resetting them at every restart. Past the
+  cap the run is `FAILED` with an error naming the attempt count and, where
+  `run_steps` still knows it, the step it died on.
+
+  `CRASH_RESUME_ENABLED=0` restores the old behaviour. So does an unreachable
+  or disabled ledger: recovery is refused and the run fails as before, with the
+  reason in the error, because replaying without a ledger would re-fire every
+  completed effect - the exact bug the ledger shipped to fix.
+
+  Also fixed on the way: `_save_run_step` skipped a falsy `cost_usd`, so a
+  memoized step re-executing under the *same* run id kept the charge from the
+  execution that crashed - a resumed run's total read `$0.00` while the step
+  row still claimed `$0.42`. Replay and fork never hit this because they mint a
+  new run id; crash-resume does not.
+
+  **Known gap:** a `sub_workflow` child executes in a scope of its own
+  (`_execute_sub_workflow_step` does not pass `effect_scope_id` down), so a
+  resumed parent re-executes a completed sub-workflow's side effects. Replay
+  and fork have always had this; crash-resume makes it easier to hit. Tracked
+  for a follow-up - fixing it needs a scope derivation that keeps a fan-out's
+  N children distinguishable.
+
+  **Deploy order:** migration `023` must land **before** workers restart on
+  0.46. A 0.46 worker against a `022` schema cannot read `recovery_attempts`;
+  its recovery sweep logs the error and leaves stuck runs alone rather than
+  requeuing them unbounded.
+
+- **A durable step effect ledger, so replay stops re-sending.**
+  `sandcastle run --replay` re-spent tokens and re-sent HTTP requests. Cassette
+  record/replay was real but lived inside `_execute_step_once`, and all 24 step
+  types in `_HYBRID_STEP_TYPES` - `llm` and `http` among them - dispatch through
+  `_execute_step_by_type` and never reached it. `bundle.py` conceded it in one
+  line: `REPLAY_SAFE_STEP_TYPES = frozenset({"standard"})`.
+
+  New `run_step_effects` table (migration `022`) holds a write-ahead claim keyed
+  on effect scope + tenant + step + `parallel_index` + `iteration_index` + a
+  per-type fingerprint of the **resolved** effect. Auth material is collapsed to
+  digests, so no secret reaches the table. Memoized steps return
+  `cost_usd=0.0`, so budget accounting is right without special-casing, and
+  `original_cost_usd` carries what the first execution paid.
+
+  The guarantee, tested without `skip_steps` so it cannot pass by accident: two
+  full runs in one effect scope fire the POST once and charge $0 the second
+  time. A separate test asserts a *different* scope fires again, so a ledger
+  that failed closed on everything could not pass the first one.
+
+  Steps opt out with `replay: live`; `GET` requests are live by default.
+  `condition`, `classify`, `gate`, `approval`, `loop`, `race`, `delegate` and
+  `sub_workflow` are never intercepted - `condition` and `classify` write
+  `branch_skip_steps`, so a memoized return would silently un-skip the other
+  branch.
+
+  When the ledger itself is unreachable, the behaviour follows the deployment
+  rather than a flag: local mode has no database and runs live with a warning,
+  a server deployment fails the step. `EFFECT_LEDGER_REQUIRED` overrides either
+  way.
+
+  **Deploy order:** migration `022` must land before workers read
+  `run.effect_scope_id`. The job signature is unchanged, so in-flight jobs still
+  deserialize.
+
+- **`type: acp` - drive an external agent harness over the Agent Client
+  Protocol.** Sandcastle spawns a harness (Claude Code, Codex, Gemini CLI,
+  goose - ~38 speak the protocol) as a local subprocess and talks
+  newline-delimited JSON-RPC 2.0 on its stdio: `initialize` -> `session/new` ->
+  `session/prompt`, with the answer reassembled from the streamed
+  `agent_message_chunk` updates, because ACP's `PromptResponse` carries only a
+  `stopReason` and nothing else. Sandcastle is a **client only**; ACP server
+  mode is not implemented and is not planned. Protocol version is pinned to the
+  integer `1`; `protocol_version: 2` is a validation error while v2 is a draft.
+  New module `engine/acp_client.py`, new `acp_config` block, new setting
+  `ACP_ALLOWED_ROOTS`, worked example in
+  `workflows/acp/acp-refactor-and-review.yaml`, full documentation in
+  `docs/acp.md`. There is no new runtime dependency: the client is
+  hand-rolled against the v1 schema rather than taking the optional
+  `agent-client-protocol` SDK.
+
+  What it buys that the four existing agent integrations do not: **graceful
+  cancellation of a running turn** (`session/cancel`, with every pending
+  permission request answered `{"outcome": "cancelled"}` as the spec requires)
+  and **visibility of the agent's tool calls** as they happen, streamed on the
+  `step.progress` event channel.
+
+  Deny-by-default throughout: permissions reject unless a rule allows,
+  `filesystem: none`, `terminal: true` is a validation error, the environment
+  is built from `build_minimal_subprocess_env()` rather than inherited, and
+  `cwd` must resolve inside `ACP_ALLOWED_ROOTS` - which is **empty by default,
+  so the step type is off until an operator opts in**. An `acp` step also
+  requires an admin-trusted run, the same gate `code` steps use, because it
+  spawns an arbitrary local executable. Every permission decision lands in the
+  SHA-256 audit chain along with the harness's reported `agentInfo` and the
+  *names* (never values) of any forwarded credentials.
+
+  **`max_cost_usd` is advisory for `acp` steps.** ACP v1 reports
+  `usage_update{used, size, cost?}` and nothing else; `used` is context
+  occupancy, not consumption, so summing it is meaningless, and there are no
+  per-turn token counts anywhere in v1. Sandcastle bills the harness's own
+  reported USD figure when it volunteers one, falls back to
+  `cost_per_call` otherwise, never converts a foreign currency and never
+  estimates. A harness that reports nothing is invisible to the budget guard -
+  `timeout` and `idle_timeout` are the real limits.
+
+  **`data_residency` fails closed for `acp`**: Sandcastle cannot know which
+  model an external harness calls, so the step refuses to run rather than
+  silently exempting itself from a compliance mode.
+
+  Not mesh-routable, deliberately: `cwd` is a local path, the wire payload
+  would carry credential names, and cancellation and streaming are both bound
+  to a live stdio pipe on the executing node. There is a test asserting that
+  decision stays one.
+
+### Security
+
+- **Memory scope ids can no longer carry a path traversal.** `workflow:..`,
+  `agent:..`, `workflow:.` and `tenant:../workflow:x` all passed scope
+  validation, and the tenant sanitiser left `..` untouched, so
+  `resolve_scope_id(cfg, "x", tenant_id="..")` produced
+  `tenant:../workflow:x`. That is inert against Qdrant, where a scope is only
+  a `user_id`, but it is a live directory-traversal primitive for any backend
+  that maps a scope onto a path. Scope names now reject every `..` run and
+  every name made only of dots and spaces, in `engine/memory.py` and in the
+  API-layer regex in `api/routes.py`; `POST /memories` validates its
+  `scope_id` explicitly instead of relying on the write path. Ordinary dotted
+  names (`workflow:my.wf.v2`, `tenant:acme.com`) are unaffected.
+
+### Changed
+
+- **`MEMORY_BACKEND` is now read.** The setting existed and was validated but
+  had no readers - every call took the literal default. Memory operations now
+  resolve the backend from `settings.memory_backend` when no `backend=` is
+  passed, and the three executor call sites pass it explicitly. The setting's
+  default is `local`, so nothing changes unless you had already set it.
+- **Memory backends are behind a `MemoryBackend` Protocol.** The Mem0 + Qdrant
+  implementation moved verbatim into a `_Mem0Backend` adapter and is the first
+  conformer. No behaviour change; this is the seam a filesystem backend hangs
+  off.
 
 ## [0.44.0] - 2026-08-19 - "Keep the Ending"
 

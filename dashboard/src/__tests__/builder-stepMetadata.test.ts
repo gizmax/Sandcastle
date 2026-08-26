@@ -31,6 +31,7 @@ const ALL_STEP_TYPES = [
   "agent",
   "managed-agent",
   "report",
+  "acp",
 ] as const;
 
 const ALL_AGENT_TEMPLATES = [

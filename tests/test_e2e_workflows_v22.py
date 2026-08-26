@@ -267,6 +267,24 @@ steps:
     trajectory_replay_config:
       golden_run_id: "00000000-0000-0000-0000-000000000000"
       fail_below_score: 0.7
+
+  - id: acp-step
+    type: acp
+    depends_on: [std-step]
+    acp_config:
+      agent: claude
+      cwd: /srv/checkouts/repo
+      message: "Implement {steps.std-step.output}"
+
+  - id: accept-step
+    type: accept
+    accept_config:
+      target: std-step
+      checks:
+        - type: not_empty
+      judges:
+        - model: haiku
+          rubric: "Did the step meet the goal?"
 """
 
 COMPOSIO_TEMPLATE_ACTION = """\

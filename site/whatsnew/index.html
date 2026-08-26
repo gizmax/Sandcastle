@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>What's New — The Log — Sandcastle</title>
-  <meta name="description" content="The Sandcastle release log. Latest: v0.44.0 Keep the Ending - four ways to shrink an over-budget context instead of one blunt cut, per-step token savings, and Claude 5 support.">
+  <meta name="description" content="The Sandcastle release log. Latest: v0.47.0 Leave the Room - an outcome gate with an evidence pack, a replay that never pays twice, crash-resume, memory a regulator can read with a grade, and any ACP harness as a worker.">
   <meta name="keywords" content="Sandcastle changelog, AI workflow orchestrator releases, release notes, sandcastle-ai, what's new">
   <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
   <meta name="author" content="Tomas Pflanzer">
@@ -14,7 +14,7 @@
 
   <!-- Open Graph -->
   <meta property="og:title" content="What's New — Sandcastle — The Log">
-  <meta property="og:description" content="The Sandcastle release log. Latest: v0.44.0 Keep the Ending - four ways to shrink an over-budget context instead of one blunt cut, per-step token savings, and Claude 5 support.">
+  <meta property="og:description" content="The Sandcastle release log. Latest: v0.47.0 Leave the Room - an outcome gate with an evidence pack, a replay that never pays twice, crash-resume, memory a regulator can read with a grade, and any ACP harness as a worker.">
   <meta property="og:image" content="https://sandcastle-ai.eu/og-image.jpeg">
   <meta property="og:url" content="https://sandcastle-ai.eu/whatsnew/">
   <meta property="og:type" content="website">
@@ -24,7 +24,7 @@
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="What's New — Sandcastle — The Log">
-  <meta name="twitter:description" content="The Sandcastle release log. Latest: v0.44.0 Keep the Ending - four ways to shrink an over-budget context instead of one blunt cut, per-step token savings, and Claude 5 support.">
+  <meta name="twitter:description" content="The Sandcastle release log. Latest: v0.47.0 Leave the Room - an outcome gate with an evidence pack, a replay that never pays twice, crash-resume, memory a regulator can read with a grade, and any ACP harness as a worker.">
   <meta name="twitter:image" content="https://sandcastle-ai.eu/og-image.jpeg">
   <meta name="twitter:creator" content="@iuditg">
 
@@ -540,7 +540,7 @@
       <a class="brand" href="/" aria-label="Sandcastle home">
         <span class="glyph" aria-hidden="true">🏰</span>
         <span>Sandcastle</span>
-        <span class="tm">v0.44.0</span>
+        <span class="tm">v0.47.0</span>
       </a>
       <nav class="primary" aria-label="Primary">
         <a class="muted" href="/compare/">Compare</a>
@@ -574,8 +574,8 @@
           <aside class="latest-stamp" aria-label="Latest release">
             <div class="ls-cap"><span>Latest release</span><span class="dot" aria-hidden="true"></span></div>
             <div class="ls-body">
-              <span class="ls-ver">v0.44.0</span>
-              <div class="ls-name">Keep the Ending</div>
+              <span class="ls-ver">v0.47.0</span>
+              <div class="ls-name">Leave the Room</div>
               <div class="ls-meta"><span>August&nbsp;19,&nbsp;2026</span><span><a href="#v0-44-0">Read&nbsp;↓</a></span></div>
             </div>
           </aside>
@@ -589,12 +589,71 @@
     <section class="log" aria-label="Release log">
       <div class="wrap">
 
+        <!-- ===================== v0.47.0 ===================== -->
+        <article class="entry is-latest reveal" id="v0-47-0" aria-labelledby="t-0470">
+          <div class="entry-margin">
+            <span class="ver">v0.47.0</span>
+            <span class="ver-date">August 26, 2026</span>
+            <span class="ver-tag">★ Latest</span>
+            <div class="ver-rule" aria-hidden="true"></div>
+          </div>
+          <div class="entry-body">
+            <h2 class="entry-title" id="t-0470">Leave the Room</h2>
+            <p class="entry-lede">
+              Approve it once, then go do something else. Three releases of work shipped as one: the gate got a spine, the ledger got a memory, the memory got a conscience.
+            </p>
+            <ul class="feats">
+              <li class="feat">
+                <span class="feat-chip headline">engine · headline</span>
+                <div class="feat-text">
+                  <h3>The outcome gate</h3>
+                  <p>"The agent finished" and "the agent succeeded" are different facts, and <code>type: accept</code> knows the difference. Deterministic checks reject for $0 before any judge is paid; then a judge panel with per-judge models and an N-of-M quorum where adding a judge tightens the vote. Rejection stops the run, is not retryable - a judge you ask three times is a judge you are negotiating with - and can send the work back with the critique injected, bounded so it can never loop. Every verdict writes an evidence pack into the audit chain.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">reliability</span>
+                <div class="feat-text">
+                  <h3>Run it again. Pay once.</h3>
+                  <p>An effect ledger records everything that leaves the building. Replay a run and the completed work stays done: one POST, $0 the second time, and the budget report shows it. Kill the worker at step 40 of 60 and the run comes back on its own - the finished prefix replays from the ledger with zero duplicate sends, and work continues from where reality left off.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">integrations</span>
+                <div class="feat-text">
+                  <h3>Bring your own agent</h3>
+                  <p>Around thirty-eight harnesses speak the Agent Client Protocol - Claude Code, Codex, Gemini CLI, goose - and <code>type: acp</code> makes any of them a worker in your DAG, with your gates in front and your budget around it. Cancel it gracefully mid-flight and watch its tool calls as it works. Ships off by default: you name the directories an agent may enter, or the step does not run.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">memory</span>
+                <div class="feat-text">
+                  <h3>Memory an auditor can read - with a grade</h3>
+                  <p><code>MEMORY_BACKEND=filesystem</code> stores agent memory as git-tracked markdown with zero new dependencies, every commit pinned into the audit chain. And <code>sandcastle memory eval</code> grades the store itself: staleness including the immortal memories it will never re-examine, forgetting health, contradictions, and whether retrieval surfaces the current fact or the one you already replaced. Every score recomputable from its own printed parts.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">visibility</span>
+                <div class="feat-text">
+                  <h3>Green checkmarks you can interrogate</h3>
+                  <p>The most expensive failure is not the red run - it is the green one that claims "1 reply created" when nothing was sent. <code>sandcastle audit silent-success</code> cross-examines a run's claims against the effect ledger and the audit chain, and reports every claim that lacks evidence. A report, never a guess acting on your behalf.</p>
+                </div>
+              </li>
+              <li class="feat">
+                <span class="feat-chip feat-new">templates</span>
+                <div class="feat-text">
+                  <h3>Six templates that do knowledge work</h3>
+                  <p>Contract review judged by a two-model panel. A recruiting screen that strips protected attributes in code before any model sees the file. Patient intake with clinician sign-off. CRM enrichment, sales-call briefs with graded memory, localization QA - each one the same pattern: models draft, deterministic code checks, judges verify, humans decide the irreversible.</p>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </article>
+
         <!-- ===================== v0.44.0 ===================== -->
-        <article class="entry is-latest reveal" id="v0-44-0" aria-labelledby="t-0440">
+        <article class="entry reveal" id="v0-44-0" aria-labelledby="t-0440">
           <div class="entry-margin">
             <span class="ver">v0.44.0</span>
             <span class="ver-date">August 19, 2026</span>
-            <span class="ver-tag">★ Latest</span>
             <div class="ver-rule" aria-hidden="true"></div>
           </div>
           <div class="entry-body">

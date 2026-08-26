@@ -192,9 +192,10 @@ steps:
           config:
             prompt: >-
               You are a release reviewer for an automated map-reduce job. Below is
-              the consolidated rollup plus roll-up statistics. PASS only if the
-              summaries are coherent, on-topic, free of obvious duplication, and
-              coverage is acceptable (>= 0.8). Otherwise FAIL with a one-line reason.
+              the consolidated rollup plus roll-up statistics. Answer 'approved'
+              only if the summaries are coherent, on-topic, free of obvious
+              duplication, and coverage is acceptable (>= 0.8). Otherwise answer
+              'rejected' with a one-line reason.
             input: "{steps.reduce.output}"
             model: sonnet
         - type: human

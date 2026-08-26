@@ -1,0 +1,621 @@
+# name: CRM Lead Enrichment with Quality Gate
+# description: Enriches a raw lead list from failover-raced data sources, validates and dedupes deterministically, then puts an accept gate on data quality that is a FILTER rather than a guard - a poor batch routes to manual review instead of aborting the run. The CRM write-back defaults to a dry-run preview and only goes live when explicitly asked.
+# tags: [Sales, RevOps, CRM, LeadEnrichment, DataQuality, Accept, Dedupe, Salesforce, HubSpot, DryRun]
+# category: sales_crm
+
+name: crm-lead-enrichment-quality-gate
+description: >
+  Lead enrichment is where "the model filled in the blanks" is most dangerous,
+  because a fabricated job title looks exactly like a researched one once it is
+  sitting in a CRM field. This template is built so that never happens silently.
+
+  A DETERMINISTIC code step normalises the raw lead list first: lowercases and
+  strips domains, drops free-mail and role addresses, and dedupes on a
+  domain+name key so the same company is not enriched three times and written
+  back three times. That dedupe is Python, not judgement.
+
+  A RACE then fans out to several enrichment providers plus a web-search
+  fallback and takes the FIRST source that returns something usable. This is
+  provider failover, not a vote - losing your enrichment vendor should change
+  your bill, not your data.
+
+  An LLM structures whatever the winning provider returned into one uniform
+  record shape. A second DETERMINISTIC step then validates every record - email
+  syntax, domain agreement between email and company, required-field fill
+  rates, and a duplicate check against the keys computed in step one - and
+  produces a quality score that no model can talk its way past.
+
+  Then the ACCEPT gate, and here it is deliberately a FILTER, not a guard:
+  `fail_on_reject: false`. This is the opposite choice from the contract-review
+  and recruiting templates in this pack, and the reason is the shape of the
+  artefact. A contract extraction is one decision a human will act on, so a
+  rejected one must stop the run. A lead batch is a hundred rows: aborting
+  throws away the ninety good ones to punish the ten bad ones. So the verdict
+  stays advisory, the evidence pack is published, and a CONDITION routes the
+  batch to manual review instead.
+
+  The CRM write-back defaults to a PREVIEW. `crm_write_mode` is "preview" out of
+  the box, which routes to a dry-run notify that logs exactly what would have
+  been written. Setting it to "live" is an explicit act, and even then the gate
+  verdict has to be "approved" for the live branch to be taken.
+
+version: "1.0"
+default_model: sonnet
+default_max_turns: 8
+default_timeout: 900
+
+input_schema:
+  required: ["lead_list"]
+  properties:
+    lead_list:
+      type: string
+      description: "Raw lead rows, one per line: name, company, domain or email, in any order. Straight out of a form export or a conference scan."
+      default: ""
+      example: "Jana Kovar, Northwind Logistics, jana.kovar@northwind-logistics.de"
+    icp_description:
+      type: string
+      description: "Your ideal customer profile, used to score fit. Fit is advisory; it never invents a field."
+      default: "B2B SaaS, 50-500 employees, EU or UK, technical buyer"
+      example: "B2B SaaS, 50-500 employees, EU or UK, technical buyer"
+    required_fields:
+      type: string
+      description: "Comma-separated fields a record must carry to count as complete."
+      default: "company_name,domain,contact_name,job_title,country"
+      example: "company_name,domain,contact_name,job_title,country"
+    min_quality_score:
+      type: number
+      description: "Batch quality score (0-1) below which the batch routes to manual review even if the panel approved."
+      default: 0.7
+      example: "0.7"
+    crm_write_mode:
+      type: string
+      description: "'preview' logs the write-back payload without sending it. 'live' PATCHes the CRM. Defaults to preview on purpose."
+      default: "preview"
+      example: "preview"
+    crm_api_url:
+      type: string
+      description: "CRM REST base that receives the enriched records (Salesforce, HubSpot, Pipedrive)."
+      default: "https://api.hubapi.com/crm/v3/objects/contacts"
+      example: "https://api.hubapi.com/crm/v3/objects/contacts"
+    enrichment_api_url:
+      type: string
+      description: "Primary enrichment provider REST base."
+      default: "https://api.apollo.io/v1/people/match"
+      example: "https://api.apollo.io/v1/people/match"
+    enrichment_api_url_secondary:
+      type: string
+      description: "Secondary enrichment provider used for race failover (different vendor)."
+      default: "https://api.clearbit.com/v2/combined/find"
+      example: "https://api.clearbit.com/v2/combined/find"
+    web_search_url:
+      type: string
+      description: "Web-search endpoint queried in parallel as the last-resort source."
+      default: "https://api.exa.ai/search"
+      example: "https://api.exa.ai/search"
+    revops_channel:
+      type: string
+      description: "RevOps channel that receives the batch outcome."
+      default: "#revops-enrichment"
+      example: "#revops-enrichment"
+
+steps:
+  # 1) DETERMINISTIC intake: normalise, filter and dedupe BEFORE spending a cent
+  #    on enrichment. Deduping after enrichment means paying twice for the same
+  #    company; deduping here means the race runs once per real account.
+  - id: normalize_leads
+    type: code
+    responsibility: "Normalise domains, drop unusable rows, and dedupe on a stable key before any spend."
+    source_hint: "Dedupe must be reproducible: the same list must always collapse to the same keys."
+    owner: "revops-eng"
+    code_config:
+      language: python
+      code: |
+        import re
+
+        raw = str(_input.get('lead_list') or '')
+        required = [f.strip() for f in str(_input.get('required_fields') or '').split(',') if f.strip()]
+
+        FREEMAIL = {
+            'gmail.com', 'googlemail.com', 'yahoo.com', 'hotmail.com', 'outlook.com',
+            'icloud.com', 'me.com', 'proton.me', 'protonmail.com', 'gmx.de', 'seznam.cz',
+        }
+        ROLE_LOCAL = {
+            'info', 'sales', 'support', 'admin', 'hello', 'contact', 'office',
+            'noreply', 'no-reply', 'marketing', 'billing', 'help',
+        }
+
+        rows = []
+        rejected = []
+        for line_no, line in enumerate(raw.splitlines(), start=1):
+            line = line.strip().strip(',;')
+            if not line:
+                continue
+            parts = [p.strip() for p in re.split(r'[,;\t|]', line) if p.strip()]
+
+            email = ''
+            domain = ''
+            for p in parts:
+                m = re.search(r'[\w\.\-\+]+@[\w\-]+\.[\w\.\-]+', p)
+                if m:
+                    email = m.group(0).lower()
+                    domain = email.split('@', 1)[1]
+                    break
+            if not domain:
+                for p in parts:
+                    m = re.search(r'(?:https?://)?(?:www\.)?([\w\-]+\.[\w\.\-]{2,})', p)
+                    if m and '@' not in p and ' ' not in p.strip():
+                        domain = m.group(1).lower()
+                        break
+
+            # Non-email parts, longest-first, give us a name and a company guess.
+            words = [p for p in parts if '@' not in p and not re.match(r'^(?:https?://)?(?:www\.)?[\w\-]+\.[\w\.\-]{2,}$', p)]
+            contact_name = words[0] if words else ''
+            company_name = words[1] if len(words) > 1 else ''
+
+            local = email.split('@', 1)[0] if email else ''
+            if domain and domain in FREEMAIL:
+                rejected.append({'line': line_no, 'reason': 'freemail_domain', 'raw': line[:160]})
+                continue
+            if local and local.split('+')[0] in ROLE_LOCAL:
+                rejected.append({'line': line_no, 'reason': 'role_address', 'raw': line[:160]})
+                continue
+            if not domain and not company_name:
+                rejected.append({'line': line_no, 'reason': 'no_company_or_domain', 'raw': line[:160]})
+                continue
+
+            # Stable dedupe key: domain wins; fall back to a squashed company name.
+            key = domain or re.sub(r'[^a-z0-9]+', '', company_name.lower())
+            rows.append({
+                'source_line': line_no,
+                'dedupe_key': key,
+                'contact_name': contact_name,
+                'company_name': company_name,
+                'domain': domain,
+                'email': email,
+            })
+
+        seen = {}
+        duplicates = []
+        for row in rows:
+            key = row['dedupe_key']
+            if key in seen:
+                duplicates.append({'dropped_line': row['source_line'], 'kept_line': seen[key], 'key': key})
+                continue
+            seen[key] = row['source_line']
+
+        unique = [row for row in rows if row['source_line'] in set(seen.values())]
+
+        result = {
+            'input_rows': len([ln for ln in raw.splitlines() if ln.strip()]),
+            'usable_rows': len(unique),
+            'rejected_rows': rejected[:50],
+            'rejected_count': len(rejected),
+            'duplicates_dropped': duplicates[:50],
+            'duplicate_count': len(duplicates),
+            'dedupe_keys': sorted(seen.keys())[:200],
+            'leads': unique[:200],
+            'required_fields': required,
+            'query_terms': ' OR '.join(sorted({r['domain'] or r['company_name'] for r in unique})[:25]),
+        }
+
+  # 2) RACE BRANCHES. Defined separately with NO depends_on - the race step owns
+  #    their scheduling. First usable source wins; this is failover, not a vote.
+  - id: lookup_enrichment_primary
+    type: http
+    responsibility: "Query the primary enrichment provider."
+    source_hint: "Vendor firmographics are the cheapest good source when they have the account."
+    owner: "revops-eng"
+    http_config:
+      url: "{input.enrichment_api_url}?q_organization_domains={steps.normalize_leads.output.query_terms}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.ENRICHMENT_API_KEY}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  - id: lookup_enrichment_secondary
+    type: http
+    responsibility: "Query a second, different enrichment vendor."
+    source_hint: "A different vendor's coverage gaps are different; that is the whole point of failover."
+    owner: "revops-eng"
+    http_config:
+      url: "{input.enrichment_api_url_secondary}?domain={steps.normalize_leads.output.query_terms}"
+      method: GET
+      headers:
+        Accept: "application/json"
+      auth: "bearer:{env.ENRICHMENT_API_KEY_SECONDARY}"
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  - id: lookup_web_search
+    type: http
+    responsibility: "Search the open web as the last-resort source."
+    source_hint: "When no vendor has the account, a company's own site is still a citable source."
+    owner: "revops-eng"
+    http_config:
+      url: "{input.web_search_url}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.WEB_SEARCH_API_KEY}"
+      body: |
+        {
+          "query": "{steps.normalize_leads.output.query_terms} company headquarters employees industry",
+          "numResults": 20,
+          "type": "keyword"
+        }
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      on_failure: skip
+
+  - id: enrichment_race
+    type: race
+    depends_on: [normalize_leads]
+    responsibility: "Take the first enrichment source that returns something usable."
+    source_hint: "Losing a vendor should change the bill, not the data."
+    owner: "revops-eng"
+    race_config:
+      branches:
+        - [lookup_enrichment_primary]
+        - [lookup_enrichment_secondary]
+        - [lookup_web_search]
+      validator: "len(str(output).strip()) > 20"
+
+  # 3) STRUCTURE whatever the winning provider returned into one uniform record
+  #    shape. The only model on the data path, and it is explicitly forbidden to
+  #    invent - the accept gate below checks that it did not.
+  - id: structure_records
+    type: llm
+    depends_on: [enrichment_race, normalize_leads]
+    model: sonnet
+    responsibility: "Normalise the winning provider's payload into one uniform record shape."
+    source_hint: "Every vendor has a different schema; downstream must read exactly one."
+    owner: "revops-ops"
+    prompt: |
+      Convert the enrichment payload below into a JSON array of lead records.
+
+      THE RULE, which the quality gate downstream will check: a field is filled
+      ONLY from the payload or from the original lead row. If neither contains
+      it, emit null. Do not infer a job title from an email local-part, do not
+      guess a country from a domain suffix, do not construct an email address
+      that does not appear in the sources. A null is a correct answer. An
+      invented value is a defect that will sit in the CRM forever.
+
+      Original normalised leads (authoritative for contact_name, domain, email):
+      {steps.normalize_leads.output.leads}
+
+      Enrichment payload from the winning source:
+      {steps.enrichment_race.output}
+
+      Ideal customer profile, for the fit_rationale field only:
+      {input.icp_description}
+
+      Emit ONLY a JSON array. One object per lead in the normalised list above,
+      in the same order, with exactly these keys:
+        "lead_id"        - the source_line number from the normalised lead
+        "company_name"   - string or null
+        "domain"         - string or null
+        "contact_name"   - string or null
+        "job_title"      - string or null
+        "country"        - string or null
+        "employee_range" - string or null
+        "industry"       - string or null
+        "source"         - which source the enriched fields came from
+        "fit_rationale"  - one sentence on ICP fit, or null if too little is known
+
+      No prose before or after the array. No markdown fence.
+    llm_config:
+      max_tokens: 4000
+
+  # 4) DETERMINISTIC validation and scoring. This is what the batch is actually
+  #    judged on: syntax, agreement between fields, fill rates, and duplicates
+  #    against the keys computed in step one. No model can move these numbers.
+  - id: validate_records
+    type: code
+    depends_on: [structure_records, normalize_leads]
+    responsibility: "Validate every record and compute a batch quality score in code."
+    source_hint: "Data quality has to be a measurement, not an impression."
+    owner: "revops-eng"
+    code_config:
+      language: python
+      code: |
+        import json
+        import re
+
+        payload = str(_steps.get('structure_records') or '').strip()
+        normalised = _steps.get('normalize_leads') or {}
+        required = normalised.get('required_fields') or []
+        known_keys = set(normalised.get('dedupe_keys') or [])
+
+        # --- Recover the array even if the model wrapped it in a fence or prose.
+        records = []
+        parse_error = ''
+        candidate = payload
+        fence = re.search(r'```(?:json)?\s*(.+?)```', payload, re.S)
+        if fence:
+            candidate = fence.group(1).strip()
+        if not candidate.startswith('['):
+            bracket = candidate.find('[')
+            if bracket >= 0:
+                candidate = candidate[bracket:candidate.rfind(']') + 1]
+        try:
+            parsed = json.loads(candidate)
+            records = parsed if isinstance(parsed, list) else [parsed]
+        except ValueError as exc:
+            parse_error = str(exc)[:200]
+
+        EMAIL_RE = r'^[\w\.\-\+]+@[\w\-]+\.[\w\.\-]+$'
+
+        valid = []
+        invalid = []
+        duplicate_keys = []
+        seen_keys = set()
+        fill_counts = {field: 0 for field in required}
+
+        for record in records:
+            if not isinstance(record, dict):
+                invalid.append({'record': str(record)[:120], 'reasons': ['not_an_object']})
+                continue
+            reasons = []
+            domain = str(record.get('domain') or '').strip().lower()
+            email = str(record.get('email') or '').strip().lower()
+
+            for field in required:
+                value = record.get(field)
+                if value not in (None, '', 'null', 'unknown', 'N/A'):
+                    fill_counts[field] += 1
+                else:
+                    reasons.append('missing_' + field)
+
+            # Email must be syntactically valid AND agree with the company domain.
+            if email:
+                if not re.match(EMAIL_RE, email):
+                    reasons.append('email_syntax')
+                elif domain and not email.endswith('@' + domain):
+                    reasons.append('email_domain_disagrees_with_company_domain')
+
+            # A domain the intake step never saw means the model introduced it.
+            if domain and known_keys and domain not in known_keys:
+                reasons.append('domain_not_in_source_list')
+
+            key = domain or re.sub(r'[^a-z0-9]+', '', str(record.get('company_name') or '').lower())
+            if key and key in seen_keys:
+                duplicate_keys.append(key)
+                reasons.append('duplicate_in_output')
+            elif key:
+                seen_keys.add(key)
+
+            if reasons:
+                invalid.append({'lead_id': record.get('lead_id'), 'domain': domain, 'reasons': reasons})
+            else:
+                valid.append(record)
+
+        total = len(records)
+        expected = int(normalised.get('usable_rows') or 0)
+        fill_rates = {
+            field: round(count / total, 3) if total else 0.0
+            for field, count in fill_counts.items()
+        }
+
+        # --- Batch quality: how many records are clean, how completely the
+        #     required fields are filled, and whether the row count survived.
+        clean_ratio = round(len(valid) / total, 3) if total else 0.0
+        mean_fill = round(sum(fill_rates.values()) / len(fill_rates), 3) if fill_rates else 0.0
+        count_ratio = round(min(total, expected) / expected, 3) if expected else 0.0
+        quality_score = round((clean_ratio * 0.5) + (mean_fill * 0.3) + (count_ratio * 0.2), 3)
+
+        min_quality = float(_input.get('min_quality_score', 0.7) or 0.7)
+
+        result = {
+            'records': valid[:200],
+            'record_count': total,
+            'expected_count': expected,
+            'valid_count': len(valid),
+            'invalid_count': len(invalid),
+            'invalid_records': invalid[:50],
+            'duplicate_count': len(duplicate_keys),
+            'field_fill_rates': fill_rates,
+            'clean_ratio': clean_ratio,
+            'quality_score': quality_score,
+            'min_quality_score': min_quality,
+            'meets_quality_bar': quality_score >= min_quality and not parse_error,
+            'parse_error': parse_error,
+        }
+
+  # 5) THE QUALITY GATE. Two targets: the deterministic validation report is the
+  #    PRIMARY target, so the schema_match check below runs against a real dict
+  #    rather than against a blob of model text. The model's own output is the
+  #    second target so the judges can see what was actually written.
+  #
+  #    fail_on_reject: FALSE. This is a FILTER, deliberately unlike the
+  #    contract-review and recruiting gates in this pack. The artefact is a
+  #    BATCH: aborting the run to punish ten bad rows also discards the ninety
+  #    good ones, and loses the evidence pack that says which was which. The
+  #    verdict stays advisory and the condition below routes on it.
+  #
+  #    on_reject stays at the default `fail` rather than `retry_target`, because
+  #    the primary target is a deterministic code step - re-running it would
+  #    produce byte-identical output and burn a round for nothing.
+  - id: accept_data_quality
+    type: accept
+    responsibility: "Judge whether this enriched batch is fit to write to a CRM, and publish the evidence either way."
+    source_hint: "A fabricated job title looks exactly like a researched one once it is in a CRM field."
+    owner: "revops-ops"
+    accept_config:
+      targets: [validate_records, structure_records]
+
+      # FREE and DETERMINISTIC. schema_match works here because the primary
+      # target is a code step returning a dict - it scores how many of the
+      # expected keys are actually present and non-null.
+      checks:
+        - type: not_empty
+        - type: schema_match
+          value:
+            type: object
+            properties:
+              records: {type: array}
+              record_count: {type: integer}
+              valid_count: {type: integer}
+              invalid_count: {type: integer}
+              duplicate_count: {type: integer}
+              field_fill_rates: {type: object}
+              quality_score: {type: number}
+              meets_quality_bar: {type: boolean}
+        - type: contains
+          value: "quality_score"
+        # These two are retargeted at the MODEL's output with `step:` - the
+        # cheapest possible invention detector, and it costs nothing.
+        - type: regex_match
+          value: '"lead_id"'
+          step: structure_records
+        - type: not_contains
+          value: "@example.com"
+          step: structure_records
+
+      judges:
+        - name: field_grounding
+          model: sonnet
+          max_tokens: 800
+          rubric: |
+            You are judging whether an enriched lead batch INVENTED data.
+
+            The enrichment rule was: fill a field only from the provider payload
+            or the original lead row, and emit null otherwise.
+
+            REJECT if you see any of:
+            - a job title that looks inferred from an email local-part
+            - a country inferred from a domain suffix rather than stated
+            - an employee_range or industry that reads like a plausible guess
+              for a company of that name rather than a retrieved fact
+            - an email address that does not appear in the source rows
+            - a fit_rationale that asserts facts not present in the record
+
+            A record full of nulls is CORRECT when the sources were thin. Do not
+            reject a batch for being honestly sparse - the fill rates are
+            reported separately and a human reads them.
+
+        - name: batch_usability
+          model: haiku
+          max_tokens: 600
+          rubric: |
+            You are judging whether this batch is USABLE by a sales team, given
+            the validation report you are shown.
+
+            REJECT if:
+            - the invalid_count is a large fraction of record_count
+            - record_count is far below expected_count, meaning records were
+              silently dropped rather than nulled
+            - parse_error is non-empty
+            - duplicate_count is greater than zero after the batch was already
+              deduped upstream, which means the model merged or split rows
+
+            APPROVE if a RevOps owner could import the valid records today and
+            work the invalid list by hand.
+
+      quorum: 0
+      on_reject: fail
+      max_cost_usd: 0.30
+      fail_on_reject: false
+
+  # 6) ROUTE. The SAFE path is the `then` branch on purpose: it is taken unless
+  #    someone has explicitly asked for a live write AND the gate approved AND
+  #    the deterministic quality bar was met.
+  - id: route_writeback
+    type: condition
+    depends_on: [accept_data_quality, validate_records]
+    responsibility: "Preview by default; write to the CRM only on an explicit, approved, quality-passing run."
+    source_hint: "A bundled template must be safe to run on the day it is installed."
+    owner: "revops-ops"
+    condition_config:
+      expression: >-
+        '{input.crm_write_mode}' != 'live'
+        or '{steps.accept_data_quality.output.decision}' != 'approved'
+        or {steps.validate_records.output.meets_quality_bar} == False
+      then: [writeback_preview]
+      else: [writeback_crm_live]
+
+  # 6a) PREVIEW - the default. A dry-run notify that logs the exact payload that
+  #     WOULD have been written, so the batch can be inspected before anyone
+  #     flips crm_write_mode to "live".
+  - id: writeback_preview
+    type: notify
+    responsibility: "Log the write-back payload without sending it."
+    source_hint: "Seeing what would be written is how you learn whether to write it."
+    owner: "revops-ops"
+    notify_config:
+      dry_run: true
+      service: slack
+      channel: "{input.revops_channel}"
+      subject: "CRM enrichment preview - not written"
+      message: >
+        PREVIEW ONLY - nothing was written to the CRM. Mode
+        '{input.crm_write_mode}', gate verdict
+        '{steps.accept_data_quality.output.decision}', quality
+        {steps.validate_records.output.quality_score} against a
+        {steps.validate_records.output.min_quality_score} bar.
+        {steps.validate_records.output.valid_count} record(s) would have been
+        written, {steps.validate_records.output.invalid_count} held back.
+        Payload: {steps.validate_records.output.records}
+
+  # 6b) LIVE WRITE-BACK. Only reachable on an explicit crm_write_mode=live run
+  #     that ALSO passed the gate and the deterministic quality bar.
+  - id: writeback_crm_live
+    type: http
+    responsibility: "PATCH the validated records into the CRM."
+    source_hint: "Only records that passed both the deterministic bar and the panel may land in a CRM field."
+    owner: "revops-eng"
+    http_config:
+      url: "{input.crm_api_url}/batch/upsert"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      auth: "bearer:{env.CRM_API_TOKEN}"
+      body: |
+        {
+          "idProperty": "domain",
+          "inputs": {steps.validate_records.output.records},
+          "_provenance": {
+            "quality_score": "{steps.validate_records.output.quality_score}",
+            "accept_decision": "{steps.accept_data_quality.output.decision}",
+            "accept_reason": "{steps.accept_data_quality.output.reason}"
+          }
+        }
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      on_failure: abort
+
+  # 7) NOTIFY RevOps with the batch outcome. Depends on BOTH branch heads so it
+  #    runs whichever path was taken. dry_run: true per the 0.44 convention.
+  - id: notify_revops
+    type: notify
+    depends_on: [writeback_preview, writeback_crm_live]
+    responsibility: "Report the batch outcome and where the bad rows went."
+    source_hint: "RevOps tracks enrichment yield and rework volume from this channel."
+    owner: "revops-ops"
+    notify_config:
+      dry_run: true
+      service: slack
+      channel: "{input.revops_channel}"
+      message: >
+        Enrichment batch done. {steps.normalize_leads.output.input_rows} row(s)
+        in, {steps.normalize_leads.output.usable_rows} usable after dropping
+        {steps.normalize_leads.output.rejected_count} unusable and
+        {steps.normalize_leads.output.duplicate_count} duplicate(s). Quality
+        {steps.validate_records.output.quality_score}
+        ({steps.validate_records.output.valid_count} valid /
+        {steps.validate_records.output.invalid_count} invalid). Gate:
+        {steps.accept_data_quality.output.decision} -
+        {steps.accept_data_quality.output.reason}. Write mode
+        '{input.crm_write_mode}'.
+
+on_complete:
+  storage_path: "crm-lead-enrichment-quality-gate/{run_id}/result.json"

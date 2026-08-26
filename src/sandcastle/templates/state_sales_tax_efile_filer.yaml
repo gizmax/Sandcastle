@@ -446,6 +446,8 @@ steps:
     type: gate
     depends_on: [review_gate]
     gate_config:
+      # Advisory: rejection means 'period-over-period deviation is large' - whose stated purpose is to send it to approve_filing for extra human scrutiny.
+      fail_on_reject: false
       strategies:
         - type: llm_eval
           config:

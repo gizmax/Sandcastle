@@ -13,7 +13,7 @@ _logger = logging.getLogger(__name__)
 
 _VALID_SANDBOX_BACKENDS = frozenset({"e2b", "docker", "local", "cloudflare"})
 _VALID_STORAGE_BACKENDS = frozenset({"local", "s3"})
-_VALID_MEMORY_BACKENDS = frozenset({"local", "cloud"})
+_VALID_MEMORY_BACKENDS = frozenset({"local", "cloud", "filesystem"})
 _VALID_LOG_LEVELS = frozenset({"debug", "info", "warning", "error", "critical"})
 _VALID_UPDATE_CHANNELS = frozenset({"stable", "beta", "pin"})
 
@@ -140,6 +140,13 @@ class Settings(BaseSettings):
     # single-tenant environment.
     code_steps_allow_inprocess_fallback: bool = False
 
+    # Directories a `type: acp` step may point an external agent harness at.
+    # Empty = the step type is disabled, which is the default: an acp step
+    # spawns somebody else's agent with read/write access to a working
+    # directory, and "any directory on this box" is not a defensible default.
+    # Set e.g. SANDCASTLE_ACP_ALLOWED_ROOTS='["/srv/checkouts"]'.
+    acp_allowed_roots: list[str] = Field(default_factory=list)
+
     # Database (empty = local SQLite mode)
     database_url: str = ""
 
@@ -183,6 +190,50 @@ class Settings(BaseSettings):
 
     # Workflows directory (default: ~/.sandcastle/workflows)
     workflows_dir: str = _DEFAULT_WORKFLOWS_DIR
+
+    # Step effect ledger (engine/effects.py): claim a side effect before it
+    # fires so a replay, fork or approval resume memoizes it instead of
+    # re-POSTing / re-spending. EFFECT_LEDGER_ENABLED=0 is the kill switch.
+    effect_ledger_enabled: bool = True
+    # How long a claim stays valid before an unfinished effect counts as
+    # abandoned (and therefore uncertain). Longer than the longest step.
+    effect_lease_seconds: int = 900
+    # Ledger rows are deleted this many days after they settle.
+    effect_ledger_ttl_days: int = 30
+    # How long to wait for another worker's in-flight claim to settle before
+    # declaring the effect uncertain.
+    effect_claim_wait_seconds: float = 5.0
+    # What to do when the ledger itself is unreachable (no DB, missing table).
+    # None means "decide from the deployment": local mode executes live with a
+    # warning so `sandcastle run --local` keeps working without a database,
+    # while a server deployment fails the step - there, an unreachable ledger
+    # means something is wrong, and re-sending a POST is the exact bug the
+    # ledger exists to prevent. Set True/False to override either way.
+    effect_ledger_required: bool | None = None
+
+    # Silent-success sweep (engine/silent_success.py): cross-check what a
+    # completed run *claimed* against the ledger and the audit chain. Evidence
+    # is written from more than one session, and the run row itself is written
+    # by the worker after the executor returns, so a claim observed this soon
+    # after it was made may simply be waiting for a record that is on its way.
+    # Claims younger than this are counted in the report, never flagged. 0
+    # disables the window.
+    silent_success_lag_hours: float = 1.0
+
+    # Crash-resume (queue/worker.py: _recover_stuck_runs). A run stranded in
+    # RUNNING by a dead worker is requeued in its own effect scope and
+    # re-executes from the top; the ledger memoizes the prefix that already
+    # landed, so nothing sends twice and the prefix costs $0. Turning this off
+    # restores the pre-0.46 behaviour: a crashed run goes straight to FAILED.
+    # Resume is *refused* - and the run failed as before - whenever the ledger
+    # is off or unreachable, because a replay without it would re-fire every
+    # completed effect, which is the exact bug 0.45 fixed.
+    crash_resume_enabled: bool = True
+    # How many times one run may be requeued after a crash before it is failed
+    # for good. Small on purpose: a run that kills its worker on the same step
+    # every time (OOM, a segfaulting sandbox) is a poison run, and this cap is
+    # the only thing standing between it and an infinite requeue loop.
+    max_recovery_attempts: int = 2
 
     # Hierarchical workflows
     max_workflow_depth: int = 5
@@ -230,10 +281,15 @@ class Settings(BaseSettings):
 
     # Memory
     memory_enabled: bool = True
-    memory_backend: str = "local"  # "local" | "cloud"
+    memory_backend: str = "local"  # "local" | "cloud" | "filesystem"
     memory_graph_enabled: bool = False
     memory_max_age_days: int = 90  # TTL for memory decay (0 = no expiry)
     memory_admit_threshold: float = 0.3  # Minimum importance score to store
+
+    # Filesystem ("markdown vault") backend. Only read when
+    # memory_backend == "filesystem"; empty root means <data_dir>/memory-vault.
+    memory_fs_root: str = ""
+    memory_fs_git: bool = True  # Commit each run's memory changes to the vault repo
 
     # Security
     credential_encryption_key: str = ""  # Fernet key for encrypting tool credentials at rest

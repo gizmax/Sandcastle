@@ -56,6 +56,11 @@ class EventBus:
         "step.started",
         "step.completed",
         "step.failed",
+        # Streamed while a step is still running: delegate publishes sub-run
+        # transitions, acp publishes the agent's message chunks and tool calls.
+        # It was already being published unregistered, which logged an "unknown
+        # event type" warning on every emit.
+        "step.progress",
         "dlq.new",
     }
 

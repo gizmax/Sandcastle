@@ -524,6 +524,8 @@ steps:
     type: gate
     depends_on: [filter_material]
     gate_config:
+      # Advisory: rejection means 'nothing material on the watch list today' - the normal case, handled by the notify_clean branch.
+      fail_on_reject: false
       strategies:
         - type: llm_eval
           config:

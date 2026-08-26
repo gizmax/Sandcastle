@@ -359,6 +359,8 @@ steps:
   - id: materiality_gate
     type: gate
     gate_config:
+      # Advisory: per-cost-center. Rejection means 'not a material variance' - the normal case; the sweep must keep looping and reach notify_clean.
+      fail_on_reject: false
       strategies:
         - type: llm_eval
           config:

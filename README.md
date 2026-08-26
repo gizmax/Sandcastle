@@ -1,8 +1,8 @@
 # Sandcastle
 
-**Build once. Run anywhere.** Sandcastle is an open-source, production-ready orchestrator for AI agents. **Describe a workflow in plain English and it builds it** (or write the YAML yourself); run it on **any model** — Claude, GPT, Mistral, or a local model on your own box — and move between them with one line; deploy it **your way** — cloud, your own server, fully air-gapped, or EU-only; and it **gets better over time**, on its own. Local models run at `$0/run` with hard data-residency enforcement and a tamper-evident audit trail; the cloud is there too, with 7 providers and auto-failover, 25 step types, verified templates, and a full dashboard. Sovereign by default. European-built.
+**Build once. Run anywhere.** Sandcastle is an open-source, production-ready orchestrator for AI agents. **Describe a workflow in plain English and it builds it** (or write the YAML yourself); run it on **any model** — Claude, GPT, Mistral, or a local model on your own box — and move between them with one line; deploy it **your way** — cloud, your own server, fully air-gapped, or EU-only; and it **gets better over time**, on its own. Local models run at `$0/run` with hard data-residency enforcement and a tamper-evident audit trail; the cloud is there too, with 7 providers and auto-failover, 26 step types, verified templates, and a full dashboard. Sovereign by default. European-built.
 
-[![PyPI](https://img.shields.io/badge/PyPI-v0.44.0-blue?style=flat-square)](https://pypi.org/project/sandcastle-ai/0.44.0/)
+[![PyPI](https://img.shields.io/badge/PyPI-v0.47.0-blue?style=flat-square)](https://pypi.org/project/sandcastle-ai/0.47.0/)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-17154%20passing-brightgreen?style=flat-square)](https://github.com/gizmax/Sandcastle/actions)
@@ -58,7 +58,7 @@
 - [Multi-Provider Model Routing](#multi-provider-model-routing)
 - [64 Built-in Integrations](#64-built-in-integrations)
 - [Workflow Engine](#workflow-engine)
-- [25 Step Types](#25-step-types)
+- [26 Step Types](#26-step-types)
 - [Managed Agents](#managed-agents)
 - [Human Approval Gates](#human-approval-gates)
 - [Self-Optimizing Workflows (AutoPilot)](#self-optimizing-workflows-autopilot)
@@ -648,7 +648,7 @@ Once connected, ask your AI assistant to:
 | **Multi-provider model routing** (Claude, OpenAI, MiniMax, Google/Gemini, Mistral, Ollama, oMLX) | Yes |
 | **⚡ Spark Mode** — auto-detects NVIDIA DGX Spark, local-inference defaults, $0/run, air-gappable | Yes |
 | **64 built-in integrations** across 11 categories | Yes |
-| **25 step types** (standard, llm, http, code, race, sensor, gate, parse, managed-agent...) | Yes |
+| **27 step types** (standard, llm, http, code, race, sensor, gate, parse, managed-agent, acp...) | Yes |
 | **Zero-config local mode** | Yes |
 | **DAG workflow orchestration** | Yes |
 | **Parallel step execution** | Yes |
@@ -987,9 +987,9 @@ For fine-grained control, you can still reference specific outputs explicitly us
 
 ---
 
-## 25 Step Types
+## 26 Step Types
 
-Sandcastle supports 25 step types for building complex workflows beyond simple LLM prompts:
+Sandcastle supports 27 step types for building complex workflows beyond simple LLM prompts:
 
 | Phase | Type | Description |
 |-------|------|-------------|
@@ -1009,6 +1009,7 @@ Sandcastle supports 25 step types for building complex workflows beyond simple L
 | **Advanced** | `delegate` | Spawn a sub-workflow and collect results |
 | **Advanced** | `openclaw` | Delegate to an autonomous OpenClaw agent |
 | **Advanced** | `managed-agent` | Delegate to Anthropic Managed Agents (15 built-in templates) |
+| **Advanced** | `acp` | Drive an external agent harness (Claude Code, Codex, Gemini CLI, goose) over the Agent Client Protocol - see [docs/acp.md](docs/acp.md) |
 | **Built-in** | `approval` | Human approval gate with timeout and auto-action |
 | **Built-in** | `sub_workflow` | Execute another workflow as a step |
 | **Built-in** | `browser` | Web automation with Playwright, LightPanda, or Browserbase |
@@ -1564,7 +1565,7 @@ Sandcastle includes a built-in memory system that gives agents persistent contex
 
 ```python
 # Configured via environment variables
-MEMORY_BACKEND=local        # "local" (SQLite + embeddings) or "cloud" (Mem0)
+MEMORY_BACKEND=local        # "local" (Qdrant + fastembed) or "cloud" (Mem0)
 MEMORY_GRAPH_ENABLED=false  # Enable Neo4j graph backend
 MEMORY_MAX_AGE_DAYS=90      # TTL for memory decay (0 = keep forever)
 MEMORY_ADMIT_THRESHOLD=0.3  # Minimum quality score for admission
@@ -1695,7 +1696,7 @@ Real-time activity stream on the dashboard: workflow runs, failures, edits, API 
   <img src="docs/screenshots/template-browser.png" alt="Template Browser" width="720" />
 </p>
 
-Sandcastle ships with 248 built-in workflow templates. The [Community Hub](https://sandcastle-ai.eu/hub) lists 181 templates, including 8 community-submitted templates, alongside curated collections for marketing, sales, DevOps, and more.
+Sandcastle ships with 248 built-in workflow templates. The [Community Hub](https://sandcastle-ai.eu/hub) lists 283 templates, including 35 community-submitted templates, alongside curated collections for marketing, sales, DevOps, and more.
 
 | Category | Built-in Templates |
 |----------|-----------|
@@ -2386,7 +2387,7 @@ flowchart TD
     A2A["A2A Agents"] -->|"POST /a2a"| API
     AGUI["AG-UI Clients"] -->|"GET /api/agui/stream"| API
 
-    API --> Engine["Workflow Engine\n(DAG executor, 25 step types)"]
+    API --> Engine["Workflow Engine\n(DAG executor, 27 step types)"]
 
     Engine --> Standard["Standard Steps"]
     Engine --> Sub["Sub-Workflow Steps\n(recursive execution)"]
@@ -2520,8 +2521,22 @@ CSP_REPORT_ONLY=false          # Content-Security-Policy in report-only mode
 DEFAULT_MAX_COST_USD=0    # 0 = no global budget limit
 MAX_WORKFLOW_DEPTH=5      # max recursion depth for hierarchical workflows
 
+# Step effect ledger (a side effect fires once per replay lineage)
+EFFECT_LEDGER_ENABLED=true     # kill switch for the whole mechanism
+EFFECT_LEASE_SECONDS=900       # after this, an unfinished effect is "uncertain"
+EFFECT_LEDGER_TTL_DAYS=30      # settled rows are pruned at worker startup
+EFFECT_CLAIM_WAIT_SECONDS=5    # wait for another worker's in-flight claim
+# EFFECT_LEDGER_REQUIRED=      # unset = local runs live, servers fail closed
+
+# Silent-success sweep (`sandcastle audit silent-success --since 48h`)
+SILENT_SUCCESS_LAG_HOURS=1     # claims younger than this are counted, not flagged
+
+# Crash resume (a run stranded by a dead worker replays instead of failing)
+CRASH_RESUME_ENABLED=true      # false restores the pre-0.46 "mark it FAILED"
+MAX_RECOVERY_ATTEMPTS=2        # per run, then FAILED - stops a poison run looping
+
 # Agent Memory
-MEMORY_BACKEND=local           # "local" (SQLite + embeddings) or "cloud"
+MEMORY_BACKEND=local           # "local" (Qdrant + fastembed) or "cloud"
 MEMORY_MAX_AGE_DAYS=90         # TTL for memory decay (0 = keep forever)
 MEMORY_ADMIT_THRESHOLD=0.3     # Minimum quality score for admission
 MEMORY_GRAPH_ENABLED=false     # Enable Neo4j graph backend

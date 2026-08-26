@@ -571,3 +571,44 @@ class TestHealerApi:
         assert entry["diagnosis"] == "prompt was ambiguous"
         assert entry["status"] == "proposed"
         assert entry["to_version"] == 2
+
+class TestEmitAuditPersists:
+    """The healer's audit events must survive the session, not just stage in it.
+
+    _emit_audit opened a session, staged the event, and let the context
+    manager exit - which rolls back on PostgreSQL, so every healer event
+    silently vanished from the audit chain there. Every other
+    append_audit_event caller commits.
+
+    Honest limitation: on this SQLite test harness the pysqlite driver's
+    savepoint quirk (no implicit BEGIN before SAVEPOINT, so RELEASE commits)
+    masks the bug - this test passes with or without the fix here. It pins
+    the persistence contract; the dialect where the fix matters is Postgres.
+    """
+
+    @pytest.mark.asyncio
+    async def test_emit_audit_event_is_committed(self):
+        from sqlalchemy import select
+
+        from sandcastle.engine.healer import _emit_audit
+        from sandcastle.models.db import AuditEvent, Run, RunStatus, async_session
+
+        # audit_events.run_id is a foreign key; the run must exist or the
+        # insert fails and _emit_audit swallows it.
+        run_id = uuid.uuid4()
+        async with async_session() as session:
+            session.add(Run(id=run_id, workflow_name="healer-audit-test", status=RunStatus.FAILED))
+            await session.commit()
+
+        await _emit_audit("healer.patch_proposed", run_id=str(run_id), payload={"x": 1})
+
+        # A fresh session must see the row; an uncommitted one rolls back.
+        async with async_session() as session:
+            rows = (
+                (await session.execute(select(AuditEvent).where(AuditEvent.run_id == run_id)))
+                .scalars()
+                .all()
+            )
+        assert len(rows) == 1
+        assert rows[0].event_type == "healer.patch_proposed"
+        assert rows[0].actor_id == "healer"

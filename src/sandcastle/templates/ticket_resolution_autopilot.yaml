@@ -204,6 +204,8 @@ steps:
     type: gate
     depends_on: [draft_race]
     gate_config:
+      # Advisory: score_decision reads this verdict and route_decision escalates a rejection to human_review. A non-deflectable ticket is a normal outcome.
+      fail_on_reject: false
       strategies:
         - type: llm_eval
           config:

@@ -349,6 +349,8 @@ steps:
   - id: grade_answer
     type: gate
     gate_config:
+      # Advisory: per-case grader. A failing eval case must be RECORDED and aggregated, not abort the harness.
+      fail_on_reject: false
       strategies:
         - type: llm_eval
           config:
@@ -585,6 +587,8 @@ steps:
     type: gate
     depends_on: [diff_scores]
     gate_config:
+      # Advisory: this check is INVERTED - it approves when drift IS present, so 'rejected' means a clean eval. The clean path (notify_clean) must still run.
+      fail_on_reject: false
       strategies:
         - type: llm_eval
           config:

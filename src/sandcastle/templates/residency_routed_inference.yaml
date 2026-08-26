@@ -291,6 +291,8 @@ steps:
     type: gate
     depends_on: [residency_check]
     gate_config:
+      # Advisory: route_on_violation handles a failed residency check by re-serving on the in-region on-prem provider. Failing here would kill the fallback AND the attestation/audit trail.
+      fail_on_reject: false
       strategies:
         - type: llm_eval
           config:

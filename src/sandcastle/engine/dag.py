@@ -7,6 +7,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -244,6 +245,82 @@ class GateConfig:
     strategies: list[dict] = field(
         default_factory=list
     )  # [{type: "llm_eval"|"human"|"timeout", config: {...}}]
+    # A rejected gate fails the step, so the workflow stops instead of walking
+    # past its own guard rail.  Set False to keep the legacy advisory behavior,
+    # where the rejection lands in output.decision and nothing acts on it.
+    fail_on_reject: bool = True
+
+
+# An accept step may re-work its target at most this many times, whatever the
+# YAML asks for.  A judge that can be re-rolled without limit is a dice cup.
+MAX_ACCEPT_ROUNDS = 5
+
+VALID_ACCEPT_ON_REJECT = frozenset({"fail", "retry_target", "escalate_to_human"})
+
+# ``llm_judge`` is banned in checks:.  It routes into the eval harness's
+# advisor path, which returns bare text, discards the cost it estimated and
+# fabricates a 0.5 score on error.  checks: is the deterministic, free half of
+# the verdict; paid judging belongs in judges:, billed through _safe_cost.
+BANNED_ACCEPT_CHECK_TYPES = frozenset({"llm_judge"})
+
+VALID_ACCEPT_CHECK_TYPES = frozenset(
+    {
+        "contains",
+        "not_contains",
+        "not_empty",
+        "equals",
+        "regex_match",
+        "schema_match",
+        "max_cost",
+        "max_duration",
+    }
+)
+
+
+@dataclass
+class AcceptJudge:
+    """One LLM judge on an ``accept`` step's panel."""
+
+    rubric: str = ""
+    model: str = "haiku"
+    name: str = ""
+    max_tokens: int = 512
+
+
+@dataclass
+class AcceptConfig:
+    """Configuration for a ``type: accept`` step - an outcome gate.
+
+    A worker step produced output; an accept step decides whether that work met
+    the goal before the run is allowed to continue.  "The agent finished" and
+    "the agent succeeded" are different facts, and only this step records the
+    second one.
+
+    Cost is meant to stay visible: ``checks`` are deterministic and run first,
+    so work can be rejected for $0 before any judge is paid, and the defaults
+    are one judge and a unanimous quorum.
+    """
+
+    # The step(s) whose output is judged.  Spelled ``target:`` in the singular
+    # for the common one-step case.
+    targets: list[str] = field(default_factory=list)
+    # Deterministic assertions, evaluated before any judge runs.  These are
+    # eval.AssertionDef - the same objects an eval suite uses.
+    checks: list = field(default_factory=list)
+    judges: list[AcceptJudge] = field(default_factory=list)
+    # N-of-M.  0 means unanimous, resolved against len(judges) at runtime, so
+    # adding a judge tightens the panel rather than silently loosening it.
+    quorum: int = 0
+    on_reject: str = "fail"  # fail | retry_target | escalate_to_human
+    max_rounds: int = 1  # re-work rounds; hard-capped at MAX_ACCEPT_ROUNDS
+    max_cost_usd: float = 0.0  # accept-local judge budget; 0 = no local cap
+    # Mirrors GateConfig: a rejected accept fails the step so the workflow
+    # stops.  False keeps the verdict advisory, in output.decision.
+    fail_on_reject: bool = True
+    # Human fallback, raised through the existing ApprovalRequest surface.
+    escalation_message: str = "Accept gate needs a human verdict"
+    timeout_hours: float | None = None
+    on_timeout: str = "abort"
 
 
 @dataclass
@@ -313,6 +390,57 @@ class OpenClawConfig:
     api_token: str = ""  # Bearer token for gateway auth
     timeout_seconds: int = 300
     cost_per_call: float = 0.0
+
+
+@dataclass
+class AcpConfig:
+    """Configuration for a ``type: acp`` step - an external agent harness.
+
+    Sandcastle spawns the harness as a subprocess and talks Agent Client
+    Protocol (newline-delimited JSON-RPC over stdio) to it. Every default here
+    is the closed one: no filesystem, no terminal, permissions rejected, no
+    inherited environment. See ``engine/acp_client.py`` and ``docs/acp.md``.
+    """
+
+    # Which harness. Exactly one of command / agent.
+    command: str = ""                # argv[0]; resolved against PATH, never shell-interpreted
+    args: list[str] = field(default_factory=list)
+    agent: str = ""                  # shorthand: claude | codex | gemini | goose
+    env: dict = field(default_factory=dict)          # extra vars, template-resolved
+    env_passthrough: list[str] = field(default_factory=list)  # parent vars to forward, by name
+
+    # Session
+    cwd: str = ""                    # required; absolute, inside settings.acp_allowed_roots
+    additional_directories: list[str] = field(default_factory=list)
+    mcp_servers: list = field(default_factory=list)  # passed through as ACP McpServer[]
+    mode: str = ""                   # opaque agent-defined modeId; grants no safety
+    config_options: dict = field(default_factory=dict)
+
+    # The prompt
+    message: str = ""                # falls back to step.prompt
+
+    # What the agent is allowed to do to us
+    permission: str = "reject"       # reject | allow_once | allow_always | ask
+    permission_rules: list = field(default_factory=list)  # ordered, first match wins
+    filesystem: str = "none"         # none | read | readwrite
+    terminal: bool = False           # 0.45: must stay False
+    elicitation: str = "decline"     # 0.45: decline only
+
+    # Limits and accounting
+    timeout: int = 900               # seconds for the whole turn, spawn included
+    idle_timeout: int = 180          # seconds without a session/update before we abort
+    max_output_chars: int = 200000
+    # Flat declared cost, used when the harness reports none. ACP v1 has no
+    # per-turn token counts, so max_cost_usd is ADVISORY for acp steps: a
+    # harness that volunteers no cost is invisible to the budget guard.
+    cost_per_call: float = 0.0
+    protocol_version: int = 1        # the integer on the wire; 2 is an unstable draft
+    strict_version: bool = True
+
+    # Shaping the result
+    output_format: str = "text"      # text | json | full
+    include_thoughts: bool = False
+    include_tool_calls: bool = True
 
 
 @dataclass
@@ -519,6 +647,8 @@ VALID_STEP_TYPES = frozenset(
         "trajectory-replay",
         "computer-use",
         "tool",
+        "acp",
+        "accept",
     }
 )
 
@@ -528,6 +658,9 @@ NON_PROMPT_TYPES = frozenset(
         "http", "code", "condition", "loop", "race", "sensor", "gate",
         "transform", "notify", "composio", "openclaw", "parse",
         "managed-agent", "agent", "trajectory-replay", "computer-use", "tool",
+        "acp",
+        # An accept step carries no prompt of its own; each judge brings a rubric.
+        "accept",
     }
 )
 
@@ -537,6 +670,12 @@ NON_LLM_TYPES = frozenset(
         "http", "code", "condition", "loop", "race", "sensor",
         "transform", "notify", "composio", "openclaw", "parse",
         "managed-agent", "agent", "trajectory-replay", "computer-use", "tool",
+        # An accept step's models live on its judges, not on step.model.
+        "accept",
+        # The model an ACP harness picks is its own business, not ours - it runs
+        # against its own credentials. Without this, every acp step would fail
+        # parsing on a model name we never validated in the first place.
+        "acp",
     }
 )
 
@@ -589,6 +728,8 @@ class StepDefinition:
     parse_config: ParseConfig | None = None
     report_config: ReportConfig | None = None
     managed_agent_config: ManagedAgentConfig | None = None
+    acp_config: AcpConfig | None = None
+    accept_config: AcceptConfig | None = None
     trajectory_replay_config: dict | None = None
     computer_use_config: dict | None = None
     # Dynamic context retrieval before execution
@@ -609,6 +750,16 @@ class StepDefinition:
     # Empty = run locally as always. Non-empty = the dispatcher picks a live mesh
     # node whose capability manifest satisfies ALL entries (local node preferred).
     requires: list[str] = field(default_factory=list)
+    # Step effect ledger (engine/effects.py). "" = the per-type default:
+    # anything that spends money or changes the world memoizes, pure and
+    # composite types stay live, and http splits on method (GET is live).
+    #   memoize - claim the effect once per replay lineage, then reuse it
+    #   live    - always re-execute; never consult or write the ledger
+    replay: str = ""
+    # What to do when a previous attempt claimed this effect and never reported
+    # an outcome: "fail" (default - we do not know whether the POST landed, so
+    # refuse to guess) or "retry" (the endpoint is genuinely idempotent).
+    on_uncertain: str = "fail"
     # Self-describing metadata
     responsibility: str = ""  # WHAT this step does in one sentence
     source_hint: str = ""  # WHY this step exists (business reason, ticket, who requested)
@@ -768,6 +919,37 @@ def _validate_context_source(source: str) -> str:
             f"Valid sources: {', '.join(sorted(VALID_CONTEXT_SOURCES))}"
         )
     return source
+
+
+def _validate_replay_mode(value: object) -> str:
+    """Validate the step-level ``replay:`` mode.
+
+    Unknown values raise rather than falling back: a typo'd ``replay: memoise``
+    silently meaning "live" would re-fire the very side effect the author was
+    trying to guard.
+    """
+    from sandcastle.engine.effects import VALID_REPLAY_MODES
+
+    v = str(value or "").strip().lower()
+    if v not in VALID_REPLAY_MODES:
+        raise ValueError(
+            f"Invalid replay mode '{value}'. Valid modes: "
+            f"{', '.join(sorted(m for m in VALID_REPLAY_MODES if m))}"
+        )
+    return v
+
+
+def _validate_on_uncertain(value: object) -> str:
+    """Validate the step-level ``on_uncertain:`` policy."""
+    from sandcastle.engine.effects import VALID_ON_UNCERTAIN
+
+    v = str(value or "fail").strip().lower()
+    if v not in VALID_ON_UNCERTAIN:
+        raise ValueError(
+            f"Invalid on_uncertain '{value}'. Valid values: "
+            f"{', '.join(sorted(VALID_ON_UNCERTAIN))}"
+        )
+    return v
 
 
 def _parse_retry(data: dict | None) -> RetryConfig | None:
@@ -1187,6 +1369,7 @@ def _parse_gate_config(data: dict | None) -> GateConfig | None:
         return None
     return GateConfig(
         strategies=data.get("strategies", []),
+        fail_on_reject=bool(data.get("fail_on_reject", True)),
     )
 
 
@@ -1267,6 +1450,128 @@ def _parse_openclaw_config(data: dict | None) -> OpenClawConfig | None:
         api_token=data.get("api_token", ""),
         timeout_seconds=data.get("timeout_seconds", 300),
         cost_per_call=float(data.get("cost_per_call", 0.0)),
+    )
+
+
+def _str_list(value: Any) -> list[str]:
+    """Coerce a YAML scalar or sequence into a list of strings."""
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value]
+    return [str(value)]
+
+
+def _str_dict(value: Any) -> dict:
+    """Coerce a YAML mapping into ``dict[str, str]``; anything else is empty."""
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): str(item) for key, item in value.items()}
+
+
+def _parse_acp_config(data: dict | None) -> AcpConfig | None:
+    """Parse ``acp_config`` from YAML data.
+
+    Types are coerced explicitly rather than trusted, because these values reach
+    a subprocess spawn and a permission decision. A YAML author writing
+    ``args: "--acp"`` means one argument, not four characters.
+    """
+    if data is None:
+        return None
+    if not isinstance(data, dict):
+        return AcpConfig()
+    rules = data.get("permission_rules")
+    return AcpConfig(
+        command=str(data.get("command", "") or ""),
+        args=_str_list(data.get("args")),
+        agent=str(data.get("agent", "") or ""),
+        env=_str_dict(data.get("env")),
+        env_passthrough=_str_list(data.get("env_passthrough")),
+        cwd=str(data.get("cwd", "") or ""),
+        additional_directories=_str_list(data.get("additional_directories")),
+        mcp_servers=list(data.get("mcp_servers") or []),
+        mode=str(data.get("mode", "") or ""),
+        config_options=_str_dict(data.get("config_options")),
+        message=str(data.get("message", "") or ""),
+        permission=str(data.get("permission", "reject") or "reject"),
+        permission_rules=[r for r in rules if isinstance(r, dict)] if isinstance(rules, list) else [],
+        filesystem=str(data.get("filesystem", "none") or "none"),
+        terminal=bool(data.get("terminal", False)),
+        elicitation=str(data.get("elicitation", "decline") or "decline"),
+        timeout=int(data.get("timeout", 900) or 900),
+        idle_timeout=int(data.get("idle_timeout", 180) or 0),
+        max_output_chars=int(data.get("max_output_chars", 200000) or 0),
+        cost_per_call=float(data.get("cost_per_call", 0.0) or 0.0),
+        protocol_version=int(data.get("protocol_version", 1) or 1),
+        strict_version=bool(data.get("strict_version", True)),
+        output_format=str(data.get("output_format", "text") or "text"),
+        include_thoughts=bool(data.get("include_thoughts", False)),
+        include_tool_calls=bool(data.get("include_tool_calls", True)),
+    )
+
+
+def _parse_accept_config(data: dict | None) -> AcceptConfig | None:
+    """Parse ``accept_config`` from YAML data.
+
+    ``target:`` is accepted as the singular spelling of ``targets:`` - judging
+    one step is the common case, and the plural reads badly there.
+
+    Checks are built as ``eval.AssertionDef`` rather than a new assertion type,
+    because ``eval.check_assertion`` is a pure async function over a value and
+    already implements every deterministic check an accept step needs.
+    """
+    if data is None:
+        return None
+    if not isinstance(data, dict):
+        return AcceptConfig()
+
+    from sandcastle.engine.eval import AssertionDef
+
+    targets = _str_list(data.get("targets")) or _str_list(data.get("target"))
+
+    checks: list = []
+    for entry in data.get("checks") or []:
+        if not isinstance(entry, dict):
+            continue
+        checks.append(
+            AssertionDef(
+                type=str(entry.get("type", "") or ""),
+                value=entry.get("value"),
+                criteria=str(entry.get("criteria", "") or ""),
+                threshold=float(entry.get("threshold", 0.7) or 0.7),
+                step=entry.get("step"),
+            )
+        )
+
+    judges: list[AcceptJudge] = []
+    for index, entry in enumerate(data.get("judges") or []):
+        if not isinstance(entry, dict):
+            continue
+        judges.append(
+            AcceptJudge(
+                rubric=str(entry.get("rubric", "") or ""),
+                model=str(entry.get("model", "haiku") or "haiku"),
+                name=str(entry.get("name", "") or "judge_%d" % (index + 1)),
+                max_tokens=int(entry.get("max_tokens", 512) or 512),
+            )
+        )
+
+    timeout_hours = data.get("timeout_hours")
+    default_message = "Accept gate needs a human verdict"
+    return AcceptConfig(
+        targets=targets,
+        checks=checks,
+        judges=judges,
+        quorum=int(data.get("quorum", 0) or 0),
+        on_reject=str(data.get("on_reject", "fail") or "fail"),
+        max_rounds=int(data.get("max_rounds", 1) or 1),
+        max_cost_usd=float(data.get("max_cost_usd", 0.0) or 0.0),
+        fail_on_reject=bool(data.get("fail_on_reject", True)),
+        escalation_message=str(
+            data.get("escalation_message", default_message) or default_message
+        ),
+        timeout_hours=float(timeout_hours) if timeout_hours is not None else None,
+        on_timeout=str(data.get("on_timeout", "abort") or "abort"),
     )
 
 
@@ -1427,6 +1732,8 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
             data.get("managed_agent_config") if "managed_agent_config" in data
             else data.get("agent_config")
         ),
+        acp_config=_parse_acp_config(data.get("acp_config")),
+        accept_config=_parse_accept_config(data.get("accept_config")),
         trajectory_replay_config=(
             dict(data["trajectory_replay_config"])
             if isinstance(data.get("trajectory_replay_config"), dict)
@@ -1447,6 +1754,9 @@ def _parse_step(data: dict, defaults: dict) -> StepDefinition:
         context_model=data.get("context_model", ""),
         # Sandcastle Mesh capability requirements (coerce to list[str])
         requires=_parse_requires(data.get("requires")),
+        # Step effect ledger
+        replay=_validate_replay_mode(data.get("replay", "")),
+        on_uncertain=_validate_on_uncertain(data.get("on_uncertain", "fail")),
         # Self-describing metadata
         responsibility=data.get("responsibility", ""),
         source_hint=data.get("source_hint", ""),
@@ -1680,6 +1990,16 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
                 errors.append(
                     f"Condition step '{step.id}' must have condition_config with an expression"
                 )
+            if step.condition_config and not step.condition_config.then_steps \
+                    and not step.condition_config.else_steps:
+                # Three shipped workflows had exactly this: then_steps:/else_steps:
+                # instead of then:/else:, parsed as two empty branches, and the
+                # condition silently routed nothing.
+                errors.append(
+                    f"Condition step '{step.id}' routes nothing: both branches are "
+                    f"empty. The YAML keys are 'then:' and 'else:' - "
+                    f"'then_steps:'/'else_steps:' are silently ignored."
+                )
             if step.condition_config:
                 for sid in step.condition_config.then_steps:
                     if sid not in step_ids:
@@ -1849,6 +2169,10 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
                     f"Managed-agent step '{step.id}' timeout must be > 0, "
                     f"got {cfg.timeout}"
                 )
+        elif step.type == "acp":
+            errors.extend(_validate_acp_step(step))
+        elif step.type == "accept":
+            errors.extend(_validate_accept_step(step, workflow, step_ids))
         elif step.type == "parse":
             cfg = step.parse_config or ParseConfig()
             if cfg.output not in ("text", "markdown", "json"):
@@ -1951,6 +2275,11 @@ def validate(workflow: WorkflowDefinition) -> list[str]:
         # Validate classify config model
         if step.classify_config and step.classify_config.model:
             all_models.add(step.classify_config.model)
+        # Each accept judge names its own model.
+        if step.accept_config:
+            for judge in step.accept_config.judges:
+                if judge.model:
+                    all_models.add(judge.model)
     for model_name in all_models:
         if not is_known_model(model_name):
             errors.append(
@@ -2075,6 +2404,262 @@ def _extract_step_refs(text: str) -> set[str]:
     return set(re.findall(r"\{steps\.([a-zA-Z0-9_\-]+)\.output", text))
 
 
+def _validate_acp_step(step: StepDefinition) -> list[str]:
+    """Validate one ``type: acp`` step. Everything unsupported is an error, not a warning.
+
+    An acp step spawns an arbitrary local executable with a working directory
+    and a network connection, so the rejections here are the cheapest place to
+    stop a workflow that would have asked for a shell or a draft protocol
+    version. ``terminal`` and ``elicitation: ask`` are refused rather than
+    silently downgraded: a workflow that asked for them and did not get them
+    should say so at parse time.
+    """
+    from sandcastle.engine.acp_client import (
+        _BUILTIN_ACP_AGENTS,
+        ACP_PROTOCOL_VERSION,
+        PERMISSION_KINDS,
+        VALID_ELICITATION_MODES,
+        VALID_FILESYSTEM_MODES,
+        VALID_OUTPUT_FORMATS,
+        VALID_PERMISSION_DEFAULTS,
+    )
+
+    errors: list[str] = []
+    cfg = step.acp_config
+    if not cfg:
+        return [f"ACP step '{step.id}' must have acp_config"]
+
+    if bool(cfg.command) == bool(cfg.agent):
+        errors.append(
+            f"ACP step '{step.id}' must set exactly one of acp_config.command "
+            "or acp_config.agent"
+        )
+    if cfg.agent and cfg.agent not in _BUILTIN_ACP_AGENTS:
+        errors.append(
+            f"ACP step '{step.id}' has unknown agent '{cfg.agent}'. "
+            f"Known: {', '.join(sorted(_BUILTIN_ACP_AGENTS))}"
+        )
+    if not cfg.cwd:
+        errors.append(f"ACP step '{step.id}' must set acp_config.cwd")
+    if cfg.timeout <= 0:
+        errors.append(f"ACP step '{step.id}' timeout must be > 0, got {cfg.timeout}")
+    if cfg.idle_timeout < 0:
+        errors.append(
+            f"ACP step '{step.id}' idle_timeout must be >= 0, got {cfg.idle_timeout}"
+        )
+    if cfg.max_output_chars <= 0:
+        errors.append(
+            f"ACP step '{step.id}' max_output_chars must be > 0, "
+            f"got {cfg.max_output_chars}"
+        )
+    if cfg.permission not in VALID_PERMISSION_DEFAULTS:
+        errors.append(
+            f"ACP step '{step.id}' has invalid permission '{cfg.permission}'. "
+            f"Must be one of {', '.join(sorted(VALID_PERMISSION_DEFAULTS))}"
+        )
+    for index, rule in enumerate(cfg.permission_rules):
+        decision = str(rule.get("decision", ""))
+        if decision not in PERMISSION_KINDS:
+            errors.append(
+                f"ACP step '{step.id}' permission_rules[{index}] has invalid "
+                f"decision '{decision}'. Must be one of "
+                f"{', '.join(sorted(PERMISSION_KINDS))}"
+            )
+    if cfg.filesystem not in VALID_FILESYSTEM_MODES:
+        errors.append(
+            f"ACP step '{step.id}' has invalid filesystem '{cfg.filesystem}'. "
+            f"Must be one of {', '.join(sorted(VALID_FILESYSTEM_MODES))}"
+        )
+    if cfg.terminal:
+        errors.append(
+            f"ACP step '{step.id}': acp_config.terminal is not supported in 0.45 - "
+            "granting an external agent a shell needs a sandbox story Sandcastle "
+            "does not have for local subprocesses"
+        )
+    if cfg.elicitation not in VALID_ELICITATION_MODES:
+        errors.append(
+            f"ACP step '{step.id}' has invalid elicitation '{cfg.elicitation}'. "
+            f"Must be one of {', '.join(sorted(VALID_ELICITATION_MODES))}"
+        )
+    elif cfg.elicitation == "ask":
+        errors.append(
+            f"ACP step '{step.id}': elicitation 'ask' is not supported in 0.45 - "
+            "there is no human-in-the-loop wiring for an agent's mid-turn question"
+        )
+    if cfg.output_format not in VALID_OUTPUT_FORMATS:
+        errors.append(
+            f"ACP step '{step.id}' has invalid output_format '{cfg.output_format}'. "
+            f"Must be one of {', '.join(sorted(VALID_OUTPUT_FORMATS))}"
+        )
+    if cfg.protocol_version != ACP_PROTOCOL_VERSION:
+        errors.append(
+            f"ACP step '{step.id}': protocol_version must be "
+            f"{ACP_PROTOCOL_VERSION}, got {cfg.protocol_version} "
+            "(version 2 is an unstable draft)"
+        )
+    for index, server in enumerate(cfg.mcp_servers):
+        if not isinstance(server, dict):
+            errors.append(
+                f"ACP step '{step.id}' mcp_servers[{index}] must be a mapping"
+            )
+            continue
+        if not server.get("name"):
+            errors.append(f"ACP step '{step.id}' mcp_servers[{index}] needs a name")
+        # An stdio MCP server is another arbitrary local exec, so it needs the
+        # same shape check the harness command gets. http/sse entries carry a
+        # url instead and are capability-gated by the agent at runtime.
+        if not server.get("url") and not server.get("command"):
+            errors.append(
+                f"ACP step '{step.id}' mcp_servers[{index}] needs either "
+                "'command' (stdio) or 'url' (http/sse)"
+            )
+    return errors
+
+
+def _accept_dependency_closure(
+    workflow: "WorkflowDefinition", start: str
+) -> set[str]:
+    """Every step *start* transitively depends on, explicit edges and template
+    references alike.
+
+    Used to prove an accept step is not inside the dependency closure of the
+    step it judges, which would make ``on_reject: retry_target`` re-run
+    something that needs the accept step's own output.
+    """
+    step_map = {s.id: s for s in workflow.steps}
+    seen: set[str] = set()
+    stack = [start]
+    while stack:
+        current = stack.pop()
+        step = step_map.get(current)
+        if step is None:
+            continue
+        deps = set(step.depends_on)
+        for text in _collect_step_template_fields(step):
+            deps |= _extract_step_refs(text)
+        for dep in deps:
+            if dep not in seen:
+                seen.add(dep)
+                stack.append(dep)
+    return seen
+
+
+def _validate_accept_step(
+    step: StepDefinition, workflow: "WorkflowDefinition", step_ids: set[str]
+) -> list[str]:
+    """Validate a ``type: accept`` step.
+
+    The structural bans matter more than the field checks: an accept step that
+    targets itself, or that sits inside its target's dependency closure, would
+    turn ``on_reject: retry_target`` into an unbounded re-execution loop at
+    runtime.  Both are cheap to prove false here and expensive to discover in
+    production.
+    """
+    errors: list[str] = []
+    cfg = step.accept_config
+    if not cfg:
+        return ["Accept step '%s' must have accept_config" % step.id]
+
+    if not cfg.targets:
+        errors.append(
+            "Accept step '%s' must have accept_config with a target" % step.id
+        )
+    for target in cfg.targets:
+        if target == step.id:
+            errors.append("Accept step '%s' cannot target itself" % step.id)
+        elif target not in step_ids:
+            errors.append(
+                "Accept step '%s' targets unknown step '%s'" % (step.id, target)
+            )
+        elif step.id in _accept_dependency_closure(workflow, target):
+            errors.append(
+                "Accept step '%s' cannot target '%s': that step depends on the "
+                "accept step, so re-working it would never terminate"
+                % (step.id, target)
+            )
+
+    if not cfg.judges and not cfg.checks:
+        errors.append(
+            "Accept step '%s' must have at least one check or one judge - "
+            "otherwise there is nothing to decide with" % step.id
+        )
+
+    for index, judge in enumerate(cfg.judges):
+        if not judge.rubric:
+            errors.append(
+                "Accept step '%s' judges[%d] must have a rubric" % (step.id, index)
+            )
+        if judge.max_tokens <= 0:
+            errors.append(
+                "Accept step '%s' judges[%d] max_tokens must be > 0, got %d"
+                % (step.id, index, judge.max_tokens)
+            )
+
+    names = [judge.name for judge in cfg.judges]
+    duplicates = sorted({name for name in names if names.count(name) > 1})
+    if duplicates:
+        errors.append(
+            "Accept step '%s' has duplicate judge names: %s"
+            % (step.id, ", ".join(duplicates))
+        )
+
+    for index, check in enumerate(cfg.checks):
+        ctype = getattr(check, "type", "")
+        if ctype in BANNED_ACCEPT_CHECK_TYPES:
+            errors.append(
+                "Accept step '%s' checks[%d] uses '%s', which is not allowed in "
+                "checks: it is an LLM call with no cost accounting. Use judges: "
+                "instead" % (step.id, index, ctype)
+            )
+        elif ctype not in VALID_ACCEPT_CHECK_TYPES:
+            errors.append(
+                "Accept step '%s' checks[%d] has unknown type '%s'. Must be one "
+                "of %s"
+                % (step.id, index, ctype, ", ".join(sorted(VALID_ACCEPT_CHECK_TYPES)))
+            )
+
+    if cfg.quorum < 0:
+        errors.append(
+            "Accept step '%s' quorum must be >= 0, got %d" % (step.id, cfg.quorum)
+        )
+    elif cfg.quorum > len(cfg.judges):
+        errors.append(
+            "Accept step '%s' quorum is %d but only %d judge(s) are configured"
+            % (step.id, cfg.quorum, len(cfg.judges))
+        )
+
+    if cfg.on_reject not in VALID_ACCEPT_ON_REJECT:
+        errors.append(
+            "Accept step '%s' has invalid on_reject '%s'. Must be one of %s"
+            % (step.id, cfg.on_reject, ", ".join(sorted(VALID_ACCEPT_ON_REJECT)))
+        )
+
+    if cfg.max_rounds < 1:
+        errors.append(
+            "Accept step '%s' max_rounds must be >= 1, got %d"
+            % (step.id, cfg.max_rounds)
+        )
+    elif cfg.max_rounds > MAX_ACCEPT_ROUNDS:
+        errors.append(
+            "Accept step '%s' max_rounds must be <= %d, got %d"
+            % (step.id, MAX_ACCEPT_ROUNDS, cfg.max_rounds)
+        )
+
+    if cfg.max_cost_usd < 0:
+        errors.append(
+            "Accept step '%s' max_cost_usd must be >= 0, got %s"
+            % (step.id, cfg.max_cost_usd)
+        )
+
+    if cfg.on_timeout not in ("abort", "approve", "reject"):
+        errors.append(
+            "Accept step '%s' has invalid on_timeout '%s'. Must be 'abort', "
+            "'approve' or 'reject'" % (step.id, cfg.on_timeout)
+        )
+
+    return errors
+
+
 def _collect_step_template_fields(step: StepDefinition) -> list[str]:
     """Collect all text fields from a step that may contain template variables."""
     fields: list[str] = [step.prompt]
@@ -2119,6 +2704,24 @@ def _collect_step_template_fields(step: StepDefinition) -> list[str]:
         fields.append(step.managed_agent_config.agent_id)
         if step.managed_agent_config.message:
             fields.append(step.managed_agent_config.message)
+    if step.acp_config:
+        # message/cwd/env are the three template-resolved fields; command and
+        # args deliberately are NOT, so an upstream step's output can never
+        # become the executable we spawn.
+        if step.acp_config.message:
+            fields.append(step.acp_config.message)
+        if step.acp_config.cwd:
+            fields.append(step.acp_config.cwd)
+        fields.extend(str(v) for v in step.acp_config.env.values())
+    if step.accept_config:
+        # Naming a target is a data dependency, so express it the way every
+        # other implicit edge is expressed: the DAG builder and the
+        # unknown-step check both read it out of this list for free.
+        for target in step.accept_config.targets:
+            fields.append("{steps.%s.output}" % target)
+        for judge in step.accept_config.judges:
+            fields.append(judge.rubric)
+        fields.append(step.accept_config.escalation_message)
     if step.tool_config:
         # Tool arguments carry {steps.X.output} / {input.X} refs that drive
         # both implicit dependency ordering and unknown-ref validation. dict/

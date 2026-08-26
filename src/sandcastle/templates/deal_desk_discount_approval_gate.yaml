@@ -255,6 +255,8 @@ steps:
     type: gate
     depends_on: [compute_margin_policy, deal_rationale]
     gate_config:
+      # Advisory: record_decision reads this verdict and decision_branch routes a rejection to notify_rep_rejected. A denied discount is a normal deal-desk outcome.
+      fail_on_reject: false
       strategies:
         - type: llm_eval
           config:

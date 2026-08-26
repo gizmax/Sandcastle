@@ -433,6 +433,8 @@ steps:
     type: gate
     depends_on: [deactivation_loop]
     gate_config:
+      # Advisory: reconcile_offboard already accounts for drifted seats. Failing here would suppress the evidence pack for exactly the runs that need it.
+      fail_on_reject: false
       strategies:
         - type: llm_eval
           config:

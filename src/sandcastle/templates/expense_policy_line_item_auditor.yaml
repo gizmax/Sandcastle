@@ -368,6 +368,8 @@ steps:
   - id: exception_gate
     type: gate
     gate_config:
+      # Advisory: per-line. Rejection means 'justified exception / no rule hit' - the normal case for most line items; the audit must keep looping.
+      fail_on_reject: false
       strategies:
         - type: llm_eval
           config:

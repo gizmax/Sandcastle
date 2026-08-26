@@ -361,6 +361,8 @@ steps:
     type: gate
     depends_on: [score_tasks]
     gate_config:
+      # Advisory: a poor-quality trajectory is a FINDING to classify and report (classify_failure_modes + scorecard), not a reason to abort the eval run.
+      fail_on_reject: false
       strategies:
         - type: llm_eval
           config:

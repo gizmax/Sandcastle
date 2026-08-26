@@ -108,6 +108,8 @@ from sandcastle.api.schemas import (
     SelfTuneNightsResponse,
     SettingsResponse,
     SettingsUpdateRequest,
+    SilentSuccessFindingResponse,
+    SilentSuccessReportResponse,
     StatsResponse,
     StepDiff,
     StepStatusResponse,
@@ -3863,6 +3865,9 @@ async def estimate_run_cost(request: RunEstimateRequest) -> ApiResponse:
         "http", "code", "condition", "loop", "race", "sensor",
         "transform", "notify", "composio", "sub_workflow",
         "openclaw", "parse",
+        # The harness bills its own credentials and ACP v1 reports no token
+        # counts, so any number we produced here would be invented.
+        "acp",
     }
     # classify and gate issue a single LLM call, not max_turns
     SINGLE_CALL_TYPES = {"classify", "gate"}
@@ -3871,6 +3876,38 @@ async def estimate_run_cost(request: RunEstimateRequest) -> ApiResponse:
     total = 0.0
 
     for step in wf.steps:
+        # An accept step's cost is its judge panel, priced per judge and
+        # multiplied by (1 + max_rounds): max_rounds judging rounds, plus one
+        # more to stand in for the target re-work a rejection triggers, which
+        # nothing else in this estimator multiplies. Estimating off step.model
+        # would report the wrong model at the wrong multiple.
+        if step.type == "accept":
+            cfg = step.accept_config
+            rounds = 1 + min(cfg.max_rounds, 5) if cfg else 1
+            judges = list(cfg.judges) if cfg else []
+            accept_cost = 0.0
+            for judge in judges:
+                judge_info = PROVIDER_REGISTRY.get(judge.model) or PROVIDER_REGISTRY.get(
+                    "sonnet"
+                )
+                accept_cost += (
+                    1500 * judge_info.input_price_per_m
+                    + judge.max_tokens * judge_info.output_price_per_m
+                ) / 1_000_000
+            accept_cost *= rounds
+            step_estimates.append({
+                "step_id": step.id,
+                "type": step.type,
+                "model": ", ".join(j.model for j in judges) or None,
+                "estimated_cost_usd": round(accept_cost, 6),
+                "note": (
+                    f"{len(judges)} judge(s) x {rounds} round(s); checks are free"
+                    if judges
+                    else "checks only - no LLM cost"
+                ),
+            })
+            total += accept_cost
+            continue
         if step.type in NON_LLM or step.type == "approval":
             step_estimates.append({
                 "step_id": step.id,
@@ -7136,6 +7173,10 @@ async def replay_run(run_id: str, request: ReplayRequest, req: Request) -> ApiRe
             tenant_id=tenant_id,
             parent_run_id=run_uuid,
             replay_from_step=request.from_step,
+            # Inherit the lineage so the effect ledger recognises effects this
+            # run's ancestors already committed (engine/effects.py). A run that
+            # predates the column is its own scope.
+            effect_scope_id=original_run.effect_scope_id or original_run.id,
             max_cost_usd=original_run.max_cost_usd,
             workflow_version=original_run.workflow_version,
         )
@@ -7279,6 +7320,9 @@ async def fork_run(run_id: str, request: ForkRequest, req: Request) -> ApiRespon
             parent_run_id=run_uuid,
             replay_from_step=request.from_step,
             fork_changes=request.changes,
+            # Same lineage as the parent: a fork re-fires only the steps whose
+            # effect fingerprint the override actually changed.
+            effect_scope_id=original_run.effect_scope_id or original_run.id,
             max_cost_usd=original_run.max_cost_usd,
             workflow_version=original_run.workflow_version,
         )
@@ -9088,6 +9132,12 @@ async def _resume_after_approval(
 
     # Use the latest checkpoint
     initial_context = checkpoints[0].context_snapshot if checkpoints else None
+
+    # An escalating accept step carries the output it wants published on
+    # approval, because its step output is an evidence pack rather than the
+    # request_data a plain approval step echoes back verbatim.
+    if isinstance(output_data, dict) and "_on_approve" in output_data:
+        output_data = output_data["_on_approve"]
 
     # Set the approval step output in the context
     if initial_context:
@@ -12631,10 +12681,17 @@ async def run_workflow_eval_gate(
 
 import re as _re  # noqa: E402
 
+# Mirrors _VALID_SCOPE_RE in engine/memory.py: the name charset excludes any
+# ".." run and any name made only of dots and spaces, so a scope id can never
+# become a path traversal for a path-backed memory backend.
+_SCOPE_NAME_RE = (
+    r"(?=[a-zA-Z0-9_. -]*[a-zA-Z0-9_-])"
+    r"(?:(?!\.\.)[a-zA-Z0-9_. -]){1,200}"
+)
 _SCOPE_ID_RE = _re.compile(
-    r"^(workflow:[a-zA-Z0-9_. -]{1,200}"
-    r"|agent:[a-zA-Z0-9_. -]{1,200}"
-    r"|global)$"
+    r"^(workflow:" + _SCOPE_NAME_RE +
+    r"|agent:" + _SCOPE_NAME_RE +
+    r"|global)\Z"
 )
 _MEMORY_ID_RE = _re.compile(r"^[a-zA-Z0-9_-]{1,200}$")
 
@@ -12702,6 +12759,7 @@ async def list_memories(
 async def add_memory(req: Request, body: MemoryAddRequest):
     """Add a new memory. Mem0 auto-extracts facts and deduplicates."""
     _require_admin(req)
+    _validate_scope_id(body.scope_id)
     from sandcastle.engine.memory import save_memory
 
     result = await save_memory(
@@ -12946,6 +13004,93 @@ async def verify_run_audit(run_id: str, req: Request) -> ApiResponse:
             valid=valid,
             chain_length=chain_length,
             broken_at=broken_at,
+        )
+    )
+
+
+@router.get("/audit/silent-success")
+async def sweep_silent_success(
+    req: Request,
+    since: str = Query("24h", description="Window: 48h, 7d, 2w, or an ISO datetime"),
+    until: str | None = Query(None, description="Optional upper bound"),
+    run_id: str | None = Query(None, description="Sweep a single run instead"),
+    lag_hours: float | None = Query(
+        None,
+        ge=0,
+        description="Override the evidence-lag window (claims younger than this are not flagged)",
+    ),
+    limit: int = Query(500, ge=1, le=2000),
+) -> ApiResponse:
+    """Report completed runs whose success claims are not backed by evidence.
+
+    Cross-checks step outputs against the durable effect ledger and the audit
+    chain. A finding means the claim *lacks evidence* - not that the step
+    failed - and nothing here writes: it is a report, never a repair.
+
+    Tenant-scoped like the other run-derived list endpoints; not admin-only,
+    because it returns nothing a tenant cannot already read from its own runs.
+    """
+    from sandcastle.engine import timemachine as tm
+    from sandcastle.engine.silent_success import sweep_run, sweep_runs
+
+    tenant_id = get_tenant_id(req)
+    scoped_tenant = (
+        tenant_id if settings.auth_required and tenant_id is not None else None
+    )
+
+    if run_id is not None:
+        try:
+            uuid.UUID(run_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=ApiResponse(
+                    error=ErrorResponse(code="INVALID_ID", message="Invalid run ID format")
+                ).model_dump(),
+            )
+        # Scope the single-run form the same way: resolve the run under the
+        # caller's tenant first, so a tenant cannot sweep somebody else's run.
+        if scoped_tenant is not None:
+            async with async_session() as session:
+                owner = await session.scalar(
+                    select(Run.tenant_id).where(Run.id == uuid.UUID(run_id))
+                )
+            if owner != scoped_tenant:
+                raise HTTPException(
+                    status_code=404,
+                    detail=ApiResponse(
+                        error=ErrorResponse(code="NOT_FOUND", message="Run not found")
+                    ).model_dump(),
+                )
+        report = await sweep_run(run_id, lag_hours=lag_hours)
+    else:
+        try:
+            since_dt = tm.parse_since(since)
+            until_dt = tm.parse_since(until) if until else None
+        except Exception:
+            raise HTTPException(
+                status_code=400,
+                detail=ApiResponse(
+                    error=ErrorResponse(
+                        code="INVALID_SINCE",
+                        message="since/until must be a window like '48h', '7d', '2w' or an ISO datetime",
+                    )
+                ).model_dump(),
+            )
+        report = await sweep_runs(
+            since=since_dt,
+            until=until_dt,
+            tenant_id=scoped_tenant,
+            limit=limit,
+            lag_hours=lag_hours,
+        )
+
+    return ApiResponse(
+        data=SilentSuccessReportResponse(
+            findings=[
+                SilentSuccessFindingResponse(**f.to_dict()) for f in report.findings
+            ],
+            meta=report.meta(),
         )
     )
 
